@@ -133,6 +133,7 @@ export default function Window({ win, isActive, children }) {
       {/* Title bar */}
       <div
         className={`h-8 flex items-center flex-shrink-0 ${isActive ? 'bg-[#e8e8ea] dark:bg-[#2c2c2e]' : 'bg-[#f0f0f0] dark:bg-[#383838]'}`}
+        data-titlebar={win.id}
         onPointerDown={handleDragStart}
         onDoubleClick={() => maximizeWindow(win.id)}
       >

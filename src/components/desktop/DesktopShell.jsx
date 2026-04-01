@@ -7,6 +7,7 @@ import Window from './Window';
 import AppWindow from './AppWindow';
 import Spotlight from './Spotlight';
 import Onboarding from './Onboarding';
+import ContextMenu from './ContextMenu';
 
 function DesktopContent() {
   const { state } = useWindowManager();
@@ -44,6 +45,7 @@ function DesktopContent() {
       ))}
 
       <Dock />
+      <ContextMenu onSpotlight={toggleSpotlight} />
       <Spotlight open={spotlightOpen} onClose={() => setSpotlightOpen(false)} />
     </div>
   );

@@ -3,6 +3,7 @@ import FlashcardsApp from './apps/FlashcardsApp';
 import DebateApp from './apps/DebateApp';
 import NotesApp from './apps/NotesApp';
 import TextbookApp from './apps/TextbookApp';
+import SocialApp from './apps/SocialApp';
 import StudyPage from '../../pages/StudyPage';
 import GoalsPage from '../../pages/GoalsPage';
 import AssessmentsPage from '../../pages/AssessmentsPage';
@@ -18,12 +19,13 @@ const APP_COMPONENTS = {
   assessments: AssessmentsPage,
   math: MathPracticePage,
   textbook: TextbookApp,
+  social: SocialApp,
   debate: DebateApp,
   settings: SettingsPage,
 };
 
 // Apps that need flex container without scroll (they manage their own scrolling)
-const FLEX_APPS = new Set(['notes', 'study', 'debate', 'math', 'textbook']);
+const FLEX_APPS = new Set(['notes', 'study', 'debate', 'math', 'textbook', 'social']);
 
 export default function AppWindow({ appId }) {
   const Component = APP_COMPONENTS[appId];

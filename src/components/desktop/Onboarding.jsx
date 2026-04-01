@@ -49,13 +49,13 @@ export default function Onboarding({ onComplete }) {
             <p className="text-white/40 text-sm mb-8">You can change this later in Settings.</p>
 
             <div className="flex gap-4 justify-center mb-8">
-              <button onClick={() => setDark(true)} className={`w-36 rounded-2xl p-4 border-2 transition-all ${dark ? 'border-blue-500 bg-white/5' : 'border-white/10 hover:border-white/20'}`}>
+              <button onClick={() => { setDark(true); document.documentElement.classList.add('dark'); localStorage.setItem('covalent-theme', 'dark'); }} className={`w-36 rounded-2xl p-4 border-2 transition-all ${dark ? 'border-blue-500 bg-white/5' : 'border-white/10 hover:border-white/20'}`}>
                 <div className="w-full aspect-video rounded-lg bg-[#0D0D14] mb-3 flex items-center justify-center">
                   <Moon size={20} className="text-white/50" />
                 </div>
                 <p className="text-sm font-medium text-white">Dark</p>
               </button>
-              <button onClick={() => setDark(false)} className={`w-36 rounded-2xl p-4 border-2 transition-all ${!dark ? 'border-blue-500 bg-white/5' : 'border-white/10 hover:border-white/20'}`}>
+              <button onClick={() => { setDark(false); document.documentElement.classList.remove('dark'); localStorage.setItem('covalent-theme', 'light'); }} className={`w-36 rounded-2xl p-4 border-2 transition-all ${!dark ? 'border-blue-500 bg-white/5' : 'border-white/10 hover:border-white/20'}`}>
                 <div className="w-full aspect-video rounded-lg bg-[#f0f4ff] mb-3 flex items-center justify-center">
                   <Sun size={20} className="text-gray-400" />
                 </div>

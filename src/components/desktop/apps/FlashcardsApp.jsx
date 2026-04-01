@@ -87,6 +87,11 @@ export default function FlashcardsApp() {
     return () => window.removeEventListener('keydown', handleKey);
   }, [mode, view, flipped, handleReview]);
 
+  // Deck loading
+  if (view === 'deck' && !deck) {
+    return <div className="flex items-center justify-center h-48"><LoadingSpinner size={24} /></div>;
+  }
+
   // Deck detail view
   if (view === 'deck' && deck) {
     const progress = reviewCards.length > 0 ? ((reviewIndex + 1) / reviewCards.length) * 100 : 0;
