@@ -6,10 +6,12 @@ import Dock from './Dock';
 import Window from './Window';
 import AppWindow from './AppWindow';
 import Spotlight from './Spotlight';
+import Onboarding from './Onboarding';
 
 function DesktopContent() {
   const { state } = useWindowManager();
   const [spotlightOpen, setSpotlightOpen] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(() => !localStorage.getItem('covalent-onboarded'));
 
   const toggleSpotlight = useCallback(() => setSpotlightOpen(prev => !prev), []);
 
@@ -23,6 +25,10 @@ function DesktopContent() {
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, [toggleSpotlight]);
+
+  if (showOnboarding) {
+    return <Onboarding onComplete={() => setShowOnboarding(false)} />;
+  }
 
   const windows = Object.values(state.windows);
 

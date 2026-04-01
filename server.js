@@ -1574,7 +1574,7 @@ app.get('/api/profile', authMiddleware, (req, res) => {
 // ===== SOCIAL =====
 
 // Social data file
-const SOCIAL_FILE = join(__dirname, 'social.json');
+const SOCIAL_FILE = join(DATA_DIR, 'social.json');
 function loadSocial() { try { return JSON.parse(readFileSync(SOCIAL_FILE, 'utf-8')); } catch { return { profiles: {}, messages: {}, groups: {} }; } }
 function saveSocial(data) { writeFileSync(SOCIAL_FILE, JSON.stringify(data, null, 2)); }
 
@@ -1740,10 +1740,10 @@ app.post('/api/social/groups/:id/send', authMiddleware, (req, res) => {
 
 // ===== TEXTBOOKS =====
 
-const UPLOADS_DIR = join(__dirname, 'uploads');
+const UPLOADS_DIR = join(DATA_DIR, 'uploads');
 if (!existsSync(UPLOADS_DIR)) mkdirSync(UPLOADS_DIR, { recursive: true });
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
-const TEXTBOOKS_FILE = join(__dirname, 'textbooks.json');
+const TEXTBOOKS_FILE = join(DATA_DIR, 'textbooks.json');
 function loadTextbooks() { try { return JSON.parse(readFileSync(TEXTBOOKS_FILE, 'utf-8')); } catch { return {}; } }
 function saveTextbooks(data) { writeFileSync(TEXTBOOKS_FILE, JSON.stringify(data, null, 2)); }
 
