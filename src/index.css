@@ -1,0 +1,94 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --color-brand-50: #EFF6FF;
+  --color-brand-100: #DBEAFE;
+  --color-brand-200: #BFDBFE;
+  --color-brand-300: #93C5FD;
+  --color-brand-400: #60A5FA;
+  --color-brand-500: #3B82F6;
+  --color-brand-600: #2563EB;
+  --color-brand-700: #1D4ED8;
+  --color-brand-800: #1E40AF;
+  --color-brand-900: #1E3A8A;
+
+  --color-surface: #F4F5F7;
+  --color-surface-card: #FFFFFF;
+  --color-surface-dark: #0D0D14;
+  --color-surface-card-dark: #161622;
+
+  --color-text-primary: #111827;
+  --color-text-secondary: #6B7280;
+  --color-text-primary-dark: #F0F0F8;
+  --color-text-secondary-dark: #9CA3AF;
+
+  --color-border-light: #E5E7EB;
+  --color-border-dark: #2A2A40;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
+}
+
+.dark body {
+  background-color: var(--color-surface-dark);
+  color: var(--color-text-primary-dark);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #374151;
+}
+
+/* Window animations */
+@keyframes window-open {
+  from { transform: scale(0.88); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+@keyframes window-close {
+  from { transform: scale(1); opacity: 1; }
+  to { transform: scale(0.88); opacity: 0; }
+}
+
+.window-opening {
+  animation: window-open 0.2s ease-out forwards;
+}
+.window-closing {
+  animation: window-close 0.15s ease-in forwards;
+  pointer-events: none;
+}
+
+/* Hide scrollbar utility */
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
