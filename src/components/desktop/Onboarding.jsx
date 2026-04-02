@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BookOpen, ChevronRight, Moon, Sun, Monitor, Layout } from 'lucide-react';
+import { BookOpen, ChevronRight, Moon, Sun } from 'lucide-react';
 
 const WALLPAPER_LIST = [
   { id: 'nebula', label: 'Nebula', preview: 'linear-gradient(135deg, #1a0533, #0d1117, #0f0a1e)' },
@@ -14,7 +14,7 @@ export default function Onboarding({ onComplete }) {
   const [step, setStep] = useState(0);
   const [dark, setDark] = useState(true);
   const [wallpaper, setWallpaper] = useState('nebula');
-  const [uiMode, setUiMode] = useState('desktop');
+  const [uiMode] = useState('desktop');
 
   function pickDark() {
     setDark(true);
@@ -83,35 +83,7 @@ export default function Onboarding({ onComplete }) {
               </button>
             </div>
 
-            <button onClick={() => setStep(2)} className={`px-8 py-3 rounded-xl ${btnBg} font-medium transition-colors`}>
-              Continue <ChevronRight size={16} className="inline ml-1" />
-            </button>
-          </div>
-        )}
-
-        {step === 2 && (
-          <div className="text-center">
-            <h2 className={`text-2xl font-bold ${textPrimary} mb-2`}>Choose your layout</h2>
-            <p className={`${textMuted} text-sm mb-8`}>You can switch anytime in Settings.</p>
-
-            <div className="flex gap-4 justify-center mb-8">
-              <button onClick={() => setUiMode('desktop')} className={`w-40 rounded-2xl p-4 border-2 transition-all ${uiMode === 'desktop' ? borderActive : borderInactive}`}>
-                <div className={`w-full aspect-video rounded-lg mb-3 flex items-center justify-center ${dark ? 'bg-[#0D0D14]' : 'bg-gray-100'}`}>
-                  <Monitor size={20} className={dark ? 'text-white/50' : 'text-gray-400'} />
-                </div>
-                <p className={`text-sm font-semibold ${textPrimary}`}>Desktop</p>
-                <p className={`text-[10px] ${textMuted} mt-0.5`}>macOS-style windows & dock</p>
-              </button>
-              <button onClick={() => setUiMode('classic')} className={`w-40 rounded-2xl p-4 border-2 transition-all ${uiMode === 'classic' ? borderActive : borderInactive}`}>
-                <div className={`w-full aspect-video rounded-lg mb-3 flex items-center justify-center ${dark ? 'bg-[#161622]' : 'bg-white'}`}>
-                  <Layout size={20} className={dark ? 'text-white/50' : 'text-gray-400'} />
-                </div>
-                <p className={`text-sm font-semibold ${textPrimary}`}>Classic</p>
-                <p className={`text-[10px] ${textMuted} mt-0.5`}>Sidebar & tabs</p>
-              </button>
-            </div>
-
-            <button onClick={() => setStep(uiMode === 'desktop' ? 3 : 4)} className={`px-8 py-3 rounded-xl ${btnBg} font-medium transition-colors`}>
+            <button onClick={() => setStep(3)} className={`px-8 py-3 rounded-xl ${btnBg} font-medium transition-colors`}>
               Continue <ChevronRight size={16} className="inline ml-1" />
             </button>
           </div>
@@ -150,7 +122,7 @@ export default function Onboarding({ onComplete }) {
         )}
 
         <div className="flex justify-center gap-2 mt-8">
-          {(uiMode === 'desktop' ? [0,1,2,3,4] : [0,1,2,4]).map(i => (
+          {[0,1,3,4].map(i => (
             <div key={i} className={`h-1.5 rounded-full transition-all ${step === i ? `w-4 ${dark ? 'bg-white' : 'bg-gray-900'}` : `w-1.5 ${dark ? 'bg-white/20' : 'bg-gray-300'}`}`} />
           ))}
         </div>

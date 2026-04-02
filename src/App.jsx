@@ -64,7 +64,6 @@ function ClassicRoutes() {
 
 function AppRouter() {
   const { user, loading } = useAuth();
-  const { uiMode } = useUIPreference();
   const [onboarded, setOnboarded] = useState(() => !!localStorage.getItem('covalent-onboarded'));
 
   if (loading) return <LoadingSpinner fullScreen />;
@@ -74,11 +73,7 @@ function AppRouter() {
     return <Onboarding onComplete={() => { setOnboarded(true); window.location.reload(); }} />;
   }
 
-  if (uiMode === 'desktop') {
-    return <DesktopShell />;
-  }
-
-  return <ClassicRoutes />;
+  return <DesktopShell />;
 }
 
 export default function App() {
