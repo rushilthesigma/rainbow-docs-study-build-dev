@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Users, Search, MessageCircle, UserPlus, UserMinus, ArrowLeft, Send, Plus, Hash, X } from 'lucide-react';
-import { getMyProfile, setProfile, searchUsers, getFriends, addFriend, removeFriend, listDMs, getDM, sendDM, listGroups, createGroup, getGroup, sendGroupMessage } from '../../../api/social';
+import { Users, Search, MessageCircle, UserPlus, UserMinus, ArrowLeft, Send, Plus, Hash, X, Check, Bell } from 'lucide-react';
+import { getMyProfile, setProfile, searchUsers, getFriends, sendFriendRequest, acceptFriendRequest, declineFriendRequest, getFriendRequests, removeFriend, listDMs, getDM, sendDM, listGroups, createGroup, getGroup, sendGroupMessage } from '../../../api/social';
 import { useAuth } from '../../../context/AuthContext';
 import Button from '../../shared/Button';
 import Input from '../../shared/Input';
@@ -151,9 +151,29 @@ export default function SocialApp() {
     setSearching(false);
   }
 
-  async function handleAddFriend(userId) {
-    await addFriend(userId);
+  // Friend requests
+  const [friendRequests, setFriendRequests] = useState([]);
+
+  function refreshRequests() {
+    getFriendRequests().then(d => setFriendRequests(d.requests || [])).catch(() => {});
+  }
+
+  useEffect(() => { if (profile) refreshRequests(); }, [profile]);
+
+  async function handleSendRequest(userId) {
+    const result = await sendFriendRequest(userId);
+    if (result.status === 'accepted') refreshHome();
+  }
+
+  async function handleAccept(requestId) {
+    await acceptFriendRequest(requestId);
     refreshHome();
+    refreshRequests();
+  }
+
+  async function handleDecline(requestId) {
+    await declineFriendRequest(requestId);
+    refreshRequests();
   }
 
   async function handleRemoveFriend(userId) {
@@ -270,7 +290,7 @@ export default function SocialApp() {
                 {isFriend ? (
                   <span className="text-[10px] text-emerald-500 font-medium">Friends</span>
                 ) : (
-                  <button onClick={() => handleAddFriend(u.userId)} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-600 text-white text-xs"><UserPlus size={12} /> Add</button>
+                  <button onClick={() => handleSendRequest(u.userId)} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-600 text-white text-xs"><UserPlus size={12} /> Add</button>
                 )}
               </div>
             );
@@ -337,6 +357,26 @@ export default function SocialApp() {
           <Plus size={12} /> New Group
         </button>
       </div>
+
+      {/* Friend Requests */}
+      {friendRequests.length > 0 && (
+        <div className="px-4 py-2 border-b border-gray-100 dark:border-[#2A2A40] flex-shrink-0">
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
+            <Bell size={10} className="inline mr-1" /> Friend Requests ({friendRequests.length})
+          </p>
+          {friendRequests.map(r => (
+            <div key={r.id} className="flex items-center gap-3 px-2 py-2 rounded-lg">
+              <div className="w-7 h-7 rounded-full bg-cyan-100 dark:bg-cyan-900/30 flex items-center justify-center text-[10px] font-bold text-cyan-600">{r.fromProfile?.displayName?.[0]?.toUpperCase() || '?'}</div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-gray-900 dark:text-white truncate">{r.fromProfile?.displayName || 'Unknown'}</p>
+                <p className="text-[10px] text-gray-400">@{r.fromProfile?.handle}</p>
+              </div>
+              <button onClick={() => handleAccept(r.id)} className="p-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700"><Check size={12} /></button>
+              <button onClick={() => handleDecline(r.id)} className="p-1 rounded-lg text-gray-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/15"><X size={12} /></button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Conversations + Groups */}
       <div className="flex-1 overflow-y-auto">

@@ -9,7 +9,10 @@ export const searchUsers = (q) => apiFetch(`/api/social/search?q=${encodeURIComp
 
 // Friends
 export const getFriends = () => apiFetch('/api/social/friends');
-export const addFriend = (userId) => apiFetch('/api/social/friends/add', { method: 'POST', body: JSON.stringify({ userId }) });
+export const sendFriendRequest = (userId) => apiFetch('/api/social/friends/add', { method: 'POST', body: JSON.stringify({ userId }) });
+export const acceptFriendRequest = (requestId) => apiFetch('/api/social/friends/accept', { method: 'POST', body: JSON.stringify({ requestId }) });
+export const declineFriendRequest = (requestId) => apiFetch('/api/social/friends/decline', { method: 'POST', body: JSON.stringify({ requestId }) });
+export const getFriendRequests = () => apiFetch('/api/social/friends/requests');
 export const removeFriend = (userId) => apiFetch('/api/social/friends/remove', { method: 'POST', body: JSON.stringify({ userId }) });
 
 // DMs

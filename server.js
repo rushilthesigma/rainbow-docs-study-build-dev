@@ -1611,19 +1611,73 @@ app.get('/api/social/search', authMiddleware, (req, res) => {
   res.json({ users: results });
 });
 
-// Add friend
+// Send friend request
 app.post('/api/social/friends/add', authMiddleware, (req, res) => {
   try {
     const { userId: friendId } = req.body;
     const social = loadSocial();
+    if (!social.friendRequests) social.friendRequests = [];
     const myProfile = social.profiles[req.userId];
     const friendProfile = social.profiles[friendId];
     if (!myProfile || !friendProfile) return res.status(404).json({ error: 'Profile not found' });
-    if (!myProfile.friends.includes(friendId)) myProfile.friends.push(friendId);
-    if (!friendProfile.friends.includes(req.userId)) friendProfile.friends.push(req.userId);
+    // Already friends
+    if (myProfile.friends.includes(friendId)) return res.json({ status: 'already_friends' });
+    // Already sent
+    const existing = social.friendRequests.find(r => r.from === req.userId && r.to === friendId && r.status === 'pending');
+    if (existing) return res.json({ status: 'already_sent' });
+    // Check if they sent us one — auto-accept
+    const incoming = social.friendRequests.find(r => r.from === friendId && r.to === req.userId && r.status === 'pending');
+    if (incoming) {
+      incoming.status = 'accepted';
+      if (!myProfile.friends.includes(friendId)) myProfile.friends.push(friendId);
+      if (!friendProfile.friends.includes(req.userId)) friendProfile.friends.push(req.userId);
+      saveSocial(social);
+      return res.json({ status: 'accepted' });
+    }
+    social.friendRequests.push({ id: crypto.randomUUID(), from: req.userId, to: friendId, status: 'pending', createdAt: new Date().toISOString() });
     saveSocial(social);
-    res.json({ friends: myProfile.friends });
+    res.json({ status: 'sent' });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Accept friend request
+app.post('/api/social/friends/accept', authMiddleware, (req, res) => {
+  try {
+    const { requestId } = req.body;
+    const social = loadSocial();
+    if (!social.friendRequests) social.friendRequests = [];
+    const request = social.friendRequests.find(r => r.id === requestId && r.to === req.userId && r.status === 'pending');
+    if (!request) return res.status(404).json({ error: 'Request not found' });
+    request.status = 'accepted';
+    const myProfile = social.profiles[req.userId];
+    const friendProfile = social.profiles[request.from];
+    if (myProfile && !myProfile.friends.includes(request.from)) myProfile.friends.push(request.from);
+    if (friendProfile && !friendProfile.friends.includes(req.userId)) friendProfile.friends.push(req.userId);
+    saveSocial(social);
+    res.json({ status: 'accepted' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Decline friend request
+app.post('/api/social/friends/decline', authMiddleware, (req, res) => {
+  try {
+    const { requestId } = req.body;
+    const social = loadSocial();
+    if (!social.friendRequests) social.friendRequests = [];
+    const request = social.friendRequests.find(r => r.id === requestId && r.to === req.userId && r.status === 'pending');
+    if (request) request.status = 'declined';
+    saveSocial(social);
+    res.json({ status: 'declined' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get pending friend requests (incoming)
+app.get('/api/social/friends/requests', authMiddleware, (req, res) => {
+  const social = loadSocial();
+  const requests = (social.friendRequests || []).filter(r => r.to === req.userId && r.status === 'pending').map(r => ({
+    ...r, fromProfile: social.profiles[r.from] || null,
+  }));
+  res.json({ requests });
 });
 
 // Remove friend
