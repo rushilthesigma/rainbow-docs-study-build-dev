@@ -122,22 +122,15 @@ export default function Onboarding({ onComplete }) {
             <h2 className={`text-2xl font-bold ${textPrimary} mb-2`}>Pick a wallpaper</h2>
             <p className={`${textMuted} text-sm mb-6`}>Choose your desktop background.</p>
 
-            <div className="grid grid-cols-3 gap-3 mb-8 px-4">
+            <select
+              value={wallpaper}
+              onChange={e => setWallpaper(e.target.value)}
+              className={`w-full max-w-xs mx-auto block px-4 py-3 rounded-xl border text-sm mb-8 ${dark ? 'bg-[#161622] border-white/10 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
+            >
               {WALLPAPER_LIST.map(wp => (
-                <button
-                  key={wp.id}
-                  onClick={() => setWallpaper(wp.id)}
-                  className={`aspect-video rounded-xl overflow-hidden border-2 transition-all relative ${wallpaper === wp.id ? 'border-blue-500 ring-2 ring-blue-500/30 scale-105' : borderInactive}`}
-                >
-                  <div className="w-full h-full bg-cover bg-center" style={{
-                    background: wp.preview.startsWith('url') ? undefined : wp.preview,
-                    backgroundImage: wp.preview.startsWith('url') ? wp.preview : undefined,
-                    backgroundSize: 'cover', backgroundPosition: 'center',
-                  }} />
-                  <span className="absolute bottom-1 left-0 right-0 text-[10px] text-white/80 text-center drop-shadow font-medium">{wp.label}</span>
-                </button>
+                <option key={wp.id} value={wp.id}>{wp.label}</option>
               ))}
-            </div>
+            </select>
 
             <button onClick={() => setStep(4)} className={`px-8 py-3 rounded-xl ${btnBg} font-medium transition-colors`}>
               Continue <ChevronRight size={16} className="inline ml-1" />

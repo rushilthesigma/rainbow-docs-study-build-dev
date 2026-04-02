@@ -2059,23 +2059,6 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', name: 'covalent-ai' });
 });
 
-// Debug storage — check what's persisting
-app.get('/api/debug/storage', (req, res) => {
-  const info = {
-    dataDir: DATA_DIR,
-    isRender: IS_RENDER,
-    dirExists: existsSync(DATA_DIR),
-    files: {},
-    sessionCount: Object.keys(sessions).length,
-  };
-  for (const f of ['users.json', 'sessions.json', 'social.json', 'textbooks.json']) {
-    const p = join(DATA_DIR, f);
-    try { info.files[f] = { exists: existsSync(p), size: existsSync(p) ? readFileSync(p, 'utf-8').length : 0 }; } catch { info.files[f] = { exists: false, error: true }; }
-  }
-  // Test write
-  try { writeFileSync(join(DATA_DIR, '.debug-test'), 'ok'); info.writable = true; } catch (e) { info.writable = false; info.writeError = e.message; }
-  res.json(info);
-});
 
 // SPA fallback (Express 5 syntax)
 app.get('/{*path}', (req, res) => {
