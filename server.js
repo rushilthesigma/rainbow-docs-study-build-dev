@@ -1592,14 +1592,38 @@ app.post('/api/social/profile', authMiddleware, (req, res) => {
     if (existing) return res.status(409).json({ error: 'Handle already taken' });
     social.profiles[req.userId] = { userId: req.userId, handle, displayName, friends: social.profiles[req.userId]?.friends || [], createdAt: social.profiles[req.userId]?.createdAt || new Date().toISOString() };
     saveSocial(social);
+    // Also save to user account for persistence
+    try {
+      const users = loadUsers();
+      const email = findEmailById(users, req.userId);
+      if (email) {
+        users[email].data = migrateUserData(users[email].data);
+        users[email].data.socialHandle = handle;
+        users[email].data.socialDisplayName = displayName;
+        saveUsers(users);
+      }
+    } catch {}
     res.json({ profile: social.profiles[req.userId] });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Get own social profile
+// Get own social profile (with fallback recovery from users.json)
 app.get('/api/social/profile', authMiddleware, (req, res) => {
   const social = loadSocial();
-  res.json({ profile: social.profiles[req.userId] || null });
+  let profile = social.profiles[req.userId] || null;
+  // Recover from users.json if social.json lost the profile
+  if (!profile) {
+    try {
+      const users = loadUsers();
+      const email = findEmailById(users, req.userId);
+      if (email && users[email].data?.socialHandle) {
+        profile = { userId: req.userId, handle: users[email].data.socialHandle, displayName: users[email].data.socialDisplayName || users[email].name, friends: [], createdAt: new Date().toISOString() };
+        social.profiles[req.userId] = profile;
+        saveSocial(social);
+      }
+    } catch {}
+  }
+  res.json({ profile });
 });
 
 // Search users by handle

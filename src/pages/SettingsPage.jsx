@@ -21,7 +21,8 @@ const WALLPAPER_PREVIEWS = [
 ];
 
 function InterfaceSection() {
-  const { uiMode, setUiMode, wallpaper, setWallpaper, dockSize, setDockSize, iconStyle, setIconStyle } = useUIPreference();
+  const { uiMode, rawUiMode, setUiMode, wallpaper, setWallpaper, dockSize, setDockSize, iconStyle, setIconStyle } = useUIPreference();
+  const currentMode = rawUiMode || uiMode;
 
   function setPref(key, val) {
     if (key === 'covalent-wallpaper') setWallpaper(val);
@@ -42,13 +43,13 @@ function InterfaceSection() {
       <div>
         <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 block">Layout</label>
         <div className="flex gap-2">
-          <button onClick={() => switchMode('desktop')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${uiMode === 'desktop' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-[#1e1e2e] text-gray-600 dark:text-gray-300'}`}>Desktop</button>
-          <button onClick={() => switchMode('classic')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${uiMode === 'classic' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-[#1e1e2e] text-gray-600 dark:text-gray-300'}`}>Classic</button>
+          <button onClick={() => switchMode('desktop')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${currentMode === 'desktop' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-[#1e1e2e] text-gray-600 dark:text-gray-300'}`}>Desktop</button>
+          <button onClick={() => switchMode('classic')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${currentMode === 'classic' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-[#1e1e2e] text-gray-600 dark:text-gray-300'}`}>Classic</button>
         </div>
       </div>
 
       {/* Wallpaper — only for desktop mode */}
-      {uiMode === 'desktop' && (<>
+      {currentMode === 'desktop' && (<>
       <div>
         <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 block">Wallpaper</label>
         <div className="grid grid-cols-4 gap-2">
