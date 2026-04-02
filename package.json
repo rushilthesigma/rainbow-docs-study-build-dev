@@ -5,14 +5,37 @@
   "description": "AI-powered adaptive learning platform",
   "author": "Rushil Kelapure",
   "type": "module",
-  "main": "server.js",
+  "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
     "server": "node server.js",
     "start": "node server.js",
     "build": "vite build",
     "render-build": "npm install && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "electron": "electron .",
+    "electron:build": "vite build && electron-builder --mac"
+  },
+  "build": {
+    "appId": "com.covalent.ai",
+    "productName": "Covalent",
+    "mac": {
+      "category": "public.app-category.education",
+      "target": "dmg",
+      "icon": "build/icon.icns"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "server.js",
+      "prompts.js",
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      { "from": "server.js", "to": "server.js" },
+      { "from": "prompts.js", "to": "prompts.js" }
+    ]
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -35,6 +58,8 @@
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
+    "electron": "^41.1.1",
+    "electron-builder": "^26.8.1",
     "tailwindcss": "^4.1.4",
     "vite": "^7.2.4"
   }

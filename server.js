@@ -190,6 +190,18 @@ function migrateUserData(data) {
   if (data.aiPersonality !== undefined && data.preferences.aiPersonality === 'friendly') {
     data.preferences.aiPersonality = data.aiPersonality;
   }
+  // Clean phantom curricula from old RushilAI app — remove any without valid units/lessons structure
+  if (data.curricula?.length) {
+    data.curricula = data.curricula.filter(c => {
+      // Must have units array with at least one unit that has lessons
+      if (!c.units || !Array.isArray(c.units) || c.units.length === 0) return false;
+      // Must have an id and title
+      if (!c.id || !c.title) return false;
+      // Units must have lessons arrays (old app had different format)
+      const hasValidUnit = c.units.some(u => Array.isArray(u.lessons) && u.lessons.length > 0);
+      return hasValidUnit;
+    });
+  }
   return data;
 }
 
