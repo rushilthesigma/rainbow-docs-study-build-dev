@@ -29,10 +29,11 @@ const DEFAULT_MODEL = 'claude-sonnet-4-6';
 const FALLBACK_MODEL = 'claude-haiku-4-5-20251001';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 
-// Data storage — set DATA_DIR env var to a Render persistent disk mount path
-const DATA_DIR = process.env.DATA_DIR || (existsSync('/data') ? '/data' : __dirname);
-if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-console.log(`Data directory: ${DATA_DIR}`);
+// Data storage — always use /data on Render (persistent disk), local dev uses project dir
+const IS_RENDER = !!process.env.RENDER;
+const DATA_DIR = process.env.DATA_DIR || (IS_RENDER ? '/data' : __dirname);
+try { if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true }); } catch (e) { console.error('Failed to create DATA_DIR:', e); }
+console.log(`Data directory: ${DATA_DIR} (Render: ${IS_RENDER})`);
 const USERS_FILE = join(DATA_DIR, 'users.json');
 
 function loadUsers() {
