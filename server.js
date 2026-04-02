@@ -29,8 +29,10 @@ const DEFAULT_MODEL = 'claude-sonnet-4-6';
 const FALLBACK_MODEL = 'claude-haiku-4-5-20251001';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 
-// Data storage
+// Data storage — set DATA_DIR env var to a Render persistent disk mount path
 const DATA_DIR = process.env.DATA_DIR || __dirname;
+if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
+console.log(`Data directory: ${DATA_DIR}`);
 const USERS_FILE = join(DATA_DIR, 'users.json');
 
 function loadUsers() {
