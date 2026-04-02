@@ -29,15 +29,32 @@ const DEFAULT_MODEL = 'claude-sonnet-4-6';
 const FALLBACK_MODEL = 'claude-haiku-4-5-20251001';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 
-// Data storage — always use /data on Render (persistent disk), local dev uses project dir
+// Data storage — try multiple locations until one works
 const IS_RENDER = !!process.env.RENDER;
-const DATA_DIR = process.env.DATA_DIR || (IS_RENDER ? '/data' : __dirname);
-try { if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true }); } catch (e) { console.error('Failed to create DATA_DIR:', e.message); }
+const CANDIDATE_DIRS = [
+  process.env.DATA_DIR,
+  '/data',
+  '/opt/render/project/data',
+  '/opt/render/project/src/data',
+  '/tmp/covalent-data',
+  __dirname,
+].filter(Boolean);
+
+let DATA_DIR = __dirname;
+for (const dir of CANDIDATE_DIRS) {
+  try {
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, '.write-test'), Date.now().toString());
+    // Verify it actually persisted
+    const readBack = readFileSync(join(dir, '.write-test'), 'utf-8');
+    if (readBack) { DATA_DIR = dir; break; }
+  } catch {}
+}
+
 console.log(`=== COVALENT STARTUP ===`);
 console.log(`Data directory: ${DATA_DIR}`);
 console.log(`Render: ${IS_RENDER}`);
-console.log(`DATA_DIR exists: ${existsSync(DATA_DIR)}`);
-console.log(`DATA_DIR writable: ${(() => { try { writeFileSync(join(DATA_DIR, '.write-test'), 'ok'); return true; } catch { return false; } })()}`);
+console.log(`Tried: ${CANDIDATE_DIRS.join(', ')}`);
 const USERS_FILE = join(DATA_DIR, 'users.json');
 
 function loadUsers() {
@@ -2040,6 +2057,24 @@ app.delete('/api/textbooks/:id', authMiddleware, (req, res) => {
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', name: 'covalent-ai' });
+});
+
+// Debug storage — check what's persisting
+app.get('/api/debug/storage', (req, res) => {
+  const info = {
+    dataDir: DATA_DIR,
+    isRender: IS_RENDER,
+    dirExists: existsSync(DATA_DIR),
+    files: {},
+    sessionCount: Object.keys(sessions).length,
+  };
+  for (const f of ['users.json', 'sessions.json', 'social.json', 'textbooks.json']) {
+    const p = join(DATA_DIR, f);
+    try { info.files[f] = { exists: existsSync(p), size: existsSync(p) ? readFileSync(p, 'utf-8').length : 0 }; } catch { info.files[f] = { exists: false, error: true }; }
+  }
+  // Test write
+  try { writeFileSync(join(DATA_DIR, '.debug-test'), 'ok'); info.writable = true; } catch (e) { info.writable = false; info.writeError = e.message; }
+  res.json(info);
 });
 
 // SPA fallback (Express 5 syntax)
