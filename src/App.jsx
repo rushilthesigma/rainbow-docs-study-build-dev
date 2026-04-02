@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { UIPreferenceProvider, useUIPreference } from './context/UIPreferenceContext';
@@ -16,9 +17,12 @@ import StudyPage from './pages/StudyPage';
 import MathPracticePage from './pages/MathPracticePage';
 import CurriculumAssessmentPage from './pages/CurriculumAssessmentPage';
 import PracticeLessonPage from './pages/PracticeLessonPage';
+import SocialPage from './pages/SocialPage';
+import DebatePage from './pages/DebatePage';
 import SettingsPage from './pages/SettingsPage';
 import AppShell from './components/layout/AppShell';
 import DesktopShell from './components/desktop/DesktopShell';
+import Onboarding from './components/desktop/Onboarding';
 import LoadingSpinner from './components/shared/LoadingSpinner';
 
 function ProtectedRoute({ children }) {
@@ -50,6 +54,8 @@ function ClassicRoutes() {
       <Route path="/notes/:id" element={<AppRoute><NoteEditorPage /></AppRoute>} />
       <Route path="/assessments" element={<AppRoute><AssessmentsPage /></AppRoute>} />
       <Route path="/math" element={<AppRoute><MathPracticePage /></AppRoute>} />
+      <Route path="/social" element={<AppRoute><SocialPage /></AppRoute>} />
+      <Route path="/debate" element={<AppRoute><DebatePage /></AppRoute>} />
       <Route path="/settings" element={<AppRoute><SettingsPage /></AppRoute>} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
@@ -59,9 +65,14 @@ function ClassicRoutes() {
 function AppRouter() {
   const { user, loading } = useAuth();
   const { uiMode } = useUIPreference();
+  const [onboarded, setOnboarded] = useState(() => !!localStorage.getItem('covalent-onboarded'));
 
   if (loading) return <LoadingSpinner fullScreen />;
   if (!user) return <Routes><Route path="*" element={<LandingPage />} /></Routes>;
+
+  if (!onboarded) {
+    return <Onboarding onComplete={() => { setOnboarded(true); window.location.reload(); }} />;
+  }
 
   if (uiMode === 'desktop') {
     return <DesktopShell />;

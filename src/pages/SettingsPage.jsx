@@ -21,7 +21,7 @@ const WALLPAPER_PREVIEWS = [
 ];
 
 function InterfaceSection() {
-  const { wallpaper, setWallpaper, dockSize, setDockSize, iconStyle, setIconStyle } = useUIPreference();
+  const { uiMode, setUiMode, wallpaper, setWallpaper, dockSize, setDockSize, iconStyle, setIconStyle } = useUIPreference();
 
   function setPref(key, val) {
     if (key === 'covalent-wallpaper') setWallpaper(val);
@@ -29,11 +29,26 @@ function InterfaceSection() {
     else if (key === 'covalent-icon-style') setIconStyle(val);
   }
 
+  function switchMode(mode) {
+    setUiMode(mode);
+    window.location.reload();
+  }
+
   return (
     <div className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-6 space-y-5">
-      <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wide">Desktop</h3>
+      <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wide">Interface</h3>
 
-      {/* Wallpaper */}
+      {/* UI Mode */}
+      <div>
+        <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 block">Layout</label>
+        <div className="flex gap-2">
+          <button onClick={() => switchMode('desktop')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${uiMode === 'desktop' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-[#1e1e2e] text-gray-600 dark:text-gray-300'}`}>Desktop</button>
+          <button onClick={() => switchMode('classic')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${uiMode === 'classic' ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-[#1e1e2e] text-gray-600 dark:text-gray-300'}`}>Classic</button>
+        </div>
+      </div>
+
+      {/* Wallpaper — only for desktop mode */}
+      {uiMode === 'desktop' && (<>
       <div>
         <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 block">Wallpaper</label>
         <div className="grid grid-cols-4 gap-2">
@@ -78,7 +93,7 @@ function InterfaceSection() {
           ))}
         </div>
       </div>
-
+      </>)}
     </div>
   );
 }

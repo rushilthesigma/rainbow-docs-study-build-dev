@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Plus, MessageSquare, Target, Layers, FileText, ClipboardCheck, PenTool, Settings, LogOut, BookOpen } from 'lucide-react';
+import { LayoutDashboard, Plus, MessageSquare, Target, Layers, FileText, ClipboardCheck, PenTool, Settings, LogOut, BookOpen, Users, Swords } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 const navItems = [
@@ -11,6 +11,8 @@ const navItems = [
   { to: '/notes', icon: FileText, label: 'Notes' },
   { to: '/assessments', icon: ClipboardCheck, label: 'Assessments' },
   { to: '/math', icon: PenTool, label: 'Math Canvas' },
+  { to: '/social', icon: Users, label: 'Social' },
+  { to: '/debate', icon: Swords, label: 'Debate' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 
