@@ -1,7 +1,8 @@
-import { useRef, useState, useCallback } from 'react';
+import { useRef, useState, useCallback, useEffect } from 'react';
 import APP_REGISTRY from './appRegistry';
 import { useWindowManager } from '../../context/WindowManagerContext';
 import { useUIPreference } from '../../context/UIPreferenceContext';
+import { checkAdmin } from '../../api/admin';
 
 const DOCK_SIZES = { small: 36, medium: 48, large: 60 };
 const ICON_SIZES = { small: 20, medium: 26, large: 32 };
@@ -73,9 +74,12 @@ export default function Dock() {
   const iconRefs = useRef({});
   const size = DOCK_SIZES[dockSize] || 48;
 
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => { checkAdmin().then(d => setIsAdmin(d.isAdmin)).catch(() => {}); }, []);
+
   const handleMouseMove = useCallback((e) => { setMouseX(e.clientX); }, []);
 
-  const mainApps = APP_REGISTRY.filter(a => !['settings', 'newcurriculum'].includes(a.id));
+  const mainApps = APP_REGISTRY.filter(a => !['settings', 'newcurriculum'].includes(a.id) && (!a.adminOnly || isAdmin));
   const utilApps = APP_REGISTRY.filter(a => ['settings'].includes(a.id));
   const openAppIds = new Set(Object.values(state.windows).map(w => w.appId));
 

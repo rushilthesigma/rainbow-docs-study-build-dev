@@ -48,7 +48,7 @@ export default function DashboardPage() {
   if (loading) return <div className="flex items-center justify-center h-64"><LoadingSpinner size={28} /></div>;
 
   return (
-    <div className="max-w-3xl mx-auto space-y-4">
+    <div className="max-w-4xl space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{greeting}, {firstName}</h1>
