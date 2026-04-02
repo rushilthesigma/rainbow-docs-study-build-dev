@@ -32,8 +32,12 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 // Data storage — always use /data on Render (persistent disk), local dev uses project dir
 const IS_RENDER = !!process.env.RENDER;
 const DATA_DIR = process.env.DATA_DIR || (IS_RENDER ? '/data' : __dirname);
-try { if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true }); } catch (e) { console.error('Failed to create DATA_DIR:', e); }
-console.log(`Data directory: ${DATA_DIR} (Render: ${IS_RENDER})`);
+try { if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true }); } catch (e) { console.error('Failed to create DATA_DIR:', e.message); }
+console.log(`=== COVALENT STARTUP ===`);
+console.log(`Data directory: ${DATA_DIR}`);
+console.log(`Render: ${IS_RENDER}`);
+console.log(`DATA_DIR exists: ${existsSync(DATA_DIR)}`);
+console.log(`DATA_DIR writable: ${(() => { try { writeFileSync(join(DATA_DIR, '.write-test'), 'ok'); return true; } catch { return false; } })()}`);
 const USERS_FILE = join(DATA_DIR, 'users.json');
 
 function loadUsers() {
@@ -44,26 +48,43 @@ function loadUsers() {
 }
 
 function saveUsers(users) {
-  try { writeFileSync(USERS_FILE, JSON.stringify(users, null, 2)); }
-  catch (e) { console.error('Error saving users:', e); }
+  try {
+    writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+  } catch (e) {
+    console.error('FAILED to save users to', USERS_FILE, e.message);
+    // Fallback to __dirname
+    try { writeFileSync(join(__dirname, 'users.json'), JSON.stringify(users, null, 2)); console.log('Saved users to fallback location'); } catch {}
+  }
 }
 
 function generateToken() {
   return crypto.randomBytes(32).toString('hex');
 }
 
-// Session storage
+// Session storage — embedded in users.json for single-file persistence
+// Also kept in memory for fast lookups, synced to disk on every change
 const SESSIONS_FILE = join(DATA_DIR, 'sessions.json');
 function loadSessions() {
   try {
-    if (existsSync(SESSIONS_FILE)) return JSON.parse(readFileSync(SESSIONS_FILE, 'utf-8'));
-  } catch (e) { console.error('Error loading sessions:', e); }
+    if (existsSync(SESSIONS_FILE)) {
+      const data = JSON.parse(readFileSync(SESSIONS_FILE, 'utf-8'));
+      console.log(`Loaded ${Object.keys(data).length} sessions from ${SESSIONS_FILE}`);
+      return data;
+    }
+  } catch (e) { console.error('Error loading sessions:', e.message); }
   return {};
 }
 function saveSessions() {
-  try { writeFileSync(SESSIONS_FILE, JSON.stringify(sessions, null, 2)); } catch {}
+  try {
+    writeFileSync(SESSIONS_FILE, JSON.stringify(sessions, null, 2));
+  } catch (e) {
+    console.error('FAILED to save sessions:', e.message);
+    // Fallback: try saving to __dirname if DATA_DIR fails
+    try { writeFileSync(join(__dirname, 'sessions.json'), JSON.stringify(sessions, null, 2)); } catch {}
+  }
 }
 const sessions = loadSessions();
+console.log(`Active sessions: ${Object.keys(sessions).length}`);
 
 const OWNER_EMAILS = ['rushilkelapure@gmail.com'];
 function isOwner(email) {
