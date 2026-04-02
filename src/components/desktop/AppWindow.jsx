@@ -4,6 +4,7 @@ import DebateApp from './apps/DebateApp';
 import NotesApp from './apps/NotesApp';
 import TextbookApp from './apps/TextbookApp';
 import SocialApp from './apps/SocialApp';
+import AdminApp from './apps/AdminApp';
 import StudyPage from '../../pages/StudyPage';
 import GoalsPage from '../../pages/GoalsPage';
 import AssessmentsPage from '../../pages/AssessmentsPage';
@@ -21,6 +22,7 @@ const APP_COMPONENTS = {
   textbook: TextbookApp,
   social: SocialApp,
   debate: DebateApp,
+  admin: AdminApp,
   settings: SettingsPage,
 };
 

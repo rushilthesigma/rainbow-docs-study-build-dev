@@ -121,6 +121,12 @@ function authMiddleware(req, res, next) {
   req.userId = sessions[token].id;
   req.userEmail = sessions[token].email;
   req.isOwner = isOwner(req.userEmail);
+  // Check if banned
+  const users = loadUsers();
+  const userEmail = findEmailById(users, req.userId);
+  if (userEmail && users[userEmail]?.banned) {
+    return res.status(403).json({ error: 'Account suspended' });
+  }
   next();
 }
 
@@ -2051,6 +2057,97 @@ app.delete('/api/textbooks/:id', authMiddleware, (req, res) => {
     textbooks[req.userId] = textbooks[req.userId].filter(t => t.id !== req.params.id);
     saveTextbooks(textbooks);
   }
+  res.json({ success: true });
+});
+
+// ===== ADMIN =====
+
+function isAdmin(userId) {
+  const social = loadSocial();
+  const profile = social.profiles[userId];
+  return profile?.handle === 'goon';
+}
+
+function adminMiddleware(req, res, next) {
+  if (!isAdmin(req.userId)) return res.status(403).json({ error: 'Not authorized' });
+  next();
+}
+
+// Check if current user is admin
+app.get('/api/admin/check', authMiddleware, (req, res) => {
+  res.json({ isAdmin: isAdmin(req.userId) });
+});
+
+// List all users
+app.get('/api/admin/users', authMiddleware, adminMiddleware, (req, res) => {
+  const users = loadUsers();
+  const social = loadSocial();
+  const list = Object.entries(users).map(([email, u]) => ({
+    id: u.id, email, name: u.name,
+    handle: social.profiles[u.id]?.handle || null,
+    banned: !!u.banned,
+    curriculaCount: (u.data?.curricula || []).length,
+    notesCount: (u.data?.notes || []).length,
+    level: u.data?.profile?.level || 1,
+    xp: u.data?.profile?.xp || 0,
+    createdAt: u.createdAt,
+  }));
+  res.json({ users: list });
+});
+
+// Get user detail (full data)
+app.get('/api/admin/users/:uid', authMiddleware, adminMiddleware, (req, res) => {
+  const users = loadUsers();
+  const social = loadSocial();
+  const entry = Object.entries(users).find(([_, u]) => u.id === req.params.uid);
+  if (!entry) return res.status(404).json({ error: 'User not found' });
+  const [email, u] = entry;
+  res.json({
+    user: {
+      id: u.id, email, name: u.name, banned: !!u.banned,
+      handle: social.profiles[u.id]?.handle || null,
+      profile: u.data?.profile,
+      curricula: (u.data?.curricula || []).map(c => ({ id: c.id, title: c.title, unitCount: c.units?.length || 0 })),
+      notes: (u.data?.notes || []).map(n => ({ id: n.id, title: n.title, type: n.type })),
+      goals: (u.data?.goals || []).map(g => ({ id: g.id, title: g.title, status: g.status })),
+      flashcardDecks: (u.data?.flashcardDecks || []).map(d => ({ id: d.id, title: d.title, cardCount: d.cards?.length || 0 })),
+    }
+  });
+});
+
+// Ban/unban user
+app.post('/api/admin/users/:uid/ban', authMiddleware, adminMiddleware, (req, res) => {
+  const users = loadUsers();
+  const email = Object.keys(users).find(e => users[e].id === req.params.uid);
+  if (!email) return res.status(404).json({ error: 'User not found' });
+  users[email].banned = !users[email].banned;
+  // If banning, kill their sessions
+  if (users[email].banned) {
+    for (const [token, sess] of Object.entries(sessions)) {
+      if (sess.id === req.params.uid) delete sessions[token];
+    }
+    saveSessions();
+  }
+  saveUsers(users);
+  res.json({ banned: users[email].banned });
+});
+
+// Delete user
+app.delete('/api/admin/users/:uid', authMiddleware, adminMiddleware, (req, res) => {
+  const users = loadUsers();
+  const email = Object.keys(users).find(e => users[e].id === req.params.uid);
+  if (!email) return res.status(404).json({ error: 'User not found' });
+  delete users[email];
+  // Kill sessions
+  for (const [token, sess] of Object.entries(sessions)) {
+    if (sess.id === req.params.uid) delete sessions[token];
+  }
+  saveSessions();
+  saveUsers(users);
+  // Remove from social
+  const social = loadSocial();
+  delete social.profiles[req.params.uid];
+  saveSocial(social);
   res.json({ success: true });
 });
 
