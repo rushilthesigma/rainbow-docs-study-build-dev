@@ -82,7 +82,7 @@ export default function QuizBowlApp() {
   const [reading, setReading] = useState(true);
 
   const q = questions[currentQ];
-  const speed = difficulty === 'Easy' ? 220 : difficulty === 'Medium' ? 160 : difficulty === 'Hard' ? 110 : 60;
+  const speed = 140;
   const { revealed, done, stop, wordIndex, totalWords } = useWordReveal(q?.text || '', speed, reading && !buzzed && view === 'playing');
 
   async function handleGenerate() {
@@ -126,17 +126,28 @@ export default function QuizBowlApp() {
 
   function handleSubmit() {
     if (!answer.trim()) return;
-    const a = answer.trim().toLowerCase();
-    const ca = q.answer.toLowerCase();
-    // Fuzzy match: exact, contains, or first/last name match
-    const isCorrect = a === ca || ca.includes(a) || a.includes(ca) ||
-      ca.split(/[\s,]+/).some(w => w.length > 2 && a.includes(w)) ||
-      a.split(/[\s,]+/).some(w => w.length > 2 && ca.includes(w));
+    // Normalize: strip accents, lowercase, trim punctuation
+    const norm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s]/g, '').trim();
+    const a = norm(answer);
+    const ca = norm(q.answer);
+    // Levenshtein distance for typo tolerance
+    function lev(s1, s2) {
+      const m = s1.length, n = s2.length;
+      if (m === 0) return n; if (n === 0) return m;
+      const d = Array.from({ length: m + 1 }, (_, i) => [i]);
+      for (let j = 1; j <= n; j++) d[0][j] = j;
+      for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++)
+        d[i][j] = Math.min(d[i-1][j] + 1, d[i][j-1] + 1, d[i-1][j-1] + (s1[i-1] !== s2[j-1] ? 1 : 0));
+      return d[m][n];
+    }
+    const dist = lev(a, ca);
+    const threshold = Math.max(1, Math.floor(ca.length * 0.25)); // allow ~25% typos
+    const isCorrect = a === ca || ca.includes(a) || a.includes(ca) || dist <= threshold ||
+      ca.split(/[\s,]+/).some(w => w.length > 2 && (a.includes(w) || lev(a, w) <= 1)) ||
+      a.split(/[\s,]+/).some(w => w.length > 2 && (ca.includes(w) || lev(ca, w) <= 1));
     setCorrect(isCorrect);
     setShowResult(true);
     setScores(prev => [...prev, { question: currentQ, correct: isCorrect, buzzWord: wordIndex, totalWords, answer: answer.trim(), correctAnswer: q.answer }]);
-    // Auto-advance after 1.5s
-    setTimeout(() => nextQuestion(), 1500);
   }
 
   function handleTimeout() {
@@ -168,13 +179,17 @@ export default function QuizBowlApp() {
     }
   }
 
-  // Keyboard: space to buzz, enter to submit
+  // Keyboard: space to buzz, enter to submit/advance
+  const justSubmitted = useRef(false);
   useEffect(() => {
     if (view !== 'playing') return;
     function handleKey(e) {
       if (e.key === ' ' && !buzzed) { e.preventDefault(); handleBuzz(); }
-      if (e.key === 'Enter' && buzzed && !showResult) { e.preventDefault(); handleSubmit(); }
-      if (e.key === 'Enter' && showResult) { e.preventDefault(); nextQuestion(); }
+      if (e.key === 'Enter' && buzzed && !showResult) { e.preventDefault(); handleSubmit(); justSubmitted.current = true; }
+      else if (e.key === 'Enter' && showResult) {
+        if (justSubmitted.current) { justSubmitted.current = false; return; }
+        e.preventDefault(); nextQuestion();
+      }
     }
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
@@ -238,21 +253,18 @@ export default function QuizBowlApp() {
             </p>
           </div>
 
-          {/* Result */}
-          {showResult && (
-            <div className={`mt-4 p-4 rounded-xl ${correct ? 'bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800' : 'bg-rose-50 dark:bg-rose-900/10 border border-rose-200 dark:border-rose-800'}`}>
-              <p className={`text-sm font-semibold ${correct ? 'text-emerald-600' : 'text-rose-600'}`}>{correct ? 'Correct!' : 'Incorrect'}</p>
-              <p className="text-sm text-gray-700 dark:text-gray-300 mt-1">Answer: <strong>{q.answer}</strong></p>
-            </div>
-          )}
+          {/* Result is shown in controls area below */}
         </div>
 
         {/* Controls */}
         <div className="px-4 py-3 border-t border-gray-200 dark:border-[#2A2A40] flex-shrink-0 space-y-2">
           {!buzzed && (
-            <button onClick={handleBuzz} className="w-full py-4 rounded-xl bg-red-600 hover:bg-red-700 text-white text-lg font-bold uppercase tracking-wider active:scale-95 transition-transform">
-              BUZZ
-            </button>
+            <>
+              <button onClick={handleBuzz} className="w-full py-4 rounded-xl bg-red-600 hover:bg-red-700 text-white text-lg font-bold uppercase tracking-wider active:scale-95 transition-transform">
+                BUZZ
+              </button>
+              <p className="text-[10px] text-gray-400 text-center">Press SPACE to buzz</p>
+            </>
           )}
 
           {buzzed && !showResult && (
@@ -260,7 +272,6 @@ export default function QuizBowlApp() {
               <input
                 value={answer}
                 onChange={e => setAnswer(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') handleSubmit(); }}
                 placeholder="Type your answer..."
                 autoFocus
                 className="flex-1 px-4 py-3 rounded-xl border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-sm outline-none"
@@ -270,12 +281,17 @@ export default function QuizBowlApp() {
           )}
 
           {showResult && (
-            <button onClick={nextQuestion} className="w-full py-3 rounded-xl bg-blue-600 text-white text-sm font-medium">
-              {currentQ < questions.length - 1 ? 'Next Question' : 'See Results'}
-            </button>
+            <>
+              <div className={`p-4 rounded-xl text-center ${correct ? 'bg-emerald-500/10 border-2 border-emerald-500' : 'bg-rose-500/10 border-2 border-rose-500'}`}>
+                <p className={`text-lg font-bold ${correct ? 'text-emerald-500' : 'text-rose-500'}`}>{correct ? 'CORRECT' : 'WRONG'}</p>
+                <p className="text-sm text-gray-700 dark:text-gray-300 mt-1">Answer: <strong>{q.answer}</strong></p>
+                {!correct && answer && <p className="text-xs text-gray-400 mt-0.5">You said: {answer}</p>}
+              </div>
+              <button onClick={nextQuestion} className="w-full py-3 rounded-xl bg-blue-600 text-white text-sm font-medium">
+                {currentQ < questions.length - 1 ? 'Next Question' : 'See Results'}
+              </button>
+            </>
           )}
-
-          {!buzzed && <p className="text-[10px] text-gray-400 text-center">Press SPACE to buzz</p>}
         </div>
       </div>
     );

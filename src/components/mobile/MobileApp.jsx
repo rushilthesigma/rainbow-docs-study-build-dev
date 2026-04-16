@@ -47,8 +47,11 @@ function MobileStudy() {
       onChunk: c => { streamRef.current += c; setStreamContent(streamRef.current); },
       onMeta: d => { if (d.sessionId) setSessionId(d.sessionId); },
       onDone: () => {
-        if (streamRef.current) setMessages(m => [...m, { role: 'assistant', content: streamRef.current, timestamp: new Date().toISOString() }]);
-        setStreamContent(''); streamRef.current = ''; setStreaming(false);
+        const final = streamRef.current;
+        streamRef.current = '';
+        setStreamContent('');
+        if (final) setMessages(m => [...m, { role: 'assistant', content: final, timestamp: new Date().toISOString() }]);
+        setStreaming(false);
       },
       onError: err => { setMessages(m => [...m, { role: 'assistant', content: `Error: ${err}` }]); setStreamContent(''); setStreaming(false); },
     });
