@@ -16,11 +16,19 @@ RULES:
 Format:
 {"questions":[{"text":"Full question text here, starting with obscure clues and ending with obvious giveaway clues.","answer":"Answer"}]}`;
 
-function generatePrompt(category, difficulty, count) {
+function generatePrompt(category, difficulty, count, customInstructions) {
+  const difficultyGuide = {
+    Easy: 'Use well-known facts. Giveaway clue should be very obvious. Target: high school students.',
+    Medium: 'Mix of common and uncommon knowledge. Standard college quiz bowl level.',
+    Hard: 'Use obscure clues early. Require deep subject expertise. Only the giveaway should be accessible to non-experts.',
+    Tournament: 'NAQT/ACF Nationals level. Opening clues should be nearly impossible except for top players. Use extremely obscure references, secondary works, lesser-known facts. Questions should be 5-7 sentences. Even the giveaway should require solid knowledge.',
+  };
   return `Generate ${count} pyramidal quiz bowl tossup questions.
 Category: ${category}
 Difficulty: ${difficulty}
-Each question should be 3-5 sentences long, pyramidal (hard clues first, easy giveaway last).
+${difficultyGuide[difficulty] || ''}
+${customInstructions ? `\nAdditional instructions from the user: ${customInstructions}` : ''}
+Each question must be pyramidal (hardest clues first, easiest giveaway last).
 Return JSON: {"questions":[{"text":"...","answer":"..."}]}`;
 }
 
@@ -63,6 +71,7 @@ export default function QuizBowlApp() {
   const [category, setCategory] = useState('Mixed');
   const [difficulty, setDifficulty] = useState('Medium');
   const [questionCount, setQuestionCount] = useState(10);
+  const [customInstructions, setCustomInstructions] = useState('');
 
   // Playing
   const [buzzed, setBuzzed] = useState(false);
@@ -73,7 +82,8 @@ export default function QuizBowlApp() {
   const [reading, setReading] = useState(true);
 
   const q = questions[currentQ];
-  const { revealed, done, stop, wordIndex, totalWords } = useWordReveal(q?.text || '', difficulty === 'Easy' ? 200 : difficulty === 'Hard' ? 100 : difficulty === 'Tournament' ? 80 : 150, reading && !buzzed && view === 'playing');
+  const speed = difficulty === 'Easy' ? 220 : difficulty === 'Medium' ? 160 : difficulty === 'Hard' ? 110 : 60;
+  const { revealed, done, stop, wordIndex, totalWords } = useWordReveal(q?.text || '', speed, reading && !buzzed && view === 'playing');
 
   async function handleGenerate() {
     setGenerating(true);
@@ -83,7 +93,7 @@ export default function QuizBowlApp() {
         method: 'POST',
         body: JSON.stringify({
           system: SYSTEM_PROMPT,
-          messages: [{ role: 'user', content: generatePrompt(category, difficulty, questionCount) }],
+          messages: [{ role: 'user', content: generatePrompt(category, difficulty, questionCount, customInstructions) }],
           max_tokens: 8192,
         }),
       });
@@ -116,12 +126,17 @@ export default function QuizBowlApp() {
 
   function handleSubmit() {
     if (!answer.trim()) return;
-    const isCorrect = answer.trim().toLowerCase() === q.answer.toLowerCase() ||
-      q.answer.toLowerCase().includes(answer.trim().toLowerCase()) ||
-      answer.trim().toLowerCase().includes(q.answer.toLowerCase());
+    const a = answer.trim().toLowerCase();
+    const ca = q.answer.toLowerCase();
+    // Fuzzy match: exact, contains, or first/last name match
+    const isCorrect = a === ca || ca.includes(a) || a.includes(ca) ||
+      ca.split(/[\s,]+/).some(w => w.length > 2 && a.includes(w)) ||
+      a.split(/[\s,]+/).some(w => w.length > 2 && ca.includes(w));
     setCorrect(isCorrect);
     setShowResult(true);
     setScores(prev => [...prev, { question: currentQ, correct: isCorrect, buzzWord: wordIndex, totalWords, answer: answer.trim(), correctAnswer: q.answer }]);
+    // Auto-advance after 1.5s
+    setTimeout(() => nextQuestion(), 1500);
   }
 
   function handleTimeout() {
@@ -299,6 +314,17 @@ export default function QuizBowlApp() {
         <div>
           <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 block">Questions: {questionCount}</label>
           <input type="range" min="5" max="30" step="5" value={questionCount} onChange={e => setQuestionCount(Number(e.target.value))} className="w-full" />
+        </div>
+
+        <div>
+          <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 block">Custom Instructions (optional)</label>
+          <textarea
+            value={customInstructions}
+            onChange={e => setCustomInstructions(e.target.value)}
+            placeholder="e.g., Focus on organic chemistry, only 20th century events, include bonus clues about specific authors..."
+            rows={3}
+            className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-sm text-gray-900 dark:text-white placeholder-gray-400 resize-none outline-none"
+          />
         </div>
 
         <button onClick={handleGenerate} disabled={generating} className="w-full py-3 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2">
