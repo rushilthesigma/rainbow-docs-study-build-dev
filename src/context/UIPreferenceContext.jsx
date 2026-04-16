@@ -12,6 +12,14 @@ export function UIPreferenceProvider({ children }) {
   const [dockSize, setDockSizeState] = useState(() => loadPref('covalent-dock-size', 'medium'));
   const [iconStyle, setIconStyleState] = useState(() => loadPref('covalent-icon-style', 'gradient'));
   const [dockPosition, setDockPositionState] = useState(() => loadPref('covalent-dock-position', 'bottom'));
+  const [theme, setThemeState] = useState(() => document.documentElement.classList.contains('dark') ? 'dark' : 'light');
+
+  function setTheme(t) {
+    setThemeState(t);
+    if (t === 'dark') document.documentElement.classList.add('dark');
+    else document.documentElement.classList.remove('dark');
+    localStorage.setItem('covalent-theme', t);
+  }
 
   function setUiMode(mode) {
     setUiModeState(mode);
@@ -50,6 +58,7 @@ export function UIPreferenceProvider({ children }) {
       dockSize, setDockSize,
       iconStyle, setIconStyle,
       dockPosition, setDockPosition,
+      theme, setTheme,
     }}>
       {children}
     </UIPreferenceContext.Provider>

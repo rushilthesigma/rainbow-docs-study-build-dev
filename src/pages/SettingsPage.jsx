@@ -9,73 +9,64 @@ import Button from '../components/shared/Button';
 import { Settings, Save, User } from 'lucide-react';
 import { useUIPreference } from '../context/UIPreferenceContext';
 
-const WALLPAPER_PREVIEWS = [
-  { id: 'nebula', label: 'Nebula', preview: 'linear-gradient(135deg, #1a0533, #0d1117, #0f0a1e)' },
-  { id: 'deepspace', label: 'Deep Space', preview: 'linear-gradient(135deg, #030712, #0a0a1a, #050510)' },
-  { id: 'carina', label: 'Carina Nebula', preview: 'url(https://images.unsplash.com/photo-1462331940025-496dfbfc7564?w=200&q=40)' },
-  { id: 'pillars', label: 'Pillars', preview: 'url(https://images.unsplash.com/photo-1543722530-d2c3201371e7?w=200&q=40)' },
-  { id: 'galaxy', label: 'Galaxy', preview: 'url(https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=200&q=40)' },
-  { id: 'orion', label: 'Orion', preview: 'url(https://images.unsplash.com/photo-1419242902214-272b3f66ee7a?w=200&q=40)' },
-  { id: 'milkyway', label: 'Milky Way', preview: 'url(https://images.unsplash.com/photo-1509773896068-7fd415d91e2e?w=200&q=40)' },
-  { id: 'cosmos', label: 'Cosmos', preview: 'url(https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=200&q=40)' },
-];
+import { WALLPAPER_LIST } from '../components/desktop/DesktopBackground';
+
+function Dropdown({ label, value, options, onChange }) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find(o => o.value === value);
+  return (
+    <div>
+      <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 block">{label}</label>
+      <div className="relative">
+        <button onClick={() => setOpen(!open)} className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-sm text-gray-900 dark:text-white">
+          <span>{selected?.label || value}</span>
+          <svg width="12" height="12" viewBox="0 0 12 12" className={`transition-transform ${open ? 'rotate-180' : ''}`}><path d="M3 5l3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+        </button>
+        {open && (
+          <>
+            <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+            <div className="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622] shadow-xl py-1">
+              {options.map(o => (
+                <button key={o.value} onClick={() => { onChange(o.value); setOpen(false); }} className={`w-full text-left px-3 py-2 text-sm ${value === o.value ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-medium' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[#1e1e2e]'}`}>
+                  {o.label}{o.desc ? <span className="text-[10px] text-gray-400 ml-2">{o.desc}</span> : ''}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function InterfaceSection() {
   const { wallpaper, setWallpaper, dockSize, setDockSize, iconStyle, setIconStyle } = useUIPreference();
 
-  function setPref(key, val) {
-    if (key === 'covalent-wallpaper') setWallpaper(val);
-    else if (key === 'covalent-dock-size') setDockSize(val);
-    else if (key === 'covalent-icon-style') setIconStyle(val);
-  }
+  const wallpaperOpts = WALLPAPER_LIST.map(w => ({ value: w.id, label: w.label }));
+  const dockOpts = [{ value: 'small', label: 'Small' }, { value: 'medium', label: 'Medium' }, { value: 'large', label: 'Large' }];
+  const iconOpts = [{ value: 'gradient', label: 'Colorful' }, { value: 'mono', label: 'Monochrome' }, { value: 'glass', label: 'Glass' }, { value: 'accent', label: 'Accent Tint' }];
+  const styleOpts = [
+    { value: 'macos', label: 'macOS', desc: 'Dock + Menu Bar' },
+    { value: 'windows', label: 'Windows', desc: 'Taskbar + Start Menu' },
+    { value: 'chromeos', label: 'ChromeOS', desc: 'Centered Shelf' },
+    { value: 'linux', label: 'Linux (GNOME)', desc: 'Top Panel + Dash' },
+    { value: 'mobile', label: 'Mobile (Dev)', desc: 'Bottom tabs, touch UI' },
+  ];
+
+  const isMobileScreen = typeof window !== 'undefined' && window.innerWidth < 768;
 
   return (
     <div className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-6 space-y-5">
-      <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wide">Desktop</h3>
-      <div>
-        <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 block">Wallpaper</label>
-        <div className="grid grid-cols-4 gap-2">
-          {WALLPAPER_PREVIEWS.map(wp => (
-            <button
-              key={wp.id}
-              onClick={() => setPref('covalent-wallpaper', wp.id)}
-              className={`aspect-video rounded-lg overflow-hidden border-2 transition-colors relative ${wallpaper === wp.id ? 'border-blue-500 ring-2 ring-blue-500/30' : 'border-transparent hover:border-gray-300 dark:hover:border-gray-600'}`}
-            >
-              <div className="w-full h-full bg-cover bg-center" style={{ background: wp.preview.startsWith('url') ? undefined : wp.preview, backgroundImage: wp.preview.startsWith('url') ? wp.preview : undefined, backgroundSize: 'cover', backgroundPosition: 'center' }} />
-              <span className="absolute bottom-0.5 left-0 right-0 text-[8px] text-white/80 text-center drop-shadow">{wp.label}</span>
-            </button>
-          ))}
-        </div>
-      </div>
+      <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wide">{isMobileScreen ? 'Appearance' : 'Desktop'}</h3>
 
-      {/* Dock Size */}
-      <div>
-        <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 block">Dock Size</label>
-        <div className="flex gap-2">
-          {['small', 'medium', 'large'].map(s => (
-            <button key={s} onClick={() => setPref('covalent-dock-size', s)} className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-colors ${dockSize === s ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-[#1e1e2e] text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-[#2A2A40]'}`}>
-              {s}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Icon Style */}
-      <div>
-        <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 block">Icon Style</label>
-        <div className="flex gap-2 flex-wrap">
-          {[
-            { id: 'gradient', label: 'Colorful' },
-            { id: 'mono', label: 'Monochrome' },
-            { id: 'glass', label: 'Glass' },
-            { id: 'accent', label: 'Accent Tint' },
-          ].map(s => (
-            <button key={s.id} onClick={() => setPref('covalent-icon-style', s.id)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${iconStyle === s.id ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-[#1e1e2e] text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-[#2A2A40]'}`}>
-              {s.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      {!isMobileScreen && (
+        <>
+          <Dropdown label="Desktop Style" value={localStorage.getItem('cov-desktop-style') || 'macos'} options={styleOpts} onChange={v => { localStorage.setItem('cov-desktop-style', v); window.location.reload(); }} />
+          <Dropdown label="Wallpaper" value={wallpaper} options={wallpaperOpts} onChange={setWallpaper} />
+          <Dropdown label="Dock Size" value={dockSize} options={dockOpts} onChange={setDockSize} />
+          <Dropdown label="Icon Style" value={iconStyle} options={iconOpts} onChange={setIconStyle} />
+        </>
+      )}
     </div>
   );
 }

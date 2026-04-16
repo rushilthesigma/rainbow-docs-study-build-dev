@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BookOpen, ChevronRight, Moon, Sun } from 'lucide-react';
+import { BookOpen, ChevronRight, Moon, Sun, Monitor, Smartphone } from 'lucide-react';
 
 const WALLPAPER_LIST = [
   { id: 'nebula', label: 'Nebula', preview: 'linear-gradient(135deg, #1a0533, #0d1117, #0f0a1e)' },
@@ -14,7 +14,7 @@ export default function Onboarding({ onComplete }) {
   const [step, setStep] = useState(0);
   const [dark, setDark] = useState(true);
   const [wallpaper, setWallpaper] = useState('nebula');
-  const [uiMode] = useState('desktop');
+  const [desktopStyle, setDesktopStyle] = useState('macos');
 
   function pickDark() {
     setDark(true);
@@ -30,7 +30,7 @@ export default function Onboarding({ onComplete }) {
 
   function finish() {
     localStorage.setItem('covalent-wallpaper', wallpaper);
-    localStorage.setItem('covalent-ui-mode', uiMode);
+    localStorage.setItem('cov-desktop-style', desktopStyle);
     localStorage.setItem('covalent-onboarded', 'true');
     onComplete();
   }
@@ -83,13 +83,38 @@ export default function Onboarding({ onComplete }) {
               </button>
             </div>
 
+            <button onClick={() => setStep(2)} className={`px-8 py-3 rounded-xl ${btnBg} font-medium transition-colors`}>
+              Continue <ChevronRight size={16} className="inline ml-1" />
+            </button>
+          </div>
+        )}
+
+        {step === 2 && (
+          <div className="text-center">
+            <h2 className={`text-2xl font-bold ${textPrimary} mb-2`}>Choose your desktop</h2>
+            <p className={`${textMuted} text-sm mb-6`}>Pick a style that feels familiar.</p>
+            <div className="grid grid-cols-2 gap-3 max-w-sm mx-auto mb-8">
+              {[
+                { id: 'macos', label: 'macOS', desc: 'Dock + Menu Bar' },
+                { id: 'windows', label: 'Windows', desc: 'Taskbar + Start Menu' },
+                { id: 'chromeos', label: 'ChromeOS', desc: 'Centered Shelf' },
+                { id: 'linux', label: 'Linux', desc: 'GNOME Panel + Dash' },
+              ].map(os => (
+                <button key={os.id} onClick={() => setDesktopStyle(os.id)} className={`rounded-xl p-4 border-2 transition-all text-left ${desktopStyle === os.id ? borderActive : borderInactive}`}>
+                  <Monitor size={20} className={desktopStyle === os.id ? 'text-blue-500 mb-2' : `${dark ? 'text-white/40' : 'text-gray-400'} mb-2`} />
+                  <p className={`text-sm font-semibold ${textPrimary}`}>{os.label}</p>
+                  <p className={`text-[10px] ${textMuted} mt-0.5`}>{os.desc}</p>
+                </button>
+              ))}
+            </div>
+            <p className={`text-[10px] ${textMuted} mb-4`}>Recommended: macOS for most users, Windows if you prefer a taskbar</p>
             <button onClick={() => setStep(3)} className={`px-8 py-3 rounded-xl ${btnBg} font-medium transition-colors`}>
               Continue <ChevronRight size={16} className="inline ml-1" />
             </button>
           </div>
         )}
 
-        {step === 3 && uiMode === 'desktop' && (
+        {step === 3 && (
           <div className="text-center">
             <h2 className={`text-2xl font-bold ${textPrimary} mb-2`}>Pick a wallpaper</h2>
             <p className={`${textMuted} text-sm mb-6`}>Choose your desktop background.</p>
@@ -112,9 +137,11 @@ export default function Onboarding({ onComplete }) {
 
         {step === 4 && (
           <div className="text-center">
-            <div className="text-5xl mb-4">🚀</div>
+            <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 flex items-center justify-center mx-auto mb-4">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-500"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
             <h2 className={`text-2xl font-bold ${textPrimary} mb-2`}>You're all set</h2>
-            <p className={`${textMuted} text-sm mb-8`}>Click apps in the dock to get started.</p>
+            <p className={`${textMuted} text-sm mb-8`}>Your {desktopStyle === 'macos' ? 'macOS' : desktopStyle === 'windows' ? 'Windows' : desktopStyle === 'chromeos' ? 'ChromeOS' : 'Linux'} desktop is ready.</p>
             <button onClick={finish} className={`px-8 py-3 rounded-xl ${btnBg} font-medium transition-colors`}>
               Get Started
             </button>
@@ -122,7 +149,7 @@ export default function Onboarding({ onComplete }) {
         )}
 
         <div className="flex justify-center gap-2 mt-8">
-          {[0,1,3,4].map(i => (
+          {[0,1,2,3,4].map(i => (
             <div key={i} className={`h-1.5 rounded-full transition-all ${step === i ? `w-4 ${dark ? 'bg-white' : 'bg-gray-900'}` : `w-1.5 ${dark ? 'bg-white/20' : 'bg-gray-300'}`}`} />
           ))}
         </div>

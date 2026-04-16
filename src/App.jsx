@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { UIPreferenceProvider, useUIPreference } from './context/UIPreferenceContext';
@@ -22,6 +22,7 @@ import DebatePage from './pages/DebatePage';
 import SettingsPage from './pages/SettingsPage';
 import AppShell from './components/layout/AppShell';
 import DesktopShell from './components/desktop/DesktopShell';
+import MobileApp from './components/mobile/MobileApp';
 import Onboarding from './components/desktop/Onboarding';
 import LoadingSpinner from './components/shared/LoadingSpinner';
 
@@ -65,9 +66,19 @@ function ClassicRoutes() {
 function AppRouter() {
   const { user, loading } = useAuth();
   const [onboarded, setOnboarded] = useState(() => !!localStorage.getItem('covalent-onboarded'));
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
+
+  useEffect(() => {
+    function onResize() { setIsMobile(window.innerWidth < 768); }
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   if (loading) return <LoadingSpinner fullScreen />;
   if (!user) return <Routes><Route path="*" element={<LandingPage />} /></Routes>;
+
+  // Mobile gets its own UI — no onboarding
+  if (isMobile) return <MobileApp />;
 
   if (!onboarded) {
     return <Onboarding onComplete={() => { setOnboarded(true); window.location.reload(); }} />;

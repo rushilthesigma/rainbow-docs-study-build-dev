@@ -7,8 +7,12 @@ import Window from './Window';
 import AppWindow from './AppWindow';
 import Spotlight from './Spotlight';
 import ContextMenu from './ContextMenu';
+import WindowsShell from './WindowsShell';
+import ChromeOSShell from './ChromeOSShell';
+import LinuxShell from './LinuxShell';
+import MobileApp from '../mobile/MobileApp';
 
-function DesktopContent() {
+function MacOSContent() {
   const { state } = useWindowManager();
   const [spotlightOpen, setSpotlightOpen] = useState(false);
 
@@ -24,8 +28,6 @@ function DesktopContent() {
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, [toggleSpotlight]);
-
-
 
   const windows = Object.values(state.windows);
 
@@ -47,10 +49,22 @@ function DesktopContent() {
   );
 }
 
+function ShellContent() {
+  const style = localStorage.getItem('cov-desktop-style') || 'macos';
+
+  switch (style) {
+    case 'windows': return <WindowsShell />;
+    case 'chromeos': return <ChromeOSShell />;
+    case 'linux': return <LinuxShell />;
+    case 'mobile': return <MobileApp />;
+    default: return <MacOSContent />;
+  }
+}
+
 export default function DesktopShell() {
   return (
     <WindowManagerProvider>
-      <DesktopContent />
+      <ShellContent />
     </WindowManagerProvider>
   );
 }
