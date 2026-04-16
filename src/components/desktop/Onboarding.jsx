@@ -1,14 +1,7 @@
 import { useState } from 'react';
 import { BookOpen, ChevronRight, Moon, Sun, Monitor, Smartphone } from 'lucide-react';
 
-const WALLPAPER_LIST = [
-  { id: 'nebula', label: 'Nebula', preview: 'linear-gradient(135deg, #1a0533, #0d1117, #0f0a1e)' },
-  { id: 'carina', label: 'Carina', preview: 'url(https://images.unsplash.com/photo-1462331940025-496dfbfc7564?w=300&q=40)' },
-  { id: 'pillars', label: 'Pillars', preview: 'url(https://images.unsplash.com/photo-1543722530-d2c3201371e7?w=300&q=40)' },
-  { id: 'galaxy', label: 'Galaxy', preview: 'url(https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=300&q=40)' },
-  { id: 'milkyway', label: 'Milky Way', preview: 'url(https://images.unsplash.com/photo-1509773896068-7fd415d91e2e?w=300&q=40)' },
-  { id: 'cosmos', label: 'Cosmos', preview: 'url(https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=300&q=40)' },
-];
+import { WALLPAPER_LIST } from './DesktopBackground';
 
 export default function Onboarding({ onComplete }) {
   const [step, setStep] = useState(0);
