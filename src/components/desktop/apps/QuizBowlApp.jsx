@@ -227,6 +227,11 @@ function PartyLobby({ onStartGame, onJoinLiveGame, currentUserId }) {
                 {fmtPlayer(m).slice(0, 1).toUpperCase()}
               </div>
               <span className="text-sm text-gray-900 dark:text-white flex-1 truncate">{fmtPlayer(m)}</span>
+              {m.plan === 'pro' && (
+                <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-yellow-500 text-white">
+                  <Crown size={8} /> PRO
+                </span>
+              )}
               {party.leaderId === m.userId && (
                 <span className="flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
                   <Crown size={10} /> LEADER

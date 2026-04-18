@@ -100,6 +100,7 @@ export default function NoteEditorPage() {
             <textarea
               value={note.mainNotes}
               onChange={e => handleChange('mainNotes', e.target.value)}
+              data-bare
               className="w-full h-full p-4 bg-transparent text-sm text-gray-800 dark:text-gray-200 placeholder-gray-400 resize-none outline-none"
               placeholder="Write your notes here..."
             />
@@ -116,6 +117,7 @@ export default function NoteEditorPage() {
             <textarea
               value={note.summary}
               onChange={e => handleChange('summary', e.target.value)}
+              data-bare
               className="w-full bg-transparent text-sm text-gray-800 dark:text-gray-200 placeholder-gray-400 resize-none outline-none min-h-[50px]"
               placeholder="Summary..."
             />
@@ -127,6 +129,7 @@ export default function NoteEditorPage() {
           <textarea
             value={note.mainNotes}
             onChange={e => handleChange('mainNotes', e.target.value)}
+            data-bare
             className="w-full h-full p-5 bg-transparent text-sm text-gray-800 dark:text-gray-200 placeholder-gray-400 resize-none outline-none leading-relaxed"
             placeholder="Start writing..."
           />

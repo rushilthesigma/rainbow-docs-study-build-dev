@@ -74,6 +74,24 @@ function AppRouter() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
+  // When the user returns from Stripe Checkout the URL gets ?upgraded=1.
+  // Ping /api/billing/sync so Pro activates immediately even if the
+  // webhook isn't configured (which is the default in dev).
+  useEffect(() => {
+    if (!user) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('upgraded')) {
+      import('./api/billing').then(({ syncBilling }) => {
+        syncBilling().catch(() => {}).finally(() => {
+          // Strip the query param so a refresh doesn't re-trigger
+          const url = new URL(window.location.href);
+          url.searchParams.delete('upgraded');
+          window.history.replaceState({}, '', url.toString());
+        });
+      });
+    }
+  }, [user]);
+
   if (loading) return <LoadingSpinner fullScreen />;
   if (!user) return <Routes><Route path="*" element={<LandingPage />} /></Routes>;
 

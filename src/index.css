@@ -151,6 +151,7 @@ input[data-spotlight-input]:hover,
   background-color: transparent !important;
 }
 
+
 /* =========================================================
    WINDOWS — Fluent / Segoe / squared chrome, underline inputs
    ========================================================= */
@@ -164,15 +165,8 @@ input[data-spotlight-input]:hover,
 .os-windows [class*="rounded-br-md"],
 .os-windows [class*="rounded-bl-md"] { border-radius: 4px !important; }
 
-/* Inputs — thick bottom border, Fluent underline style */
-.os-windows input,
-.os-windows textarea {
-  border-radius: 2px !important;
-  border-width: 1px !important;
-  border-bottom-width: 2px !important;
-  box-shadow: none !important;
-  transition: border-color 0.12s ease-out;
-}
+/* No forced borders. If a component wants a border it declares it via
+   Tailwind's `border border-*` classes itself. */
 .os-windows input:focus,
 .os-windows textarea:focus { outline: none !important; box-shadow: none !important; }
 
@@ -206,18 +200,9 @@ input[data-spotlight-input]:hover,
 }
 .os-chromeos .rounded-md { border-radius: 9999px !important; }
 
-/* Inputs — pill-ish, thicker border, animated halo */
-.os-chromeos input,
-.os-chromeos textarea {
-  border-radius: 0.875rem !important;
-  border-width: 1px !important;
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
+/* No forced borders / focus rings. */
 .os-chromeos input:focus,
-.os-chromeos textarea:focus {
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.22) !important;
-  outline: none !important;
-}
+.os-chromeos textarea:focus { outline: none !important; box-shadow: none !important; }
 
 /* Material two-layer card shadows */
 .os-chromeos .shadow-sm  { box-shadow: 0 1px 2px rgba(60,64,67,0.15) !important; }
@@ -252,18 +237,9 @@ input[data-spotlight-input]:hover,
 .os-linux nav button { padding-top: 0.35rem !important; padding-bottom: 0.35rem !important; }
 .os-linux nav button:hover { background-color: rgba(59, 130, 246, 0.1) !important; }
 
-/* Inputs — flat, single border, double-ring focus */
-.os-linux input,
-.os-linux textarea {
-  border-radius: 0.5rem !important;
-  border-width: 1px !important;
-  box-shadow: none !important;
-}
+/* No forced borders / focus rings. */
 .os-linux input:focus,
-.os-linux textarea:focus {
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3) !important;
-  outline: none !important;
-}
+.os-linux textarea:focus { outline: none !important; box-shadow: none !important; }
 
 /* GNOME-ish tighter heading leading */
 .os-linux h1, .os-linux h2, .os-linux h3 { line-height: 1.2 !important; font-weight: 700 !important; }

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
+import Stripe from 'stripe';
 import { createRequire } from 'module';
 const _require = createRequire(import.meta.url);
 const pdfParse = _require('pdf-parse');
@@ -109,8 +110,75 @@ function isOwner(email) {
   return OWNER_EMAILS.includes(email?.toLowerCase());
 }
 
+// ===== Stripe =====
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
+const STRIPE_PRICE_ID = process.env.STRIPE_PRICE_ID || '';
+const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
+
+// ===== Plan / limits =====
+const FREE_DAILY_MESSAGE_LIMIT = 50;
+const FREE_DAILY_QUIZBOWL_GAMES = 2;
+const MODEL_PRO  = 'claude-sonnet-4-6';
+const MODEL_FREE = 'claude-haiku-4-5-20251001';
+
+function todayKey() { return new Date().toISOString().slice(0, 10); }
+
+// Normalizes and returns the live plan for a user. Owners are always Pro.
+// Stripe-paid Pro users auto-expire when proUntil passes; we gracefully
+// downgrade them here rather than running a cron.
+function getPlan(user, email) {
+  if (isOwner(email)) return 'pro';
+  if (!user?.data) return 'free';
+  if (user.data.plan !== 'pro') return 'free';
+  if (!user.data.proUntil) return 'pro'; // untimed grant (owner-granted)
+  if (new Date(user.data.proUntil).getTime() > Date.now()) return 'pro';
+  // Lease expired — downgrade in-memory; persistence happens next saveUsers
+  user.data.plan = 'free';
+  return 'free';
+}
+function isPro(user, email) { return getPlan(user, email) === 'pro'; }
+function modelForUser(user, email) { return isPro(user, email) ? MODEL_PRO : MODEL_FREE; }
+
+// Reset counters when the day rolls over
+function ensureUsageBucket(user) {
+  if (!user.data.usage) user.data.usage = { day: null, messages: 0, quizBowlGames: 0 };
+  if (user.data.usage.day !== todayKey()) {
+    user.data.usage = { day: todayKey(), messages: 0, quizBowlGames: 0 };
+  }
+}
+
+// Returns { allowed: boolean, remaining: number, limit: number, plan }.
+// Mutates usage on allowed=true (caller must saveUsers).
+function consumeMessage(users, email) {
+  const u = users[email];
+  if (!u) return { allowed: false, remaining: 0, limit: 0, plan: 'free' };
+  const plan = getPlan(u, email);
+  if (plan === 'pro') return { allowed: true, remaining: Infinity, limit: Infinity, plan };
+  ensureUsageBucket(u);
+  if (u.data.usage.messages >= FREE_DAILY_MESSAGE_LIMIT) {
+    return { allowed: false, remaining: 0, limit: FREE_DAILY_MESSAGE_LIMIT, plan };
+  }
+  u.data.usage.messages++;
+  return { allowed: true, remaining: Math.max(0, FREE_DAILY_MESSAGE_LIMIT - u.data.usage.messages), limit: FREE_DAILY_MESSAGE_LIMIT, plan };
+}
+function consumeQuizBowlGame(users, email) {
+  const u = users[email];
+  if (!u) return { allowed: false };
+  if (getPlan(u, email) === 'pro') return { allowed: true, remaining: Infinity, limit: Infinity };
+  ensureUsageBucket(u);
+  if (u.data.usage.quizBowlGames >= FREE_DAILY_QUIZBOWL_GAMES) {
+    return { allowed: false, remaining: 0, limit: FREE_DAILY_QUIZBOWL_GAMES };
+  }
+  u.data.usage.quizBowlGames++;
+  return { allowed: true, remaining: Math.max(0, FREE_DAILY_QUIZBOWL_GAMES - u.data.usage.quizBowlGames), limit: FREE_DAILY_QUIZBOWL_GAMES };
+}
+
 // ===== MIDDLEWARE =====
 app.use(cors());
+// Stripe webhook MUST read the raw body for signature verification.
+// Mount it BEFORE express.json() or the signature check will fail.
+app.post('/api/billing/webhook', express.raw({ type: 'application/json' }), handleStripeWebhook);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(join(__dirname, 'dist')));
 
@@ -168,6 +236,14 @@ function createDefaultData() {
     studySessions: [],
     assessmentHistory: [],
     lessons: [],
+    // ----- Billing / plan state -----
+    plan: 'free',                 // 'free' | 'pro'
+    proUntil: null,               // ISO string or null — when paid sub expires; null = untimed (admin grant / owner)
+    proGrantedBy: null,           // 'owner' | 'stripe' | null
+    stripeCustomerId: null,
+    stripeSubscriptionId: null,
+    // Usage counters — reset by helper when the date changes
+    usage: { day: null, messages: 0, quizBowlGames: 0 },
   };
 }
 
@@ -892,7 +968,8 @@ function advancePhaseIfNeeded(lesson, fullContent) {
 }
 
 // Helper: stream AI response as SSE
-async function streamAIResponse(res, systemPrompt, messages, onComplete) {
+async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOverride) {
+  const model = modelOverride || DEFAULT_MODEL;
   if (!res.headersSent) {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -907,7 +984,7 @@ async function streamAIResponse(res, systemPrompt, messages, onComplete) {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: DEFAULT_MODEL, max_tokens: 8192, system: systemPrompt, messages, stream: true }),
+      body: JSON.stringify({ model, max_tokens: 8192, system: systemPrompt, messages, stream: true }),
       signal: controller.signal,
     });
     clearTimeout(timeout);
@@ -958,7 +1035,7 @@ async function streamAIResponse(res, systemPrompt, messages, onComplete) {
 }
 
 // Lesson chat (conversational 5-phase)
-app.post('/api/curriculum/:id/lesson/:lessonId/chat', authMiddleware, async (req, res) => {
+app.post('/api/curriculum/:id/lesson/:lessonId/chat', authMiddleware, requireMessageQuota, async (req, res) => {
   try {
     const { message } = req.body;
     if (!message) return res.status(400).json({ error: 'Message required' });
@@ -995,6 +1072,7 @@ app.post('/api/curriculum/:id/lesson/:lessonId/chat', authMiddleware, async (req
     // Build messages from chat history
     const aiMessages = lesson.chatHistory.map(m => ({ role: m.role, content: m.content }));
 
+    const tierModel = modelForUser(users[email], email);
     await streamAIResponse(res, systemPrompt, aiMessages, async (fullContent) => {
       // Save AI response to chat history
       lesson.chatHistory.push({ role: 'assistant', content: fullContent, timestamp: new Date().toISOString() });
@@ -1040,7 +1118,7 @@ app.post('/api/curriculum/:id/lesson/:lessonId/chat', authMiddleware, async (req
       checkGoalMilestones(users[email].data);
 
       saveUsers(users);
-    });
+    }, tierModel);
   } catch (e) {
     console.error('Lesson chat error:', e);
     if (!res.headersSent) res.status(500).json({ error: e.message });
@@ -1084,7 +1162,7 @@ app.post('/api/curriculum/:id/lesson/:lessonId/reset', authMiddleware, (req, res
 
 // ===== STUDY MODE =====
 
-app.post('/api/study/chat', authMiddleware, async (req, res) => {
+app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res) => {
   try {
     const { message, sessionId, context } = req.body;
     if (!message) return res.status(400).json({ error: 'Message required' });
@@ -1118,6 +1196,7 @@ app.post('/api/study/chat', authMiddleware, async (req, res) => {
     res.flushHeaders();
     res.write(`data: ${JSON.stringify({ sessionId: session.id })}\n\n`);
 
+    const tierModel = modelForUser(users[email], email);
     await streamAIResponse(res, systemPrompt, aiMessages, async (fullContent) => {
       session.messages.push({ role: 'assistant', content: fullContent, timestamp: new Date().toISOString() });
 
@@ -1142,7 +1221,7 @@ app.post('/api/study/chat', authMiddleware, async (req, res) => {
       }
 
       saveUsers(users);
-    });
+    }, tierModel);
   } catch (e) {
     console.error('Study chat error:', e);
     if (!res.headersSent) res.status(500).json({ error: e.message });
@@ -1729,7 +1808,14 @@ app.get('/api/social/search', authMiddleware, (req, res) => {
   const q = (req.query.q || '').toLowerCase();
   if (!q) return res.json({ users: [] });
   const social = loadSocial();
-  const results = Object.values(social.profiles).filter(p => p.userId !== req.userId && (p.handle.toLowerCase().includes(q) || p.displayName.toLowerCase().includes(q))).slice(0, 20);
+  const users = loadUsers();
+  const results = Object.values(social.profiles)
+    .filter(p => p.userId !== req.userId && (p.handle.toLowerCase().includes(q) || p.displayName.toLowerCase().includes(q)))
+    .slice(0, 20)
+    .map(p => {
+      const email = findEmailById(users, p.userId);
+      return { ...p, plan: email ? getPlan(users[email], email) : 'free' };
+    });
   res.json({ users: results });
 });
 
@@ -1821,7 +1907,13 @@ app.get('/api/social/friends', authMiddleware, (req, res) => {
   const social = loadSocial();
   const myProfile = social.profiles[req.userId];
   if (!myProfile) return res.json({ friends: [] });
-  const friends = myProfile.friends.map(fid => social.profiles[fid]).filter(Boolean);
+  const users = loadUsers();
+  const friends = myProfile.friends
+    .map(fid => social.profiles[fid]).filter(Boolean)
+    .map(p => {
+      const email = findEmailById(users, p.userId);
+      return { ...p, plan: email ? getPlan(users[email], email) : 'free' };
+    });
   res.json({ friends });
 });
 
@@ -2126,6 +2218,29 @@ function adminMiddleware(req, res, next) {
   next();
 }
 
+// Enforce the free-plan message quota for AI chat endpoints.
+// Pro / owner = unlimited. Free = FREE_DAILY_MESSAGE_LIMIT/day.
+// On success, increments `usage.messages` and persists; adds `req.quota`
+// and `req.userPlan` so handlers can surface remaining count.
+function requireMessageQuota(req, res, next) {
+  const users = loadUsers();
+  const email = findEmailById(users, req.userId);
+  if (!email) return res.status(404).json({ error: 'User not found' });
+  users[email].data = migrateUserData(users[email].data);
+  const result = consumeMessage(users, email);
+  if (!result.allowed) {
+    return res.status(402).json({
+      error: 'message_limit_reached',
+      message: `You've hit the free-plan daily limit of ${result.limit} messages. Upgrade to Pro for unlimited.`,
+      limit: result.limit, remaining: 0, plan: result.plan,
+    });
+  }
+  saveUsers(users);
+  req.quota = result;
+  req.userPlan = result.plan;
+  next();
+}
+
 // ===== STANDALONE LESSONS =====
 // A simple single-lesson-at-a-time app: user requests a topic, gets one lesson,
 // and can chat through the same 5-phase flow as curriculum lessons.
@@ -2256,7 +2371,7 @@ app.post('/api/lessons/:id/reset', authMiddleware, (req, res) => {
 });
 
 // Chat (SSE) — free-form single-lesson teaching. No phases; AI decides when done via [LESSON_DONE].
-app.post('/api/lessons/:id/chat', authMiddleware, async (req, res) => {
+app.post('/api/lessons/:id/chat', authMiddleware, requireMessageQuota, async (req, res) => {
   try {
     const { message } = req.body || {};
     if (!message) return res.status(400).json({ error: 'Message required' });
@@ -2281,6 +2396,7 @@ app.post('/api/lessons/:id/chat', authMiddleware, async (req, res) => {
     );
     const aiMessages = lesson.chatHistory.map(m => ({ role: m.role, content: m.content }));
 
+    const tierModel = modelForUser(users[email], email);
     await streamAIResponse(res, systemPrompt, aiMessages, async (fullContent) => {
       lesson.chatHistory.push({ role: 'assistant', content: fullContent, timestamp: new Date().toISOString() });
 
@@ -2316,7 +2432,7 @@ app.post('/api/lessons/:id/chat', authMiddleware, async (req, res) => {
       }
 
       saveUsers(users);
-    });
+    }, tierModel);
   } catch (e) {
     console.error('Standalone lesson chat error:', e);
     if (!res.headersSent) res.status(500).json({ error: e.message });
@@ -2336,11 +2452,12 @@ function saveParties(data) {
 }
 function getSocialDisplay(userId) {
   const social = loadSocial();
-  const p = social.profiles[userId];
-  if (p) return { userId, handle: p.handle, displayName: p.displayName };
   const users = loadUsers();
   const email = findEmailById(users, userId);
-  return { userId, handle: null, displayName: users[email]?.name || 'Player' };
+  const plan = email ? getPlan(users[email], email) : 'free';
+  const p = social.profiles[userId];
+  if (p) return { userId, handle: p.handle, displayName: p.displayName, plan };
+  return { userId, handle: null, displayName: users[email]?.name || 'Player', plan };
 }
 // Remove question.answer from the polled state so clients can't cheat
 function scrubGameForPolling(game) {
@@ -2500,6 +2617,22 @@ app.post('/api/parties/:id/game', authMiddleware, async (req, res) => {
   if (!party) return res.status(404).json({ error: 'Party not found' });
   if (party.leaderId !== req.userId) return res.status(403).json({ error: 'Only leader can start' });
 
+  // Daily quiz-bowl games limit (free plan only — leader's bucket pays)
+  const usersQ = loadUsers();
+  const emailQ = findEmailById(usersQ, req.userId);
+  if (emailQ) {
+    usersQ[emailQ].data = migrateUserData(usersQ[emailQ].data);
+    const r = consumeQuizBowlGame(usersQ, emailQ);
+    if (!r.allowed) {
+      return res.status(402).json({
+        error: 'quizbowl_limit_reached',
+        message: `You've used today's free Quiz Bowl games (${r.limit}/day). Upgrade to Pro for unlimited.`,
+        limit: r.limit, remaining: 0,
+      });
+    }
+    saveUsers(usersQ);
+  }
+
   try {
     const questions = await generateQuizQuestions(category, difficulty, Math.min(Math.max(3, count), 30), customInstructions);
     const scores = {};
@@ -2549,6 +2682,10 @@ app.get('/api/parties/:id/state', authMiddleware, (req, res) => {
     if (g.buzzedBy && g.buzzedAt && !g.lastAnswer && Date.now() > g.buzzedAt + 10000) {
       g.answeredBy[g.currentQ] = [...(g.answeredBy[g.currentQ] || []), g.buzzedBy];
       g.lastAnswer = { userId: g.buzzedBy, text: '(no answer)', correct: false };
+      // Shift questionStartedAt forward by the paused duration so the
+      // reveal resumes at buzzedWord (not jumping ahead by the pause).
+      const pausedMs = Date.now() - g.buzzedAt;
+      g.questionStartedAt = (g.questionStartedAt || 0) + pausedMs;
       g.buzzedBy = null; g.buzzedAt = null; g.buzzedWord = null;
       // Everyone else can still buzz on this question
       dirty = true;
@@ -2627,6 +2764,13 @@ app.post('/api/parties/:id/game/answer', authMiddleware, (req, res) => {
   } else {
     // Wrong: lock this user out of this question, clear buzz so others may try
     g.answeredBy[g.currentQ] = [...(g.answeredBy[g.currentQ] || []), req.userId];
+    // Slide questionStartedAt forward by the paused duration so the reveal
+    // resumes exactly where it froze (at buzzedWord) rather than jumping
+    // ahead by the pause length.
+    if (g.buzzedAt) {
+      const pausedMs = Date.now() - g.buzzedAt;
+      g.questionStartedAt = (g.questionStartedAt || 0) + pausedMs;
+    }
     g.buzzedBy = null; g.buzzedAt = null; g.buzzedWord = null;
   }
   saveParties(state);
@@ -2664,6 +2808,263 @@ app.post('/api/parties/:id/game/end', authMiddleware, (req, res) => {
   res.json({ success: true });
 });
 
+// =========================================================
+// BILLING / PRO PLAN
+// =========================================================
+
+// Current user's plan + today's usage + limits.
+app.get('/api/billing/status', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    ensureUsageBucket(users[email]);
+    saveUsers(users);
+    const plan = getPlan(users[email], email);
+    const pro = plan === 'pro';
+    res.json({
+      plan,
+      isOwner: isOwner(email),
+      proUntil: users[email].data.proUntil || null,
+      proGrantedBy: users[email].data.proGrantedBy || null,
+      limits: {
+        messagesPerDay: FREE_DAILY_MESSAGE_LIMIT,
+        quizBowlGamesPerDay: FREE_DAILY_QUIZBOWL_GAMES,
+      },
+      usage: {
+        messages: users[email].data.usage.messages,
+        quizBowlGames: users[email].data.usage.quizBowlGames,
+        remainingMessages: pro ? null : Math.max(0, FREE_DAILY_MESSAGE_LIMIT - users[email].data.usage.messages),
+        remainingQuizBowl: pro ? null : Math.max(0, FREE_DAILY_QUIZBOWL_GAMES - users[email].data.usage.quizBowlGames),
+      },
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Create a Stripe Checkout session. Frontend redirects to `url`.
+app.post('/api/billing/create-checkout-session', authMiddleware, async (req, res) => {
+  if (!stripe) return res.status(500).json({ error: 'Stripe not configured' });
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+
+    // Reuse or create Stripe customer
+    let customerId = users[email].data.stripeCustomerId;
+    if (!customerId) {
+      const customer = await stripe.customers.create({
+        email,
+        name: users[email].name || undefined,
+        metadata: { userId: req.userId },
+      });
+      customerId = customer.id;
+      users[email].data.stripeCustomerId = customerId;
+      saveUsers(users);
+    }
+
+    // Use a preconfigured STRIPE_PRICE_ID if set, otherwise create an inline
+    // price so the user can test without pre-provisioning anything in Stripe.
+    let priceConfig;
+    if (STRIPE_PRICE_ID) {
+      priceConfig = { price: STRIPE_PRICE_ID };
+    } else {
+      const usd = Number(process.env.PRO_PRICE_USD || '10');
+      priceConfig = {
+        price_data: {
+          currency: 'usd',
+          recurring: { interval: 'month' },
+          product_data: { name: 'RushilAI Pro', description: 'Unlimited messages, Sonnet 4.6, unlimited Quiz Bowl, Pro badge.' },
+          unit_amount: Math.round(usd * 100),
+        },
+      };
+    }
+
+    const origin = req.headers.origin || `http://localhost:${PORT}`;
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      customer: customerId,
+      line_items: [{ ...priceConfig, quantity: 1 }],
+      success_url: `${origin}/?upgraded=1`,
+      cancel_url: `${origin}/?upgraded=0`,
+      metadata: { userId: req.userId },
+      allow_promotion_codes: true,
+    });
+    res.json({ url: session.url, id: session.id });
+  } catch (e) {
+    console.error('checkout session failed', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Verify Stripe subscription status on-demand. Called by the frontend
+// when the user returns from Checkout — works WITHOUT a configured
+// webhook, which is why Pro wasn't activating before.
+app.post('/api/billing/sync', authMiddleware, async (req, res) => {
+  if (!stripe) return res.status(500).json({ error: 'Stripe not configured' });
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const customerId = users[email].data.stripeCustomerId;
+    if (!customerId) return res.json({ plan: 'free', synced: false });
+
+    // Pull the newest subscription for this customer
+    const subs = await stripe.subscriptions.list({ customer: customerId, limit: 5, status: 'all' });
+    const active = subs.data.find(s => s.status === 'active' || s.status === 'trialing');
+    if (active) {
+      users[email].data.plan = 'pro';
+      users[email].data.proGrantedBy = 'stripe';
+      users[email].data.stripeSubscriptionId = active.id;
+      users[email].data.proUntil = active.current_period_end
+        ? new Date(active.current_period_end * 1000).toISOString()
+        : new Date(Date.now() + 35 * 86400000).toISOString();
+    } else {
+      // No active sub — but don't downgrade owner-granted Pro
+      if (users[email].data.proGrantedBy === 'stripe') {
+        users[email].data.plan = 'free';
+        users[email].data.proUntil = null;
+        users[email].data.stripeSubscriptionId = null;
+      }
+    }
+    saveUsers(users);
+    res.json({ plan: getPlan(users[email], email), synced: true, proUntil: users[email].data.proUntil });
+  } catch (e) {
+    console.error('billing sync failed', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Customer portal (manage/cancel subscription).
+app.post('/api/billing/portal', authMiddleware, async (req, res) => {
+  if (!stripe) return res.status(500).json({ error: 'Stripe not configured' });
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    const customerId = users[email]?.data?.stripeCustomerId;
+    if (!customerId) return res.status(400).json({ error: 'No Stripe customer yet' });
+    const origin = req.headers.origin || `http://localhost:${PORT}`;
+    const portal = await stripe.billingPortal.sessions.create({ customer: customerId, return_url: `${origin}/` });
+    res.json({ url: portal.url });
+  } catch (e) {
+    console.error('portal failed', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Webhook handler (mounted as raw body above).
+async function handleStripeWebhook(req, res) {
+  if (!stripe) return res.status(500).send('Stripe not configured');
+  let event;
+  try {
+    if (STRIPE_WEBHOOK_SECRET) {
+      const sig = req.headers['stripe-signature'];
+      event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
+    } else {
+      // Fallback for local testing without a webhook secret set
+      event = JSON.parse(req.body.toString('utf-8'));
+    }
+  } catch (err) {
+    console.error('Webhook signature check failed:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  try {
+    const users = loadUsers();
+    function userByCustomer(customerId) {
+      const email = Object.keys(users).find(e => users[e].data?.stripeCustomerId === customerId);
+      return email ? { email, user: users[email] } : null;
+    }
+
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data.object;
+      const entry = userByCustomer(session.customer);
+      if (entry) {
+        entry.user.data = migrateUserData(entry.user.data);
+        entry.user.data.plan = 'pro';
+        entry.user.data.proGrantedBy = 'stripe';
+        entry.user.data.stripeSubscriptionId = session.subscription || null;
+        // Subscriptions don't give an end date on this event — we set a
+        // 35-day grace. The subscription.updated webhook will refine it.
+        entry.user.data.proUntil = new Date(Date.now() + 35 * 86400000).toISOString();
+        saveUsers(users);
+      }
+    }
+
+    if (event.type === 'customer.subscription.updated' || event.type === 'customer.subscription.created') {
+      const sub = event.data.object;
+      const entry = userByCustomer(sub.customer);
+      if (entry) {
+        entry.user.data = migrateUserData(entry.user.data);
+        entry.user.data.stripeSubscriptionId = sub.id;
+        if (sub.status === 'active' || sub.status === 'trialing') {
+          entry.user.data.plan = 'pro';
+          entry.user.data.proGrantedBy = 'stripe';
+          const periodEnd = sub.current_period_end ? new Date(sub.current_period_end * 1000) : null;
+          entry.user.data.proUntil = periodEnd ? periodEnd.toISOString() : null;
+        } else if (sub.status === 'canceled' || sub.status === 'unpaid' || sub.status === 'incomplete_expired') {
+          entry.user.data.plan = 'free';
+          entry.user.data.proUntil = null;
+        }
+        saveUsers(users);
+      }
+    }
+
+    if (event.type === 'customer.subscription.deleted') {
+      const sub = event.data.object;
+      const entry = userByCustomer(sub.customer);
+      if (entry) {
+        entry.user.data = migrateUserData(entry.user.data);
+        entry.user.data.plan = 'free';
+        entry.user.data.proUntil = null;
+        entry.user.data.stripeSubscriptionId = null;
+        saveUsers(users);
+      }
+    }
+
+    res.json({ received: true });
+  } catch (err) {
+    console.error('webhook handler error', err);
+    res.status(500).send(err.message);
+  }
+}
+
+// Owner-only: grant / revoke Pro to any user (no payment)
+function ownerMiddleware(req, res, next) {
+  const users = loadUsers();
+  const email = findEmailById(users, req.userId);
+  if (!isOwner(email)) return res.status(403).json({ error: 'Owner only' });
+  next();
+}
+
+app.post('/api/owner/grant-pro', authMiddleware, ownerMiddleware, (req, res) => {
+  const { userId, email: targetEmail, until } = req.body || {};
+  const users = loadUsers();
+  let email = targetEmail && users[targetEmail] ? targetEmail : findEmailById(users, userId);
+  if (!email) return res.status(404).json({ error: 'User not found' });
+  users[email].data = migrateUserData(users[email].data);
+  users[email].data.plan = 'pro';
+  users[email].data.proGrantedBy = 'owner';
+  users[email].data.proUntil = until || null; // null = untimed
+  saveUsers(users);
+  res.json({ success: true, user: { email, plan: users[email].data.plan, proUntil: users[email].data.proUntil } });
+});
+
+app.post('/api/owner/revoke-pro', authMiddleware, ownerMiddleware, (req, res) => {
+  const { userId, email: targetEmail } = req.body || {};
+  const users = loadUsers();
+  let email = targetEmail && users[targetEmail] ? targetEmail : findEmailById(users, userId);
+  if (!email) return res.status(404).json({ error: 'User not found' });
+  users[email].data = migrateUserData(users[email].data);
+  users[email].data.plan = 'free';
+  users[email].data.proUntil = null;
+  users[email].data.proGrantedBy = null;
+  saveUsers(users);
+  res.json({ success: true });
+});
+
 // Check if current user is admin
 app.get('/api/admin/check', authMiddleware, (req, res) => {
   res.json({ isAdmin: isAdmin(req.userId) });
@@ -2673,16 +3074,38 @@ app.get('/api/admin/check', authMiddleware, (req, res) => {
 app.get('/api/admin/users', authMiddleware, adminMiddleware, (req, res) => {
   const users = loadUsers();
   const social = loadSocial();
-  const list = Object.entries(users).map(([email, u]) => ({
-    id: u.id, email, name: u.name,
-    handle: social.profiles[u.id]?.handle || null,
-    banned: !!u.banned,
-    curriculaCount: (u.data?.curricula || []).length,
-    notesCount: (u.data?.notes || []).length,
-    level: u.data?.profile?.level || 1,
-    xp: u.data?.profile?.xp || 0,
-    createdAt: u.createdAt,
-  }));
+  const list = Object.entries(users).map(([email, u]) => {
+    const plan = getPlan(u, email);
+    const totalStudyMsgs = (u.data?.studySessions || []).reduce((n, s) => n + (s.messages?.length || 0), 0);
+    const totalLessonMsgs = (u.data?.lessons || []).reduce((n, l) => n + (l.chatHistory?.length || 0), 0);
+    let curriculumMsgs = 0;
+    for (const c of (u.data?.curricula || [])) {
+      for (const unit of (c.units || [])) {
+        for (const l of (unit.lessons || [])) {
+          curriculumMsgs += (l.chatHistory?.length || 0);
+        }
+      }
+    }
+    return {
+      id: u.id, email, name: u.name,
+      handle: social.profiles[u.id]?.handle || null,
+      banned: !!u.banned,
+      plan,
+      proUntil: u.data?.proUntil || null,
+      proGrantedBy: u.data?.proGrantedBy || null,
+      level: u.data?.profile?.level || 1,
+      xp: u.data?.profile?.xp || 0,
+      curriculaCount: (u.data?.curricula || []).length,
+      notesCount: (u.data?.notes || []).length,
+      studySessionCount: (u.data?.studySessions || []).length,
+      lessonCount: (u.data?.lessons || []).length,
+      // Cheap chat totals for the list view
+      chatMessages: { study: totalStudyMsgs, lessons: totalLessonMsgs, curriculum: curriculumMsgs },
+      usage: u.data?.usage || { day: null, messages: 0, quizBowlGames: 0 },
+      createdAt: u.createdAt,
+      lastActiveAt: u.data?.studyStreaks?.lastActiveDate || null,
+    };
+  });
   res.json({ users: list });
 });
 
@@ -2693,16 +3116,116 @@ app.get('/api/admin/users/:uid', authMiddleware, adminMiddleware, (req, res) => 
   const entry = Object.entries(users).find(([_, u]) => u.id === req.params.uid);
   if (!entry) return res.status(404).json({ error: 'User not found' });
   const [email, u] = entry;
+  u.data = migrateUserData(u.data);
+  const plan = getPlan(u, email);
+
+  // Flatten curriculum lesson chats for quick indexing in the detail view
+  const curriculumChats = [];
+  for (const c of (u.data.curricula || [])) {
+    for (const unit of (c.units || [])) {
+      for (const l of (unit.lessons || [])) {
+        if (Array.isArray(l.chatHistory) && l.chatHistory.length) {
+          curriculumChats.push({
+            curriculumId: c.id, unitId: unit.id, lessonId: l.id,
+            curriculumTitle: c.title, unitTitle: unit.title, lessonTitle: l.title,
+            messageCount: l.chatHistory.length,
+            lastActiveAt: l.chatHistory[l.chatHistory.length - 1]?.timestamp || null,
+          });
+        }
+      }
+    }
+  }
+  curriculumChats.sort((a, b) => (b.lastActiveAt || '').localeCompare(a.lastActiveAt || ''));
+
   res.json({
     user: {
       id: u.id, email, name: u.name, banned: !!u.banned,
       handle: social.profiles[u.id]?.handle || null,
+      createdAt: u.createdAt,
       profile: u.data?.profile,
-      curricula: (u.data?.curricula || []).map(c => ({ id: c.id, title: c.title, unitCount: c.units?.length || 0 })),
-      notes: (u.data?.notes || []).map(n => ({ id: n.id, title: n.title, type: n.type })),
+      // Billing
+      plan,
+      proUntil: u.data?.proUntil || null,
+      proGrantedBy: u.data?.proGrantedBy || null,
+      stripeCustomerId: u.data?.stripeCustomerId || null,
+      stripeSubscriptionId: u.data?.stripeSubscriptionId || null,
+      // Usage today
+      usage: u.data?.usage || { day: null, messages: 0, quizBowlGames: 0 },
+      // Learning content
+      curricula: (u.data?.curricula || []).map(c => ({
+        id: c.id, title: c.title, unitCount: c.units?.length || 0,
+        lessonCount: (c.units || []).reduce((n, u2) => n + (u2.lessons || []).length, 0),
+        completedLessons: (c.units || []).reduce((n, u2) => n + (u2.lessons || []).filter(l => l.isCompleted).length, 0),
+      })),
+      notes: (u.data?.notes || []).map(n => ({ id: n.id, title: n.title, type: n.type, updatedAt: n.updatedAt })),
       goals: (u.data?.goals || []).map(g => ({ id: g.id, title: g.title, status: g.status })),
       flashcardDecks: (u.data?.flashcardDecks || []).map(d => ({ id: d.id, title: d.title, cardCount: d.cards?.length || 0 })),
+      // Study sessions (metadata only — full content via /chats/study/:sid)
+      studySessions: (u.data?.studySessions || []).map(s => ({
+        id: s.id, title: s.title, messageCount: (s.messages || []).length,
+        createdAt: s.createdAt, updatedAt: s.updatedAt,
+      })),
+      // Standalone Lessons app
+      standaloneLessons: (u.data?.lessons || []).map(l => ({
+        id: l.id, topic: l.topic, title: l.title, difficulty: l.difficulty,
+        isCompleted: !!l.isCompleted, messageCount: (l.chatHistory || []).length,
+        createdAt: l.createdAt, lastActiveAt: l.lastActiveAt,
+      })),
+      // Curriculum lesson chats (flattened)
+      curriculumChats,
+      // Assessments
+      assessmentHistory: (u.data?.assessmentHistory || []).map(a => ({
+        id: a.id, title: a.title, score: a.score, total: a.total, percentage: a.percentage, createdAt: a.createdAt,
+      })),
+      // Streaks / daily activity
+      studyStreaks: u.data?.studyStreaks || null,
     }
+  });
+});
+
+// Get a specific study session's full transcript
+app.get('/api/admin/users/:uid/chats/study/:sid', authMiddleware, adminMiddleware, (req, res) => {
+  const users = loadUsers();
+  const entry = Object.entries(users).find(([_, u]) => u.id === req.params.uid);
+  if (!entry) return res.status(404).json({ error: 'User not found' });
+  const [, u] = entry;
+  const s = (u.data?.studySessions || []).find(x => x.id === req.params.sid);
+  if (!s) return res.status(404).json({ error: 'Session not found' });
+  res.json({ session: s });
+});
+
+// Get a standalone Lesson's chat transcript
+app.get('/api/admin/users/:uid/chats/lesson/:lid', authMiddleware, adminMiddleware, (req, res) => {
+  const users = loadUsers();
+  const entry = Object.entries(users).find(([_, u]) => u.id === req.params.uid);
+  if (!entry) return res.status(404).json({ error: 'User not found' });
+  const [, u] = entry;
+  const l = (u.data?.lessons || []).find(x => x.id === req.params.lid);
+  if (!l) return res.status(404).json({ error: 'Lesson not found' });
+  res.json({ lesson: l });
+});
+
+// Get a curriculum lesson's chat transcript (nested lookup)
+app.get('/api/admin/users/:uid/chats/curriculum/:cid/:lid', authMiddleware, adminMiddleware, (req, res) => {
+  const users = loadUsers();
+  const entry = Object.entries(users).find(([_, u]) => u.id === req.params.uid);
+  if (!entry) return res.status(404).json({ error: 'User not found' });
+  const [, u] = entry;
+  const curriculum = (u.data?.curricula || []).find(c => c.id === req.params.cid);
+  if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
+  let lesson = null, unitFound = null;
+  for (const unit of (curriculum.units || [])) {
+    const l = (unit.lessons || []).find(x => x.id === req.params.lid);
+    if (l) { lesson = l; unitFound = unit; break; }
+  }
+  if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
+  res.json({
+    curriculum: { id: curriculum.id, title: curriculum.title },
+    unit: { id: unitFound.id, title: unitFound.title },
+    lesson: {
+      id: lesson.id, title: lesson.title, type: lesson.type, phase: lesson.phase,
+      isCompleted: !!lesson.isCompleted, chatHistory: lesson.chatHistory || [],
+    },
   });
 });
 

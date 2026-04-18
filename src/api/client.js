@@ -24,6 +24,13 @@ export async function apiFetch(path, options = {}) {
 
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
+    // 402 = plan limit. Preserve the server-provided `message` / `error` code.
+    if (res.status === 402) {
+      const err = new Error(data.message || 'Plan limit reached');
+      err.code = data.error || 'plan_limit';
+      err.planLimit = true;
+      throw err;
+    }
     throw new Error(data.error || `Request failed: ${res.status}`);
   }
 

@@ -24,27 +24,39 @@ export default function ChatInput({ onSend, disabled, placeholder = 'Type a mess
     }
   }
 
+  const canSend = !disabled && text.trim().length > 0;
   return (
-    <form onSubmit={handleSubmit} className="flex items-end gap-2 p-3 border-t border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622]">
-      <textarea
-        ref={inputRef}
-        value={text}
-        onChange={e => setText(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder={placeholder}
-        disabled={disabled}
-        rows={1}
-        className="flex-1 resize-none px-3 py-2 rounded-xl border border-gray-200 dark:border-[#2A2A40] bg-gray-50 dark:bg-[#0D0D14] text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition-colors max-h-32 overflow-y-auto"
-        style={{ minHeight: '40px' }}
-        onInput={e => { e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 128) + 'px'; }}
-      />
-      <button
-        type="submit"
-        disabled={disabled || !text.trim()}
-        className="p-2.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-      >
-        <Send size={16} />
-      </button>
+    <form
+      onSubmit={handleSubmit}
+      className="flex items-end gap-2 p-3 border-t border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622]"
+    >
+      {/* Single rounded pill containing the textarea AND the send button so
+          no stray border/bg strips appear between them. */}
+      <div className="flex-1 flex items-end rounded-xl border border-gray-200 dark:border-[#2A2A40] bg-gray-50 dark:bg-[#0D0D14] focus-within:border-blue-500 transition-colors overflow-hidden">
+        <textarea
+          ref={inputRef}
+          value={text}
+          onChange={e => setText(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={placeholder}
+          disabled={disabled}
+          rows={1}
+          className="flex-1 resize-none px-3 py-2 bg-transparent text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none max-h-32 overflow-y-auto"
+          style={{ minHeight: '40px', border: 'none', boxShadow: 'none' }}
+          onInput={e => { e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 128) + 'px'; }}
+        />
+        <button
+          type="submit"
+          disabled={!canSend}
+          className={`m-1 p-2 rounded-lg flex-shrink-0 transition-colors ${
+            canSend
+              ? 'bg-blue-600 hover:bg-blue-700 text-white'
+              : 'bg-transparent text-gray-400 dark:text-gray-500 cursor-not-allowed'
+          }`}
+        >
+          <Send size={16} />
+        </button>
+      </div>
     </form>
   );
 }

@@ -10,6 +10,7 @@ import { Settings, Save, User } from 'lucide-react';
 import { useUIPreference } from '../context/UIPreferenceContext';
 
 import { WALLPAPER_LIST } from '../components/desktop/DesktopBackground';
+import PlanSection from '../components/shared/PlanSection';
 
 function Dropdown({ label, value, options, onChange }) {
   const [open, setOpen] = useState(false);
@@ -113,6 +114,9 @@ export default function SettingsPage() {
           <p className="text-sm text-gray-500 dark:text-gray-400">Customize your learning experience</p>
         </div>
       </div>
+
+      {/* Plan / Pro */}
+      <PlanSection />
 
       {/* Interface Mode */}
       <InterfaceSection />
