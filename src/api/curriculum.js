@@ -22,6 +22,26 @@ export async function updateCurriculum(id, updates) {
   });
 }
 
+// AI-powered edit: text instruction + optional attachments.
+// Uses multipart/form-data so we can send files. Skips apiFetch because
+// that only does JSON.
+export async function editCurriculumWithAI(id, instruction, files = []) {
+  const token = localStorage.getItem('covalent-token');
+  const form = new FormData();
+  form.append('instruction', instruction);
+  for (const f of files) form.append('files', f, f.name);
+  const res = await fetch(`/api/curriculum/${id}/edit`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Edit failed: ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function deleteCurriculum(id) {
   return apiFetch(`/api/curriculum/${id}`, { method: 'DELETE' });
 }

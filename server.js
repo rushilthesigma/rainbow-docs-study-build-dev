@@ -2201,6 +2201,162 @@ const TEXTBOOKS_FILE = join(DATA_DIR, 'textbooks.json');
 function loadTextbooks() { try { return JSON.parse(readFileSync(TEXTBOOKS_FILE, 'utf-8')); } catch { return {}; } }
 function saveTextbooks(data) { writeFileSync(TEXTBOOKS_FILE, JSON.stringify(data, null, 2)); }
 
+// =========================================================
+// CURRICULUM EDIT — text instruction + optional PDF/text attachments
+// =========================================================
+app.post('/api/curriculum/:id/edit', authMiddleware, upload.array('files', 10), async (req, res) => {
+  try {
+    const { instruction } = req.body || {};
+    if (!instruction || !instruction.trim()) {
+      return res.status(400).json({ error: 'Instruction required' });
+    }
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const curriculum = (users[email].data.curricula || []).find(c => c.id === req.params.id);
+    if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
+
+    // Extract text from each attachment. PDFs go through pdf-parse; text
+    // files are used as-is. Cap each attachment to 25k chars to protect
+    // the context window.
+    const contextPieces = [];
+    const attachments = req.files || [];
+    for (const file of attachments) {
+      try {
+        let text = '';
+        if (file.mimetype === 'application/pdf' || (file.originalname || '').toLowerCase().endsWith('.pdf')) {
+          const parsed = await pdfParse(file.buffer);
+          text = parsed.text || '';
+        } else {
+          text = file.buffer.toString('utf-8');
+        }
+        text = text.slice(0, 25000);
+        if (text.trim()) {
+          contextPieces.push(`--- FILE: ${file.originalname || 'attachment'} ---\n${text}`);
+        }
+      } catch (e) {
+        console.warn('Failed to parse attachment', file.originalname, e.message);
+      }
+    }
+
+    // IMPORTANT: preserve chatHistory / phase / completion state. The model
+    // only gets a SKELETON of the current curriculum (no per-lesson chat
+    // history — that would blow the context, and we don't want the model
+    // rewriting it anyway).
+    const skeleton = {
+      id: curriculum.id,
+      title: curriculum.title,
+      description: curriculum.description,
+      settings: curriculum.settings,
+      units: (curriculum.units || []).map(u => ({
+        id: u.id,
+        title: u.title,
+        description: u.description,
+        locked: false,
+        lessons: (u.lessons || []).map(l => ({
+          id: l.id,
+          title: l.title,
+          description: l.description,
+          type: l.type,
+        })),
+      })),
+    };
+
+    const system = `You are editing a learning curriculum in JSON form. The user will give you an instruction and (optionally) some context files. Apply the instruction, keeping as much structure intact as possible.
+
+RULES:
+- Output ONLY a valid JSON object with the updated curriculum. No markdown, no explanation.
+- Preserve existing ids on units/lessons whenever you keep them. For new units/lessons generate new ids using the pattern "\${curriculumId}-u\${n}" and "\${curriculumId}-u\${n}-l\${m}" with sensible numbers.
+- Every unit must have a "lessons" array and "locked":false.
+- Every lesson must have "id", "title", "description", and "type" (one of: "lesson", "practice", "essay", "unit_test").
+- DO NOT invent user progress fields like chatHistory, isCompleted, score, phase — the server preserves those on the client side.
+- If the instruction is ambiguous, use your best judgment. Do NOT refuse.
+
+Return JSON with this exact shape:
+{
+  "title": "...",
+  "description": "...",
+  "units": [
+    { "id": "...", "title": "...", "description": "...", "lessons": [
+      { "id": "...", "title": "...", "description": "...", "type": "lesson" }
+    ] }
+  ]
+}`;
+
+    const userParts = [
+      `CURRENT CURRICULUM (JSON):\n${JSON.stringify(skeleton, null, 2)}`,
+    ];
+    if (contextPieces.length) {
+      userParts.push(`\nCONTEXT FILES:\n${contextPieces.join('\n\n')}`);
+    }
+    userParts.push(`\nINSTRUCTION FROM USER:\n${instruction.trim()}`);
+
+    const result = await callAnthropic(
+      system,
+      [{ role: 'user', content: userParts.join('\n\n') }],
+      modelForUser(users[email], email),
+      8192
+    );
+    if (!result.success) return res.status(500).json({ error: result.error || 'Edit failed' });
+
+    const text = result.data.content?.[0]?.text || '';
+    const updated = parseAIJson(text);
+    if (!updated || !Array.isArray(updated.units)) {
+      return res.status(500).json({ error: 'Model returned invalid JSON' });
+    }
+
+    // Merge: for each unit/lesson, if the updated one has an id that matches
+    // the existing, copy over user-progress fields (chatHistory, phase,
+    // isCompleted, score, phaseData, content). New ones get fresh defaults.
+    const oldLessonMap = new Map();
+    for (const u of (curriculum.units || [])) {
+      for (const l of (u.lessons || [])) {
+        oldLessonMap.set(l.id, l);
+      }
+    }
+
+    const newUnits = (updated.units || []).map((u, ui) => {
+      const uid = u.id || `${curriculum.id}-u${ui}`;
+      const lessons = (u.lessons || []).map((l, li) => {
+        const lid = l.id || `${uid}-l${li}`;
+        const existing = oldLessonMap.get(lid) || {};
+        return {
+          id: lid,
+          title: l.title || 'Untitled',
+          description: l.description || '',
+          type: l.type || 'lesson',
+          // preserve progress if present
+          chatHistory: existing.chatHistory || [],
+          phase: existing.phase ?? null,
+          phaseData: existing.phaseData || {},
+          content: existing.content ?? null,
+          isCompleted: !!existing.isCompleted,
+          score: existing.score ?? null,
+        };
+      });
+      return {
+        id: uid,
+        title: u.title || 'Untitled Unit',
+        description: u.description || '',
+        locked: false,
+        lessons,
+      };
+    });
+
+    curriculum.title = updated.title || curriculum.title;
+    curriculum.description = updated.description || curriculum.description;
+    curriculum.units = newUnits;
+    curriculum.updatedAt = new Date().toISOString();
+    saveUsers(users);
+
+    res.json({ curriculum });
+  } catch (e) {
+    console.error('curriculum edit error', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Upload + parse PDF
 app.post('/api/textbooks/upload', authMiddleware, upload.single('file'), async (req, res) => {
   try {
@@ -2631,470 +2787,6 @@ app.post('/api/lessons/:id/chat', authMiddleware, requireMessageQuota, async (re
   }
 });
 
-
-// =========================================================
-// QUIZ BOWL MULTIPLAYER — Parties + realtime synced game
-// =========================================================
-const PARTIES_FILE = join(DATA_DIR, 'parties.json');
-function loadParties() {
-  try { return JSON.parse(readFileSync(PARTIES_FILE, 'utf-8')); } catch { return { parties: {}, invites: {} }; }
-}
-function saveParties(data) {
-  try { writeFileSync(PARTIES_FILE, JSON.stringify(data, null, 2)); } catch (e) { console.error('parties save failed', e); }
-}
-// If caller provides `ctx` (the loaded social + users objects), reuse them
-// instead of re-reading from disk per member — this was reading
-// users.json several times on every poll of a multi-member party.
-function getSocialDisplay(userId, ctx) {
-  const social = ctx?.social || loadSocial();
-  const users = ctx?.users || loadUsers();
-  const email = findEmailById(users, userId);
-  const plan = email ? getPlan(users[email], email) : 'free';
-  const p = social.profiles[userId];
-  if (p) return { userId, handle: p.handle, displayName: p.displayName, plan };
-  return { userId, handle: null, displayName: users[email]?.name || 'Player', plan };
-}
-// Remove question.answer from the polled state so clients can't cheat
-function scrubGameForPolling(game) {
-  if (!game) return null;
-  const clone = JSON.parse(JSON.stringify(game));
-  if (Array.isArray(clone.questions)) {
-    clone.questions = clone.questions.map((q, i) => {
-      // Only reveal the answer for already-resolved questions
-      if (i < clone.currentQ) return q;
-      if (i === clone.currentQ && clone.questionResolved) return q;
-      return { text: q.text }; // hide answer until resolved
-    });
-  }
-  return clone;
-}
-function findPartyForUser(state, userId) {
-  return Object.values(state.parties).find(p => p.leaderId === userId || p.members.includes(userId));
-}
-
-// ---- Party CRUD ----
-app.post('/api/parties', authMiddleware, (req, res) => {
-  const { name } = req.body || {};
-  const state = loadParties();
-  // Leaving any existing party first (a user can only be in one)
-  const existing = findPartyForUser(state, req.userId);
-  if (existing) {
-    if (existing.leaderId === req.userId) delete state.parties[existing.id];
-    else existing.members = existing.members.filter(m => m !== req.userId);
-  }
-  const id = `party-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  const party = {
-    id,
-    name: (name || '').trim().slice(0, 40) || `${getSocialDisplay(req.userId).displayName}'s party`,
-    leaderId: req.userId,
-    members: [req.userId],
-    game: null,
-    createdAt: Date.now(),
-  };
-  state.parties[id] = party;
-  saveParties(state);
-  res.json({ party });
-});
-
-app.get('/api/parties/mine', authMiddleware, (req, res) => {
-  const state = loadParties();
-  const party = findPartyForUser(state, req.userId);
-  // Load social + users once and pass as ctx to every hydration.
-  const ctx = { social: loadSocial(), users: loadUsers() };
-  const pendingInvites = Object.values(state.invites || {})
-    .filter(i => i.toUserId === req.userId && !i.resolved)
-    .map(i => ({ ...i, from: getSocialDisplay(i.fromUserId, ctx), partyName: state.parties[i.partyId]?.name || 'Party' }));
-  const outgoingInvites = party ? Object.values(state.invites || {})
-    .filter(i => i.partyId === party.id && !i.resolved && i.fromUserId === req.userId)
-    .map(i => ({ ...i, to: getSocialDisplay(i.toUserId, ctx) })) : [];
-  const hydrated = party ? {
-    ...party,
-    leader: getSocialDisplay(party.leaderId, ctx),
-    memberProfiles: party.members.map(uid => getSocialDisplay(uid, ctx)),
-    chat: party.chat || [],
-    generating: party.generating || null,
-  } : null;
-  res.json({ party: hydrated, invites: pendingInvites, outgoingInvites });
-});
-
-// Send a chat message in the party lobby (and during games).
-app.post('/api/parties/:id/chat', authMiddleware, (req, res) => {
-  const { text } = req.body || {};
-  if (!text || typeof text !== 'string') return res.status(400).json({ error: 'text required' });
-  const trimmed = text.trim().slice(0, 500);
-  if (!trimmed) return res.status(400).json({ error: 'text required' });
-  const state = loadParties();
-  const party = state.parties[req.params.id];
-  if (!party) return res.status(404).json({ error: 'Party not found' });
-  if (!party.members.includes(req.userId)) return res.status(403).json({ error: 'Not in party' });
-  if (!Array.isArray(party.chat)) party.chat = [];
-  const msg = { id: `m-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, userId: req.userId, text: trimmed, ts: Date.now() };
-  party.chat.push(msg);
-  if (party.chat.length > 200) party.chat = party.chat.slice(-200); // cap memory
-  saveParties(state);
-  res.json({ message: msg });
-});
-
-// Cancel / rescind an outgoing invite (sender only)
-app.delete('/api/parties/invites/:inviteId', authMiddleware, (req, res) => {
-  const state = loadParties();
-  const inv = (state.invites || {})[req.params.inviteId];
-  if (!inv) return res.status(404).json({ error: 'Invite not found' });
-  if (inv.fromUserId !== req.userId) return res.status(403).json({ error: 'Only sender can cancel' });
-  if (inv.resolved) return res.status(409).json({ error: 'Already resolved' });
-  delete state.invites[req.params.inviteId];
-  saveParties(state);
-  res.json({ success: true });
-});
-
-// Explicit disband endpoint — leader deletes the entire party.
-app.post('/api/parties/:id/disband', authMiddleware, (req, res) => {
-  const state = loadParties();
-  const party = state.parties[req.params.id];
-  if (!party) return res.status(404).json({ error: 'Party not found' });
-  if (party.leaderId !== req.userId) return res.status(403).json({ error: 'Only leader can disband' });
-  delete state.parties[req.params.id];
-  // Also drop any pending invites that pointed at this party
-  if (state.invites) {
-    for (const [iid, inv] of Object.entries(state.invites)) {
-      if (inv.partyId === req.params.id) delete state.invites[iid];
-    }
-  }
-  saveParties(state);
-  res.json({ success: true });
-});
-
-app.post('/api/parties/:id/invite', authMiddleware, (req, res) => {
-  const { userId: toUserId } = req.body || {};
-  if (!toUserId) return res.status(400).json({ error: 'userId required' });
-  const state = loadParties();
-  const party = state.parties[req.params.id];
-  if (!party) return res.status(404).json({ error: 'Party not found' });
-  if (party.leaderId !== req.userId) return res.status(403).json({ error: 'Only leader can invite' });
-  if (party.members.includes(toUserId)) return res.status(409).json({ error: 'Already in party' });
-  if (party.members.length >= 8) return res.status(409).json({ error: 'Party full (max 8)' });
-  state.invites = state.invites || {};
-  const inviteId = `inv-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-  state.invites[inviteId] = { id: inviteId, partyId: party.id, fromUserId: req.userId, toUserId, createdAt: Date.now(), resolved: false };
-  saveParties(state);
-  res.json({ invite: state.invites[inviteId] });
-});
-
-app.post('/api/parties/invites/:inviteId/accept', authMiddleware, (req, res) => {
-  const state = loadParties();
-  const inv = (state.invites || {})[req.params.inviteId];
-  if (!inv || inv.toUserId !== req.userId) return res.status(404).json({ error: 'Invite not found' });
-  if (inv.resolved) return res.status(409).json({ error: 'Already resolved' });
-  const party = state.parties[inv.partyId];
-  if (!party) { inv.resolved = true; saveParties(state); return res.status(404).json({ error: 'Party gone' }); }
-
-  // Leave any other party — if the accepter was leader, the whole party
-  // gets disbanded (and its pending invites deleted).
-  const other = findPartyForUser(state, req.userId);
-  if (other && other.id !== party.id) {
-    if (other.leaderId === req.userId) {
-      delete state.parties[other.id];
-      // Clean up dangling invites for the disbanded party
-      if (state.invites) {
-        for (const [iid, otherInv] of Object.entries(state.invites)) {
-          if (otherInv.partyId === other.id) delete state.invites[iid];
-        }
-      }
-    } else {
-      other.members = other.members.filter(m => m !== req.userId);
-    }
-  }
-
-  if (!party.members.includes(req.userId)) party.members.push(req.userId);
-  inv.resolved = true;
-  saveParties(state);
-  res.json({ party });
-});
-
-app.post('/api/parties/invites/:inviteId/decline', authMiddleware, (req, res) => {
-  const state = loadParties();
-  const inv = (state.invites || {})[req.params.inviteId];
-  if (!inv || inv.toUserId !== req.userId) return res.status(404).json({ error: 'Invite not found' });
-  inv.resolved = true;
-  saveParties(state);
-  res.json({ success: true });
-});
-
-app.post('/api/parties/:id/leave', authMiddleware, (req, res) => {
-  const state = loadParties();
-  const party = state.parties[req.params.id];
-  if (!party) return res.status(404).json({ error: 'Party not found' });
-  if (party.leaderId === req.userId) delete state.parties[req.params.id];
-  else party.members = party.members.filter(m => m !== req.userId);
-  saveParties(state);
-  res.json({ success: true });
-});
-
-app.post('/api/parties/:id/kick', authMiddleware, (req, res) => {
-  const { userId } = req.body || {};
-  const state = loadParties();
-  const party = state.parties[req.params.id];
-  if (!party) return res.status(404).json({ error: 'Party not found' });
-  if (party.leaderId !== req.userId) return res.status(403).json({ error: 'Only leader can kick' });
-  party.members = party.members.filter(m => m !== userId);
-  saveParties(state);
-  res.json({ party });
-});
-
-// ---- Game (realtime synced) ----
-async function generateQuizQuestions(category, difficulty, count, customInstructions) {
-  const systemPrompt = `You are a quiz bowl question writer. Write pyramidal quiz bowl tossup questions.
-- Each question is a single paragraph that starts with hard clues and progressively gets easier.
-- The answer should be guessable from the first few clues by experts, but obvious by the end.
-- Write exactly the number of questions requested.
-- Output ONLY valid JSON, no markdown. Format: {"questions":[{"text":"...","answer":"..."}]}`;
-  const userPrompt = `Generate ${count} pyramidal quiz bowl tossup questions.
-Category: ${category}
-Difficulty: ${difficulty}
-${customInstructions ? `\nAdditional: ${customInstructions}` : ''}
-Return JSON: {"questions":[{"text":"...","answer":"..."}]}`;
-
-  const resp = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({ model: DEFAULT_MODEL, max_tokens: 8192, system: systemPrompt, messages: [{ role: 'user', content: userPrompt }] }),
-  });
-  if (!resp.ok) throw new Error('Question generation failed');
-  const data = await resp.json();
-  const text = data.content?.[0]?.text || '';
-  let parsed;
-  try { parsed = JSON.parse(text); } catch { const m = text.match(/\{[\s\S]*\}/); if (m) parsed = JSON.parse(m[0]); }
-  if (!parsed?.questions?.length) throw new Error('Bad question format');
-  return parsed.questions;
-}
-
-app.post('/api/parties/:id/game', authMiddleware, async (req, res) => {
-  const { category = 'Mixed', difficulty = 'Medium', count = 10, customInstructions = '', revealSpeedMs = 140 } = req.body || {};
-  const speed = Math.max(60, Math.min(400, Number(revealSpeedMs) || 140));
-  const state = loadParties();
-  const party = state.parties[req.params.id];
-  if (!party) return res.status(404).json({ error: 'Party not found' });
-  if (party.leaderId !== req.userId) return res.status(403).json({ error: 'Only leader can start' });
-
-  // Daily quiz-bowl games limit (free plan only — leader's bucket pays)
-  const usersQ = loadUsers();
-  const emailQ = findEmailById(usersQ, req.userId);
-  if (emailQ) {
-    usersQ[emailQ].data = migrateUserData(usersQ[emailQ].data);
-    const r = consumeQuizBowlGame(usersQ, emailQ);
-    if (!r.allowed) {
-      return res.status(402).json({
-        error: 'quizbowl_limit_reached',
-        message: `You've used today's free Quiz Bowl games (${r.limit}/day). Upgrade to Pro for unlimited.`,
-        limit: r.limit, remaining: 0,
-      });
-    }
-    saveUsers(usersQ);
-  }
-
-  // Flip a "generating" flag so pollers (non-leaders in the lobby) can
-  // surface a "questions are generating…" banner immediately, without
-  // waiting for the AI call to finish.
-  party.generating = {
-    by: req.userId,
-    startedAt: Date.now(),
-    category, difficulty, count: Math.min(Math.max(3, count), 30),
-  };
-  saveParties(state);
-
-  try {
-    const questions = await generateQuizQuestions(category, difficulty, Math.min(Math.max(3, count), 30), customInstructions);
-    // Re-load — chat messages may have been appended during the generation
-    // window; don't clobber them.
-    const freshState = loadParties();
-    const p = freshState.parties[req.params.id];
-    if (!p) return res.status(404).json({ error: 'Party gone' });
-    const scores = {};
-    p.members.forEach(m => { scores[m] = 0; });
-    p.game = {
-      id: `g-${Date.now()}`,
-      category, difficulty, count: questions.length,
-      questions,
-      currentQ: 0,
-      questionStartedAt: Date.now(),
-      revealSpeedMs: speed,              // ms per word
-      scores,
-      answeredBy: {},                  // { qIndex: [userIds who got it wrong and are locked out] }
-      buzzedBy: null, buzzedAt: null, buzzedWord: null,
-      lastAnswer: null,                // { userId, text, correct }
-      questionResolved: false,         // true once correctly answered or timed out
-      status: 'playing',               // 'playing' | 'finished'
-      startedAt: Date.now(),
-    };
-    p.generating = null;
-    saveParties(freshState);
-    res.json({ game: scrubGameForPolling(p.game) });
-  } catch (e) {
-    console.error('game start failed', e);
-    // Clear the generating flag so the UI doesn't stay stuck on "generating…"
-    try {
-      const freshState = loadParties();
-      const p = freshState.parties[req.params.id];
-      if (p) { p.generating = null; saveParties(freshState); }
-    } catch {}
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.get('/api/parties/:id/state', authMiddleware, (req, res) => {
-  const state = loadParties();
-  const party = state.parties[req.params.id];
-  if (!party) return res.status(404).json({ error: 'Party not found' });
-  if (!party.members.includes(req.userId)) return res.status(403).json({ error: 'Not in party' });
-
-  // Auto-resolve after question end + 2s grace if no one got it
-  const g = party.game;
-  let dirty = false;
-  if (g && g.status === 'playing' && !g.questionResolved) {
-    const q = g.questions[g.currentQ];
-    const words = (q?.text || '').split(/\s+/).length;
-    const graceEnd = g.questionStartedAt + words * g.revealSpeedMs + 2500;
-    if (Date.now() > graceEnd && !g.buzzedBy) {
-      g.questionResolved = true;
-      g.lastAnswer = { userId: null, text: '(timeout)', correct: false };
-      dirty = true;
-    }
-    // Buzz timeout — 10s after buzz with no answer submitted = auto-wrong
-    if (g.buzzedBy && g.buzzedAt && !g.lastAnswer && Date.now() > g.buzzedAt + 10000) {
-      g.answeredBy[g.currentQ] = [...(g.answeredBy[g.currentQ] || []), g.buzzedBy];
-      g.lastAnswer = { userId: g.buzzedBy, text: '(no answer)', correct: false };
-      // Shift questionStartedAt forward by the paused duration so the
-      // reveal resumes at buzzedWord (not jumping ahead by the pause).
-      const pausedMs = Date.now() - g.buzzedAt;
-      g.questionStartedAt = (g.questionStartedAt || 0) + pausedMs;
-      g.buzzedBy = null; g.buzzedAt = null; g.buzzedWord = null;
-      // Everyone else can still buzz on this question
-      dirty = true;
-    }
-  }
-  if (dirty) saveParties(state);
-
-  // Load social + users once and reuse for every member hydration below —
-  // without this, we were re-reading users.json once per party member on
-  // every 350ms poll.
-  const ctx = { social: loadSocial(), users: loadUsers() };
-
-  res.json({
-    party: {
-      id: party.id, name: party.name, leaderId: party.leaderId,
-      memberProfiles: party.members.map(uid => getSocialDisplay(uid, ctx)),
-      chat: party.chat || [],
-      generating: party.generating || null,
-    },
-    game: scrubGameForPolling(party.game),
-    serverNow: Date.now(),
-  });
-});
-
-app.post('/api/parties/:id/game/buzz', authMiddleware, (req, res) => {
-  const state = loadParties();
-  const party = state.parties[req.params.id];
-  if (!party?.game) return res.status(404).json({ error: 'No active game' });
-  if (!party.members.includes(req.userId)) return res.status(403).json({ error: 'Not in party' });
-  const g = party.game;
-  if (g.status !== 'playing' || g.questionResolved) return res.status(409).json({ error: 'Question over' });
-  if ((g.answeredBy[g.currentQ] || []).includes(req.userId)) return res.status(409).json({ error: 'Already locked out' });
-  if (g.buzzedBy) return res.status(409).json({ error: 'Already buzzed', buzzedBy: g.buzzedBy });
-
-  const elapsed = Date.now() - g.questionStartedAt;
-  const qWords = (g.questions[g.currentQ]?.text || '').split(/\s+/).length;
-  const word = Math.min(qWords - 1, Math.floor(elapsed / g.revealSpeedMs));
-  g.buzzedBy = req.userId;
-  g.buzzedAt = Date.now();
-  g.buzzedWord = word;
-  g.lastAnswer = null;
-  saveParties(state);
-  res.json({ ok: true, buzzedBy: req.userId, buzzedWord: word });
-});
-
-function checkAnswer(given, correct) {
-  const norm = s => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s]/g, '').trim();
-  const a = norm(given), c = norm(correct);
-  if (!a || !c) return false;
-  if (a === c || c.includes(a) || a.includes(c)) return true;
-  function lev(s1, s2) {
-    const m = s1.length, n = s2.length;
-    if (!m) return n; if (!n) return m;
-    const d = Array.from({ length: m + 1 }, (_, i) => [i]);
-    for (let j = 1; j <= n; j++) d[0][j] = j;
-    for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++)
-      d[i][j] = Math.min(d[i-1][j] + 1, d[i][j-1] + 1, d[i-1][j-1] + (s1[i-1] !== s2[j-1] ? 1 : 0));
-    return d[m][n];
-  }
-  const dist = lev(a, c);
-  if (dist <= Math.max(1, Math.floor(c.length * 0.25))) return true;
-  const cWords = c.split(/\s+/).filter(w => w.length > 2);
-  if (cWords.some(w => a.includes(w) || lev(a, w) <= 1)) return true;
-  return false;
-}
-
-app.post('/api/parties/:id/game/answer', authMiddleware, (req, res) => {
-  const { answer } = req.body || {};
-  if (typeof answer !== 'string') return res.status(400).json({ error: 'answer required' });
-  const state = loadParties();
-  const party = state.parties[req.params.id];
-  if (!party?.game) return res.status(404).json({ error: 'No active game' });
-  const g = party.game;
-  if (g.buzzedBy !== req.userId) return res.status(403).json({ error: 'Not your buzz' });
-  if (g.questionResolved) return res.status(409).json({ error: 'Question over' });
-
-  const q = g.questions[g.currentQ];
-  const correct = checkAnswer(answer, q.answer);
-  g.lastAnswer = { userId: req.userId, text: answer, correct };
-  if (correct) {
-    g.scores[req.userId] = (g.scores[req.userId] || 0) + 1;
-    g.questionResolved = true;
-  } else {
-    // Wrong: lock this user out of this question, clear buzz so others may try
-    g.answeredBy[g.currentQ] = [...(g.answeredBy[g.currentQ] || []), req.userId];
-    // Slide questionStartedAt forward by the paused duration so the reveal
-    // resumes exactly where it froze (at buzzedWord) rather than jumping
-    // ahead by the pause length.
-    if (g.buzzedAt) {
-      const pausedMs = Date.now() - g.buzzedAt;
-      g.questionStartedAt = (g.questionStartedAt || 0) + pausedMs;
-    }
-    g.buzzedBy = null; g.buzzedAt = null; g.buzzedWord = null;
-  }
-  saveParties(state);
-  res.json({ correct });
-});
-
-app.post('/api/parties/:id/game/advance', authMiddleware, (req, res) => {
-  const state = loadParties();
-  const party = state.parties[req.params.id];
-  if (!party?.game) return res.status(404).json({ error: 'No active game' });
-  if (party.leaderId !== req.userId) return res.status(403).json({ error: 'Only leader can advance' });
-  const g = party.game;
-
-  if (g.currentQ >= g.count - 1) {
-    g.status = 'finished';
-    g.finishedAt = Date.now();
-  } else {
-    g.currentQ++;
-    g.questionStartedAt = Date.now();
-    g.buzzedBy = null; g.buzzedAt = null; g.buzzedWord = null;
-    g.lastAnswer = null;
-    g.questionResolved = false;
-  }
-  saveParties(state);
-  res.json({ ok: true, game: scrubGameForPolling(g) });
-});
-
-app.post('/api/parties/:id/game/end', authMiddleware, (req, res) => {
-  const state = loadParties();
-  const party = state.parties[req.params.id];
-  if (!party) return res.status(404).json({ error: 'Party not found' });
-  if (party.leaderId !== req.userId) return res.status(403).json({ error: 'Only leader can end' });
-  party.game = null;
-  saveParties(state);
-  res.json({ success: true });
-});
 
 // =========================================================
 // BILLING / PRO PLAN

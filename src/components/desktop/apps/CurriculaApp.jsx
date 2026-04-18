@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, Plus, Sparkles, Loader2, BookOpen, ChevronDown, ChevronRight, CheckCircle2, Circle, Lock, ClipboardCheck, PenTool, FileText, Check, X, Trophy } from 'lucide-react';
-import { listCurricula, generateCurriculum, getCurriculum, sendLessonMessage, getLessonHistory } from '../../../api/curriculum';
+import { ArrowLeft, Plus, Sparkles, Loader2, BookOpen, ChevronDown, ChevronRight, CheckCircle2, Circle, Lock, ClipboardCheck, PenTool, FileText, Check, X, Trophy, Wand2, Paperclip, Upload } from 'lucide-react';
+import { listCurricula, generateCurriculum, getCurriculum, sendLessonMessage, getLessonHistory, editCurriculumWithAI } from '../../../api/curriculum';
 import { apiFetch } from '../../../api/client';
 import { DEFAULT_SETTINGS, DIFFICULTY_OPTIONS, LEARNING_STYLE_OPTIONS } from '../../../utils/constants';
 import Button from '../../shared/Button';
@@ -37,6 +37,9 @@ export default function CurriculaApp() {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState(null);
+
+  // Edit curriculum modal
+  const [editOpen, setEditOpen] = useState(false);
 
   useEffect(() => {
     listCurricula().then(d => { setCurricula(d.curricula || []); setLoading(false); }).catch(() => setLoading(false));
@@ -171,9 +174,18 @@ export default function CurriculaApp() {
 
     return (
       <div>
-        <button onClick={() => { setView('list'); setSelectedCurriculum(null); }} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 mb-4">
-          <ArrowLeft size={16} /> All Curricula
-        </button>
+        <div className="flex items-center justify-between mb-4">
+          <button onClick={() => { setView('list'); setSelectedCurriculum(null); }} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-200">
+            <ArrowLeft size={16} /> All Curricula
+          </button>
+          <button
+            onClick={() => setEditOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-[#2A2A40] text-xs font-medium text-gray-700 dark:text-gray-300 hover:border-blue-400 hover:text-blue-600"
+            title="Edit with AI"
+          >
+            <Wand2 size={12} /> Edit with AI
+          </button>
+        </div>
         <h1 className="text-xl font-bold text-gray-900 dark:text-white mb-1">{c.title}</h1>
         {c.description && <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">{c.description}</p>}
         <div className="flex items-center gap-3 mb-4">
@@ -185,6 +197,19 @@ export default function CurriculaApp() {
             <UnitSection key={unit.id} unit={unit} onOpenLesson={(l) => openLesson(l, c.id)} />
           ))}
         </div>
+
+        {editOpen && (
+          <EditCurriculumModal
+            curriculum={c}
+            onClose={() => setEditOpen(false)}
+            onUpdated={(updated) => {
+              setSelectedCurriculum(updated);
+              // Also update list-view cache so the updated title/descr propagate
+              setCurricula(prev => prev.map(x => x.id === updated.id ? updated : x));
+              setEditOpen(false);
+            }}
+          />
+        )}
       </div>
     );
   }
@@ -421,6 +446,117 @@ function AssessmentView({ lesson, curriculum, onBack }) {
             <button onClick={onBack} className="mt-4 w-full py-2.5 rounded-xl border border-gray-200 dark:border-[#2A2A40] text-sm font-medium">Back to curriculum</button>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ============= Edit with AI modal =============
+function EditCurriculumModal({ curriculum, onClose, onUpdated }) {
+  const [instruction, setInstruction] = useState('');
+  const [files, setFiles] = useState([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const fileInputRef = useRef(null);
+
+  function addFiles(list) {
+    const incoming = Array.from(list || []);
+    // Cap to 5 files + 25MB each (server caps 50MB but we nudge smaller)
+    const filtered = incoming.filter(f => f.size <= 25 * 1024 * 1024).slice(0, 5);
+    setFiles(prev => [...prev, ...filtered].slice(0, 5));
+  }
+  function removeFile(i) { setFiles(prev => prev.filter((_, idx) => idx !== i)); }
+
+  async function submit() {
+    if (!instruction.trim() || submitting) return;
+    setSubmitting(true); setError(null);
+    try {
+      const { curriculum: updated } = await editCurriculumWithAI(curriculum.id, instruction.trim(), files);
+      onUpdated(updated);
+    } catch (e) {
+      setError(e.message || 'Edit failed');
+      setSubmitting(false);
+    }
+  }
+
+  function onDrop(e) {
+    e.preventDefault();
+    if (e.dataTransfer?.files) addFiles(e.dataTransfer.files);
+  }
+
+  return (
+    <div className="fixed inset-0 z-[1500] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-xl bg-white dark:bg-[#161622] rounded-2xl border border-gray-200 dark:border-[#2A2A40] shadow-2xl overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 dark:border-[#2A2A40]">
+          <div className="flex items-center gap-2">
+            <Wand2 size={14} className="text-blue-500" />
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Edit curriculum with AI</h3>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"><X size={16} /></button>
+        </div>
+
+        <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
+          <div>
+            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 block">Your instruction</label>
+            <textarea
+              value={instruction}
+              onChange={e => setInstruction(e.target.value)}
+              placeholder={'Examples:\n• Add a unit on functional groups after Unit 2\n• Simplify Unit 1 to 3 lessons\n• Rename "Intro" to "Getting Started" and add a practice lesson\n• Rewrite this to match the AP Chemistry syllabus in the attached PDF'}
+              rows={6}
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-gray-50 dark:bg-[#0D0D14] text-sm text-gray-900 dark:text-white placeholder-gray-400 resize-none outline-none focus:border-blue-500"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 block">Context files (optional)</label>
+            <div
+              onDragOver={e => e.preventDefault()}
+              onDrop={onDrop}
+              onClick={() => fileInputRef.current?.click()}
+              className="border-2 border-dashed border-gray-200 dark:border-[#2A2A40] rounded-xl p-4 text-center cursor-pointer hover:border-blue-400"
+            >
+              <Upload size={18} className="text-gray-400 mx-auto mb-1" />
+              <p className="text-xs text-gray-500 dark:text-gray-400">Drop PDFs or text files here, or click to pick</p>
+              <p className="text-[10px] text-gray-400 mt-0.5">up to 5 files · 25MB each</p>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept=".pdf,.txt,.md,.json,application/pdf,text/plain,text/markdown"
+                className="hidden"
+                onChange={e => { addFiles(e.target.files); e.target.value = ''; }}
+              />
+            </div>
+            {files.length > 0 && (
+              <div className="mt-2 space-y-1.5">
+                {files.map((f, i) => (
+                  <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-50 dark:bg-[#0D0D14] border border-gray-200 dark:border-[#2A2A40]">
+                    <Paperclip size={11} className="text-gray-400 flex-shrink-0" />
+                    <span className="flex-1 text-xs text-gray-700 dark:text-gray-200 truncate">{f.name}</span>
+                    <span className="text-[10px] text-gray-400">{Math.round(f.size / 1024)} KB</span>
+                    <button onClick={() => removeFile(i)} className="text-gray-300 hover:text-rose-500"><X size={11} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {error && <p className="text-xs text-rose-500 bg-rose-50 dark:bg-rose-900/20 rounded-lg px-3 py-2">{error}</p>}
+        </div>
+
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-gray-200 dark:border-[#2A2A40]">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg border border-gray-200 dark:border-[#2A2A40] text-xs font-medium text-gray-700 dark:text-gray-300">Cancel</button>
+          <button
+            onClick={submit}
+            disabled={!instruction.trim() || submitting}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {submitting ? <><Loader2 size={12} className="animate-spin" /> Applying…</> : <><Sparkles size={12} /> Apply edit</>}
+          </button>
+        </div>
       </div>
     </div>
   );
