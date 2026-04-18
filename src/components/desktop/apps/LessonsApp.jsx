@@ -4,6 +4,7 @@ import {
   listLessons, createLesson, getLessonHistory, sendLessonMessage,
   resetLesson, deleteLesson,
 } from '../../../api/lessons';
+import { consumePendingLesson } from '../../../utils/pendingLesson';
 import { DIFFICULTY_OPTIONS } from '../../../utils/constants';
 import Button from '../../shared/Button';
 import Input from '../../shared/Input';
@@ -43,6 +44,32 @@ export default function LessonsApp() {
       .then(d => { setLessons(d.lessons || []); })
       .catch(() => {})
       .finally(() => setLoading(false));
+  }, []);
+
+  // Auto-create a lesson when another app (e.g. Quiz Bowl) requests one
+  // via setPendingLesson({ topic, difficulty }) + openApp('lessons').
+  async function tryConsumePending() {
+    const req = consumePendingLesson();
+    if (!req?.topic) return;
+    const diff = req.difficulty || 'beginner';
+    try {
+      const { lesson } = await createLesson(req.topic, diff);
+      setLessons(prev => [lesson, ...prev.filter(l => l.id !== lesson.id)]);
+      await openLesson(lesson);
+    } catch (err) {
+      setView('new');
+      setTopic(req.topic);
+      setDifficulty(diff);
+      setCreateError(err.message || 'Failed to create lesson');
+    }
+  }
+  useEffect(() => {
+    // Run once on mount in case a request was queued just before this app opened.
+    tryConsumePending();
+    function onPending() { tryConsumePending(); }
+    window.addEventListener('cov-pending-lesson', onPending);
+    return () => window.removeEventListener('cov-pending-lesson', onPending);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleCreate() {

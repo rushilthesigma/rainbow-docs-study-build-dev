@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { Zap, Play, Check, X, Loader2 } from 'lucide-react';
+import { Zap, Play, Check, X, Loader2, Lightbulb } from 'lucide-react';
 import { apiFetch } from '../../../api/client';
+import { useWindowManager } from '../../../context/WindowManagerContext';
+import { setPendingLesson } from '../../../utils/pendingLesson';
 
 const DIFFICULTIES = ['Easy', 'Medium', 'Hard', 'Tournament'];
 const CATEGORIES = ['Science', 'History', 'Literature', 'Geography', 'Math', 'Art', 'Music', 'Philosophy', 'Pop Culture', 'Mixed'];
@@ -61,6 +63,12 @@ function useWordReveal(text, speed = 140, active = false) {
 }
 
 export default function QuizBowlApp() {
+  const { openApp } = useWindowManager();
+  function openLessonFor(topic) {
+    if (!topic) return;
+    setPendingLesson({ topic, difficulty: 'beginner' });
+    openApp('lessons', 'Lessons');
+  }
   const [view, setView] = useState('setup'); // 'setup' | 'playing' | 'review'
   const [questions, setQuestions] = useState([]);
   const [currentQ, setCurrentQ] = useState(0);
@@ -192,6 +200,13 @@ export default function QuizBowlApp() {
                   {s.correct ? <Check size={14} className="text-emerald-500" /> : <X size={14} className="text-rose-500" />}
                   <span className="text-xs font-medium text-gray-900 dark:text-white">Q{i + 1}</span>
                   {s.buzzWord >= 0 && <span className="text-[10px] text-gray-400">Buzzed at word {s.buzzWord + 1}/{s.totalWords}</span>}
+                  <div className="flex-1" />
+                  <button
+                    onClick={() => openLessonFor(s.correctAnswer)}
+                    className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border border-amber-400/60 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-500/20"
+                  >
+                    <Lightbulb size={10} /> Lesson
+                  </button>
                 </div>
                 <p className="text-xs text-gray-600 dark:text-gray-300">Answer: <strong>{s.correctAnswer}</strong></p>
                 {s.answer && !s.correct && <p className="text-[10px] text-gray-400 mt-0.5">You said: {s.answer}</p>}
@@ -246,9 +261,17 @@ export default function QuizBowlApp() {
                 <p className="text-sm text-gray-700 dark:text-gray-300 mt-1">Answer: <strong>{q.answer}</strong></p>
                 {!correct && answer && <p className="text-xs text-gray-400 mt-0.5">You said: {answer}</p>}
               </div>
-              <button onClick={nextQuestion} className="w-full py-3 rounded-xl bg-blue-600 text-white text-sm font-medium">
-                {currentQ < questions.length - 1 ? 'Next Question' : 'See Results'}
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => openLessonFor(q.answer)}
+                  className="flex-1 py-3 rounded-xl border border-amber-400/60 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300 text-sm font-medium hover:bg-amber-100 dark:hover:bg-amber-500/20 inline-flex items-center justify-center gap-1.5"
+                >
+                  <Lightbulb size={14} /> Lesson on this
+                </button>
+                <button onClick={nextQuestion} className="flex-1 py-3 rounded-xl bg-blue-600 text-white text-sm font-medium">
+                  {currentQ < questions.length - 1 ? 'Next Question' : 'See Results'}
+                </button>
+              </div>
             </>
           )}
         </div>
