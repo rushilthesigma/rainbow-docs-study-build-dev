@@ -24,6 +24,7 @@ export default function DebateApp() {
   const [started, setStarted] = useState(false);
   const [side, setSide] = useState(null); // 'for' | 'against'
   const [streamingContent, setStreamingContent] = useState('');
+  const [quotaError, setQuotaError] = useState(null);
   const systemRef = useRef('');
 
   const doSend = useCallback(async (text) => {
@@ -55,7 +56,19 @@ export default function DebateApp() {
     setMessages([]); setStarted(false); setTopic(''); setSide(null);
   }
 
-  function startDebate(t, s) {
+  async function startDebate(t, s) {
+    setQuotaError(null);
+    // Consume the weekly debate quota BEFORE any LLM call — free plan is 1/week
+    try {
+      await apiFetch('/api/debate/start', { method: 'POST' });
+    } catch (err) {
+      if (err.planLimit || err.code === 'debate_limit_reached') {
+        setQuotaError(err.message || 'Weekly debate limit reached.');
+        return;
+      }
+      // Non-quota error: still allow the debate (server issue)
+      console.error('debate/start failed', err);
+    }
     setSide(s);
     setTopic(t);
     setStarted(true);
@@ -119,6 +132,12 @@ export default function DebateApp() {
                 </button>
               </div>
             </div>
+          )}
+
+          {quotaError && (
+            <p className="mt-4 max-w-sm text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2 text-center">
+              {quotaError}
+            </p>
           )}
         </div>
       </div>

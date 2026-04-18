@@ -117,12 +117,23 @@ const STRIPE_PRICE_ID = process.env.STRIPE_PRICE_ID || '';
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 
 // ===== Plan / limits =====
-const FREE_DAILY_MESSAGE_LIMIT = 50;
+const FREE_DAILY_MESSAGE_LIMIT = 20;
 const FREE_DAILY_QUIZBOWL_GAMES = 2;
+const FREE_WEEKLY_CURRICULA = 1;
+const FREE_WEEKLY_DEBATES = 1;
 const MODEL_PRO  = 'claude-sonnet-4-6';
 const MODEL_FREE = 'claude-haiku-4-5-20251001';
 
 function todayKey() { return new Date().toISOString().slice(0, 10); }
+// ISO year-week (Mon-start) for weekly buckets, e.g. "2026-W16"
+function weekKey(d = new Date()) {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const day = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const weekNum = Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+  return `${date.getUTCFullYear()}-W${String(weekNum).padStart(2, '0')}`;
+}
 
 // Normalizes and returns the live plan for a user. Owners are always Pro.
 // Stripe-paid Pro users auto-expire when proUntil passes; we gracefully
@@ -140,11 +151,20 @@ function getPlan(user, email) {
 function isPro(user, email) { return getPlan(user, email) === 'pro'; }
 function modelForUser(user, email) { return isPro(user, email) ? MODEL_PRO : MODEL_FREE; }
 
-// Reset counters when the day rolls over
+// Reset daily counters when the day rolls over, weekly counters on ISO week change
 function ensureUsageBucket(user) {
+  const today = todayKey();
+  const week = weekKey();
   if (!user.data.usage) user.data.usage = { day: null, messages: 0, quizBowlGames: 0 };
-  if (user.data.usage.day !== todayKey()) {
-    user.data.usage = { day: todayKey(), messages: 0, quizBowlGames: 0 };
+  if (user.data.usage.day !== today) {
+    user.data.usage.day = today;
+    user.data.usage.messages = 0;
+    user.data.usage.quizBowlGames = 0;
+  }
+  if (user.data.usage.week !== week) {
+    user.data.usage.week = week;
+    user.data.usage.curricula = 0;
+    user.data.usage.debates = 0;
   }
 }
 
@@ -172,6 +192,29 @@ function consumeQuizBowlGame(users, email) {
   }
   u.data.usage.quizBowlGames++;
   return { allowed: true, remaining: Math.max(0, FREE_DAILY_QUIZBOWL_GAMES - u.data.usage.quizBowlGames), limit: FREE_DAILY_QUIZBOWL_GAMES };
+}
+// Weekly buckets — curricula / debates
+function consumeCurriculumGeneration(users, email) {
+  const u = users[email];
+  if (!u) return { allowed: false };
+  if (getPlan(u, email) === 'pro') return { allowed: true, remaining: Infinity, limit: Infinity };
+  ensureUsageBucket(u);
+  if ((u.data.usage.curricula || 0) >= FREE_WEEKLY_CURRICULA) {
+    return { allowed: false, remaining: 0, limit: FREE_WEEKLY_CURRICULA };
+  }
+  u.data.usage.curricula = (u.data.usage.curricula || 0) + 1;
+  return { allowed: true, remaining: Math.max(0, FREE_WEEKLY_CURRICULA - u.data.usage.curricula), limit: FREE_WEEKLY_CURRICULA };
+}
+function consumeDebate(users, email) {
+  const u = users[email];
+  if (!u) return { allowed: false };
+  if (getPlan(u, email) === 'pro') return { allowed: true, remaining: Infinity, limit: Infinity };
+  ensureUsageBucket(u);
+  if ((u.data.usage.debates || 0) >= FREE_WEEKLY_DEBATES) {
+    return { allowed: false, remaining: 0, limit: FREE_WEEKLY_DEBATES };
+  }
+  u.data.usage.debates = (u.data.usage.debates || 0) + 1;
+  return { allowed: true, remaining: Math.max(0, FREE_WEEKLY_DEBATES - u.data.usage.debates), limit: FREE_WEEKLY_DEBATES };
 }
 
 // ===== MIDDLEWARE =====
@@ -242,8 +285,8 @@ function createDefaultData() {
     proGrantedBy: null,           // 'owner' | 'stripe' | null
     stripeCustomerId: null,
     stripeSubscriptionId: null,
-    // Usage counters — reset by helper when the date changes
-    usage: { day: null, messages: 0, quizBowlGames: 0 },
+    // Usage counters — reset by helper when the date / week changes
+    usage: { day: null, messages: 0, quizBowlGames: 0, week: null, curricula: 0, debates: 0 },
   };
 }
 
@@ -279,6 +322,13 @@ function migrateUserData(data) {
       const hasValidUnit = c.units.some(u => Array.isArray(u.lessons) && u.lessons.length > 0);
       return hasValidUnit;
     });
+    // Retroactively unlock any previously-locked units — students can jump
+    // ahead to any lesson at will now.
+    for (const c of data.curricula) {
+      for (const unit of (c.units || [])) {
+        if (unit.locked) unit.locked = false;
+      }
+    }
   }
   return data;
 }
@@ -559,6 +609,27 @@ app.post('/api/chat', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Consume the weekly debate quota. Client calls this BEFORE starting a
+// new debate conversation. Free plan = 1/week, Pro = unlimited.
+app.post('/api/debate/start', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const quota = consumeDebate(users, email);
+    if (!quota.allowed) {
+      return res.status(402).json({
+        error: 'debate_limit_reached',
+        message: `You've already used this week's free debate (${quota.limit}/week). Upgrade to Pro for unlimited.`,
+        limit: quota.limit, remaining: 0,
+      });
+    }
+    saveUsers(users);
+    res.json({ ok: true, remaining: quota.remaining, limit: quota.limit });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ===== CURRICULUM ROUTES =====
 
 // Generate a new curriculum
@@ -566,6 +637,21 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
   try {
     const { settings } = req.body;
     if (!settings?.topic) return res.status(400).json({ error: 'Topic is required' });
+
+    // Free plan: 1 curriculum generation per week. Pro: unlimited.
+    const usersC = loadUsers();
+    const emailC = findEmailById(usersC, req.userId);
+    if (!emailC) return res.status(404).json({ error: 'User not found' });
+    usersC[emailC].data = migrateUserData(usersC[emailC].data);
+    const quota = consumeCurriculumGeneration(usersC, emailC);
+    if (!quota.allowed) {
+      return res.status(402).json({
+        error: 'curriculum_limit_reached',
+        message: `You've already generated ${quota.limit} curriculum this week on the free plan. Upgrade to Pro for unlimited.`,
+        limit: quota.limit, remaining: 0,
+      });
+    }
+    saveUsers(usersC);
 
     const { system, user } = buildCurriculumPrompt(settings);
     const result = await callAnthropic(system, [{ role: 'user', content: user }], DEFAULT_MODEL, 4096);
@@ -652,7 +738,8 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
         score: null,
       });
 
-      return { ...unit, id: `${curriculumId}-u${ui}`, locked: ui > 0, lessons };
+      // All units unlocked — student can jump to any lesson at any time.
+      return { ...unit, id: `${curriculumId}-u${ui}`, locked: false, lessons };
     });
 
     // Save to user data
@@ -2123,7 +2210,7 @@ Return this exact JSON structure:
     parsed.units = (parsed.units || []).map((unit, ui) => ({
       ...unit,
       id: `${curriculumId}-u${ui}`,
-      locked: ui > 0,
+      locked: false,
       lessons: [
         ...(unit.lessons || []).map((lesson, li) => ({
           ...lesson,
@@ -2831,12 +2918,18 @@ app.get('/api/billing/status', authMiddleware, (req, res) => {
       limits: {
         messagesPerDay: FREE_DAILY_MESSAGE_LIMIT,
         quizBowlGamesPerDay: FREE_DAILY_QUIZBOWL_GAMES,
+        curriculaPerWeek: FREE_WEEKLY_CURRICULA,
+        debatesPerWeek: FREE_WEEKLY_DEBATES,
       },
       usage: {
         messages: users[email].data.usage.messages,
         quizBowlGames: users[email].data.usage.quizBowlGames,
+        curricula: users[email].data.usage.curricula || 0,
+        debates: users[email].data.usage.debates || 0,
         remainingMessages: pro ? null : Math.max(0, FREE_DAILY_MESSAGE_LIMIT - users[email].data.usage.messages),
         remainingQuizBowl: pro ? null : Math.max(0, FREE_DAILY_QUIZBOWL_GAMES - users[email].data.usage.quizBowlGames),
+        remainingCurricula: pro ? null : Math.max(0, FREE_WEEKLY_CURRICULA - (users[email].data.usage.curricula || 0)),
+        remainingDebates: pro ? null : Math.max(0, FREE_WEEKLY_DEBATES - (users[email].data.usage.debates || 0)),
       },
     });
   } catch (e) { res.status(500).json({ error: e.message }); }

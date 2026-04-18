@@ -63,6 +63,10 @@ export default function PlanSection() {
   const msgLimit = status.limits?.messagesPerDay;
   const qbUsed = status.usage?.quizBowlGames || 0;
   const qbLimit = status.limits?.quizBowlGamesPerDay;
+  const cUsed = status.usage?.curricula || 0;
+  const cLimit = status.limits?.curriculaPerWeek;
+  const dUsed = status.usage?.debates || 0;
+  const dLimit = status.limits?.debatesPerWeek;
 
   return (
     <div className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-6 space-y-4">
@@ -108,13 +112,16 @@ export default function PlanSection() {
         <div className="space-y-2">
           <UsageBar label="AI messages today" used={msgUsed} limit={msgLimit} />
           <UsageBar label="Quiz Bowl games today" used={qbUsed} limit={qbLimit} />
+          <UsageBar label="Curricula this week" used={cUsed} limit={cLimit} />
+          <UsageBar label="Debates this week" used={dUsed} limit={dLimit} />
         </div>
       )}
 
       {/* Pro features list */}
       <div className="rounded-lg border border-gray-200 dark:border-[#2A2A40] p-3 space-y-1.5">
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Pro includes</p>
-        <Feat>Unlimited AI messages (no daily cap)</Feat>
+        <Feat>Unlimited AI messages (free is 20/day)</Feat>
+        <Feat>Unlimited curricula + debates (free is 1 each per week)</Feat>
         <Feat>Claude Sonnet 4.6 on lessons + study (vs Haiku on free)</Feat>
         <Feat>Unlimited multiplayer Quiz Bowl games</Feat>
         <Feat>Pro badge next to your handle</Feat>
