@@ -1,12 +1,9 @@
 import { useState } from 'react';
 import { BookOpen, ChevronRight, Moon, Sun, Monitor, Smartphone } from 'lucide-react';
 
-import { WALLPAPER_LIST } from './DesktopBackground';
-
 export default function Onboarding({ onComplete }) {
   const [step, setStep] = useState(0);
   const [dark, setDark] = useState(true);
-  const [wallpaper, setWallpaper] = useState('nebula');
   const [desktopStyle, setDesktopStyle] = useState('macos');
 
   function pickDark() {
@@ -22,7 +19,6 @@ export default function Onboarding({ onComplete }) {
   }
 
   function finish() {
-    localStorage.setItem('covalent-wallpaper', wallpaper);
     localStorage.setItem('cov-desktop-style', desktopStyle);
     localStorage.setItem('covalent-onboarded', 'true');
     onComplete();
@@ -109,27 +105,6 @@ export default function Onboarding({ onComplete }) {
 
         {step === 3 && (
           <div className="text-center">
-            <h2 className={`text-2xl font-bold ${textPrimary} mb-2`}>Pick a wallpaper</h2>
-            <p className={`${textMuted} text-sm mb-6`}>Choose your desktop background.</p>
-
-            <select
-              value={wallpaper}
-              onChange={e => setWallpaper(e.target.value)}
-              className={`w-full max-w-xs mx-auto block px-4 py-3 rounded-xl border text-sm mb-8 ${dark ? 'bg-[#161622] border-white/10 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
-            >
-              {WALLPAPER_LIST.map(wp => (
-                <option key={wp.id} value={wp.id}>{wp.label}</option>
-              ))}
-            </select>
-
-            <button onClick={() => setStep(4)} className={`px-8 py-3 rounded-xl ${btnBg} font-medium transition-colors`}>
-              Continue <ChevronRight size={16} className="inline ml-1" />
-            </button>
-          </div>
-        )}
-
-        {step === 4 && (
-          <div className="text-center">
             <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 flex items-center justify-center mx-auto mb-4">
               <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-500"><polyline points="20 6 9 17 4 12"/></svg>
             </div>
@@ -142,7 +117,7 @@ export default function Onboarding({ onComplete }) {
         )}
 
         <div className="flex justify-center gap-2 mt-8">
-          {[0,1,2,3,4].map(i => (
+          {[0,1,2,3].map(i => (
             <div key={i} className={`h-1.5 rounded-full transition-all ${step === i ? `w-4 ${dark ? 'bg-white' : 'bg-gray-900'}` : `w-1.5 ${dark ? 'bg-white/20' : 'bg-gray-300'}`}`} />
           ))}
         </div>

@@ -2,7 +2,7 @@
   "name": "covalent-ai",
   "private": true,
   "version": "1.0.0",
-  "description": "AI-powered adaptive learning platform",
+  "description": "RushilAI",
   "author": "Rushil Kelapure",
   "type": "module",
   "main": "electron/main.js",
