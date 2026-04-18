@@ -8,7 +8,7 @@ function loadPref(key, fallback) {
 
 export function UIPreferenceProvider({ children }) {
   const [uiMode, setUiModeState] = useState('desktop');
-  const [wallpaper, setWallpaperState] = useState(() => loadPref('covalent-wallpaper', 'nebula'));
+  const [wallpaper, setWallpaperState] = useState(() => loadPref('covalent-wallpaper', 'lavender'));
   const [dockSize, setDockSizeState] = useState(() => loadPref('covalent-dock-size', 'medium'));
   const [iconStyle, setIconStyleState] = useState(() => loadPref('covalent-icon-style', 'gradient'));
   const [dockPosition, setDockPositionState] = useState(() => loadPref('covalent-dock-position', 'bottom'));

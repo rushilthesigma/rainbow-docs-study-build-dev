@@ -20,7 +20,13 @@ function MacOSContent() {
 
   useEffect(() => {
     function handleKey(e) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      // Cmd+K or Cmd+Shift+1 → spotlight
+      const cmdish = e.metaKey || e.ctrlKey;
+      const isDigit1 = e.code === 'Digit1' || e.key === '1' || e.key === '!' || e.keyCode === 49;
+      if (cmdish && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        toggleSpotlight();
+      } else if (cmdish && e.shiftKey && isDigit1) {
         e.preventDefault();
         toggleSpotlight();
       }
@@ -51,6 +57,16 @@ function MacOSContent() {
 
 function ShellContent() {
   const style = localStorage.getItem('cov-desktop-style') || 'macos';
+
+  // Tag <html> with os-<style> so per-OS CSS tweaks can target app UI without
+  // every component needing to read the preference. Cleans up on unmount.
+  useEffect(() => {
+    const root = document.documentElement;
+    const prev = Array.from(root.classList).filter(c => c.startsWith('os-'));
+    prev.forEach(c => root.classList.remove(c));
+    root.classList.add(`os-${style}`);
+    return () => root.classList.remove(`os-${style}`);
+  }, [style]);
 
   switch (style) {
     case 'windows': return <WindowsShell />;

@@ -6,7 +6,7 @@ import Window from './Window';
 import AppWindow from './AppWindow';
 import Spotlight from './Spotlight';
 import APP_REGISTRY from './appRegistry';
-import { Moon, Sun, Search, BookOpen, Settings, LogOut } from 'lucide-react';
+import { Moon, Sun, Search, BookOpen, Settings, LogOut, Grid3x3 } from 'lucide-react';
 import { checkAdmin } from '../../api/admin';
 import { useAuth } from '../../context/AuthContext';
 
@@ -42,8 +42,8 @@ function TopPanel({ onActivities, onSettings, onLogout }) {
   );
 }
 
-// GNOME dash (left side dock)
-function Dash({ openWindows, onOpenApp }) {
+// GNOME dash (left side dock) + "Show Apps" button at the bottom
+function Dash({ openWindows, onOpenApp, onShowApps, onDashClick }) {
   const dark = document.documentElement.classList.contains('dark');
   const [isAdmin, setIsAdmin] = useState(false);
   useEffect(() => { checkAdmin().then(d => setIsAdmin(d.isAdmin)).catch(() => {}); }, []);
@@ -57,24 +57,102 @@ function Dash({ openWindows, onOpenApp }) {
       {apps.map(app => {
         const Icon = app.icon;
         return (
-          <button key={app.id} onClick={() => onOpenApp(app.id, app.label)} className="relative w-10 h-10 rounded-xl flex items-center justify-center hover:bg-white/10 transition-colors" title={app.label}>
+          <button key={app.id} onClick={() => onDashClick(app)} className="relative w-10 h-10 rounded-xl flex items-center justify-center hover:bg-white/10 transition-colors" title={app.label}>
             <Icon size={20} style={{ color: app.color }} />
             {openIds.has(app.id) && <div className="absolute right-0 top-1/2 -translate-y-1/2 w-[3px] h-3 rounded-full bg-blue-400" />}
           </button>
         );
       })}
+      <div className="w-5 h-px bg-white/10 my-1" />
+      {/* Show Applications — GNOME's dotted grid */}
+      <button onClick={onShowApps} title="Show Applications (Ctrl+Shift+1)"
+        className="w-10 h-10 rounded-xl flex items-center justify-center hover:bg-white/10 transition-colors">
+        <Grid3x3 size={20} style={{ color: dark ? '#fff' : '#333' }} />
+      </button>
+    </div>
+  );
+}
+
+// GNOME "Show Applications" overlay — dim background + grid of every app
+function AppsHub({ open, onClose, onOpenApp }) {
+  const [query, setQuery] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => { checkAdmin().then(d => setIsAdmin(d.isAdmin)).catch(() => {}); }, []);
+  useEffect(() => { if (open) setQuery(''); }, [open]);
+
+  // Global Esc handler (the autofocused input handles Esc too, but this
+  // catches cases where focus moved elsewhere).
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e) { if (e.key === 'Escape') { e.preventDefault(); onClose(); } }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const apps = APP_REGISTRY
+    .filter(a => !['newcurriculum'].includes(a.id) && (!a.adminOnly || isAdmin))
+    .filter(a => !query.trim() || a.label.toLowerCase().includes(query.toLowerCase()) || a.id.toLowerCase().includes(query.toLowerCase()));
+
+  return (
+    <div className="appshub-overlay fixed inset-0 z-[1500] flex flex-col"
+      style={{ background: 'rgba(20, 20, 28, 0.78)', backdropFilter: 'blur(40px) saturate(1.4)' }}
+      onClick={onClose}
+    >
+      <div className="appshub-panel pt-20 px-6 flex justify-center" onClick={e => e.stopPropagation()}>
+        <input
+          autoFocus
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onKeyDown={e => e.key === 'Escape' && onClose()}
+          placeholder="Type to filter applications..."
+          className="w-full max-w-md px-4 py-2.5 rounded-full bg-white/10 border border-white/15 text-white placeholder:text-white/40 text-sm outline-none focus:bg-white/15 focus:border-white/25"
+        />
+      </div>
+
+      <div className="appshub-panel flex-1 overflow-y-auto flex items-start justify-center pt-10 pb-10" onClick={e => e.stopPropagation()}>
+        <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-6 max-w-5xl px-8">
+          {apps.map(app => {
+            const Icon = app.icon;
+            return (
+              <button
+                key={app.id}
+                onClick={() => { onOpenApp(app.id, app.label); onClose(); }}
+                className="flex flex-col items-center gap-2 p-3 rounded-xl hover:bg-white/10 transition-colors"
+              >
+                <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${app.gradient} flex items-center justify-center shadow-lg`}>
+                  <Icon size={32} className="text-white" />
+                </div>
+                <span className="text-xs text-white/90 font-medium text-center max-w-[90px] truncate">{app.label}</span>
+              </button>
+            );
+          })}
+          {apps.length === 0 && (
+            <div className="col-span-full text-center text-white/40 py-12 text-sm">No apps match "{query}"</div>
+          )}
+        </div>
+      </div>
+
+      <div className="appshub-panel pb-4 text-center text-[10px] text-white/40">
+        <kbd className="font-mono border border-white/20 rounded px-1.5 py-0.5">esc</kbd> close
+      </div>
     </div>
   );
 }
 
 export default function LinuxShell() {
-  const { state, openApp, focusWindow } = useWindowManager();
+  const { state, openApp, focusWindow, restoreWindow } = useWindowManager();
   const { logout } = useAuth();
   const [spotlightOpen, setSpotlightOpen] = useState(false);
+  const [appsHubOpen, setAppsHubOpen] = useState(false);
 
   useEffect(() => {
     function handleKey(e) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); setSpotlightOpen(p => !p); }
+      const cmdish = e.metaKey || e.ctrlKey;
+      const isDigit1 = e.code === 'Digit1' || e.key === '1' || e.key === '!' || e.keyCode === 49;
+      if (cmdish && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); setSpotlightOpen(p => !p); }
+      else if (cmdish && e.shiftKey && isDigit1) { e.preventDefault(); setAppsHubOpen(p => !p); }
     }
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
@@ -85,14 +163,25 @@ export default function LinuxShell() {
   return (
     <div className="h-screen w-screen overflow-hidden relative">
       <DesktopBackground />
-      <TopPanel onActivities={() => setSpotlightOpen(true)} onSettings={() => openApp('settings', 'Settings')} onLogout={logout} />
+      <TopPanel onActivities={() => setAppsHubOpen(true)} onSettings={() => openApp('settings', 'Settings')} onLogout={logout} />
       {windows.map(win => (
         <Window key={win.id} win={win} isActive={win.id === state.activeWindowId}>
           <AppWindow appId={win.appId} />
         </Window>
       ))}
-      <Dash openWindows={windows} onOpenApp={openApp} />
+      <Dash
+        openWindows={windows}
+        onOpenApp={openApp}
+        onShowApps={() => setAppsHubOpen(true)}
+        onDashClick={(app) => {
+          const existing = Object.values(state.windows).find(w => w.appId === app.id);
+          if (existing?.isMinimized) restoreWindow(existing.id);
+          else if (existing) focusWindow(existing.id);
+          else openApp(app.id, app.label);
+        }}
+      />
       <Spotlight open={spotlightOpen} onClose={() => setSpotlightOpen(false)} />
+      <AppsHub open={appsHubOpen} onClose={() => setAppsHubOpen(false)} onOpenApp={openApp} />
     </div>
   );
 }

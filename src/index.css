@@ -89,6 +89,194 @@ body {
   pointer-events: none;
 }
 
+/* Minimize / restore is handled inline on Window.jsx via transform+opacity
+   transitions (driven directly by win.isMinimized). No keyframes needed. */
+
+/* ===== GNOME Activities / Apps Hub open animation =====
+   Single overlay + panel fade/scale. No per-tile stagger. */
+@keyframes appshub-overlay-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes appshub-panel-in {
+  from { opacity: 0; transform: scale(0.96) translateY(6px); }
+  to   { opacity: 1; transform: scale(1)    translateY(0); }
+}
+.appshub-overlay  { animation: appshub-overlay-in 0.18s ease-out forwards; }
+.appshub-panel    { animation: appshub-panel-in   0.28s cubic-bezier(0.22, 1, 0.36, 1) forwards; transform-origin: center center; }
+
 /* Hide scrollbar utility */
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ===========================================================
+   OS-specific app UI tweaks
+   Root <html> gets an os-<style> class from DesktopShell.
+   Apps still share one React codebase; these CSS rules nudge
+   corner radii, borders, shadows, and button chrome so each
+   OS feels closer to its native idiom. macOS is the default
+   (no extra rules) — other shells override selectively.
+   =========================================================== */
+
+/* =========================================================
+   Shared: every OS keeps the same blue accent. Only chrome,
+   corners, typography, shadows, spacing, and motion differ.
+   Spotlight / Apps Hub search inputs are opt-out via
+   [data-spotlight-input] so per-OS focus halos don't draw a
+   bright cylinder around them.
+   ========================================================= */
+/* Kill ALL focus chrome for the Spotlight input — no cylinder, no ring,
+   no border color/bg change on focus. Highest specificity + !important
+   so every per-OS rule below loses. */
+input[data-spotlight-input],
+input[data-spotlight-input]:focus,
+input[data-spotlight-input]:focus-visible,
+input[data-spotlight-input]:active,
+input[data-spotlight-input]:hover,
+.os-macos input[data-spotlight-input],
+.os-macos input[data-spotlight-input]:focus,
+.os-windows input[data-spotlight-input],
+.os-windows input[data-spotlight-input]:focus,
+.os-chromeos input[data-spotlight-input],
+.os-chromeos input[data-spotlight-input]:focus,
+.os-linux input[data-spotlight-input],
+.os-linux input[data-spotlight-input]:focus {
+  border: 0 !important;
+  border-width: 0 !important;
+  border-bottom-width: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* =========================================================
+   WINDOWS — Fluent / Segoe / squared chrome, underline inputs
+   ========================================================= */
+.os-windows { font-family: 'Segoe UI', 'Noto Sans', system-ui, sans-serif; letter-spacing: 0.005em; }
+.os-windows .rounded-2xl { border-radius: 0.375rem !important; }
+.os-windows .rounded-xl  { border-radius: 0.3125rem !important; }
+.os-windows .rounded-lg  { border-radius: 0.25rem !important; }
+.os-windows .rounded-md  { border-radius: 0.1875rem !important; }
+
+/* Chat bubbles — Teams/Fluent rectangles */
+.os-windows [class*="rounded-br-md"],
+.os-windows [class*="rounded-bl-md"] { border-radius: 4px !important; }
+
+/* Inputs — thick bottom border, Fluent underline style */
+.os-windows input,
+.os-windows textarea {
+  border-radius: 2px !important;
+  border-width: 1px !important;
+  border-bottom-width: 2px !important;
+  box-shadow: none !important;
+  transition: border-color 0.12s ease-out;
+}
+.os-windows input:focus,
+.os-windows textarea:focus { outline: none !important; box-shadow: none !important; }
+
+/* Heavier headings, smaller body — Fluent feels denser */
+.os-windows h1, .os-windows h2, .os-windows h3 { font-weight: 600 !important; letter-spacing: -0.01em; }
+.os-windows .text-sm { font-size: 0.8125rem !important; }
+.os-windows .text-xs { font-size: 0.6875rem !important; }
+
+/* Fluent shadow — tighter, two-step */
+.os-windows .shadow-lg  { box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08) !important; }
+.os-windows .shadow-xl  { box-shadow: 0 2px 6px rgba(0,0,0,0.15), 0 8px 16px rgba(0,0,0,0.12) !important; }
+.os-windows .shadow-2xl { box-shadow: 0 4px 10px rgba(0,0,0,0.18), 0 16px 32px rgba(0,0,0,0.15) !important; }
+
+/* Hover reveal ring (Fluent "acrylic reveal") */
+.os-windows button:hover { transition: background-color 0.1s ease-out; }
+
+/* Taskbar windows feel more rectangular */
+.os-windows [class*="fixed"][class*="rounded-2xl"] { border-radius: 0 !important; }
+
+/* =========================================================
+   CHROMEOS — Material You / pill everything / airy spacing
+   ========================================================= */
+.os-chromeos { font-family: 'Google Sans', 'Roboto', system-ui, sans-serif; letter-spacing: -0.005em; }
+.os-chromeos .rounded-2xl { border-radius: 1.5rem !important; }
+.os-chromeos .rounded-xl  { border-radius: 1.125rem !important; }
+.os-chromeos .rounded-lg  { border-radius: 0.875rem !important; }
+
+/* Pill buttons almost everywhere (skip chat bubble corners) */
+.os-chromeos button:not([class*="rounded-full"]):not([class*="rounded-br-md"]):not([class*="rounded-bl-md"]) {
+  border-radius: 9999px !important;
+}
+.os-chromeos .rounded-md { border-radius: 9999px !important; }
+
+/* Inputs — pill-ish, thicker border, animated halo */
+.os-chromeos input,
+.os-chromeos textarea {
+  border-radius: 0.875rem !important;
+  border-width: 1px !important;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.os-chromeos input:focus,
+.os-chromeos textarea:focus {
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.22) !important;
+  outline: none !important;
+}
+
+/* Material two-layer card shadows */
+.os-chromeos .shadow-sm  { box-shadow: 0 1px 2px rgba(60,64,67,0.15) !important; }
+.os-chromeos .shadow-lg  { box-shadow: 0 2px 6px rgba(60,64,67,0.16), 0 1px 2px rgba(60,64,67,0.2) !important; }
+.os-chromeos .shadow-xl  { box-shadow: 0 4px 10px rgba(60,64,67,0.18), 0 2px 4px rgba(60,64,67,0.2) !important; }
+.os-chromeos .shadow-2xl { box-shadow: 0 8px 14px rgba(60,64,67,0.2), 0 4px 6px rgba(60,64,67,0.18) !important; }
+
+/* Airier vertical padding on cards / list rows */
+.os-chromeos .p-3 { padding: 0.9rem !important; }
+.os-chromeos .py-2 { padding-top: 0.6rem !important; padding-bottom: 0.6rem !important; }
+.os-chromeos .py-3 { padding-top: 0.9rem !important; padding-bottom: 0.9rem !important; }
+
+/* Chat bubbles — Gmail/Material-y asymmetric pills */
+.os-chromeos [class*="rounded-br-md"] { border-radius: 20px 20px 4px 20px !important; }
+.os-chromeos [class*="rounded-bl-md"] { border-radius: 20px 20px 20px 4px !important; }
+
+/* Slightly heavier button press feedback */
+.os-chromeos button:active { transform: scale(0.97); transition: transform 0.08s ease-out; }
+
+/* =========================================================
+   LINUX / GNOME — Adwaita flat, tighter rows, thick focus halo
+   ========================================================= */
+.os-linux { font-family: 'Ubuntu', 'Cantarell', system-ui, sans-serif; }
+.os-linux .rounded-2xl { border-radius: 0.75rem !important; }
+.os-linux .rounded-xl  { border-radius: 0.625rem !important; }
+.os-linux .rounded-lg  { border-radius: 0.5rem !important; }
+.os-linux button:not([class*="rounded-full"]):not([class*="rounded-br-md"]):not([class*="rounded-bl-md"]) {
+  border-radius: 0.5rem !important;
+}
+
+/* GNOME-ish sidebar: tighter rows, subtle blue tint hover */
+.os-linux nav button { padding-top: 0.35rem !important; padding-bottom: 0.35rem !important; }
+.os-linux nav button:hover { background-color: rgba(59, 130, 246, 0.1) !important; }
+
+/* Inputs — flat, single border, double-ring focus */
+.os-linux input,
+.os-linux textarea {
+  border-radius: 0.5rem !important;
+  border-width: 1px !important;
+  box-shadow: none !important;
+}
+.os-linux input:focus,
+.os-linux textarea:focus {
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3) !important;
+  outline: none !important;
+}
+
+/* GNOME-ish tighter heading leading */
+.os-linux h1, .os-linux h2, .os-linux h3 { line-height: 1.2 !important; font-weight: 700 !important; }
+
+/* Flat, single-layer shadows */
+.os-linux .shadow-sm  { box-shadow: 0 1px 2px rgba(0,0,0,0.1) !important; }
+.os-linux .shadow-lg  { box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.08) !important; }
+.os-linux .shadow-xl  { box-shadow: 0 2px 8px rgba(0,0,0,0.18) !important; }
+.os-linux .shadow-2xl { box-shadow: 0 4px 12px rgba(0,0,0,0.2) !important; }
+
+/* Chat bubbles — Adwaita rounded rectangles */
+.os-linux [class*="rounded-br-md"] { border-radius: 12px 12px 4px 12px !important; }
+.os-linux [class*="rounded-bl-md"] { border-radius: 12px 12px 12px 4px !important; }
+
+/* Hard button press — GTK-style */
+.os-linux button:active { transform: translateY(1px); transition: transform 0.05s ease-out; }

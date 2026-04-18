@@ -67,16 +67,25 @@ export default function Window({ win, isActive, children }) {
     const startX = e.clientX - win.position.x;
     const startY = e.clientY - win.position.y;
     const posRef = { x: win.position.x, y: win.position.y };
+    // Kill the geometry transition for the duration of the drag so it feels snappy
+    const el = windowRef.current;
+    const prevTransition = el ? el.style.transition : '';
+    if (el) el.style.transition = 'none';
     function onMove(ev) {
       const topBar = STYLE === 'windows' || STYLE === 'chromeos' ? 0 : 28;
-      const bottomBar = STYLE === 'windows' ? 40 : STYLE === 'chromeos' ? 56 : STYLE === 'linux' ? 0 : 72;
+      const bottomBar = STYLE === 'windows' ? 40 : STYLE === 'chromeos' ? 48 : STYLE === 'linux' ? 0 : 72;
       const maxX = window.innerWidth - win.size.w;
       const maxY = window.innerHeight - win.size.h - bottomBar;
       posRef.x = Math.max(0, Math.min(maxX, ev.clientX - startX));
       posRef.y = Math.max(topBar, Math.min(maxY, ev.clientY - startY));
       if (windowRef.current) { windowRef.current.style.left = posRef.x + 'px'; windowRef.current.style.top = posRef.y + 'px'; }
     }
-    function onUp() { moveWindow(win.id, posRef); document.removeEventListener('pointermove', onMove); document.removeEventListener('pointerup', onUp); }
+    function onUp() {
+      if (el) el.style.transition = prevTransition;
+      moveWindow(win.id, posRef);
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+    }
     document.addEventListener('pointermove', onMove);
     document.addEventListener('pointerup', onUp);
   }, [win.id, win.position, win.size, win.isMaximized, moveWindow]);
@@ -86,11 +95,14 @@ export default function Window({ win, isActive, children }) {
     e.preventDefault(); e.stopPropagation();
     const startX = e.clientX, startY = e.clientY;
     const startPos = { ...win.position }; const startSize = { ...win.size };
+    const el = windowRef.current;
+    const prevTransition = el ? el.style.transition : '';
+    if (el) el.style.transition = 'none';
     function onMove(ev) {
       const dx = ev.clientX - startX; const dy = ev.clientY - startY;
       const vw = window.innerWidth; const vh = window.innerHeight;
       const topBar = STYLE === 'windows' || STYLE === 'chromeos' ? 0 : 28;
-      const bottomBar = STYLE === 'windows' ? 40 : STYLE === 'chromeos' ? 56 : STYLE === 'linux' ? 0 : 72;
+      const bottomBar = STYLE === 'windows' ? 40 : STYLE === 'chromeos' ? 48 : STYLE === 'linux' ? 0 : 72;
       let x = startPos.x, y = startPos.y, w = startSize.w, h = startSize.h;
       if (dir.includes('e')) w = Math.min(vw - x, Math.max(400, startSize.w + dx));
       if (dir.includes('w')) { w = Math.max(400, startSize.w - dx); x = startPos.x + (startSize.w - w); if (x < 0) { w += x; x = 0; } }
@@ -99,12 +111,19 @@ export default function Window({ win, isActive, children }) {
       if (windowRef.current) { windowRef.current.style.left = x + 'px'; windowRef.current.style.top = y + 'px'; windowRef.current.style.width = w + 'px'; windowRef.current.style.height = h + 'px'; }
       resizeRef.current = { size: { w, h }, position: { x, y } };
     }
-    function onUp() { if (resizeRef.current) resizeWindow(win.id, resizeRef.current.size, resizeRef.current.position); resizeRef.current = null; document.removeEventListener('pointermove', onMove); document.removeEventListener('pointerup', onUp); }
+    function onUp() {
+      if (el) el.style.transition = prevTransition;
+      if (resizeRef.current) resizeWindow(win.id, resizeRef.current.size, resizeRef.current.position);
+      resizeRef.current = null;
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+    }
     document.addEventListener('pointermove', onMove); document.addEventListener('pointerup', onUp);
   }, [win.id, win.position, win.size, win.isMaximized, resizeWindow]);
 
-  if (win.isMinimized) return null;
-
+  // Keep minimized apps MOUNTED so they don't lose state (chat transcripts,
+  // running streams, form inputs). Just hide them visually.
+  const minimized = win.isMinimized;
   const maxed = win.isMaximized;
 
   // Fullscreen dimensions per OS style
@@ -113,8 +132,8 @@ export default function Window({ win, isActive, children }) {
     // Windows: full screen above taskbar (40px bottom)
     maxStyle = { left: 0, top: 0, width: '100vw', height: 'calc(100vh - 40px)' };
   } else if (STYLE === 'chromeos') {
-    // ChromeOS: full screen above shelf (~56px bottom)
-    maxStyle = { left: 0, top: 0, width: '100vw', height: 'calc(100vh - 56px)' };
+    // ChromeOS: full screen above shelf (48px bottom)
+    maxStyle = { left: 0, top: 0, width: '100vw', height: 'calc(100vh - 48px)' };
   } else if (STYLE === 'linux') {
     // Linux GNOME: below top panel (28px), full width, above dash (left 48px ignored — full width is fine)
     maxStyle = { left: 0, top: 28, width: '100vw', height: 'calc(100vh - 28px)' };
@@ -127,7 +146,12 @@ export default function Window({ win, isActive, children }) {
     ? { ...maxStyle, zIndex: win.zIndex }
     : { left: win.position.x, top: win.position.y, width: win.size.w, height: win.size.h, zIndex: win.zIndex };
 
-  const animClass = animState === 'opening' ? 'window-opening' : animState === 'closing' ? 'window-closing' : '';
+  // Opening/closing keyframe classes only — minimize/restore are handled
+  // below via a CSS transition on transform/opacity (simpler, no state race).
+  const animClass =
+    animState === 'opening' ? 'window-opening' :
+    animState === 'closing' ? 'window-closing' :
+    '';
 
   // Pick title bar based on desktop style
   const TitleBar = STYLE === 'windows' ? WindowsTitleBar : STYLE === 'chromeos' || STYLE === 'linux' ? GenericTitleBar : MacTitleBar;
@@ -141,11 +165,24 @@ export default function Window({ win, isActive, children }) {
       className={`absolute flex flex-col ${radius} overflow-hidden select-none ${animClass}`}
       style={{
         ...style,
+        // Minimize = shrink + fade (CSS-transition driven, never unmount).
+        transform: minimized ? 'scale(0.2)' : 'scale(1)',
+        transformOrigin: 'bottom center',
+        opacity: minimized ? 0 : 1,
+        pointerEvents: minimized ? 'none' : 'auto',
         boxShadow: isActive
           ? '0 25px 50px -12px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.1)'
           : '0 10px 30px -8px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.05)',
-        transition: maxed ? 'left 0.25s, top 0.25s, width 0.25s, height 0.25s' : 'box-shadow 0.15s',
+        transition:
+          'left 0.25s cubic-bezier(0.22, 1, 0.36, 1),' +
+          ' top 0.25s cubic-bezier(0.22, 1, 0.36, 1),' +
+          ' width 0.25s cubic-bezier(0.22, 1, 0.36, 1),' +
+          ' height 0.25s cubic-bezier(0.22, 1, 0.36, 1),' +
+          ' transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),' +
+          ' opacity 0.2s ease-in-out,' +
+          ' box-shadow 0.15s',
       }}
+      aria-hidden={minimized}
       onPointerDown={() => focusWindow(win.id)}
     >
       <TitleBar windowId={win.id} isMaximized={maxed} isActive={isActive} title={win.title} onDragStart={handleDragStart} onDoubleClick={() => maximizeWindow(win.id)} />

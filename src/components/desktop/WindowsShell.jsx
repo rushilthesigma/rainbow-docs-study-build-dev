@@ -33,12 +33,15 @@ function Taskbar({ onStartMenu, onSettings, onLogout, openWindows, activeWindowI
 
       <div className="w-px h-6 bg-white/10 mx-1" />
 
-      {/* Open windows */}
-      {openWindows.map(w => (
-        <button key={w.id} onClick={() => onFocusWindow(w.id)} className={`h-8 px-3 rounded text-xs font-medium truncate max-w-[140px] ${w.id === activeWindowId ? (dark ? 'bg-white/15 text-white' : 'bg-black/10 text-gray-900') : (dark ? 'hover:bg-white/10 text-white/60' : 'hover:bg-black/5 text-gray-600')}`}>
-          {w.title}
-        </button>
-      ))}
+      {/* Open windows — minimized windows render as inactive even if activeWindowId still points at them */}
+      {openWindows.map(w => {
+        const isActive = w.id === activeWindowId && !w.isMinimized;
+        return (
+          <button key={w.id} onClick={() => onFocusWindow(w.id)} className={`h-8 px-3 rounded text-xs font-medium truncate max-w-[140px] ${isActive ? (dark ? 'bg-white/15 text-white' : 'bg-black/10 text-gray-900') : (dark ? 'hover:bg-white/10 text-white/60' : 'hover:bg-black/5 text-gray-600')}`}>
+            {w.title}
+          </button>
+        );
+      })}
 
       <div className="flex-1" />
 
@@ -91,21 +94,35 @@ function StartMenu({ open, onClose, onOpenApp }) {
 }
 
 export default function WindowsShell() {
-  const { state, openApp, focusWindow } = useWindowManager();
+  const { state, openApp, focusWindow, minimizeWindow, restoreWindow } = useWindowManager();
   const { logout } = useAuth();
   const [startOpen, setStartOpen] = useState(false);
   const [spotlightOpen, setSpotlightOpen] = useState(false);
 
   useEffect(() => {
     function handleKey(e) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); setSpotlightOpen(p => !p); }
+      const cmdish = e.metaKey || e.ctrlKey;
+      const isDigit1 = e.code === 'Digit1' || e.key === '1' || e.key === '!' || e.keyCode === 49;
+      if (cmdish && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); setSpotlightOpen(p => !p); }
+      else if (cmdish && e.shiftKey && isDigit1) { e.preventDefault(); setSpotlightOpen(p => !p); }
     }
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, []);
 
   const windows = Object.values(state.windows);
-  const visibleWindows = windows.filter(w => !w.isMinimized && !w.isClosing);
+  // Show every non-closing window in the taskbar — including minimized ones
+  // so you can click them to restore, just like real Windows.
+  const taskbarWindows = windows.filter(w => !w.isClosing);
+
+  // Click taskbar entry: if minimized → restore; if currently active → minimize; else focus.
+  function handleTaskbarClick(winId) {
+    const w = state.windows[winId];
+    if (!w) return;
+    if (w.isMinimized) restoreWindow(winId);
+    else if (state.activeWindowId === winId) minimizeWindow(winId);
+    else focusWindow(winId);
+  }
 
   return (
     <div className="h-screen w-screen overflow-hidden relative">
@@ -115,7 +132,7 @@ export default function WindowsShell() {
           <AppWindow appId={win.appId} />
         </Window>
       ))}
-      <Taskbar onStartMenu={() => setStartOpen(p => !p)} onSettings={() => openApp('settings', 'Settings')} onLogout={logout} openWindows={visibleWindows} activeWindowId={state.activeWindowId} onFocusWindow={focusWindow} />
+      <Taskbar onStartMenu={() => setStartOpen(p => !p)} onSettings={() => openApp('settings', 'Settings')} onLogout={logout} openWindows={taskbarWindows} activeWindowId={state.activeWindowId} onFocusWindow={handleTaskbarClick} />
       <StartMenu open={startOpen} onClose={() => setStartOpen(false)} onOpenApp={openApp} />
       <Spotlight open={spotlightOpen} onClose={() => setSpotlightOpen(false)} />
     </div>

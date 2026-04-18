@@ -54,6 +54,9 @@ function InterfaceSection() {
   ];
 
   const isMobileScreen = typeof window !== 'undefined' && window.innerWidth < 768;
+  const currentStyle = (typeof window !== 'undefined' && localStorage.getItem('cov-desktop-style')) || 'macos';
+  // Dock Size / Icon Style only matter on macOS (it's the only shell using Dock.jsx with these controls)
+  const isMacos = currentStyle === 'macos';
 
   return (
     <div className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-6 space-y-5">
@@ -61,10 +64,10 @@ function InterfaceSection() {
 
       {!isMobileScreen && (
         <>
-          <Dropdown label="Desktop Style" value={localStorage.getItem('cov-desktop-style') || 'macos'} options={styleOpts} onChange={v => { localStorage.setItem('cov-desktop-style', v); window.location.reload(); }} />
+          <Dropdown label="Desktop Style" value={currentStyle} options={styleOpts} onChange={v => { localStorage.setItem('cov-desktop-style', v); window.location.reload(); }} />
           <Dropdown label="Wallpaper" value={wallpaper} options={wallpaperOpts} onChange={setWallpaper} />
-          <Dropdown label="Dock Size" value={dockSize} options={dockOpts} onChange={setDockSize} />
-          <Dropdown label="Icon Style" value={iconStyle} options={iconOpts} onChange={setIconStyle} />
+          {isMacos && <Dropdown label="Dock Size" value={dockSize} options={dockOpts} onChange={setDockSize} />}
+          {isMacos && <Dropdown label="Icon Style" value={iconStyle} options={iconOpts} onChange={setIconStyle} />}
         </>
       )}
     </div>

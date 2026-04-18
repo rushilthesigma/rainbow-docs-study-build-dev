@@ -67,7 +67,7 @@ function DockIcon({ app, mouseX, iconRef, isOpen, onClick, size, iconStyle }) {
 }
 
 export default function Dock() {
-  const { state, openApp } = useWindowManager();
+  const { state, openApp, restoreWindow, focusWindow } = useWindowManager();
   const { dockSize, iconStyle } = useUIPreference();
   const [mouseX, setMouseX] = useState(null);
   const dockRef = useRef(null);
@@ -99,11 +99,25 @@ export default function Dock() {
           onMouseLeave={() => setMouseX(null)}
         >
           {mainApps.map(app => (
-            <DockIcon key={app.id} app={app} mouseX={mouseX} iconRef={getIconRef(app.id)} isOpen={openAppIds.has(app.id)} onClick={() => openApp(app.id, app.label)} size={size} iconStyle={iconStyle} />
+            <DockIcon key={app.id} app={app} mouseX={mouseX} iconRef={getIconRef(app.id)} isOpen={openAppIds.has(app.id)} onClick={() => {
+            // If there's already a window for this app that's minimized, restore it.
+            // Otherwise let openApp handle (focus existing or open new).
+            const existing = Object.values(state.windows).find(w => w.appId === app.id);
+            if (existing?.isMinimized) restoreWindow(existing.id);
+            else if (existing) focusWindow(existing.id);
+            else openApp(app.id, app.label);
+          }} size={size} iconStyle={iconStyle} />
           ))}
           <div className="w-px bg-white/15 mx-1 self-center" style={{ height: size * 0.7 }} />
           {utilApps.map(app => (
-            <DockIcon key={app.id} app={app} mouseX={mouseX} iconRef={getIconRef(app.id)} isOpen={openAppIds.has(app.id)} onClick={() => openApp(app.id, app.label)} size={size} iconStyle={iconStyle} />
+            <DockIcon key={app.id} app={app} mouseX={mouseX} iconRef={getIconRef(app.id)} isOpen={openAppIds.has(app.id)} onClick={() => {
+            // If there's already a window for this app that's minimized, restore it.
+            // Otherwise let openApp handle (focus existing or open new).
+            const existing = Object.values(state.windows).find(w => w.appId === app.id);
+            if (existing?.isMinimized) restoreWindow(existing.id);
+            else if (existing) focusWindow(existing.id);
+            else openApp(app.id, app.label);
+          }} size={size} iconStyle={iconStyle} />
           ))}
         </div>
       </div>

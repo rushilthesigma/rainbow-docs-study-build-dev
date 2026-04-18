@@ -62,7 +62,31 @@ function reducer(state, action) {
     case 'MINIMIZE_WINDOW': {
       const w = state.windows[action.windowId];
       if (!w) return state;
-      return { ...state, windows: { ...state.windows, [action.windowId]: { ...w, isMinimized: true } } };
+      // If the minimized window was active, drop focus so taskbar / dock don't
+      // keep highlighting it. Pick the highest-zIndex non-minimized window as
+      // the new active, or null if none.
+      let nextActive = state.activeWindowId;
+      if (state.activeWindowId === action.windowId) {
+        const candidates = Object.values(state.windows)
+          .filter(x => x.id !== action.windowId && !x.isMinimized && !x.isClosing)
+          .sort((a, b) => b.zIndex - a.zIndex);
+        nextActive = candidates[0]?.id || null;
+      }
+      return {
+        ...state,
+        activeWindowId: nextActive,
+        windows: { ...state.windows, [action.windowId]: { ...w, isMinimized: true } },
+      };
+    }
+    case 'RESTORE_WINDOW': {
+      const w = state.windows[action.windowId];
+      if (!w) return state;
+      return {
+        ...state,
+        activeWindowId: action.windowId,
+        windows: { ...state.windows, [action.windowId]: { ...w, isMinimized: false, zIndex: state.nextZIndex } },
+        nextZIndex: state.nextZIndex + 1,
+      };
     }
     case 'MAXIMIZE_WINDOW': {
       const w = state.windows[action.windowId];
@@ -121,6 +145,7 @@ export function WindowManagerProvider({ children }) {
   const closeWindow = useCallback((windowId) => dispatch({ type: 'CLOSE_WINDOW', windowId }), []);
   const removeWindow = useCallback((windowId) => dispatch({ type: 'REMOVE_WINDOW', windowId }), []);
   const minimizeWindow = useCallback((windowId) => dispatch({ type: 'MINIMIZE_WINDOW', windowId }), []);
+  const restoreWindow = useCallback((windowId) => dispatch({ type: 'RESTORE_WINDOW', windowId }), []);
   const maximizeWindow = useCallback((windowId) => dispatch({ type: 'MAXIMIZE_WINDOW', windowId }), []);
   const focusWindow = useCallback((windowId) => dispatch({ type: 'FOCUS_WINDOW', windowId }), []);
   const moveWindow = useCallback((windowId, position) => dispatch({ type: 'MOVE_WINDOW', windowId, position }), []);
@@ -128,7 +153,7 @@ export function WindowManagerProvider({ children }) {
   const splitWindows = useCallback((leftId, rightId) => dispatch({ type: 'SPLIT_WINDOWS', leftId, rightId }), []);
 
   return (
-    <WindowManagerContext.Provider value={{ state, dispatch, openApp, closeWindow, removeWindow, minimizeWindow, maximizeWindow, focusWindow, moveWindow, resizeWindow, splitWindows }}>
+    <WindowManagerContext.Provider value={{ state, dispatch, openApp, closeWindow, removeWindow, minimizeWindow, restoreWindow, maximizeWindow, focusWindow, moveWindow, resizeWindow, splitWindows }}>
       {children}
     </WindowManagerContext.Provider>
   );
