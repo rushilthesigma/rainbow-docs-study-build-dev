@@ -6,8 +6,11 @@ export const getMyParty     = ()           => apiFetch('/api/parties/mine');
 export const invitePlayer   = (partyId, userId) => apiFetch(`/api/parties/${partyId}/invite`, { method: 'POST', body: JSON.stringify({ userId }) });
 export const acceptInvite   = (inviteId)   => apiFetch(`/api/parties/invites/${inviteId}/accept`, { method: 'POST' });
 export const declineInvite  = (inviteId)   => apiFetch(`/api/parties/invites/${inviteId}/decline`, { method: 'POST' });
+export const cancelInvite   = (inviteId)   => apiFetch(`/api/parties/invites/${inviteId}`, { method: 'DELETE' });
 export const leaveParty     = (partyId)    => apiFetch(`/api/parties/${partyId}/leave`, { method: 'POST' });
+export const disbandParty   = (partyId)    => apiFetch(`/api/parties/${partyId}/disband`, { method: 'POST' });
 export const kickMember     = (partyId, userId) => apiFetch(`/api/parties/${partyId}/kick`, { method: 'POST', body: JSON.stringify({ userId }) });
+export const sendPartyChat  = (partyId, text) => apiFetch(`/api/parties/${partyId}/chat`, { method: 'POST', body: JSON.stringify({ text }) });
 
 // ---- Game ----
 export const startGame   = (partyId, settings) => apiFetch(`/api/parties/${partyId}/game`, { method: 'POST', body: JSON.stringify(settings) });

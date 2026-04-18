@@ -1,13 +1,14 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Zap, Play, RotateCcw, Check, X, ArrowLeft, Loader2, Users, UserPlus, UserX,
-  Crown, Trophy, Mail, LogOut, Plus, ChevronRight,
+  Crown, Trophy, Mail, LogOut, Plus, ChevronRight, Send, MessageSquare, Clock, XCircle,
 } from 'lucide-react';
 import { apiFetch } from '../../../api/client';
 import {
   createParty, getMyParty, invitePlayer, acceptInvite, declineInvite,
-  leaveParty, kickMember, startGame, getGameState, buzz, submitAnswer,
-  advanceQuestion, endGame,
+  cancelInvite, leaveParty, disbandParty, kickMember, startGame,
+  getGameState, buzz, submitAnswer, advanceQuestion, endGame,
+  sendPartyChat,
 } from '../../../api/parties';
 
 const DIFFICULTIES = ['Easy', 'Medium', 'Hard', 'Tournament'];
@@ -75,6 +76,7 @@ function fmtPlayer(p) { return p?.displayName || p?.handle || 'Player'; }
 function PartyLobby({ onStartGame, onJoinLiveGame, currentUserId }) {
   const [party, setParty] = useState(null);
   const [invites, setInvites] = useState([]);
+  const [outgoing, setOutgoing] = useState([]);
   const [searchResults, setSearchResults] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searching, setSearching] = useState(false);
@@ -92,6 +94,7 @@ function PartyLobby({ onStartGame, onJoinLiveGame, currentUserId }) {
         if (!alive) return;
         setParty(d.party);
         setInvites(d.invites || []);
+        setOutgoing(d.outgoingInvites || []);
         // If we're in a party and a game is active, drop us into the game view.
         if (d.party?.id) {
           try {
@@ -129,18 +132,31 @@ function PartyLobby({ onStartGame, onJoinLiveGame, currentUserId }) {
   }, [searchQuery, showInvite]);
 
   async function handleCreate() {
-    const { party } = await createParty(partyName || '');
-    setParty({ ...party, leader: { userId: party.leaderId }, memberProfiles: [{ userId: party.leaderId }] });
     setPartyName('');
+    try {
+      // Create + immediately fetch the hydrated party so the UI doesn't have
+      // to wait for the next 2-second poll tick to show it with member
+      // profiles/handles/plan filled in.
+      const { party: bare } = await createParty(partyName || '');
+      const d = await getMyParty();
+      setParty(d.party || bare);
+      setInvites(d.invites || []);
+      setOutgoing(d.outgoingInvites || []);
+    } catch (e) { console.error(e); }
   }
 
   async function handleInvite(friendUserId) {
     try { await invitePlayer(party.id, friendUserId); } catch (e) { alert(e.message); }
   }
   async function handleAccept(inviteId) {
+    // Warn if the user is currently leader of another party — accepting
+    // will disband their existing party.
+    if (party && party.leaderId === currentUserId) {
+      if (!confirm(`Accepting this invite will disband your current party "${party.name}". Continue?`)) return;
+    }
     await acceptInvite(inviteId);
     const d = await getMyParty();
-    setParty(d.party); setInvites(d.invites || []);
+    setParty(d.party); setInvites(d.invites || []); setOutgoing(d.outgoingInvites || []);
   }
   async function handleDecline(inviteId) {
     await declineInvite(inviteId);
@@ -151,9 +167,21 @@ function PartyLobby({ onStartGame, onJoinLiveGame, currentUserId }) {
     await leaveParty(party.id);
     setParty(null);
   }
+  async function handleDisband() {
+    if (!party) return;
+    if (!confirm('Disband the party? Everyone will be kicked out.')) return;
+    await disbandParty(party.id);
+    setParty(null); setOutgoing([]);
+  }
   async function handleKick(userId) {
     await kickMember(party.id, userId);
     const d = await getMyParty(); setParty(d.party);
+  }
+  async function handleCancelInvite(inviteId) {
+    try {
+      await cancelInvite(inviteId);
+      setOutgoing(prev => prev.filter(i => i.id !== inviteId));
+    } catch (e) { console.error(e); }
   }
 
   const isLeader = party && party.leaderId === currentUserId;
@@ -216,7 +244,13 @@ function PartyLobby({ onStartGame, onJoinLiveGame, currentUserId }) {
             <p className="text-xs text-gray-500 uppercase tracking-wider">Party</p>
             <h3 className="text-base font-bold text-gray-900 dark:text-white truncate">{party.name}</h3>
           </div>
-          <button onClick={handleLeave} title="Leave party" className="p-2 rounded-lg text-gray-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20"><LogOut size={14} /></button>
+          {isLeader ? (
+            <button onClick={handleDisband} title="Disband party" className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-rose-500 hover:text-white hover:bg-rose-500 border border-rose-200 dark:border-rose-900/40 transition-colors">
+              <XCircle size={12} /> Disband
+            </button>
+          ) : (
+            <button onClick={handleLeave} title="Leave party" className="p-2 rounded-lg text-gray-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20"><LogOut size={14} /></button>
+          )}
         </div>
 
         {/* Members */}
@@ -290,17 +324,144 @@ function PartyLobby({ onStartGame, onJoinLiveGame, currentUserId }) {
             </div>
           </div>
         )}
+
+        {/* Outgoing invites (leader view) */}
+        {isLeader && outgoing.length > 0 && (
+          <div className="mt-3 space-y-1.5">
+            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1">
+              <Clock size={9} /> Pending invites ({outgoing.length})
+            </p>
+            {outgoing.map(inv => (
+              <div key={inv.id} className="flex items-center gap-2 px-2 py-1.5 rounded bg-gray-50 dark:bg-[#0D0D14] border border-gray-200 dark:border-[#2A2A40]">
+                <div className="w-5 h-5 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0">
+                  {fmtPlayer(inv.to)[0]?.toUpperCase()}
+                </div>
+                <span className="flex-1 truncate text-xs text-gray-700 dark:text-gray-200">{fmtPlayer(inv.to)}</span>
+                <span className="text-[10px] text-gray-400">waiting</span>
+                <button onClick={() => handleCancelInvite(inv.id)} title="Cancel invite" className="p-1 text-gray-400 hover:text-rose-500">
+                  <X size={11} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Start game CTA — leader only */}
-      {isLeader && (
+      {/* Party chat */}
+      <PartyChat party={party} currentUserId={currentUserId} />
+
+      {/* Generating banner — visible to ALL members as soon as leader hits Start Round */}
+      {party.generating && (
+        <div className="rounded-xl border border-blue-200 dark:border-blue-900/50 bg-blue-50 dark:bg-blue-900/15 px-4 py-3 flex items-center gap-3">
+          <Loader2 size={16} className="animate-spin text-blue-500 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-blue-700 dark:text-blue-300">Generating questions…</p>
+            <p className="text-[11px] text-blue-600/80 dark:text-blue-400/80">
+              {party.generating.count} {party.generating.difficulty} {party.generating.category} tossups · the game starts automatically.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Start game CTA — leader only, hide while generating */}
+      {isLeader && !party.generating && (
         <button onClick={() => onStartGame(party)} className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold flex items-center justify-center gap-2">
           <Zap size={16} /> Set Up Quiz Bowl Game
         </button>
       )}
-      {!isLeader && (
+      {!isLeader && !party.generating && (
         <p className="text-xs text-gray-500 text-center py-2">Waiting for the party leader to start a game…</p>
       )}
+    </div>
+  );
+}
+
+// ============= MULTIPLAYER: Lobby chat =============
+function PartyChat({ party, currentUserId }) {
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+  const inputRef = useRef(null);
+  const scrollRef = useRef(null);
+  const messages = Array.isArray(party?.chat) ? party.chat : [];
+  const memberById = useMemo(() => {
+    const m = {};
+    for (const p of (party?.memberProfiles || [])) m[p.userId] = p;
+    return m;
+  }, [party?.memberProfiles]);
+
+  // Space shortcut: focus the chat input from anywhere in the lobby,
+  // unless focus is already on an input / textarea.
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key !== ' ') return;
+      const t = e.target;
+      const typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+      if (typing) return;
+      e.preventDefault();
+      inputRef.current?.focus();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Auto-scroll as new messages appear
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages.length]);
+
+  async function send() {
+    const body = text.trim();
+    if (!body || sending) return;
+    setSending(true);
+    try { await sendPartyChat(party.id, body); setText(''); }
+    catch (e) { console.error(e); }
+    setSending(false);
+  }
+
+  return (
+    <div className="rounded-xl border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622] overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 dark:border-[#2A2A40]">
+        <MessageSquare size={12} className="text-blue-500" />
+        <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">Party chat</span>
+        <span className="ml-auto text-[10px] text-gray-400">Press Space to type</span>
+      </div>
+      <div ref={scrollRef} className="max-h-48 overflow-y-auto px-3 py-2 space-y-1">
+        {messages.length === 0 && (
+          <p className="text-[11px] text-gray-400 text-center py-3">No messages yet. Say hi!</p>
+        )}
+        {messages.map(m => {
+          const mine = m.userId === currentUserId;
+          const profile = memberById[m.userId];
+          return (
+            <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+              <div className={`max-w-[80%] px-2.5 py-1.5 rounded-lg text-xs ${mine ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-[#1e1e2e] text-gray-800 dark:text-gray-100'}`}>
+                {!mine && (
+                  <p className="text-[10px] font-semibold opacity-80 mb-0.5">{fmtPlayer(profile) || 'Player'}</p>
+                )}
+                <p className="whitespace-pre-wrap break-words">{m.text}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex items-center gap-2 p-2 border-t border-gray-200 dark:border-[#2A2A40]">
+        <input
+          ref={inputRef}
+          value={text}
+          onChange={e => setText(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); send(); } }}
+          placeholder="Message the party…"
+          maxLength={500}
+          className="flex-1 px-3 py-1.5 rounded-lg bg-gray-50 dark:bg-[#0D0D14] border border-gray-200 dark:border-[#2A2A40] text-xs text-gray-900 dark:text-gray-100 outline-none"
+        />
+        <button
+          onClick={send}
+          disabled={!text.trim() || sending}
+          className={`p-1.5 rounded-lg flex-shrink-0 ${text.trim() && !sending ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-200 dark:bg-[#2A2A40] text-gray-400 cursor-not-allowed'}`}
+        >
+          <Send size={12} />
+        </button>
+      </div>
     </div>
   );
 }

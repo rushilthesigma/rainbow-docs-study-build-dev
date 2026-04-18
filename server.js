@@ -2594,12 +2594,65 @@ app.get('/api/parties/mine', authMiddleware, (req, res) => {
   const pendingInvites = Object.values(state.invites || {})
     .filter(i => i.toUserId === req.userId && !i.resolved)
     .map(i => ({ ...i, from: getSocialDisplay(i.fromUserId), partyName: state.parties[i.partyId]?.name || 'Party' }));
+  // Outgoing invites — pending ones this user sent FROM their own party (leader view)
+  const outgoingInvites = party ? Object.values(state.invites || {})
+    .filter(i => i.partyId === party.id && !i.resolved && i.fromUserId === req.userId)
+    .map(i => ({ ...i, to: getSocialDisplay(i.toUserId) })) : [];
   const hydrated = party ? {
     ...party,
     leader: getSocialDisplay(party.leaderId),
     memberProfiles: party.members.map(getSocialDisplay),
+    chat: party.chat || [],
+    generating: party.generating || null,
   } : null;
-  res.json({ party: hydrated, invites: pendingInvites });
+  res.json({ party: hydrated, invites: pendingInvites, outgoingInvites });
+});
+
+// Send a chat message in the party lobby (and during games).
+app.post('/api/parties/:id/chat', authMiddleware, (req, res) => {
+  const { text } = req.body || {};
+  if (!text || typeof text !== 'string') return res.status(400).json({ error: 'text required' });
+  const trimmed = text.trim().slice(0, 500);
+  if (!trimmed) return res.status(400).json({ error: 'text required' });
+  const state = loadParties();
+  const party = state.parties[req.params.id];
+  if (!party) return res.status(404).json({ error: 'Party not found' });
+  if (!party.members.includes(req.userId)) return res.status(403).json({ error: 'Not in party' });
+  if (!Array.isArray(party.chat)) party.chat = [];
+  const msg = { id: `m-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, userId: req.userId, text: trimmed, ts: Date.now() };
+  party.chat.push(msg);
+  if (party.chat.length > 200) party.chat = party.chat.slice(-200); // cap memory
+  saveParties(state);
+  res.json({ message: msg });
+});
+
+// Cancel / rescind an outgoing invite (sender only)
+app.delete('/api/parties/invites/:inviteId', authMiddleware, (req, res) => {
+  const state = loadParties();
+  const inv = (state.invites || {})[req.params.inviteId];
+  if (!inv) return res.status(404).json({ error: 'Invite not found' });
+  if (inv.fromUserId !== req.userId) return res.status(403).json({ error: 'Only sender can cancel' });
+  if (inv.resolved) return res.status(409).json({ error: 'Already resolved' });
+  delete state.invites[req.params.inviteId];
+  saveParties(state);
+  res.json({ success: true });
+});
+
+// Explicit disband endpoint — leader deletes the entire party.
+app.post('/api/parties/:id/disband', authMiddleware, (req, res) => {
+  const state = loadParties();
+  const party = state.parties[req.params.id];
+  if (!party) return res.status(404).json({ error: 'Party not found' });
+  if (party.leaderId !== req.userId) return res.status(403).json({ error: 'Only leader can disband' });
+  delete state.parties[req.params.id];
+  // Also drop any pending invites that pointed at this party
+  if (state.invites) {
+    for (const [iid, inv] of Object.entries(state.invites)) {
+      if (inv.partyId === req.params.id) delete state.invites[iid];
+    }
+  }
+  saveParties(state);
+  res.json({ success: true });
 });
 
 app.post('/api/parties/:id/invite', authMiddleware, (req, res) => {
@@ -2626,11 +2679,21 @@ app.post('/api/parties/invites/:inviteId/accept', authMiddleware, (req, res) => 
   const party = state.parties[inv.partyId];
   if (!party) { inv.resolved = true; saveParties(state); return res.status(404).json({ error: 'Party gone' }); }
 
-  // Leave any other party
+  // Leave any other party — if the accepter was leader, the whole party
+  // gets disbanded (and its pending invites deleted).
   const other = findPartyForUser(state, req.userId);
   if (other && other.id !== party.id) {
-    if (other.leaderId === req.userId) delete state.parties[other.id];
-    else other.members = other.members.filter(m => m !== req.userId);
+    if (other.leaderId === req.userId) {
+      delete state.parties[other.id];
+      // Clean up dangling invites for the disbanded party
+      if (state.invites) {
+        for (const [iid, otherInv] of Object.entries(state.invites)) {
+          if (otherInv.partyId === other.id) delete state.invites[iid];
+        }
+      }
+    } else {
+      other.members = other.members.filter(m => m !== req.userId);
+    }
   }
 
   if (!party.members.includes(req.userId)) party.members.push(req.userId);
@@ -2720,11 +2783,26 @@ app.post('/api/parties/:id/game', authMiddleware, async (req, res) => {
     saveUsers(usersQ);
   }
 
+  // Flip a "generating" flag so pollers (non-leaders in the lobby) can
+  // surface a "questions are generating…" banner immediately, without
+  // waiting for the AI call to finish.
+  party.generating = {
+    by: req.userId,
+    startedAt: Date.now(),
+    category, difficulty, count: Math.min(Math.max(3, count), 30),
+  };
+  saveParties(state);
+
   try {
     const questions = await generateQuizQuestions(category, difficulty, Math.min(Math.max(3, count), 30), customInstructions);
+    // Re-load — chat messages may have been appended during the generation
+    // window; don't clobber them.
+    const freshState = loadParties();
+    const p = freshState.parties[req.params.id];
+    if (!p) return res.status(404).json({ error: 'Party gone' });
     const scores = {};
-    party.members.forEach(m => { scores[m] = 0; });
-    party.game = {
+    p.members.forEach(m => { scores[m] = 0; });
+    p.game = {
       id: `g-${Date.now()}`,
       category, difficulty, count: questions.length,
       questions,
@@ -2739,10 +2817,17 @@ app.post('/api/parties/:id/game', authMiddleware, async (req, res) => {
       status: 'playing',               // 'playing' | 'finished'
       startedAt: Date.now(),
     };
-    saveParties(state);
-    res.json({ game: scrubGameForPolling(party.game) });
+    p.generating = null;
+    saveParties(freshState);
+    res.json({ game: scrubGameForPolling(p.game) });
   } catch (e) {
     console.error('game start failed', e);
+    // Clear the generating flag so the UI doesn't stay stuck on "generating…"
+    try {
+      const freshState = loadParties();
+      const p = freshState.parties[req.params.id];
+      if (p) { p.generating = null; saveParties(freshState); }
+    } catch {}
     res.status(500).json({ error: e.message });
   }
 });
@@ -2784,6 +2869,8 @@ app.get('/api/parties/:id/state', authMiddleware, (req, res) => {
     party: {
       id: party.id, name: party.name, leaderId: party.leaderId,
       memberProfiles: party.members.map(getSocialDisplay),
+      chat: party.chat || [],
+      generating: party.generating || null,
     },
     game: scrubGameForPolling(party.game),
     serverNow: Date.now(),
