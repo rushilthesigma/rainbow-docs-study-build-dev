@@ -90,7 +90,10 @@ export default function LessonPage() {
           const aiMsg = { role: 'assistant', content: fullContent, timestamp: new Date().toISOString() };
           setMessages(m => [...m, aiMsg]);
 
-          if (fullContent.includes('[PHASE_COMPLETE]')) {
+          const shouldAdvance = /\[STATUS:\s*advance\]/i.test(fullContent)
+            || fullContent.includes('[PHASE_COMPLETE]')
+            || fullContent.includes('[LESSON_COMPLETE]');
+          if (shouldAdvance) {
             const phases = ['introduction', 'explanation', 'check_understanding', 'deeper_dive', 'practice'];
             setPhase(p => {
               const idx = phases.indexOf(p);

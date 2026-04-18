@@ -33,8 +33,14 @@
       "node_modules/**/*"
     ],
     "extraResources": [
-      { "from": "server.js", "to": "server.js" },
-      { "from": "prompts.js", "to": "prompts.js" }
+      {
+        "from": "server.js",
+        "to": "server.js"
+      },
+      {
+        "from": "prompts.js",
+        "to": "prompts.js"
+      }
     ]
   },
   "dependencies": {
@@ -42,6 +48,7 @@
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
+    "katex": "^0.16.45",
     "lucide-react": "^0.468.0",
     "multer": "^2.1.1",
     "pdf-parse": "^1.1.1",
@@ -50,7 +57,9 @@
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.6.1",
     "rehype-highlight": "^7.0.2",
-    "remark-gfm": "^4.0.1"
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0"
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.16",

@@ -56,7 +56,7 @@ export default function MobileShell() {
   return (
     <div className="h-screen flex flex-col bg-[#F4F5F7] dark:bg-[#0D0D14]">
       <MobileHeader
-        title={page?.title || 'Covalent'}
+        title={page?.title || 'RushilAI'}
         onBack={!isMainTab ? () => { setActivePage(activeTab !== 'more' ? activeTab : 'study'); setActiveTab(activeTab !== 'more' ? activeTab : 'study'); } : null}
       />
 

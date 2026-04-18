@@ -88,7 +88,7 @@ export default function LandingPage() {
           <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
             <BookOpen size={18} className="text-white" />
           </div>
-          <span className="font-bold text-lg text-gray-900 dark:text-white">Covalent</span>
+          <span className="font-bold text-lg text-gray-900 dark:text-white">RushilAI</span>
         </div>
       </nav>
 
@@ -105,7 +105,7 @@ export default function LandingPage() {
         </h1>
 
         <p className="text-lg text-gray-500 dark:text-gray-400 max-w-xl mx-auto mb-10">
-          Covalent generates structured, adaptive learning paths tailored to your pace and style. Powered by AI, designed for you.
+          RushilAI generates structured, adaptive learning paths tailored to your pace and style. Powered by AI, designed for you.
         </p>
 
         {/* Google Sign In */}

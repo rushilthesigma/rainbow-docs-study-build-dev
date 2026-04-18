@@ -12,6 +12,7 @@ const _require = createRequire(import.meta.url);
 const pdfParse = _require('pdf-parse');
 import {
   buildCurriculumPrompt, buildLessonPrompt, buildLessonChatPrompt,
+  buildStandaloneLessonPrompt,
   buildStudyModePrompt, buildGoalMilestonesPrompt, buildAssessmentPrompt,
   buildFlashcardPrompt, buildCueGenerationPrompt, buildSummaryPrompt,
 } from './prompts.js';
@@ -166,6 +167,7 @@ function createDefaultData() {
     notes: [],
     studySessions: [],
     assessmentHistory: [],
+    lessons: [],
   };
 }
 
@@ -845,6 +847,50 @@ app.get('/api/study/streak', authMiddleware, (req, res) => {
 
 const LESSON_PHASES = ['introduction', 'explanation', 'check_understanding', 'deeper_dive', 'practice'];
 
+// Max assistant turns we allow in a single phase before we forcibly advance.
+// Prevents a lesson getting stuck when the model forgets the status marker.
+const PHASE_TURN_CAPS = {
+  introduction: 2,
+  explanation: 5,
+  check_understanding: 6,
+  deeper_dive: 4,
+  practice: 6,
+};
+
+function countAssistantTurnsInPhase(lesson) {
+  if (!lesson.phaseStartIndex && lesson.phaseStartIndex !== 0) lesson.phaseStartIndex = 0;
+  let count = 0;
+  for (let i = lesson.phaseStartIndex; i < (lesson.chatHistory || []).length; i++) {
+    if (lesson.chatHistory[i].role === 'assistant') count++;
+  }
+  return count;
+}
+
+// Returns true if phase advanced (or lesson completed).
+function advancePhaseIfNeeded(lesson, fullContent) {
+  const currentIdx = LESSON_PHASES.indexOf(lesson.phase);
+  if (currentIdx < 0) return false;
+
+  // 1. Explicit model signal — [STATUS: advance] OR legacy [PHASE_COMPLETE]
+  const modelSaidAdvance = /\[STATUS:\s*advance\]/i.test(fullContent)
+    || fullContent.includes('[PHASE_COMPLETE]')
+    || fullContent.includes('[LESSON_COMPLETE]');
+
+  // 2. Safety fallback — too many turns in this phase
+  const turnsInPhase = countAssistantTurnsInPhase(lesson);
+  const cap = PHASE_TURN_CAPS[lesson.phase] ?? 5;
+  const hitCap = turnsInPhase >= cap;
+
+  if (!modelSaidAdvance && !hitCap) return false;
+
+  if (currentIdx < LESSON_PHASES.length - 1) {
+    lesson.phase = LESSON_PHASES[currentIdx + 1];
+    lesson.phaseStartIndex = (lesson.chatHistory || []).length;
+    return true;
+  }
+  return false;
+}
+
 // Helper: stream AI response as SSE
 async function streamAIResponse(res, systemPrompt, messages, onComplete) {
   if (!res.headersSent) {
@@ -953,13 +999,8 @@ app.post('/api/curriculum/:id/lesson/:lessonId/chat', authMiddleware, async (req
       // Save AI response to chat history
       lesson.chatHistory.push({ role: 'assistant', content: fullContent, timestamp: new Date().toISOString() });
 
-      // Check for phase transition
-      if (fullContent.includes('[PHASE_COMPLETE]')) {
-        const currentIdx = LESSON_PHASES.indexOf(lesson.phase);
-        if (currentIdx < LESSON_PHASES.length - 1) {
-          lesson.phase = LESSON_PHASES[currentIdx + 1];
-        }
-      }
+      // Phase transition: model signal OR turn-cap fallback
+      advancePhaseIfNeeded(lesson, fullContent);
 
       // Check for lesson completion
       if (fullContent.includes('[LESSON_COMPLETE]')) {
@@ -2084,6 +2125,204 @@ function adminMiddleware(req, res, next) {
   if (!isAdmin(req.userId)) return res.status(403).json({ error: 'Not authorized' });
   next();
 }
+
+// ===== STANDALONE LESSONS =====
+// A simple single-lesson-at-a-time app: user requests a topic, gets one lesson,
+// and can chat through the same 5-phase flow as curriculum lessons.
+
+function findLesson(userData, lessonId) {
+  return (userData.lessons || []).find(l => l.id === lessonId);
+}
+
+// List lessons (newest first)
+app.get('/api/lessons', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const lessons = (users[email].data.lessons || [])
+      .slice()
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+      .map(l => ({
+        id: l.id,
+        topic: l.topic,
+        title: l.title,
+        description: l.description,
+        difficulty: l.difficulty,
+        isCompleted: !!l.isCompleted,
+        createdAt: l.createdAt,
+        lastActiveAt: l.lastActiveAt,
+        messageCount: (l.chatHistory || []).length,
+      }));
+    res.json({ lessons });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Create a new standalone lesson (no AI generation — we just record the topic.
+// The actual teaching happens in the chat endpoint below.)
+app.post('/api/lessons', authMiddleware, (req, res) => {
+  try {
+    const { topic, difficulty } = req.body || {};
+    if (!topic || !topic.trim()) return res.status(400).json({ error: 'Topic required' });
+
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+
+    const cleanTopic = topic.trim().slice(0, 200);
+    const id = `lesson-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const lesson = {
+      id,
+      topic: cleanTopic,
+      title: cleanTopic,
+      description: `Single lesson on ${cleanTopic}`,
+      difficulty: difficulty || users[email].data.preferences?.defaultDifficulty || 'beginner',
+      type: 'lesson',
+      chatHistory: [],
+      isCompleted: false,
+      createdAt: Date.now(),
+      lastActiveAt: Date.now(),
+    };
+    if (!users[email].data.lessons) users[email].data.lessons = [];
+    users[email].data.lessons.unshift(lesson);
+    saveUsers(users);
+    res.json({ lesson });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get single lesson
+app.get('/api/lessons/:id', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const lesson = findLesson(users[email].data, req.params.id);
+    if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
+    res.json({ lesson });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Delete a lesson
+app.delete('/api/lessons/:id', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const before = (users[email].data.lessons || []).length;
+    users[email].data.lessons = (users[email].data.lessons || []).filter(l => l.id !== req.params.id);
+    if (users[email].data.lessons.length === before) return res.status(404).json({ error: 'Lesson not found' });
+    saveUsers(users);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Chat history
+app.get('/api/lessons/:id/history', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const lesson = findLesson(users[email].data, req.params.id);
+    if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
+    res.json({
+      chatHistory: lesson.chatHistory || [],
+      isCompleted: !!lesson.isCompleted,
+      completionData: lesson.completionData || null,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Reset
+app.post('/api/lessons/:id/reset', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const lesson = findLesson(users[email].data, req.params.id);
+    if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
+    lesson.chatHistory = [];
+    lesson.isCompleted = false;
+    lesson.completionData = null;
+    lesson.lastActiveAt = Date.now();
+    saveUsers(users);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Chat (SSE) — free-form single-lesson teaching. No phases; AI decides when done via [LESSON_DONE].
+app.post('/api/lessons/:id/chat', authMiddleware, async (req, res) => {
+  try {
+    const { message } = req.body || {};
+    if (!message) return res.status(400).json({ error: 'Message required' });
+
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+
+    const lesson = findLesson(users[email].data, req.params.id);
+    if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
+
+    if (!lesson.chatHistory) lesson.chatHistory = [];
+
+    lesson.chatHistory.push({ role: 'user', content: message, timestamp: new Date().toISOString() });
+    lesson.lastActiveAt = Date.now();
+
+    const systemPrompt = buildStandaloneLessonPrompt(
+      lesson,
+      { difficulty: lesson.difficulty || 'beginner' },
+      users[email].data.profile, users[email].data.preferences, lesson.chatHistory
+    );
+    const aiMessages = lesson.chatHistory.map(m => ({ role: m.role, content: m.content }));
+
+    await streamAIResponse(res, systemPrompt, aiMessages, async (fullContent) => {
+      lesson.chatHistory.push({ role: 'assistant', content: fullContent, timestamp: new Date().toISOString() });
+
+      // Completion — AI-decided. Accepts [LESSON_DONE] (new) and [LESSON_COMPLETE] (legacy).
+      const doneMatch = fullContent.match(/\[LESSON_(?:DONE|COMPLETE)\]\s*(\{[^}]+\})/);
+      const hasDoneMarker = doneMatch || /\[LESSON_(?:DONE|COMPLETE)\]/.test(fullContent);
+      if (hasDoneMarker) {
+        lesson.isCompleted = true;
+        if (doneMatch) {
+          try {
+            const completionData = JSON.parse(doneMatch[1]);
+            lesson.completionData = completionData;
+            const xp = completionData.xpEarned || 20;
+            users[email].data.profile.xp = (users[email].data.profile.xp || 0) + xp;
+            if (users[email].data.profile.xp >= users[email].data.profile.xpToNextLevel) {
+              users[email].data.profile.level++;
+              users[email].data.profile.xp -= users[email].data.profile.xpToNextLevel;
+              users[email].data.profile.xpToNextLevel = Math.floor(users[email].data.profile.xpToNextLevel * 1.5);
+            }
+          } catch {}
+        }
+        const today = new Date().toISOString().slice(0, 10);
+        const streaks = users[email].data.studyStreaks;
+        if (!users[email].data.dailyLog[today]) users[email].data.dailyLog[today] = { lessonsCompleted: 0 };
+        users[email].data.dailyLog[today].lessonsCompleted++;
+        if (streaks.lastActiveDate !== today) {
+          const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+          streaks.currentStreak = streaks.lastActiveDate === yesterday ? streaks.currentStreak + 1 : 1;
+          streaks.lastActiveDate = today;
+          if (streaks.currentStreak > streaks.longestStreak) streaks.longestStreak = streaks.currentStreak;
+        }
+        streaks.weeklyActivity[new Date().getDay()] = (streaks.weeklyActivity[new Date().getDay()] || 0) + 1;
+      }
+
+      saveUsers(users);
+    });
+  } catch (e) {
+    console.error('Standalone lesson chat error:', e);
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+  }
+});
+
 
 // Check if current user is admin
 app.get('/api/admin/check', authMiddleware, (req, res) => {

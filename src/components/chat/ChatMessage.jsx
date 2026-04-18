@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import { Check, X } from 'lucide-react';
 
 const CURSOR = '\u200B@@CURSOR@@';
@@ -68,15 +71,26 @@ export default function ChatMessage({ message, isStreaming }) {
   const isUser = message.role === 'user';
   const raw = message.content || '';
 
-  // Extract quiz blocks
+  // Extract quiz blocks — only render the inline quiz UI when the full block has arrived
   const quizMatch = raw.match(/\[QUIZ_START\]\s*([\s\S]*?)\s*\[QUIZ_END\]/);
   const quizJson = quizMatch ? quizMatch[1].trim() : null;
+  const quizStreaming = !quizJson && raw.includes('[QUIZ_START]');
 
-  const displayContent = raw
+  let displayContent = raw;
+
+  // While streaming: drop any partial quiz block so the raw JSON doesn't flash in the bubble.
+  // Also drop an unclosed [LESSON_DONE]{... block so the JSON tail doesn't show up either.
+  if (quizStreaming) displayContent = displayContent.replace(/\[QUIZ_START\][\s\S]*$/, '');
+  displayContent = displayContent.replace(/\[LESSON_DONE\]\s*\{[^}]*$/g, '');
+
+  displayContent = displayContent
     .replace(/\[PHASE_COMPLETE\]/g, '')
     .replace(/\[LESSON_COMPLETE\]\s*\{[^}]*\}/g, '')
+    .replace(/\[LESSON_DONE\]\s*\{[^}]*\}/g, '')
+    .replace(/\[LESSON_DONE\]/g, '')
     .replace(/\[QUIZ_START\][\s\S]*?\[QUIZ_END\]/g, '')
     .replace(/\[MILESTONE_COMPLETE:[^\]]+\]/g, '')
+    .replace(/\[STATUS:\s*(advance|stay|next)\s*\]/gi, '')
     .trim();
 
   if (!displayContent && !quizJson && !isStreaming) return null;
@@ -97,7 +111,8 @@ export default function ChatMessage({ message, isStreaming }) {
             {displayContent && (
               <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1.5 prose-headings:my-2 prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-code:bg-gray-100 dark:prose-code:bg-[#161622] prose-code:px-1 prose-code:rounded prose-pre:bg-gray-900 dark:prose-pre:bg-[#0D0D14] prose-pre:rounded-lg">
                 <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
+                  remarkPlugins={[remarkGfm, remarkMath]}
+                  rehypePlugins={[rehypeKatex]}
                   components={{
                     p: ({ children, ...props }) => <p {...props}>{injectCursor(children)}</p>,
                     li: ({ children, ...props }) => <li {...props}>{injectCursor(children)}</li>,
@@ -108,6 +123,12 @@ export default function ChatMessage({ message, isStreaming }) {
                 >
                   {contentWithCursor}
                 </ReactMarkdown>
+              </div>
+            )}
+            {quizStreaming && !quizJson && (
+              <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+                <span className="inline-block w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />
+                <span className="text-xs text-blue-700 dark:text-blue-400 font-medium">Generating quiz…</span>
               </div>
             )}
             {quizJson && <InlineQuiz quizJson={quizJson} />}

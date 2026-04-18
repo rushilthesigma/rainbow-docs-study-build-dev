@@ -25,7 +25,7 @@ export default function Sidebar({ hidden, onNavigate }) {
         <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center flex-shrink-0">
           <BookOpen size={18} className="text-white" />
         </div>
-        <span className="font-bold text-lg text-gray-900 dark:text-white">Covalent</span>
+        <span className="font-bold text-lg text-gray-900 dark:text-white">RushilAI</span>
       </div>
 
       <nav className="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">

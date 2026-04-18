@@ -58,7 +58,7 @@ export default function MenuBar({ onSpotlight }) {
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-1.5">
           <BookOpen size={14} className={dark ? 'text-white/90' : 'text-gray-800'} />
-          <span className={`font-semibold ${dark ? 'text-white/90' : 'text-gray-800'}`}>Covalent</span>
+          <span className={`font-semibold ${dark ? 'text-white/90' : 'text-gray-800'}`}>RushilAI</span>
         </div>
         {activeApp && (
           <>

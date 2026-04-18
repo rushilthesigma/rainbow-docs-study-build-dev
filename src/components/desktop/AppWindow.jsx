@@ -1,4 +1,5 @@
 import CurriculaApp from './apps/CurriculaApp';
+import LessonsApp from './apps/LessonsApp';
 import FlashcardsApp from './apps/FlashcardsApp';
 import DebateApp from './apps/DebateApp';
 import NotesApp from './apps/NotesApp';
@@ -14,6 +15,7 @@ import SettingsPage from '../../pages/SettingsPage';
 
 const APP_COMPONENTS = {
   curricula: CurriculaApp,
+  lessons: LessonsApp,
   study: StudyPage,
   flashcards: FlashcardsApp,
   notes: NotesApp,

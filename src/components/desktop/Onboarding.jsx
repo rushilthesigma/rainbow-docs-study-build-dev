@@ -48,7 +48,7 @@ export default function Onboarding({ onComplete }) {
             <div className="w-20 h-20 rounded-2xl bg-blue-600 flex items-center justify-center mx-auto mb-6 shadow-xl shadow-blue-500/20">
               <BookOpen size={40} className="text-white" />
             </div>
-            <h1 className={`text-3xl font-bold ${textPrimary} mb-2`}>Welcome to Covalent</h1>
+            <h1 className={`text-3xl font-bold ${textPrimary} mb-2`}>Welcome to RushilAI</h1>
             <p className={`${textSecondary} mb-8`}>Let's set things up.</p>
             <button onClick={() => setStep(1)} className={`px-8 py-3 rounded-xl ${btnBg} font-medium transition-colors`}>
               Continue <ChevronRight size={16} className="inline ml-1" />
