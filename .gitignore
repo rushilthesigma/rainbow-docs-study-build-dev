@@ -7,5 +7,6 @@ users.json
 sessions.json
 social.json
 textbooks.json
+parties.json
 *.log
 .DS_Store

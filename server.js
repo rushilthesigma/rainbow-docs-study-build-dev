@@ -2324,6 +2324,346 @@ app.post('/api/lessons/:id/chat', authMiddleware, async (req, res) => {
 });
 
 
+// =========================================================
+// QUIZ BOWL MULTIPLAYER — Parties + realtime synced game
+// =========================================================
+const PARTIES_FILE = join(DATA_DIR, 'parties.json');
+function loadParties() {
+  try { return JSON.parse(readFileSync(PARTIES_FILE, 'utf-8')); } catch { return { parties: {}, invites: {} }; }
+}
+function saveParties(data) {
+  try { writeFileSync(PARTIES_FILE, JSON.stringify(data, null, 2)); } catch (e) { console.error('parties save failed', e); }
+}
+function getSocialDisplay(userId) {
+  const social = loadSocial();
+  const p = social.profiles[userId];
+  if (p) return { userId, handle: p.handle, displayName: p.displayName };
+  const users = loadUsers();
+  const email = findEmailById(users, userId);
+  return { userId, handle: null, displayName: users[email]?.name || 'Player' };
+}
+// Remove question.answer from the polled state so clients can't cheat
+function scrubGameForPolling(game) {
+  if (!game) return null;
+  const clone = JSON.parse(JSON.stringify(game));
+  if (Array.isArray(clone.questions)) {
+    clone.questions = clone.questions.map((q, i) => {
+      // Only reveal the answer for already-resolved questions
+      if (i < clone.currentQ) return q;
+      if (i === clone.currentQ && clone.questionResolved) return q;
+      return { text: q.text }; // hide answer until resolved
+    });
+  }
+  return clone;
+}
+function findPartyForUser(state, userId) {
+  return Object.values(state.parties).find(p => p.leaderId === userId || p.members.includes(userId));
+}
+
+// ---- Party CRUD ----
+app.post('/api/parties', authMiddleware, (req, res) => {
+  const { name } = req.body || {};
+  const state = loadParties();
+  // Leaving any existing party first (a user can only be in one)
+  const existing = findPartyForUser(state, req.userId);
+  if (existing) {
+    if (existing.leaderId === req.userId) delete state.parties[existing.id];
+    else existing.members = existing.members.filter(m => m !== req.userId);
+  }
+  const id = `party-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const party = {
+    id,
+    name: (name || '').trim().slice(0, 40) || `${getSocialDisplay(req.userId).displayName}'s party`,
+    leaderId: req.userId,
+    members: [req.userId],
+    game: null,
+    createdAt: Date.now(),
+  };
+  state.parties[id] = party;
+  saveParties(state);
+  res.json({ party });
+});
+
+app.get('/api/parties/mine', authMiddleware, (req, res) => {
+  const state = loadParties();
+  const party = findPartyForUser(state, req.userId);
+  const pendingInvites = Object.values(state.invites || {})
+    .filter(i => i.toUserId === req.userId && !i.resolved)
+    .map(i => ({ ...i, from: getSocialDisplay(i.fromUserId), partyName: state.parties[i.partyId]?.name || 'Party' }));
+  const hydrated = party ? {
+    ...party,
+    leader: getSocialDisplay(party.leaderId),
+    memberProfiles: party.members.map(getSocialDisplay),
+  } : null;
+  res.json({ party: hydrated, invites: pendingInvites });
+});
+
+app.post('/api/parties/:id/invite', authMiddleware, (req, res) => {
+  const { userId: toUserId } = req.body || {};
+  if (!toUserId) return res.status(400).json({ error: 'userId required' });
+  const state = loadParties();
+  const party = state.parties[req.params.id];
+  if (!party) return res.status(404).json({ error: 'Party not found' });
+  if (party.leaderId !== req.userId) return res.status(403).json({ error: 'Only leader can invite' });
+  if (party.members.includes(toUserId)) return res.status(409).json({ error: 'Already in party' });
+  if (party.members.length >= 8) return res.status(409).json({ error: 'Party full (max 8)' });
+  state.invites = state.invites || {};
+  const inviteId = `inv-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  state.invites[inviteId] = { id: inviteId, partyId: party.id, fromUserId: req.userId, toUserId, createdAt: Date.now(), resolved: false };
+  saveParties(state);
+  res.json({ invite: state.invites[inviteId] });
+});
+
+app.post('/api/parties/invites/:inviteId/accept', authMiddleware, (req, res) => {
+  const state = loadParties();
+  const inv = (state.invites || {})[req.params.inviteId];
+  if (!inv || inv.toUserId !== req.userId) return res.status(404).json({ error: 'Invite not found' });
+  if (inv.resolved) return res.status(409).json({ error: 'Already resolved' });
+  const party = state.parties[inv.partyId];
+  if (!party) { inv.resolved = true; saveParties(state); return res.status(404).json({ error: 'Party gone' }); }
+
+  // Leave any other party
+  const other = findPartyForUser(state, req.userId);
+  if (other && other.id !== party.id) {
+    if (other.leaderId === req.userId) delete state.parties[other.id];
+    else other.members = other.members.filter(m => m !== req.userId);
+  }
+
+  if (!party.members.includes(req.userId)) party.members.push(req.userId);
+  inv.resolved = true;
+  saveParties(state);
+  res.json({ party });
+});
+
+app.post('/api/parties/invites/:inviteId/decline', authMiddleware, (req, res) => {
+  const state = loadParties();
+  const inv = (state.invites || {})[req.params.inviteId];
+  if (!inv || inv.toUserId !== req.userId) return res.status(404).json({ error: 'Invite not found' });
+  inv.resolved = true;
+  saveParties(state);
+  res.json({ success: true });
+});
+
+app.post('/api/parties/:id/leave', authMiddleware, (req, res) => {
+  const state = loadParties();
+  const party = state.parties[req.params.id];
+  if (!party) return res.status(404).json({ error: 'Party not found' });
+  if (party.leaderId === req.userId) delete state.parties[req.params.id];
+  else party.members = party.members.filter(m => m !== req.userId);
+  saveParties(state);
+  res.json({ success: true });
+});
+
+app.post('/api/parties/:id/kick', authMiddleware, (req, res) => {
+  const { userId } = req.body || {};
+  const state = loadParties();
+  const party = state.parties[req.params.id];
+  if (!party) return res.status(404).json({ error: 'Party not found' });
+  if (party.leaderId !== req.userId) return res.status(403).json({ error: 'Only leader can kick' });
+  party.members = party.members.filter(m => m !== userId);
+  saveParties(state);
+  res.json({ party });
+});
+
+// ---- Game (realtime synced) ----
+async function generateQuizQuestions(category, difficulty, count, customInstructions) {
+  const systemPrompt = `You are a quiz bowl question writer. Write pyramidal quiz bowl tossup questions.
+- Each question is a single paragraph that starts with hard clues and progressively gets easier.
+- The answer should be guessable from the first few clues by experts, but obvious by the end.
+- Write exactly the number of questions requested.
+- Output ONLY valid JSON, no markdown. Format: {"questions":[{"text":"...","answer":"..."}]}`;
+  const userPrompt = `Generate ${count} pyramidal quiz bowl tossup questions.
+Category: ${category}
+Difficulty: ${difficulty}
+${customInstructions ? `\nAdditional: ${customInstructions}` : ''}
+Return JSON: {"questions":[{"text":"...","answer":"..."}]}`;
+
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({ model: DEFAULT_MODEL, max_tokens: 8192, system: systemPrompt, messages: [{ role: 'user', content: userPrompt }] }),
+  });
+  if (!resp.ok) throw new Error('Question generation failed');
+  const data = await resp.json();
+  const text = data.content?.[0]?.text || '';
+  let parsed;
+  try { parsed = JSON.parse(text); } catch { const m = text.match(/\{[\s\S]*\}/); if (m) parsed = JSON.parse(m[0]); }
+  if (!parsed?.questions?.length) throw new Error('Bad question format');
+  return parsed.questions;
+}
+
+app.post('/api/parties/:id/game', authMiddleware, async (req, res) => {
+  const { category = 'Mixed', difficulty = 'Medium', count = 10, customInstructions = '', revealSpeedMs = 140 } = req.body || {};
+  const speed = Math.max(60, Math.min(400, Number(revealSpeedMs) || 140));
+  const state = loadParties();
+  const party = state.parties[req.params.id];
+  if (!party) return res.status(404).json({ error: 'Party not found' });
+  if (party.leaderId !== req.userId) return res.status(403).json({ error: 'Only leader can start' });
+
+  try {
+    const questions = await generateQuizQuestions(category, difficulty, Math.min(Math.max(3, count), 30), customInstructions);
+    const scores = {};
+    party.members.forEach(m => { scores[m] = 0; });
+    party.game = {
+      id: `g-${Date.now()}`,
+      category, difficulty, count: questions.length,
+      questions,
+      currentQ: 0,
+      questionStartedAt: Date.now(),
+      revealSpeedMs: speed,              // ms per word
+      scores,
+      answeredBy: {},                  // { qIndex: [userIds who got it wrong and are locked out] }
+      buzzedBy: null, buzzedAt: null, buzzedWord: null,
+      lastAnswer: null,                // { userId, text, correct }
+      questionResolved: false,         // true once correctly answered or timed out
+      status: 'playing',               // 'playing' | 'finished'
+      startedAt: Date.now(),
+    };
+    saveParties(state);
+    res.json({ game: scrubGameForPolling(party.game) });
+  } catch (e) {
+    console.error('game start failed', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/parties/:id/state', authMiddleware, (req, res) => {
+  const state = loadParties();
+  const party = state.parties[req.params.id];
+  if (!party) return res.status(404).json({ error: 'Party not found' });
+  if (!party.members.includes(req.userId)) return res.status(403).json({ error: 'Not in party' });
+
+  // Auto-resolve after question end + 2s grace if no one got it
+  const g = party.game;
+  let dirty = false;
+  if (g && g.status === 'playing' && !g.questionResolved) {
+    const q = g.questions[g.currentQ];
+    const words = (q?.text || '').split(/\s+/).length;
+    const graceEnd = g.questionStartedAt + words * g.revealSpeedMs + 2500;
+    if (Date.now() > graceEnd && !g.buzzedBy) {
+      g.questionResolved = true;
+      g.lastAnswer = { userId: null, text: '(timeout)', correct: false };
+      dirty = true;
+    }
+    // Buzz timeout — 10s after buzz with no answer submitted = auto-wrong
+    if (g.buzzedBy && g.buzzedAt && !g.lastAnswer && Date.now() > g.buzzedAt + 10000) {
+      g.answeredBy[g.currentQ] = [...(g.answeredBy[g.currentQ] || []), g.buzzedBy];
+      g.lastAnswer = { userId: g.buzzedBy, text: '(no answer)', correct: false };
+      g.buzzedBy = null; g.buzzedAt = null; g.buzzedWord = null;
+      // Everyone else can still buzz on this question
+      dirty = true;
+    }
+  }
+  if (dirty) saveParties(state);
+
+  res.json({
+    party: {
+      id: party.id, name: party.name, leaderId: party.leaderId,
+      memberProfiles: party.members.map(getSocialDisplay),
+    },
+    game: scrubGameForPolling(party.game),
+    serverNow: Date.now(),
+  });
+});
+
+app.post('/api/parties/:id/game/buzz', authMiddleware, (req, res) => {
+  const state = loadParties();
+  const party = state.parties[req.params.id];
+  if (!party?.game) return res.status(404).json({ error: 'No active game' });
+  if (!party.members.includes(req.userId)) return res.status(403).json({ error: 'Not in party' });
+  const g = party.game;
+  if (g.status !== 'playing' || g.questionResolved) return res.status(409).json({ error: 'Question over' });
+  if ((g.answeredBy[g.currentQ] || []).includes(req.userId)) return res.status(409).json({ error: 'Already locked out' });
+  if (g.buzzedBy) return res.status(409).json({ error: 'Already buzzed', buzzedBy: g.buzzedBy });
+
+  const elapsed = Date.now() - g.questionStartedAt;
+  const qWords = (g.questions[g.currentQ]?.text || '').split(/\s+/).length;
+  const word = Math.min(qWords - 1, Math.floor(elapsed / g.revealSpeedMs));
+  g.buzzedBy = req.userId;
+  g.buzzedAt = Date.now();
+  g.buzzedWord = word;
+  g.lastAnswer = null;
+  saveParties(state);
+  res.json({ ok: true, buzzedBy: req.userId, buzzedWord: word });
+});
+
+function checkAnswer(given, correct) {
+  const norm = s => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s]/g, '').trim();
+  const a = norm(given), c = norm(correct);
+  if (!a || !c) return false;
+  if (a === c || c.includes(a) || a.includes(c)) return true;
+  function lev(s1, s2) {
+    const m = s1.length, n = s2.length;
+    if (!m) return n; if (!n) return m;
+    const d = Array.from({ length: m + 1 }, (_, i) => [i]);
+    for (let j = 1; j <= n; j++) d[0][j] = j;
+    for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++)
+      d[i][j] = Math.min(d[i-1][j] + 1, d[i][j-1] + 1, d[i-1][j-1] + (s1[i-1] !== s2[j-1] ? 1 : 0));
+    return d[m][n];
+  }
+  const dist = lev(a, c);
+  if (dist <= Math.max(1, Math.floor(c.length * 0.25))) return true;
+  const cWords = c.split(/\s+/).filter(w => w.length > 2);
+  if (cWords.some(w => a.includes(w) || lev(a, w) <= 1)) return true;
+  return false;
+}
+
+app.post('/api/parties/:id/game/answer', authMiddleware, (req, res) => {
+  const { answer } = req.body || {};
+  if (typeof answer !== 'string') return res.status(400).json({ error: 'answer required' });
+  const state = loadParties();
+  const party = state.parties[req.params.id];
+  if (!party?.game) return res.status(404).json({ error: 'No active game' });
+  const g = party.game;
+  if (g.buzzedBy !== req.userId) return res.status(403).json({ error: 'Not your buzz' });
+  if (g.questionResolved) return res.status(409).json({ error: 'Question over' });
+
+  const q = g.questions[g.currentQ];
+  const correct = checkAnswer(answer, q.answer);
+  g.lastAnswer = { userId: req.userId, text: answer, correct };
+  if (correct) {
+    g.scores[req.userId] = (g.scores[req.userId] || 0) + 1;
+    g.questionResolved = true;
+  } else {
+    // Wrong: lock this user out of this question, clear buzz so others may try
+    g.answeredBy[g.currentQ] = [...(g.answeredBy[g.currentQ] || []), req.userId];
+    g.buzzedBy = null; g.buzzedAt = null; g.buzzedWord = null;
+  }
+  saveParties(state);
+  res.json({ correct });
+});
+
+app.post('/api/parties/:id/game/advance', authMiddleware, (req, res) => {
+  const state = loadParties();
+  const party = state.parties[req.params.id];
+  if (!party?.game) return res.status(404).json({ error: 'No active game' });
+  if (party.leaderId !== req.userId) return res.status(403).json({ error: 'Only leader can advance' });
+  const g = party.game;
+
+  if (g.currentQ >= g.count - 1) {
+    g.status = 'finished';
+    g.finishedAt = Date.now();
+  } else {
+    g.currentQ++;
+    g.questionStartedAt = Date.now();
+    g.buzzedBy = null; g.buzzedAt = null; g.buzzedWord = null;
+    g.lastAnswer = null;
+    g.questionResolved = false;
+  }
+  saveParties(state);
+  res.json({ ok: true, game: scrubGameForPolling(g) });
+});
+
+app.post('/api/parties/:id/game/end', authMiddleware, (req, res) => {
+  const state = loadParties();
+  const party = state.parties[req.params.id];
+  if (!party) return res.status(404).json({ error: 'Party not found' });
+  if (party.leaderId !== req.userId) return res.status(403).json({ error: 'Only leader can end' });
+  party.game = null;
+  saveParties(state);
+  res.json({ success: true });
+});
+
 // Check if current user is admin
 app.get('/api/admin/check', authMiddleware, (req, res) => {
   res.json({ isAdmin: isAdmin(req.userId) });

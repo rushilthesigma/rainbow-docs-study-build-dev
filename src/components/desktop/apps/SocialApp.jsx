@@ -153,6 +153,8 @@ export default function SocialApp() {
 
   // Friend requests
   const [friendRequests, setFriendRequests] = useState([]);
+  // Track per-user add status for in-search-results feedback
+  const [addedStatus, setAddedStatus] = useState({}); // { userId: 'sent' | 'accepted' | 'already_friends' | 'already_sent' | 'error' }
 
   function refreshRequests() {
     getFriendRequests().then(d => setFriendRequests(d.requests || [])).catch(() => {});
@@ -161,8 +163,15 @@ export default function SocialApp() {
   useEffect(() => { if (profile) refreshRequests(); }, [profile]);
 
   async function handleSendRequest(userId) {
-    const result = await sendFriendRequest(userId);
-    if (result.status === 'accepted') refreshHome();
+    setAddedStatus(p => ({ ...p, [userId]: 'pending' }));
+    try {
+      const result = await sendFriendRequest(userId);
+      setAddedStatus(p => ({ ...p, [userId]: result.status || 'sent' }));
+      if (result.status === 'accepted') refreshHome();
+    } catch (err) {
+      setAddedStatus(p => ({ ...p, [userId]: 'error' }));
+      console.error('Add friend failed', err);
+    }
   }
 
   async function handleAccept(requestId) {
@@ -289,9 +298,25 @@ export default function SocialApp() {
                 </div>
                 {isFriend ? (
                   <span className="text-[10px] text-emerald-500 font-medium">Friends</span>
-                ) : (
-                  <button onClick={() => handleSendRequest(u.userId)} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-600 text-white text-xs"><UserPlus size={12} /> Add</button>
-                )}
+                ) : (() => {
+                  const s = addedStatus[u.userId];
+                  if (s === 'accepted') return <span className="text-[10px] text-emerald-500 font-medium">Friends</span>;
+                  if (s === 'sent' || s === 'already_sent') return <span className="text-[10px] text-gray-400 font-medium px-2 py-1">Requested</span>;
+                  if (s === 'already_friends') return <span className="text-[10px] text-emerald-500 font-medium">Friends</span>;
+                  if (s === 'error') return (
+                    <button onClick={() => handleSendRequest(u.userId)} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-600 text-white text-xs">Retry</button>
+                  );
+                  const pending = s === 'pending';
+                  return (
+                    <button
+                      onClick={() => handleSendRequest(u.userId)}
+                      disabled={pending}
+                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs disabled:opacity-60"
+                    >
+                      <UserPlus size={12} /> {pending ? 'Adding…' : 'Add'}
+                    </button>
+                  );
+                })()}
               </div>
             );
           })}
