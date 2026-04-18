@@ -335,11 +335,22 @@ function MultiplayerGame({ party, onExit, currentUserId }) {
   const [wordIndex, setWordIndex] = useState(0);
   const [totalWords, setTotalWords] = useState(0);
   useEffect(() => {
-    if (!g || g.questionResolved) { setWordIndex(Math.max(totalWords - 1, 0)); return; }
+    if (!g) return;
     const q = g.questions?.[g.currentQ];
     if (!q) return;
     const words = q.text.split(/\s+/).length;
     setTotalWords(words);
+
+    // Resolved → jump to end of text
+    if (g.questionResolved) { setWordIndex(Math.max(words - 1, 0)); return; }
+
+    // Someone buzzed → freeze the reveal at the word they buzzed on
+    if (g.buzzedBy) {
+      const frozen = typeof g.buzzedWord === 'number' ? Math.min(words - 1, Math.max(0, g.buzzedWord)) : 0;
+      setWordIndex(frozen);
+      return;
+    }
+
     const speed = g.revealSpeedMs || 140;
     function tick() {
       const elapsed = Date.now() - serverOffset - g.questionStartedAt;
@@ -349,7 +360,7 @@ function MultiplayerGame({ party, onExit, currentUserId }) {
     tick();
     const id = setInterval(tick, 50);
     return () => clearInterval(id);
-  }, [g?.currentQ, g?.questionStartedAt, g?.questionResolved, g?.revealSpeedMs, serverOffset]);
+  }, [g?.currentQ, g?.questionStartedAt, g?.questionResolved, g?.revealSpeedMs, g?.buzzedBy, g?.buzzedWord, serverOffset]);
 
   if (!g) {
     return (
@@ -380,7 +391,16 @@ function MultiplayerGame({ party, onExit, currentUserId }) {
             </div>
           ))}
         </div>
-        <button onClick={onExit} className="w-full py-3 rounded-xl bg-blue-600 text-white text-sm font-medium">Back to Lobby</button>
+        <button
+          onClick={async () => {
+            // Leader clears the server game so the next "Start Round" begins clean.
+            if (isLeader) { try { await endGame(party.id); } catch {} }
+            onExit();
+          }}
+          className="w-full py-3 rounded-xl bg-blue-600 text-white text-sm font-medium"
+        >
+          Back to Lobby
+        </button>
       </div>
     );
   }
@@ -604,6 +624,7 @@ export default function QuizBowlApp() {
   const [mpView, setMpView] = useState('lobby'); // 'lobby' | 'setup' | 'game'
   const [activeParty, setActiveParty] = useState(null);
   const [currentUserId, setCurrentUserId] = useState(null);
+  const [myHandle, setMyHandle] = useState(undefined); // undefined = still loading; null = no handle; string = handle
 
   // Solo state
   const [view, setView] = useState('setup'); // 'setup' | 'playing' | 'review'
@@ -626,9 +647,10 @@ export default function QuizBowlApp() {
   const q = questions[currentQ];
   const { revealed, done, stop, wordIndex, totalWords } = useWordReveal(q?.text || '', revealSpeedMs, reading && !buzzed && view === 'playing' && mode === 'solo');
 
-  // Get current user id (used throughout mp flow)
+  // Get current user id + social handle (required for multiplayer)
   useEffect(() => {
     apiFetch('/api/auth/me').then(d => setCurrentUserId(d?.id || d?.user?.id)).catch(() => {});
+    apiFetch('/api/social/profile').then(d => setMyHandle(d?.profile?.handle || null)).catch(() => setMyHandle(null));
   }, []);
 
   // Auto-advance mp view based on party.game
@@ -639,7 +661,10 @@ export default function QuizBowlApp() {
       try {
         const d = await getGameState(activeParty.id);
         if (!alive) return;
-        if (d.game && mpView === 'setup') setMpView('game');
+        // Only jump into the game view when an active PLAYING game exists.
+        // (A finished game lingering on the server used to drag the leader
+        // back into the end screen as soon as they opened Setup.)
+        if (d.game?.status === 'playing' && mpView === 'setup') setMpView('game');
         if (!d.game && mpView === 'game') setMpView('lobby');
       } catch {}
     }
@@ -750,6 +775,46 @@ export default function QuizBowlApp() {
 
   // ====== MULTIPLAYER BRANCH ======
   if (mode === 'multiplayer') {
+    // Require a social handle to play multiplayer
+    if (myHandle === null) {
+      return (
+        <div className="flex flex-col h-full">
+          <TopTabs mode={mode} onChange={setMode} />
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+            <Users size={40} className="text-blue-500 mb-3" />
+            <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-1">Set a handle to play multiplayer</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 max-w-sm mb-5">
+              You need a public <span className="font-medium">@handle</span> so party members can find and invite you.
+              Open the <span className="font-medium">Social</span> app to pick one.
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setMode('solo')} className="px-4 py-2 rounded-lg border border-gray-200 dark:border-[#2A2A40] text-sm text-gray-700 dark:text-gray-300">Back to Solo</button>
+              <button
+                onClick={async () => {
+                  try {
+                    const d = await apiFetch('/api/social/profile');
+                    setMyHandle(d?.profile?.handle || null);
+                  } catch {}
+                }}
+                className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium"
+              >
+                I set my handle — refresh
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    if (myHandle === undefined) {
+      return (
+        <div className="flex flex-col h-full">
+          <TopTabs mode={mode} onChange={setMode} />
+          <div className="flex-1 flex items-center justify-center">
+            <Loader2 size={20} className="animate-spin text-gray-400" />
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="flex flex-col h-full">
         {mpView === 'lobby' && (
