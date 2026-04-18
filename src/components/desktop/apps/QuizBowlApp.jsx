@@ -83,19 +83,25 @@ function PartyLobby({ onStartGame, onJoinLiveGame, currentUserId }) {
   const [loading, setLoading] = useState(true);
   const [showInvite, setShowInvite] = useState(false);
   const [partyName, setPartyName] = useState('');
+  const [creating, setCreating] = useState(false);
+  const creatingRef = useRef(false);
+  const [createError, setCreateError] = useState(null);
+  // Let any handler trigger an immediate refresh so the UI reflects
+  // their action without waiting for the 1-second poll tick.
+  const pokeRef = useRef(() => {});
 
   // Load party + invites; also poll the game state so non-leaders auto-join
   // the game when the leader starts one.
   useEffect(() => {
     let alive = true;
     async function refresh() {
+      if (creatingRef.current) return;
       try {
         const d = await getMyParty();
-        if (!alive) return;
+        if (!alive || creatingRef.current) return;
         setParty(d.party);
         setInvites(d.invites || []);
         setOutgoing(d.outgoingInvites || []);
-        // If we're in a party and a game is active, drop us into the game view.
         if (d.party?.id) {
           try {
             const st = await getGameState(d.party.id);
@@ -106,9 +112,10 @@ function PartyLobby({ onStartGame, onJoinLiveGame, currentUserId }) {
         }
       } catch {}
     }
+    pokeRef.current = refresh;
     refresh();
     setLoading(false);
-    const t = setInterval(refresh, 2000);
+    const t = setInterval(refresh, 1000);
     return () => { alive = false; clearInterval(t); };
   }, [onJoinLiveGame]);
 
@@ -132,56 +139,87 @@ function PartyLobby({ onStartGame, onJoinLiveGame, currentUserId }) {
   }, [searchQuery, showInvite]);
 
   async function handleCreate() {
+    // Hard-guard against double clicks / Enter-spamming — re-entry was
+    // letting two createParty calls race, so the second would clobber
+    // the first and the UI would flash empty.
+    if (creatingRef.current) return;
+    creatingRef.current = true;
+    setCreating(true); setCreateError(null);
+    const nameSnapshot = partyName;
     setPartyName('');
     try {
-      // Create + immediately fetch the hydrated party so the UI doesn't have
-      // to wait for the next 2-second poll tick to show it with member
-      // profiles/handles/plan filled in.
-      const { party: bare } = await createParty(partyName || '');
-      const d = await getMyParty();
-      setParty(d.party || bare);
-      setInvites(d.invites || []);
-      setOutgoing(d.outgoingInvites || []);
-    } catch (e) { console.error(e); }
+      const { party: bare } = await createParty(nameSnapshot || '');
+      // Fetch the hydrated party + pending invites/outgoing in one go.
+      // Retry once if the read is faster than the filesystem write.
+      let hydrated = null;
+      for (let attempt = 0; attempt < 3 && !hydrated; attempt++) {
+        try {
+          const d = await getMyParty();
+          if (d.party?.id) {
+            hydrated = d;
+          } else if (attempt < 2) {
+            await new Promise(r => setTimeout(r, 100));
+          }
+        } catch {}
+      }
+      if (hydrated) {
+        setParty(hydrated.party);
+        setInvites(hydrated.invites || []);
+        setOutgoing(hydrated.outgoingInvites || []);
+      } else {
+        // Fallback: use the bare create response so the user sees SOMETHING
+        setParty({ ...bare, leader: { userId: bare.leaderId }, memberProfiles: [{ userId: bare.leaderId }] });
+      }
+    } catch (e) {
+      setCreateError(e.message || 'Failed to create party');
+      setPartyName(nameSnapshot);  // put the name back so the user can retry
+    } finally {
+      creatingRef.current = false;
+      setCreating(false);
+      pokeRef.current();
+    }
   }
 
   async function handleInvite(friendUserId) {
     try { await invitePlayer(party.id, friendUserId); } catch (e) { alert(e.message); }
+    pokeRef.current();
   }
   async function handleAccept(inviteId) {
-    // Warn if the user is currently leader of another party — accepting
-    // will disband their existing party.
     if (party && party.leaderId === currentUserId) {
       if (!confirm(`Accepting this invite will disband your current party "${party.name}". Continue?`)) return;
     }
     await acceptInvite(inviteId);
-    const d = await getMyParty();
-    setParty(d.party); setInvites(d.invites || []); setOutgoing(d.outgoingInvites || []);
+    pokeRef.current();
   }
   async function handleDecline(inviteId) {
-    await declineInvite(inviteId);
+    // Optimistically remove so the invite disappears instantly.
     setInvites(p => p.filter(i => i.id !== inviteId));
+    try { await declineInvite(inviteId); } catch {}
+    pokeRef.current();
   }
   async function handleLeave() {
     if (!party) return;
-    await leaveParty(party.id);
-    setParty(null);
+    setParty(null);   // optimistic
+    try { await leaveParty(party.id); } catch {}
+    pokeRef.current();
   }
   async function handleDisband() {
     if (!party) return;
     if (!confirm('Disband the party? Everyone will be kicked out.')) return;
-    await disbandParty(party.id);
-    setParty(null); setOutgoing([]);
+    setParty(null); setOutgoing([]);  // optimistic
+    try { await disbandParty(party.id); } catch {}
+    pokeRef.current();
   }
   async function handleKick(userId) {
-    await kickMember(party.id, userId);
-    const d = await getMyParty(); setParty(d.party);
+    // Optimistically drop from member list
+    setParty(p => p ? { ...p, memberProfiles: (p.memberProfiles || []).filter(m => m.userId !== userId), members: (p.members || []).filter(m => m !== userId) } : p);
+    try { await kickMember(party.id, userId); } catch {}
+    pokeRef.current();
   }
   async function handleCancelInvite(inviteId) {
-    try {
-      await cancelInvite(inviteId);
-      setOutgoing(prev => prev.filter(i => i.id !== inviteId));
-    } catch (e) { console.error(e); }
+    setOutgoing(prev => prev.filter(i => i.id !== inviteId));  // optimistic
+    try { await cancelInvite(inviteId); } catch (e) { console.error(e); }
+    pokeRef.current();
   }
 
   const isLeader = party && party.leaderId === currentUserId;
@@ -220,14 +258,23 @@ function PartyLobby({ onStartGame, onJoinLiveGame, currentUserId }) {
             <input
               value={partyName}
               onChange={e => setPartyName(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleCreate()}
+              onKeyDown={e => { if (e.key === 'Enter' && !creating) handleCreate(); }}
+              disabled={creating}
               placeholder="Party name (optional)"
-              className="flex-1 px-3 py-2 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-sm outline-none"
+              className="flex-1 px-3 py-2 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-sm outline-none disabled:opacity-60"
             />
-            <button onClick={handleCreate} className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium flex items-center gap-1">
-              <Plus size={14} /> Create
+            <button
+              onClick={handleCreate}
+              disabled={creating}
+              className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {creating ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+              {creating ? 'Creating…' : 'Create'}
             </button>
           </div>
+          {createError && (
+            <p className="mt-2 text-[11px] text-rose-500">{createError}</p>
+          )}
         </div>
       </div>
     );
@@ -474,7 +521,10 @@ function MultiplayerGame({ party, onExit, currentUserId }) {
   const [tab, setTab] = useState('game'); // 'game' | 'leaderboard'
   const pollRef = useRef(null);
 
-  // Poll state every 300ms
+  // Poll state every 300ms. pokeRef lets action handlers trigger an
+  // immediate poll so the UI reflects their action without waiting for
+  // the next 300ms tick (that was the felt lag on every button click).
+  const pokeRef = useRef(() => {});
   useEffect(() => {
     let alive = true;
     async function poll() {
@@ -483,10 +533,10 @@ function MultiplayerGame({ party, onExit, currentUserId }) {
         const d = await getGameState(party.id);
         if (!alive) return;
         setState(d);
-        // Approximate clock skew
         setServerOffset(Math.floor((sent + Date.now()) / 2) - d.serverNow);
       } catch {}
     }
+    pokeRef.current = poll;
     poll();
     pollRef.current = setInterval(poll, 300);
     return () => { alive = false; clearInterval(pollRef.current); };
@@ -581,13 +631,18 @@ function MultiplayerGame({ party, onExit, currentUserId }) {
   async function handleBuzz() {
     if (someoneBuzzed || g.questionResolved || lockedOut) return;
     try { await buzz(party.id); } catch {}
+    pokeRef.current();  // refresh immediately; don't wait for 300ms poll
   }
   async function handleSubmit() {
     if (!answer.trim() || !iBuzzed) return;
-    try { await submitAnswer(party.id, answer); setAnswer(''); } catch {}
+    const snapshot = answer;
+    setAnswer('');
+    try { await submitAnswer(party.id, snapshot); } catch { setAnswer(snapshot); }
+    pokeRef.current();
   }
   async function handleAdvance() {
     try { await advanceQuestion(party.id); } catch {}
+    pokeRef.current();
   }
   async function handleEnd() {
     if (!confirm('End this game early?')) return;
