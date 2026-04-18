@@ -6,10 +6,14 @@ import ChatContainer from '../chat/ChatContainer';
 export default function StudyModePanel({ className = '', initialMessage }) {
   const [messages, setMessages] = useState([]);
   const [streamingContent, setStreamingContent] = useState('');
+  const [streamingSources, setStreamingSources] = useState([]);
+  const [searchStatus, setSearchStatus] = useState(null);
+  const [sourceMode, setSourceMode] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [sessionId, setSessionId] = useState(null);
   const abortRef = useRef(null);
   const streamContentRef = useRef('');
+  const streamSourcesRef = useRef([]);
   const initialSent = useRef(false);
 
   // History state
@@ -17,35 +21,57 @@ export default function StudyModePanel({ className = '', initialMessage }) {
   const [sessions, setSessions] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
-  function doSend(text) {
+  function doSend(text, opts = {}) {
+    const wasSourced = !!(opts.sourced ?? sourceMode);
     const userMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
     setMessages(prev => [...prev, userMsg]);
     setStreaming(true);
     setStreamingContent('');
+    setStreamingSources([]);
+    setSearchStatus(wasSourced ? 'searching' : null);
     streamContentRef.current = '';
+    streamSourcesRef.current = [];
 
     const abort = sendStudyMessage(text, sessionId, {}, {
       onChunk: (chunk) => {
         streamContentRef.current += chunk;
         setStreamingContent(streamContentRef.current);
+        if (searchStatus) setSearchStatus(null);
       },
       onMeta: (data) => { if (data.sessionId) setSessionId(data.sessionId); },
+      onSource: (src) => {
+        streamSourcesRef.current = [...streamSourcesRef.current, src];
+        setStreamingSources(streamSourcesRef.current);
+      },
+      onStatus: (s) => setSearchStatus(s),
       onDone: () => {
         const fullContent = streamContentRef.current;
+        const sources = streamSourcesRef.current;
         if (fullContent) {
-          setMessages(m => [...m, { role: 'assistant', content: fullContent, timestamp: new Date().toISOString() }]);
+          setMessages(m => [...m, {
+            role: 'assistant',
+            content: fullContent,
+            sources: sources.length ? sources : undefined,
+            timestamp: new Date().toISOString(),
+          }]);
         }
         setStreamingContent('');
+        setStreamingSources([]);
+        setSearchStatus(null);
         streamContentRef.current = '';
+        streamSourcesRef.current = [];
         setStreaming(false);
       },
       onError: (err) => {
         setMessages(m => [...m, { role: 'assistant', content: `Error: ${err}` }]);
         setStreamingContent('');
+        setStreamingSources([]);
+        setSearchStatus(null);
         streamContentRef.current = '';
+        streamSourcesRef.current = [];
         setStreaming(false);
       },
-    });
+    }, wasSourced);
     abortRef.current = abort;
   }
 
@@ -180,11 +206,15 @@ export default function StudyModePanel({ className = '', initialMessage }) {
     <ChatContainer
       messages={messages}
       streamingContent={streamingContent}
+      streamingSources={streamingSources}
+      searchStatus={searchStatus}
       onSend={handleSend}
       disabled={streaming}
       placeholder={streaming ? 'AI is thinking...' : 'Message...'}
       header={header}
       className={className}
+      sourceMode={sourceMode}
+      onToggleSource={setSourceMode}
     />
   );
 }

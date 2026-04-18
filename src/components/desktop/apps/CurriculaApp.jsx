@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, Plus, Sparkles, Loader2, BookOpen, ChevronDown, ChevronRight, CheckCircle2, Circle, Lock, ClipboardCheck, PenTool, FileText } from 'lucide-react';
+import { ArrowLeft, Plus, Sparkles, Loader2, BookOpen, ChevronDown, ChevronRight, CheckCircle2, Circle, Lock, ClipboardCheck, PenTool, FileText, Check, X, Trophy } from 'lucide-react';
 import { listCurricula, generateCurriculum, getCurriculum, sendLessonMessage, getLessonHistory } from '../../../api/curriculum';
+import { apiFetch } from '../../../api/client';
 import { DEFAULT_SETTINGS, DIFFICULTY_OPTIONS, LEARNING_STYLE_OPTIONS } from '../../../utils/constants';
 import Button from '../../shared/Button';
 import Input from '../../shared/Input';
@@ -23,8 +24,12 @@ export default function CurriculaApp() {
   const [currentLesson, setCurrentLesson] = useState(null);
   const [lessonMessages, setLessonMessages] = useState([]);
   const [streamingContent, setStreamingContent] = useState('');
+  const [streamingSources, setStreamingSources] = useState([]);
+  const [searchStatus, setSearchStatus] = useState(null);
+  const [sourceMode, setSourceMode] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const streamRef = useRef('');
+  const streamSourcesRef = useRef([]);
   const abortRef = useRef(null);
   const autoStarted = useRef(false);
 
@@ -57,36 +62,62 @@ export default function CurriculaApp() {
 
   async function openLesson(lesson, curriculumId) {
     setCurrentLesson({ ...lesson, curriculumId });
+    // Unit-test typed lessons go to a real assessment quiz, not the chat tutor.
+    if (lesson.type === 'unit_test' || lesson.type === 'essay') {
+      setView('assessment');
+      return;
+    }
     setView('lesson');
     setLessonMessages([]);
+    setSourceMode(false);
     autoStarted.current = false;
     try {
       const hist = await getLessonHistory(curriculumId, lesson.id);
       setLessonMessages(hist.chatHistory || []);
       if (!hist.chatHistory?.length && !autoStarted.current) {
         autoStarted.current = true;
-        setTimeout(() => doSendLesson(`I'm ready to learn about "${lesson.title}". Let's begin!`, curriculumId, lesson.id), 200);
+        setTimeout(() => doSendLesson(`I'm ready to learn about "${lesson.title}". Let's begin!`, curriculumId, lesson.id, { sourced: true }), 200);
       }
     } catch {}
   }
 
-  function doSendLesson(text, cid, lid) {
+  function doSendLesson(text, cid, lid, opts = {}) {
+    const wasSourced = !!(opts.sourced ?? sourceMode);
     const userMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
     setLessonMessages(prev => [...prev, userMsg]);
-    setStreaming(true); setStreamingContent(''); streamRef.current = '';
+    setStreaming(true);
+    setStreamingContent('');
+    setStreamingSources([]);
+    setSearchStatus(wasSourced ? 'searching' : null);
+    streamRef.current = '';
+    streamSourcesRef.current = [];
 
     const abort = sendLessonMessage(cid || currentLesson?.curriculumId, lid || currentLesson?.id, text, {
-      onChunk: c => { streamRef.current += c; setStreamingContent(streamRef.current); },
+      onChunk: c => { streamRef.current += c; setStreamingContent(streamRef.current); if (searchStatus) setSearchStatus(null); },
+      onSource: src => {
+        streamSourcesRef.current = [...streamSourcesRef.current, src];
+        setStreamingSources(streamSourcesRef.current);
+      },
+      onStatus: s => setSearchStatus(s),
       onDone: () => {
         const full = streamRef.current;
-        if (full) setLessonMessages(m => [...m, { role: 'assistant', content: full, timestamp: new Date().toISOString() }]);
-        setStreamingContent(''); streamRef.current = ''; setStreaming(false);
+        const sources = streamSourcesRef.current;
+        if (full) {
+          const msg = { role: 'assistant', content: full, timestamp: new Date().toISOString() };
+          if (sources.length) msg.sources = sources;
+          setLessonMessages(m => [...m, msg]);
+        }
+        setStreamingContent(''); setStreamingSources([]); setSearchStatus(null);
+        streamRef.current = ''; streamSourcesRef.current = [];
+        setStreaming(false);
       },
       onError: err => {
         setLessonMessages(m => [...m, { role: 'assistant', content: `Error: ${err}` }]);
-        setStreamingContent(''); streamRef.current = ''; setStreaming(false);
+        setStreamingContent(''); setStreamingSources([]); setSearchStatus(null);
+        streamRef.current = ''; streamSourcesRef.current = [];
+        setStreaming(false);
       },
-    });
+    }, wasSourced);
     abortRef.current = abort;
   }
 
@@ -94,6 +125,17 @@ export default function CurriculaApp() {
     if (streaming) return;
     doSendLesson(text);
   }, [streaming, currentLesson]);
+
+  // ===== Assessment (unit_test / essay) — real quiz, not a chat tutor =====
+  if (view === 'assessment' && currentLesson) {
+    return (
+      <AssessmentView
+        lesson={currentLesson}
+        curriculum={selectedCurriculum}
+        onBack={() => setView('detail')}
+      />
+    );
+  }
 
   // Lesson view
   if (view === 'lesson' && currentLesson) {
@@ -108,11 +150,15 @@ export default function CurriculaApp() {
       <ChatContainer
         messages={lessonMessages}
         streamingContent={streamingContent}
+        streamingSources={streamingSources}
+        searchStatus={searchStatus}
         onSend={handleLessonSend}
         disabled={streaming}
         placeholder={streaming ? 'AI is thinking...' : 'Message...'}
         header={header}
         className="h-full"
+        sourceMode={sourceMode}
+        onToggleSource={setSourceMode}
       />
     );
   }
@@ -236,6 +282,146 @@ function UnitSection({ unit, onOpenLesson }) {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// ============= Real assessment quiz UI (unit_test / essay) =============
+function AssessmentView({ lesson, curriculum, onBack }) {
+  const [assessment, setAssessment] = useState(null);
+  const [answers, setAnswers] = useState({});
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [grading, setGrading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const topic = `${lesson.title}${curriculum?.title ? ` (from ${curriculum.title})` : ''}`;
+        const isEssay = lesson.type === 'essay';
+        const data = await apiFetch('/api/assessment/generate', {
+          method: 'POST',
+          body: JSON.stringify({
+            topic,
+            type: isEssay ? 'essay' : 'quiz',
+            questionCount: 5,
+            difficulty: curriculum?.settings?.difficulty || 'beginner',
+          }),
+        });
+        if (!alive) return;
+        setAssessment(data.assessment);
+      } catch (e) {
+        setError(e.message || 'Failed to load assessment');
+      }
+      if (alive) setLoading(false);
+    })();
+    return () => { alive = false; };
+  }, [lesson.id]);
+
+  async function handleSubmit() {
+    if (!assessment) return;
+    setGrading(true);
+    try {
+      const r = await apiFetch('/api/assessment/grade', {
+        method: 'POST',
+        body: JSON.stringify({ assessment, answers }),
+      });
+      setResult(r.result);
+    } catch (e) { setError(e.message); }
+    setGrading(false);
+  }
+
+  const answered = assessment?.questions?.filter((q, i) => answers[i] !== undefined).length || 0;
+  const total = assessment?.questions?.length || 0;
+
+  return (
+    <div className="h-full overflow-y-auto">
+      <div className="max-w-2xl mx-auto p-5">
+        <button onClick={onBack} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 mb-4">
+          <ArrowLeft size={16} /> Back
+        </button>
+
+        <div className="flex items-center gap-2 mb-4">
+          <ClipboardCheck size={18} className="text-rose-500" />
+          <h2 className="text-lg font-bold text-gray-900 dark:text-white">{lesson.title}</h2>
+        </div>
+
+        {loading && (
+          <div className="flex items-center gap-2 py-12 justify-center">
+            <Loader2 size={16} className="animate-spin text-gray-400" />
+            <span className="text-sm text-gray-500">Generating quiz…</span>
+          </div>
+        )}
+
+        {error && <p className="text-sm text-rose-500 bg-rose-50 dark:bg-rose-900/20 rounded-lg p-3">{error}</p>}
+
+        {!loading && !error && assessment && !result && (
+          <>
+            <p className="text-xs text-gray-500 mb-4">{total} questions · Answered {answered}/{total}</p>
+            <div className="space-y-3">
+              {(assessment.questions || []).map((q, i) => (
+                <div key={i} className="bg-white dark:bg-[#161622] border border-gray-200 dark:border-[#2A2A40] rounded-xl p-4">
+                  <p className="text-sm font-medium text-gray-900 dark:text-white mb-3">{i + 1}. {q.question}</p>
+                  <div className="space-y-1.5">
+                    {(q.options || []).map(opt => {
+                      const letter = opt.charAt(0);
+                      const selected = answers[i] === letter;
+                      return (
+                        <button
+                          key={opt}
+                          onClick={() => setAnswers(prev => ({ ...prev, [i]: letter }))}
+                          className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors ${
+                            selected
+                              ? 'bg-blue-600 text-white font-medium'
+                              : 'bg-gray-50 dark:bg-[#0D0D14] text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#1e1e2e]'
+                          }`}
+                        >
+                          {opt}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={handleSubmit}
+              disabled={grading || answered < total}
+              className="mt-4 w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {grading ? <><Loader2 size={14} className="animate-spin" /> Grading…</> : `Submit${answered < total ? ` (${total - answered} left)` : ''}`}
+            </button>
+          </>
+        )}
+
+        {result && (
+          <>
+            <div className="bg-white dark:bg-[#161622] border border-gray-200 dark:border-[#2A2A40] rounded-xl p-5 text-center mb-4">
+              <Trophy size={28} className="text-amber-500 mx-auto mb-2" />
+              <p className="text-3xl font-bold text-gray-900 dark:text-white">{result.score}/{result.total}</p>
+              <p className="text-sm text-gray-500 mt-1">{result.percentage}% correct</p>
+            </div>
+            <div className="space-y-2">
+              {(result.details || []).map((d, i) => (
+                <div key={i} className={`rounded-xl p-3 border ${d.correct ? 'bg-emerald-50 dark:bg-emerald-900/10 border-emerald-200 dark:border-emerald-800' : 'bg-rose-50 dark:bg-rose-900/10 border-rose-200 dark:border-rose-800'}`}>
+                  <div className="flex items-start gap-2 mb-1">
+                    {d.correct ? <Check size={14} className="text-emerald-500 mt-0.5" /> : <X size={14} className="text-rose-500 mt-0.5" />}
+                    <p className="text-xs font-medium text-gray-900 dark:text-white flex-1">{d.question}</p>
+                  </div>
+                  <p className="text-[11px] text-gray-500 ml-6">
+                    Your answer: <strong>{d.answer || '—'}</strong>
+                    {!d.correct && <> · Correct: <strong className="text-emerald-600">{d.correctAnswer}</strong></>}
+                  </p>
+                  {d.explanation && <p className="text-[10px] text-gray-400 ml-6 mt-1 italic">{d.explanation}</p>}
+                </div>
+              ))}
+            </div>
+            <button onClick={onBack} className="mt-4 w-full py-2.5 rounded-xl border border-gray-200 dark:border-[#2A2A40] text-sm font-medium">Back to curriculum</button>
+          </>
+        )}
+      </div>
     </div>
   );
 }

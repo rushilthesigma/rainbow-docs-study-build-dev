@@ -4,6 +4,7 @@ import {
   Crown, Trophy, Mail, LogOut, Plus, ChevronRight, Send, MessageSquare, Clock, XCircle,
 } from 'lucide-react';
 import { apiFetch } from '../../../api/client';
+import { useAuth } from '../../../context/AuthContext';
 import {
   createParty, getMyParty, invitePlayer, acceptInvite, declineInvite,
   cancelInvite, leaveParty, disbandParty, kickMember, startGame,
@@ -113,8 +114,9 @@ function PartyLobby({ onStartGame, onJoinLiveGame, currentUserId }) {
       } catch {}
     }
     pokeRef.current = refresh;
-    refresh();
-    setLoading(false);
+    // Wait for the FIRST fetch to complete before we hide the loader — that
+    // stops the "No party yet" card from flashing on tab-switch back.
+    (async () => { await refresh(); if (alive) setLoading(false); })();
     const t = setInterval(refresh, 1000);
     return () => { alive = false; clearInterval(t); };
   }, [onJoinLiveGame]);
@@ -521,24 +523,46 @@ function MultiplayerGame({ party, onExit, currentUserId }) {
   const [tab, setTab] = useState('game'); // 'game' | 'leaderboard'
   const pollRef = useRef(null);
 
-  // Poll state every 300ms. pokeRef lets action handlers trigger an
+  // Poll state every 600ms. pokeRef lets action handlers trigger an
   // immediate poll so the UI reflects their action without waiting for
-  // the next 300ms tick (that was the felt lag on every button click).
+  // the next tick (that was the felt lag on every button click).
   const pokeRef = useRef(() => {});
+  const lastSigRef = useRef('');
   useEffect(() => {
     let alive = true;
+    let inFlight = false;
     async function poll() {
+      // Don't stack requests if one is already pending (prevents build-up
+      // under network latency — the real cause of "too laggy to run").
+      if (inFlight) return;
+      inFlight = true;
       try {
         const sent = Date.now();
         const d = await getGameState(party.id);
         if (!alive) return;
-        setState(d);
+        // Skip re-render if nothing observable changed. Cuts renders ~80%.
+        const g = d.game || {};
+        const sig = [
+          g.currentQ, g.questionStartedAt, g.questionResolved,
+          g.buzzedBy, g.buzzedWord, g.status,
+          (d.party?.memberProfiles || []).length,
+          (d.party?.chat || []).length,
+          Object.values(g.scores || {}).join(','),
+          (g.answeredBy && g.answeredBy[g.currentQ]?.length) || 0,
+          g.lastAnswer?.userId, g.lastAnswer?.correct,
+        ].join('|');
+        if (sig !== lastSigRef.current) {
+          lastSigRef.current = sig;
+          setState(d);
+        }
         setServerOffset(Math.floor((sent + Date.now()) / 2) - d.serverNow);
-      } catch {}
+      } catch {} finally {
+        inFlight = false;
+      }
     }
     pokeRef.current = poll;
     poll();
-    pollRef.current = setInterval(poll, 300);
+    pollRef.current = setInterval(poll, 350);
     return () => { alive = false; clearInterval(pollRef.current); };
   }, [party.id]);
 
@@ -641,7 +665,20 @@ function MultiplayerGame({ party, onExit, currentUserId }) {
     pokeRef.current();
   }
   async function handleAdvance() {
-    try { await advanceQuestion(party.id); } catch {}
+    // Optimistically reset local UI for the new question so the leader sees
+    // the transition immediately (no wait for the round-trip).
+    setAnswer('');
+    setWordIndex(0);
+    // Reset the signature so the next poll definitely re-renders even if
+    // we got the optimistic update right.
+    lastSigRef.current = '';
+    try {
+      const r = await advanceQuestion(party.id);
+      // advanceQuestion returns { ok, game } — shove it into state now
+      if (r?.game) {
+        setState(s => s ? { ...s, game: r.game } : s);
+      }
+    } catch {}
     pokeRef.current();
   }
   async function handleEnd() {
@@ -841,11 +878,17 @@ function Selector({ label, options, value, onChange, grid = 'flex flex-wrap gap-
 
 // ============= TOP-LEVEL =============
 export default function QuizBowlApp() {
+  const { user } = useAuth();
   const [mode, setMode] = useState('solo'); // 'solo' | 'multiplayer'
   const [mpView, setMpView] = useState('lobby'); // 'lobby' | 'setup' | 'game'
   const [activeParty, setActiveParty] = useState(null);
-  const [currentUserId, setCurrentUserId] = useState(null);
-  const [myHandle, setMyHandle] = useState(undefined); // undefined = still loading; null = no handle; string = handle
+  // Seed from AuthContext immediately — no extra /auth/me round trip.
+  const currentUserId = user?.id || null;
+  // Seed handle from user.data.socialHandle if present; otherwise fetch lazily.
+  const [myHandle, setMyHandle] = useState(() => {
+    const h = user?.data?.socialHandle;
+    return h === undefined ? undefined : (h || null);
+  });
 
   // Solo state
   const [view, setView] = useState('setup'); // 'setup' | 'playing' | 'review'
@@ -868,23 +911,25 @@ export default function QuizBowlApp() {
   const q = questions[currentQ];
   const { revealed, done, stop, wordIndex, totalWords } = useWordReveal(q?.text || '', revealSpeedMs, reading && !buzzed && view === 'playing' && mode === 'solo');
 
-  // Get current user id + social handle (required for multiplayer)
+  // Lazily fetch social handle only if AuthContext didn't already have one.
   useEffect(() => {
-    apiFetch('/api/auth/me').then(d => setCurrentUserId(d?.id || d?.user?.id)).catch(() => {});
-    apiFetch('/api/social/profile').then(d => setMyHandle(d?.profile?.handle || null)).catch(() => setMyHandle(null));
-  }, []);
+    if (myHandle !== undefined) return;
+    apiFetch('/api/social/profile')
+      .then(d => setMyHandle(d?.profile?.handle || null))
+      .catch(() => setMyHandle(null));
+  }, [myHandle]);
 
-  // Auto-advance mp view based on party.game
+  // Auto-advance mp view based on party.game. Skip while in the live
+  // game view — MultiplayerGame already polls there, and running this
+  // loop too just piles extra requests on the same endpoint.
   useEffect(() => {
     if (mode !== 'multiplayer' || !activeParty) return;
+    if (mpView === 'game') return;
     let alive = true;
     async function tick() {
       try {
         const d = await getGameState(activeParty.id);
         if (!alive) return;
-        // Only jump into the game view when an active PLAYING game exists.
-        // (A finished game lingering on the server used to drag the leader
-        // back into the end screen as soon as they opened Setup.)
         if (d.game?.status === 'playing' && mpView === 'setup') setMpView('game');
         if (!d.game && mpView === 'game') setMpView('lobby');
       } catch {}
@@ -1070,7 +1115,7 @@ export default function QuizBowlApp() {
           <MultiplayerGame
             party={activeParty}
             currentUserId={currentUserId}
-            onExit={() => setMpView('lobby')}
+            onExit={() => { setMpView('lobby'); setActiveParty(null); }}
           />
         )}
       </div>

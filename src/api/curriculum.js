@@ -45,7 +45,7 @@ export async function resetLesson(curriculumId, lessonId) {
 }
 
 // Generic SSE streaming helper
-function streamSSE(url, body, { onChunk, onDone, onError, onMeta }) {
+function streamSSE(url, body, { onChunk, onDone, onError, onMeta, onSource, onStatus }) {
   const token = getToken();
   const controller = new AbortController();
 
@@ -58,7 +58,7 @@ function streamSSE(url, body, { onChunk, onDone, onError, onMeta }) {
     .then(async (response) => {
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
-        onError?.(err.error || `Request failed: ${response.status}`);
+        onError?.(err.error || `Request failed: ${response.status}`, err);
         return;
       }
       const reader = response.body.getReader();
@@ -75,9 +75,11 @@ function streamSSE(url, body, { onChunk, onDone, onError, onMeta }) {
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
-              if (data.done) onDone?.();
+              if (data.done) onDone?.(data);
               else if (data.error) onError?.(data.error);
               else if (data.content) onChunk?.(data.content);
+              else if (data.source) onSource?.(data.source);
+              else if (data.status) onStatus?.(data.status);
               else if (data.sessionId) onMeta?.(data);
             } catch {}
           }
@@ -91,14 +93,14 @@ function streamSSE(url, body, { onChunk, onDone, onError, onMeta }) {
   return () => controller.abort();
 }
 
-// Lesson chat (conversational)
-export function sendLessonMessage(curriculumId, lessonId, message, handlers) {
-  return streamSSE(`/api/curriculum/${curriculumId}/lesson/${lessonId}/chat`, { message }, handlers);
+// Lesson chat (conversational). `sourced` = true → web-search backed answer (counts 2x).
+export function sendLessonMessage(curriculumId, lessonId, message, handlers, sourced = false) {
+  return streamSSE(`/api/curriculum/${curriculumId}/lesson/${lessonId}/chat`, { message, sourced }, handlers);
 }
 
 // Study mode chat
-export function sendStudyMessage(message, sessionId, context, handlers) {
-  return streamSSE('/api/study/chat', { message, sessionId, context }, handlers);
+export function sendStudyMessage(message, sessionId, context, handlers, sourced = false) {
+  return streamSSE('/api/study/chat', { message, sessionId, context, sourced }, handlers);
 }
 
 // Study session history

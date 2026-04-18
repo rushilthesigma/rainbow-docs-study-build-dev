@@ -114,11 +114,13 @@ export default function ChatMessage({ message, isStreaming }) {
                   remarkPlugins={[remarkGfm, remarkMath]}
                   rehypePlugins={[rehypeKatex]}
                   components={{
-                    p: ({ children, ...props }) => <p {...props}>{injectCursor(children)}</p>,
-                    li: ({ children, ...props }) => <li {...props}>{injectCursor(children)}</li>,
+                    p: ({ children, ...props }) => <p {...props}>{styleCitations(injectCursor(children), message.sources)}</p>,
+                    li: ({ children, ...props }) => <li {...props}>{styleCitations(injectCursor(children), message.sources)}</li>,
                     h1: ({ children, ...props }) => <h1 {...props}>{injectCursor(children)}</h1>,
                     h2: ({ children, ...props }) => <h2 {...props}>{injectCursor(children)}</h2>,
                     h3: ({ children, ...props }) => <h3 {...props}>{injectCursor(children)}</h3>,
+                    strong: ({ children, ...props }) => <strong {...props}>{styleCitations(children, message.sources)}</strong>,
+                    em: ({ children, ...props }) => <em {...props}>{styleCitations(children, message.sources)}</em>,
                   }}
                 >
                   {contentWithCursor}
@@ -132,9 +134,41 @@ export default function ChatMessage({ message, isStreaming }) {
               </div>
             )}
             {quizJson && <InlineQuiz quizJson={quizJson} />}
+            {Array.isArray(message.sources) && message.sources.length > 0 && (
+              <Sources sources={message.sources} />
+            )}
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+function Sources({ sources }) {
+  return (
+    <div className="mt-3 pt-2 border-t border-gray-200 dark:border-[#2A2A40]">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400 mb-1.5">Sources</p>
+      <ol className="space-y-1">
+        {sources.map((s, i) => {
+          let host = '';
+          try { host = new URL(s.url).hostname.replace(/^www\./, ''); } catch { host = s.url; }
+          return (
+            <li key={i} className="flex items-start gap-1.5 text-[11px]">
+              <span className="text-gray-400 tabular-nums">[{i + 1}]</span>
+              <a
+                href={s.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-600 dark:text-blue-400 hover:underline break-all"
+                title={s.url}
+              >
+                {s.title || host}
+              </a>
+              {s.title && <span className="text-gray-400 truncate">· {host}</span>}
+            </li>
+          );
+        })}
+      </ol>
     </div>
   );
 }
@@ -154,5 +188,48 @@ function injectCursor(children) {
       );
     }
     return child;
+  });
+}
+
+// Turn inline "[n]" citation markers into Wikipedia-style superscripts.
+// If we have the matching source, make it a clickable link to the URL
+// and trim the preceding space so "word [3]" renders as "word³".
+function styleCitations(children, sources) {
+  if (!children) return children;
+  if (!Array.isArray(children)) children = [children];
+  const rx = /\s*\[(\d+)\]/g;
+  return children.flatMap((child, idx) => {
+    if (typeof child !== 'string') return [child];
+    const parts = [];
+    let last = 0;
+    let m;
+    let n = 0;
+    while ((m = rx.exec(child)) !== null) {
+      if (m.index > last) parts.push(child.slice(last, m.index));
+      const num = Number(m[1]);
+      const src = Array.isArray(sources) ? sources[num - 1] : null;
+      const sup = (
+        <sup
+          key={`${idx}-${n++}`}
+          className="ml-0.5 text-[0.7em] font-medium text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 align-super"
+        >
+          {src?.url ? (
+            <a
+              href={src.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={src.title || src.url}
+              className="no-underline hover:underline"
+            >[{num}]</a>
+          ) : (
+            <span>[{num}]</span>
+          )}
+        </sup>
+      );
+      parts.push(sup);
+      last = m.index + m[0].length;
+    }
+    if (last < child.length) parts.push(child.slice(last));
+    return parts.length ? parts : [child];
   });
 }

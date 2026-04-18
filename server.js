@@ -170,17 +170,18 @@ function ensureUsageBucket(user) {
 
 // Returns { allowed: boolean, remaining: number, limit: number, plan }.
 // Mutates usage on allowed=true (caller must saveUsers).
-function consumeMessage(users, email) {
+// `cost` is how many messages this request counts as (2 for sourced).
+function consumeMessage(users, email, cost = 1) {
   const u = users[email];
   if (!u) return { allowed: false, remaining: 0, limit: 0, plan: 'free' };
   const plan = getPlan(u, email);
   if (plan === 'pro') return { allowed: true, remaining: Infinity, limit: Infinity, plan };
   ensureUsageBucket(u);
-  if (u.data.usage.messages >= FREE_DAILY_MESSAGE_LIMIT) {
-    return { allowed: false, remaining: 0, limit: FREE_DAILY_MESSAGE_LIMIT, plan };
+  if (u.data.usage.messages + cost > FREE_DAILY_MESSAGE_LIMIT) {
+    return { allowed: false, remaining: Math.max(0, FREE_DAILY_MESSAGE_LIMIT - u.data.usage.messages), limit: FREE_DAILY_MESSAGE_LIMIT, plan };
   }
-  u.data.usage.messages++;
-  return { allowed: true, remaining: Math.max(0, FREE_DAILY_MESSAGE_LIMIT - u.data.usage.messages), limit: FREE_DAILY_MESSAGE_LIMIT, plan };
+  u.data.usage.messages += cost;
+  return { allowed: true, remaining: Math.max(0, FREE_DAILY_MESSAGE_LIMIT - u.data.usage.messages), limit: FREE_DAILY_MESSAGE_LIMIT, plan, cost };
 }
 function consumeQuizBowlGame(users, email) {
   const u = users[email];
@@ -1055,8 +1056,9 @@ function advancePhaseIfNeeded(lesson, fullContent) {
 }
 
 // Helper: stream AI response as SSE
-async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOverride) {
+async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOverride, opts = {}) {
   const model = modelOverride || DEFAULT_MODEL;
+  const enableWebSearch = !!opts.enableWebSearch;
   if (!res.headersSent) {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -1065,13 +1067,49 @@ async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOv
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 120000);
+  const timeout = setTimeout(() => controller.abort(), 180000);
 
   try {
+    // When source mode is on, MANDATE the web_search tool — otherwise Claude
+    // will cheerfully answer from memory with no citations. Also tell it to
+    // put inline [n] markers in its prose so the citation chips line up.
+    const finalSystem = enableWebSearch
+      ? `${systemPrompt}
+
+SOURCE MODE — HARD RULES (override any conflicting rules above):
+1. You MUST call the web_search tool before writing a single word of prose. Use 2–4 targeted queries. Do this silently — the user does not see you searching.
+2. Write the answer directly, as if you always knew it. The response must read like a normal teaching response, NOT a research summary.
+3. NEVER mention that you searched. NEVER write phrases like "based on my search", "according to the sources", "I looked this up", "recent searches show", "the web indicates", or anything similar. The user paid for citations, not a narration of your process.
+4. Every factual claim MUST be grounded in the search results you just retrieved — quote/paraphrase those results rather than relying on memory. The API will attach inline citations automatically to grounded text, so stay close to the sources.
+5. Do not include a "Sources:" section or a numbered bibliography in your own prose — the UI renders that separately. Just write the answer.`
+      : systemPrompt;
+
+    const body = {
+      model,
+      max_tokens: 8192,
+      system: finalSystem,
+      messages,
+      stream: true,
+    };
+    if (enableWebSearch) {
+      // Anthropic's built-in web search tool — Claude fetches pages,
+      // cites them inline via citation blocks, and the final answer
+      // streams with a sources list we pass through to the client.
+      body.tools = [{ type: 'web_search_20250305', name: 'web_search', max_uses: 6 }];
+      // Force the model to invoke THIS specific tool at least once.
+      // 'any' allows Claude to skip when only one tool exists — naming
+      // it explicitly is more reliable.
+      body.tool_choice = { type: 'tool', name: 'web_search' };
+      res.write(`data: ${JSON.stringify({ status: 'searching' })}\n\n`);
+    }
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model, max_tokens: 8192, system: systemPrompt, messages, stream: true }),
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify(body),
       signal: controller.signal,
     });
     clearTimeout(timeout);
@@ -1084,6 +1122,12 @@ async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOv
     }
 
     let fullContent = '';
+    const sources = []; // { title, url } — citation order, each source shown gets a [n] in the text
+    const seenUrls = new Set();
+    // Track URLs we've seen from tool results (not yet cited inline) so we
+    // don't mis-number them when they later get cited. We ONLY assign [n]
+    // numbers in the order citations are emitted by the model.
+    const seenPendingUrls = new Set();
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -1100,17 +1144,66 @@ async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOv
           if (data === '[DONE]') continue;
           try {
             const parsed = JSON.parse(data);
-            if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+            // Text streaming
+            if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta' && parsed.delta?.text) {
               fullContent += parsed.delta.text;
               res.write(`data: ${JSON.stringify({ content: parsed.delta.text })}\n\n`);
+            }
+            // Inline citations — numbered [1], [2], ... in the ORDER they
+            // first appear in the prose. Claude emits these AFTER the text
+            // they cite, so we append a space+bracket marker directly.
+            if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'citations_delta' && parsed.delta?.citation) {
+              const c = parsed.delta.citation;
+              const url = c.url;
+              if (!url) continue;
+              let index;
+              if (!seenUrls.has(url)) {
+                seenUrls.add(url);
+                const src = { url, title: c.title || url };
+                sources.push(src);
+                index = sources.length;
+                res.write(`data: ${JSON.stringify({ source: src })}\n\n`);
+              } else {
+                index = sources.findIndex(s => s.url === url) + 1;
+              }
+              if (index) {
+                // Strip any trailing whitespace already present to avoid
+                // "word [3] " chains; just append a single space+marker.
+                const trimmed = fullContent.replace(/\s+$/, '');
+                const marker = (trimmed === fullContent ? ' ' : '') + `[${index}]`;
+                fullContent += marker;
+                res.write(`data: ${JSON.stringify({ content: marker })}\n\n`);
+              }
+            }
+            // Tool use progress surface
+            if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'server_tool_use') {
+              res.write(`data: ${JSON.stringify({ status: 'searching' })}\n\n`);
+            }
+            if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'web_search_tool_result') {
+              res.write(`data: ${JSON.stringify({ status: 'reading' })}\n\n`);
+              // DO NOT push these into `sources` yet — that would give
+              // them indices before they're cited, and inline [n] markers
+              // would skip (e.g. [6], [9], [10] instead of [1], [2], [3]).
+              // Just remember the URLs so we know about them.
+              const results = parsed.content_block?.content || [];
+              if (Array.isArray(results)) {
+                for (const r of results) {
+                  const url = r?.url;
+                  if (url) seenPendingUrls.add(url);
+                }
+              }
             }
           } catch {}
         }
       }
     }
 
-    if (onComplete) await onComplete(fullContent);
-    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    if (enableWebSearch && sources.length === 0) {
+      // Let the client surface "tried to search but got nothing"
+      res.write(`data: ${JSON.stringify({ status: 'no_sources' })}\n\n`);
+    }
+    if (onComplete) await onComplete(fullContent, sources);
+    res.write(`data: ${JSON.stringify({ done: true, sources })}\n\n`);
     res.end();
   } catch (e) {
     clearTimeout(timeout);
@@ -1160,9 +1253,11 @@ app.post('/api/curriculum/:id/lesson/:lessonId/chat', authMiddleware, requireMes
     const aiMessages = lesson.chatHistory.map(m => ({ role: m.role, content: m.content }));
 
     const tierModel = modelForUser(users[email], email);
-    await streamAIResponse(res, systemPrompt, aiMessages, async (fullContent) => {
-      // Save AI response to chat history
-      lesson.chatHistory.push({ role: 'assistant', content: fullContent, timestamp: new Date().toISOString() });
+    await streamAIResponse(res, systemPrompt, aiMessages, async (fullContent, sources) => {
+      // Save AI response to chat history (with sources if web-search was on)
+      const entry = { role: 'assistant', content: fullContent, timestamp: new Date().toISOString() };
+      if (sources && sources.length) entry.sources = sources;
+      lesson.chatHistory.push(entry);
 
       // Phase transition: model signal OR turn-cap fallback
       advancePhaseIfNeeded(lesson, fullContent);
@@ -1205,7 +1300,7 @@ app.post('/api/curriculum/:id/lesson/:lessonId/chat', authMiddleware, requireMes
       checkGoalMilestones(users[email].data);
 
       saveUsers(users);
-    }, tierModel);
+    }, tierModel, { enableWebSearch: !!req.sourced });
   } catch (e) {
     console.error('Lesson chat error:', e);
     if (!res.headersSent) res.status(500).json({ error: e.message });
@@ -1284,8 +1379,10 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
     res.write(`data: ${JSON.stringify({ sessionId: session.id })}\n\n`);
 
     const tierModel = modelForUser(users[email], email);
-    await streamAIResponse(res, systemPrompt, aiMessages, async (fullContent) => {
-      session.messages.push({ role: 'assistant', content: fullContent, timestamp: new Date().toISOString() });
+    await streamAIResponse(res, systemPrompt, aiMessages, async (fullContent, sources) => {
+      const msg = { role: 'assistant', content: fullContent, timestamp: new Date().toISOString() };
+      if (sources && sources.length) msg.sources = sources;
+      session.messages.push(msg);
 
       // Check for milestone completion markers
       const milestoneMatches = fullContent.matchAll(/\[MILESTONE_COMPLETE:([^\]]+)\]/g);
@@ -1308,7 +1405,7 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
       }
 
       saveUsers(users);
-    }, tierModel);
+    }, tierModel, { enableWebSearch: !!req.sourced });
   } catch (e) {
     console.error('Study chat error:', e);
     if (!res.headersSent) res.status(500).json({ error: e.message });
@@ -2314,17 +2411,23 @@ function requireMessageQuota(req, res, next) {
   const email = findEmailById(users, req.userId);
   if (!email) return res.status(404).json({ error: 'User not found' });
   users[email].data = migrateUserData(users[email].data);
-  const result = consumeMessage(users, email);
+  // Sourced (web-search) requests cost 2 messages against the daily cap.
+  const sourced = !!(req.body && req.body.sourced);
+  const cost = sourced ? 2 : 1;
+  const result = consumeMessage(users, email, cost);
   if (!result.allowed) {
     return res.status(402).json({
       error: 'message_limit_reached',
-      message: `You've hit the free-plan daily limit of ${result.limit} messages. Upgrade to Pro for unlimited.`,
-      limit: result.limit, remaining: 0, plan: result.plan,
+      message: sourced
+        ? `A sourced answer costs 2 messages and you only have ${result.remaining} left today. Upgrade to Pro for unlimited.`
+        : `You've hit the free-plan daily limit of ${result.limit} messages. Upgrade to Pro for unlimited.`,
+      limit: result.limit, remaining: result.remaining, plan: result.plan,
     });
   }
   saveUsers(users);
   req.quota = result;
   req.userPlan = result.plan;
+  req.sourced = sourced;
   next();
 }
 
@@ -2484,8 +2587,10 @@ app.post('/api/lessons/:id/chat', authMiddleware, requireMessageQuota, async (re
     const aiMessages = lesson.chatHistory.map(m => ({ role: m.role, content: m.content }));
 
     const tierModel = modelForUser(users[email], email);
-    await streamAIResponse(res, systemPrompt, aiMessages, async (fullContent) => {
-      lesson.chatHistory.push({ role: 'assistant', content: fullContent, timestamp: new Date().toISOString() });
+    await streamAIResponse(res, systemPrompt, aiMessages, async (fullContent, sources) => {
+      const assistantMsg = { role: 'assistant', content: fullContent, timestamp: new Date().toISOString() };
+      if (sources && sources.length) assistantMsg.sources = sources;
+      lesson.chatHistory.push(assistantMsg);
 
       // Completion — AI-decided. Accepts [LESSON_DONE] (new) and [LESSON_COMPLETE] (legacy).
       const doneMatch = fullContent.match(/\[LESSON_(?:DONE|COMPLETE)\]\s*(\{[^}]+\})/);
@@ -2519,7 +2624,7 @@ app.post('/api/lessons/:id/chat', authMiddleware, requireMessageQuota, async (re
       }
 
       saveUsers(users);
-    }, tierModel);
+    }, tierModel, { enableWebSearch: !!req.sourced });
   } catch (e) {
     console.error('Standalone lesson chat error:', e);
     if (!res.headersSent) res.status(500).json({ error: e.message });
@@ -2537,9 +2642,12 @@ function loadParties() {
 function saveParties(data) {
   try { writeFileSync(PARTIES_FILE, JSON.stringify(data, null, 2)); } catch (e) { console.error('parties save failed', e); }
 }
-function getSocialDisplay(userId) {
-  const social = loadSocial();
-  const users = loadUsers();
+// If caller provides `ctx` (the loaded social + users objects), reuse them
+// instead of re-reading from disk per member — this was reading
+// users.json several times on every poll of a multi-member party.
+function getSocialDisplay(userId, ctx) {
+  const social = ctx?.social || loadSocial();
+  const users = ctx?.users || loadUsers();
   const email = findEmailById(users, userId);
   const plan = email ? getPlan(users[email], email) : 'free';
   const p = social.profiles[userId];
@@ -2591,17 +2699,18 @@ app.post('/api/parties', authMiddleware, (req, res) => {
 app.get('/api/parties/mine', authMiddleware, (req, res) => {
   const state = loadParties();
   const party = findPartyForUser(state, req.userId);
+  // Load social + users once and pass as ctx to every hydration.
+  const ctx = { social: loadSocial(), users: loadUsers() };
   const pendingInvites = Object.values(state.invites || {})
     .filter(i => i.toUserId === req.userId && !i.resolved)
-    .map(i => ({ ...i, from: getSocialDisplay(i.fromUserId), partyName: state.parties[i.partyId]?.name || 'Party' }));
-  // Outgoing invites — pending ones this user sent FROM their own party (leader view)
+    .map(i => ({ ...i, from: getSocialDisplay(i.fromUserId, ctx), partyName: state.parties[i.partyId]?.name || 'Party' }));
   const outgoingInvites = party ? Object.values(state.invites || {})
     .filter(i => i.partyId === party.id && !i.resolved && i.fromUserId === req.userId)
-    .map(i => ({ ...i, to: getSocialDisplay(i.toUserId) })) : [];
+    .map(i => ({ ...i, to: getSocialDisplay(i.toUserId, ctx) })) : [];
   const hydrated = party ? {
     ...party,
-    leader: getSocialDisplay(party.leaderId),
-    memberProfiles: party.members.map(getSocialDisplay),
+    leader: getSocialDisplay(party.leaderId, ctx),
+    memberProfiles: party.members.map(uid => getSocialDisplay(uid, ctx)),
     chat: party.chat || [],
     generating: party.generating || null,
   } : null;
@@ -2865,10 +2974,15 @@ app.get('/api/parties/:id/state', authMiddleware, (req, res) => {
   }
   if (dirty) saveParties(state);
 
+  // Load social + users once and reuse for every member hydration below —
+  // without this, we were re-reading users.json once per party member on
+  // every 350ms poll.
+  const ctx = { social: loadSocial(), users: loadUsers() };
+
   res.json({
     party: {
       id: party.id, name: party.name, leaderId: party.leaderId,
-      memberProfiles: party.members.map(getSocialDisplay),
+      memberProfiles: party.members.map(uid => getSocialDisplay(uid, ctx)),
       chat: party.chat || [],
       generating: party.generating || null,
     },

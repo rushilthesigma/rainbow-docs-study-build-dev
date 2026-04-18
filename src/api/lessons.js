@@ -27,15 +27,15 @@ export async function resetLesson(id) {
   return apiFetch(`/api/lessons/${id}/reset`, { method: 'POST' });
 }
 
-// SSE chat — same shape as curriculum lesson chat
-export function sendLessonMessage(id, message, { onChunk, onDone, onError }) {
+// SSE chat — same shape as curriculum lesson chat. `sourced=true` → web-search (2x cost).
+export function sendLessonMessage(id, message, { onChunk, onDone, onError, onSource, onStatus }, sourced = false) {
   const token = getToken();
   const controller = new AbortController();
 
   fetch(`/api/lessons/${id}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, sourced }),
     signal: controller.signal,
   })
     .then(async (response) => {
@@ -57,9 +57,11 @@ export function sendLessonMessage(id, message, { onChunk, onDone, onError }) {
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
-              if (data.done) onDone?.();
+              if (data.done) onDone?.(data);
               else if (data.error) onError?.(data.error);
               else if (data.content) onChunk?.(data.content);
+              else if (data.source) onSource?.(data.source);
+              else if (data.status) onStatus?.(data.status);
             } catch {}
           }
         }

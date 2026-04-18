@@ -26,12 +26,17 @@ export default function LessonsApp() {
   const [activeLesson, setActiveLesson] = useState(null);
   const [messages, setMessages] = useState([]);
   const [streamingContent, setStreamingContent] = useState('');
+  const [streamingSources, setStreamingSources] = useState([]);
+  const [searchStatus, setSearchStatus] = useState(null);
+  // Source mode toggle persists across a single lesson session.
+  const [sourceMode, setSourceMode] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [completionData, setCompletionData] = useState(null);
   const streamRef = useRef('');
+  const streamSourcesRef = useRef([]);
   const abortRef = useRef(null);
-  const autoStarted = useRef(false);
+  const autoStartedRef = useRef(false);
 
   useEffect(() => {
     listLessons()
@@ -61,7 +66,8 @@ export default function LessonsApp() {
     setMessages([]);
     setCompleted(!!lesson.isCompleted);
     setCompletionData(null);
-    autoStarted.current = false;
+    setSourceMode(false);
+    autoStartedRef.current = false;
 
     try {
       const hist = await getLessonHistory(lesson.id);
@@ -69,44 +75,61 @@ export default function LessonsApp() {
       setCompleted(!!hist.isCompleted);
       if (hist.completionData) setCompletionData(hist.completionData);
 
-      if (!hist.chatHistory?.length && !autoStarted.current && !hist.isCompleted) {
-        autoStarted.current = true;
-        setTimeout(() => doSend(`Teach me about "${lesson.topic}".`, lesson.id), 150);
+      // Fresh lesson → auto-fire the FIRST teaching message WITH source
+      // mode on, so the opening always has citations. After that, the
+      // source-mode toggle at the bottom controls subsequent messages.
+      if (!hist.chatHistory?.length && !hist.isCompleted && !autoStartedRef.current) {
+        autoStartedRef.current = true;
+        setTimeout(() => doSend(`Teach me about "${lesson.topic}".`, lesson.id, { sourced: true }), 150);
       }
     } catch {}
   }
 
-  function doSend(text, lessonId) {
+  function doSend(text, lessonId, opts = {}) {
     const id = lessonId || activeLesson?.id;
     if (!id) return;
+    const wasSourced = !!(opts.sourced ?? sourceMode);
     const userMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
     setMessages(prev => [...prev, userMsg]);
     setStreaming(true);
     setStreamingContent('');
+    setStreamingSources([]);
+    setSearchStatus(wasSourced ? 'searching' : null);
     streamRef.current = '';
+    streamSourcesRef.current = [];
 
     const abort = sendLessonMessage(id, text, {
-      onChunk: (c) => { streamRef.current += c; setStreamingContent(streamRef.current); },
+      onChunk: (c) => { streamRef.current += c; setStreamingContent(streamRef.current); if (searchStatus) setSearchStatus(null); },
+      onSource: (src) => {
+        streamSourcesRef.current = [...streamSourcesRef.current, src];
+        setStreamingSources(streamSourcesRef.current);
+      },
+      onStatus: (s) => setSearchStatus(s),
       onDone: () => {
         const full = streamRef.current;
+        const sources = streamSourcesRef.current;
         if (full) {
           const aiMsg = { role: 'assistant', content: full, timestamp: new Date().toISOString() };
+          if (sources.length) aiMsg.sources = sources;
           setMessages(m => [...m, aiMsg]);
 
-          // AI decides when the lesson is done — look for [LESSON_DONE] (or legacy [LESSON_COMPLETE])
           const doneMatch = full.match(/\[LESSON_(?:DONE|COMPLETE)\]\s*(\{[^}]+\})/);
           if (doneMatch || /\[LESSON_(?:DONE|COMPLETE)\]/.test(full)) {
             setCompleted(true);
             if (doneMatch) { try { setCompletionData(JSON.parse(doneMatch[1])); } catch {} }
           }
         }
-        setStreamingContent(''); streamRef.current = ''; setStreaming(false);
+        setStreamingContent(''); setStreamingSources([]); setSearchStatus(null);
+        streamRef.current = ''; streamSourcesRef.current = [];
+        setStreaming(false);
       },
       onError: (err) => {
         setMessages(m => [...m, { role: 'assistant', content: `Error: ${err}` }]);
-        setStreamingContent(''); streamRef.current = ''; setStreaming(false);
+        setStreamingContent(''); setStreamingSources([]); setSearchStatus(null);
+        streamRef.current = ''; streamSourcesRef.current = [];
+        setStreaming(false);
       },
-    });
+    }, wasSourced);
     abortRef.current = abort;
   }
 
@@ -123,8 +146,10 @@ export default function LessonsApp() {
       setMessages([]);
       setCompleted(false);
       setCompletionData(null);
-      autoStarted.current = true;
-      setTimeout(() => doSend(`Teach me about "${activeLesson.topic}".`, activeLesson.id), 150);
+      // Re-fire the first teaching message with source mode ON (matches
+      // the open-fresh-lesson behavior).
+      autoStartedRef.current = true;
+      setTimeout(() => doSend(`Teach me about "${activeLesson.topic}".`, activeLesson.id, { sourced: true }), 150);
     } catch (err) { console.error(err); }
   }
 
@@ -172,11 +197,15 @@ export default function LessonsApp() {
       <ChatContainer
         messages={messages}
         streamingContent={streamingContent}
+        streamingSources={streamingSources}
+        searchStatus={searchStatus}
         onSend={handleSend}
         disabled={streaming || completed}
         placeholder={completed ? 'Lesson complete!' : streaming ? 'AI is teaching...' : 'Type your response...'}
         header={header}
         className="h-full"
+        sourceMode={sourceMode}
+        onToggleSource={setSourceMode}
       />
     );
   }
