@@ -2894,7 +2894,22 @@ app.post('/api/billing/sync', authMiddleware, async (req, res) => {
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
     users[email].data = migrateUserData(users[email].data);
-    const customerId = users[email].data.stripeCustomerId;
+    let customerId = users[email].data.stripeCustomerId;
+    // Payment Link creates a fresh customer — look it up by email if we don't have one yet.
+    if (!customerId) {
+      try {
+        const found = await stripe.customers.list({ email, limit: 5 });
+        if (found?.data?.length) {
+          // Prefer a customer with an active/trialing subscription
+          for (const c of found.data) {
+            const s = await stripe.subscriptions.list({ customer: c.id, limit: 5, status: 'all' });
+            if (s.data.some(x => x.status === 'active' || x.status === 'trialing')) { customerId = c.id; break; }
+          }
+          if (!customerId) customerId = found.data[0].id;
+          users[email].data.stripeCustomerId = customerId;
+        }
+      } catch (e) { console.warn('customer email lookup failed', e.message); }
+    }
     if (!customerId) return res.json({ plan: 'free', synced: false });
 
     // Pull the newest subscription for this customer
@@ -2963,10 +2978,25 @@ async function handleStripeWebhook(req, res) {
       const email = Object.keys(users).find(e => users[e].data?.stripeCustomerId === customerId);
       return email ? { email, user: users[email] } : null;
     }
+    function userByEmail(emailAddr) {
+      if (!emailAddr) return null;
+      const key = Object.keys(users).find(e => e.toLowerCase() === emailAddr.toLowerCase());
+      return key ? { email: key, user: users[key] } : null;
+    }
 
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
-      const entry = userByCustomer(session.customer);
+      // Payment Links create fresh Stripe customers — fall back to email lookup
+      // so link-based payments still activate Pro for the right user.
+      let entry = userByCustomer(session.customer);
+      if (!entry) {
+        const email = session.customer_email || session.customer_details?.email;
+        entry = userByEmail(email);
+        if (entry && session.customer) {
+          entry.user.data = migrateUserData(entry.user.data);
+          entry.user.data.stripeCustomerId = session.customer;
+        }
+      }
       if (entry) {
         entry.user.data = migrateUserData(entry.user.data);
         entry.user.data.plan = 'pro';
@@ -2981,7 +3011,17 @@ async function handleStripeWebhook(req, res) {
 
     if (event.type === 'customer.subscription.updated' || event.type === 'customer.subscription.created') {
       const sub = event.data.object;
-      const entry = userByCustomer(sub.customer);
+      let entry = userByCustomer(sub.customer);
+      if (!entry && sub.customer) {
+        try {
+          const cust = await stripe.customers.retrieve(sub.customer);
+          entry = userByEmail(cust?.email);
+          if (entry) {
+            entry.user.data = migrateUserData(entry.user.data);
+            entry.user.data.stripeCustomerId = sub.customer;
+          }
+        } catch {}
+      }
       if (entry) {
         entry.user.data = migrateUserData(entry.user.data);
         entry.user.data.stripeSubscriptionId = sub.id;

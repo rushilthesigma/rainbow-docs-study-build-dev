@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react';
 import { Zap, Crown, Loader2, Check, ExternalLink } from 'lucide-react';
 import {
-  getBillingStatus, createCheckoutSession, openBillingPortal,
+  getBillingStatus, openBillingPortal,
   ownerGrantPro, ownerRevokePro, syncBilling,
 } from '../../api/billing';
+import { useAuth } from '../../context/AuthContext';
+
+const STRIPE_PAYMENT_LINK = 'https://buy.stripe.com/3cI3cpg1Df225Qh67Fdby00';
 
 export default function PlanSection() {
+  const { user } = useAuth();
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -36,12 +40,12 @@ export default function PlanSection() {
     setBusy(false);
   }
 
-  async function upgrade() {
-    setBusy(true); setErr(null);
-    try {
-      const d = await createCheckoutSession();
-      if (d.url) window.location.href = d.url;
-    } catch (e) { setErr(e.message); setBusy(false); }
+  function upgrade() {
+    const email = user?.email || '';
+    const url = email
+      ? `${STRIPE_PAYMENT_LINK}?prefilled_email=${encodeURIComponent(email)}`
+      : STRIPE_PAYMENT_LINK;
+    window.location.href = url;
   }
   async function managePortal() {
     setBusy(true);
