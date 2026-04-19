@@ -11,6 +11,7 @@ import WindowsShell from './WindowsShell';
 import ChromeOSShell from './ChromeOSShell';
 import LinuxShell from './LinuxShell';
 import MobileApp from '../mobile/MobileApp';
+import FirstTipsModal from './FirstTipsModal';
 
 function MacOSContent() {
   const { state } = useWindowManager();
@@ -81,6 +82,7 @@ export default function DesktopShell() {
   return (
     <WindowManagerProvider>
       <ShellContent />
+      <FirstTipsModal />
     </WindowManagerProvider>
   );
 }
