@@ -57,11 +57,11 @@ export default function LandingPage() {
           </h1>
           <div ref={googleBtnRef} className="flex justify-center" />
           {loading && <p className="text-xs text-gray-400 mt-4">Signing in…</p>}
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-6">
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-6 max-w-sm mx-auto">
             For payment issues, contact{' '}
             <a href="mailto:rushilkelapure@gmail.com" className="text-blue-600 hover:underline">
               rushilkelapure@gmail.com
-            </a>.
+            </a>. That said, you can do a decent amount for free, so I'd recommend just using that for a bit.
           </p>
         </div>
       </div>
