@@ -6,7 +6,7 @@ import {
 } from '../../api/billing';
 import { useAuth } from '../../context/AuthContext';
 
-const STRIPE_PAYMENT_LINK = 'https://buy.stripe.com/3cI3cpg1Df225Qh67Fdby00';
+const STRIPE_PAYMENT_LINK = 'https://buy.stripe.com/14A4gt7v70782E59jRdby01';
 
 export default function PlanSection() {
   const { user } = useAuth();
@@ -126,7 +126,7 @@ export default function PlanSection() {
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Pro includes</p>
         <Feat>Unlimited AI messages (free is 20/day)</Feat>
         <Feat>Unlimited curricula + debates (free is 1 each per week)</Feat>
-        <Feat>Claude Sonnet 4.6 on lessons + study (vs Haiku on free)</Feat>
+        <Feat>Gemini 3.1 Pro on lessons + study (vs Gemini 3 Flash on free)</Feat>
         <Feat>Unlimited multiplayer Quiz Bowl games</Feat>
         <Feat>Pro badge next to your handle</Feat>
       </div>

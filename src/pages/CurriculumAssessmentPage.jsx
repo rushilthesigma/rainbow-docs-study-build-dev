@@ -5,6 +5,7 @@ import { getCurriculum } from '../api/curriculum';
 import { generateAssessment, gradeAssessment } from '../api/assessments';
 import { apiFetch } from '../api/client';
 import LoadingSpinner from '../components/shared/LoadingSpinner';
+import MathText from '../components/shared/MathText';
 
 export default function CurriculumAssessmentPage() {
   const { id: curriculumId, lessonId } = useParams();
@@ -184,10 +185,10 @@ export default function CurriculumAssessmentPage() {
 
       {/* Question card */}
       <div className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-6 mb-4">
-        <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-4">
+        <MathText as="p" className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-4">
           <span className="text-gray-400 mr-2">Q{currentQ + 1}.</span>
           {q.question}
-        </p>
+        </MathText>
 
         <div className="space-y-2">
           {(q.options || []).map((opt) => {
@@ -203,7 +204,7 @@ export default function CurriculumAssessmentPage() {
                     : 'border-gray-200 dark:border-[#2A2A40] hover:border-gray-300 dark:hover:border-gray-600 text-gray-700 dark:text-gray-300'
                 }`}
               >
-                {opt}
+                <MathText>{opt}</MathText>
               </button>
             );
           })}

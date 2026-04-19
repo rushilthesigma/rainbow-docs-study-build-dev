@@ -7,6 +7,7 @@ import PillGroup from '../components/shared/PillGroup';
 import { DIFFICULTY_OPTIONS } from '../utils/constants';
 import LoadingSpinner from '../components/shared/LoadingSpinner';
 import Modal from '../components/shared/Modal';
+import MathText from '../components/shared/MathText';
 
 export default function AssessmentsPage() {
   const [history, setHistory] = useState([]);
@@ -164,7 +165,7 @@ export default function AssessmentsPage() {
         {q && (
           <div className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-6">
             <p className="text-xs text-gray-400 mb-3">Question {currentQ + 1} of {total}</p>
-            <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-5">{q.question}</h2>
+            <MathText as="h2" className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-5">{q.question}</MathText>
 
             <div className="space-y-2.5">
               {(q.options || []).map((opt) => {
@@ -185,7 +186,7 @@ export default function AssessmentsPage() {
                     }`}>
                       {letter}
                     </span>
-                    {opt.slice(3)}
+                    <MathText>{opt.slice(3)}</MathText>
                   </button>
                 );
               })}

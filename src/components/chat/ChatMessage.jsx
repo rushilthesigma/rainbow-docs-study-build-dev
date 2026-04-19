@@ -1,10 +1,34 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
+import renderMathInElement from 'katex/dist/contrib/auto-render.mjs';
 import 'katex/dist/katex.min.css';
 import { Check, X } from 'lucide-react';
+import MathText from '../shared/MathText';
+
+// Single KaTeX auto-render pass after markdown has mounted. Handles every
+// common delimiter: $...$, $$...$$, \(...\), \[...\]. No remark-math /
+// rehype-katex — those fight with prose dollar signs and with auto-render.
+function useMathAutoRender(ref, deps) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    try {
+      renderMathInElement(el, {
+        delimiters: [
+          { left: '$$', right: '$$', display: true },
+          { left: '\\[', right: '\\]', display: true },
+          { left: '\\(', right: '\\)', display: false },
+          { left: '$', right: '$', display: false },
+        ],
+        throwOnError: false,
+        ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'option'],
+        ignoredClasses: ['katex', 'katex-display'],
+      });
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+}
 
 const CURSOR = '\u200B@@CURSOR@@';
 
@@ -27,7 +51,7 @@ function InlineQuiz({ quizJson }) {
         const isWrong = submitted && userAnswer && userAnswer !== q.correct;
         return (
           <div key={i} className={`rounded-lg border p-3 ${submitted ? (isCorrect ? 'border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/10' : isWrong ? 'border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-900/10' : 'border-gray-200 dark:border-[#2A2A40]') : 'border-gray-200 dark:border-[#2A2A40]'}`}>
-            <p className="text-sm font-medium mb-2">{i + 1}. {q.question}</p>
+            <MathText as="p" className="text-sm font-medium mb-2">{i + 1}. {q.question}</MathText>
             <div className="space-y-1">
               {(q.options || []).map(opt => {
                 const letter = opt.charAt(0);
@@ -43,12 +67,12 @@ function InlineQuiz({ quizJson }) {
                       selected ? 'bg-blue-100 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 font-medium' : 'hover:bg-gray-50 dark:hover:bg-[#161622] text-gray-700 dark:text-gray-300'
                     }`}
                   >
-                    {opt}
+                    <MathText>{opt}</MathText>
                   </button>
                 );
               })}
             </div>
-            {submitted && q.explanation && <p className="text-[11px] text-gray-500 mt-2 italic">{q.explanation}</p>}
+            {submitted && q.explanation && <MathText as="p" className="text-[11px] text-gray-500 mt-2 italic">{q.explanation}</MathText>}
           </div>
         );
       })}
@@ -97,6 +121,9 @@ export default function ChatMessage({ message, isStreaming }) {
 
   const contentWithCursor = isStreaming ? displayContent + CURSOR : displayContent;
 
+  const markdownRef = useRef(null);
+  useMathAutoRender(markdownRef, [displayContent, isStreaming]);
+
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-3`}>
       <div className={`max-w-[92%] rounded-2xl px-4 py-3 text-sm ${
@@ -109,10 +136,9 @@ export default function ChatMessage({ message, isStreaming }) {
         ) : (
           <>
             {displayContent && (
-              <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1.5 prose-headings:my-2 prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-code:bg-gray-100 dark:prose-code:bg-[#161622] prose-code:px-1 prose-code:rounded prose-pre:bg-gray-900 dark:prose-pre:bg-[#0D0D14] prose-pre:rounded-lg">
+              <div ref={markdownRef} className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1.5 prose-headings:my-2 prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-code:bg-gray-100 dark:prose-code:bg-[#161622] prose-code:px-1 prose-code:rounded prose-pre:bg-gray-900 dark:prose-pre:bg-[#0D0D14] prose-pre:rounded-lg">
                 <ReactMarkdown
-                  remarkPlugins={[remarkGfm, remarkMath]}
-                  rehypePlugins={[rehypeKatex]}
+                  remarkPlugins={[remarkGfm]}
                   components={{
                     p: ({ children, ...props }) => <p {...props}>{styleCitations(injectCursor(children), message.sources)}</p>,
                     li: ({ children, ...props }) => <li {...props}>{styleCitations(injectCursor(children), message.sources)}</li>,

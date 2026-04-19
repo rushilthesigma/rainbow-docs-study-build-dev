@@ -10,6 +10,7 @@ import Toggle from '../../shared/Toggle';
 import LoadingSpinner from '../../shared/LoadingSpinner';
 import ProgressBar from '../../curriculum/ProgressBar';
 import ChatContainer from '../../chat/ChatContainer';
+import MathText from '../../shared/MathText';
 
 const TYPE_ICONS = { lesson: BookOpen, practice: PenTool, essay: FileText, unit_test: ClipboardCheck };
 const TYPE_COLORS = { lesson: 'text-blue-400', practice: 'text-purple-400', essay: 'text-amber-400', unit_test: 'text-rose-400' };
@@ -388,7 +389,7 @@ function AssessmentView({ lesson, curriculum, onBack }) {
             <div className="space-y-3">
               {(assessment.questions || []).map((q, i) => (
                 <div key={i} className="bg-white dark:bg-[#161622] border border-gray-200 dark:border-[#2A2A40] rounded-xl p-4">
-                  <p className="text-sm font-medium text-gray-900 dark:text-white mb-3">{i + 1}. {q.question}</p>
+                  <MathText as="p" className="text-sm font-medium text-gray-900 dark:text-white mb-3">{i + 1}. {q.question}</MathText>
                   <div className="space-y-1.5">
                     {(q.options || []).map(opt => {
                       const letter = opt.charAt(0);
@@ -403,7 +404,7 @@ function AssessmentView({ lesson, curriculum, onBack }) {
                               : 'bg-gray-50 dark:bg-[#0D0D14] text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#1e1e2e]'
                           }`}
                         >
-                          {opt}
+                          <MathText>{opt}</MathText>
                         </button>
                       );
                     })}
@@ -433,13 +434,13 @@ function AssessmentView({ lesson, curriculum, onBack }) {
                 <div key={i} className={`rounded-xl p-3 border ${d.correct ? 'bg-emerald-50 dark:bg-emerald-900/10 border-emerald-200 dark:border-emerald-800' : 'bg-rose-50 dark:bg-rose-900/10 border-rose-200 dark:border-rose-800'}`}>
                   <div className="flex items-start gap-2 mb-1">
                     {d.correct ? <Check size={14} className="text-emerald-500 mt-0.5" /> : <X size={14} className="text-rose-500 mt-0.5" />}
-                    <p className="text-xs font-medium text-gray-900 dark:text-white flex-1">{d.question}</p>
+                    <MathText as="p" className="text-xs font-medium text-gray-900 dark:text-white flex-1">{d.question}</MathText>
                   </div>
                   <p className="text-[11px] text-gray-500 ml-6">
                     Your answer: <strong>{d.answer || '—'}</strong>
                     {!d.correct && <> · Correct: <strong className="text-emerald-600">{d.correctAnswer}</strong></>}
                   </p>
-                  {d.explanation && <p className="text-[10px] text-gray-400 ml-6 mt-1 italic">{d.explanation}</p>}
+                  {d.explanation && <MathText as="p" className="text-[10px] text-gray-400 ml-6 mt-1 italic">{d.explanation}</MathText>}
                 </div>
               ))}
             </div>

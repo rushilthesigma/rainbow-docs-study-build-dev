@@ -8,6 +8,7 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
 import Stripe from 'stripe';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { createRequire } from 'module';
 const _require = createRequire(import.meta.url);
 const pdfParse = _require('pdf-parse');
@@ -26,9 +27,18 @@ dotenv.config({ path: join(__dirname, '.env'), override: true });
 const app = express();
 const PORT = process.env.PORT || 3002;
 
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const DEFAULT_MODEL = 'claude-sonnet-4-6';
-const FALLBACK_MODEL = 'claude-haiku-4-5-20251001';
+// ===== Google Gemini =====
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+// As of 2026-04 the 3.x family is exposed as `-preview` variants.
+// Pro users get 3.1 Pro (latest), Free users get 3 Flash.
+const GEMINI_PRO = 'gemini-3.1-pro-preview';
+const GEMINI_FLASH = 'gemini-3-flash-preview';
+const DEFAULT_MODEL = GEMINI_PRO;
+const FALLBACK_MODEL = GEMINI_FLASH;
+const resolveModel = (name) => name || DEFAULT_MODEL;
+const fallbackFor = (name) => (name === GEMINI_PRO ? GEMINI_FLASH : GEMINI_FLASH);
+const genAI = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
+if (!GEMINI_API_KEY) console.warn('GEMINI_API_KEY is not set — AI calls will fail');
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 
 // Data storage — try multiple locations until one works
@@ -121,8 +131,8 @@ const FREE_DAILY_MESSAGE_LIMIT = 20;
 const FREE_DAILY_QUIZBOWL_GAMES = 2;
 const FREE_WEEKLY_CURRICULA = 1;
 const FREE_WEEKLY_DEBATES = 1;
-const MODEL_PRO  = 'claude-sonnet-4-6';
-const MODEL_FREE = 'claude-haiku-4-5-20251001';
+const MODEL_PRO  = GEMINI_PRO;
+const MODEL_FREE = GEMINI_FLASH;
 
 function todayKey() { return new Date().toISOString().slice(0, 10); }
 // ISO year-week (Mon-start) for weekly buckets, e.g. "2026-W16"
@@ -149,7 +159,13 @@ function getPlan(user, email) {
   return 'free';
 }
 function isPro(user, email) { return getPlan(user, email) === 'pro'; }
-function modelForUser(user, email) { return isPro(user, email) ? MODEL_PRO : MODEL_FREE; }
+// Pro users can opt into the smaller/faster model via preferences.modelTier.
+// Free users always get FREE (Flash) regardless of preference.
+function modelForUser(user, email) {
+  if (!isPro(user, email)) return MODEL_FREE;
+  const tier = user?.data?.preferences?.modelTier;
+  return tier === 'flash' ? MODEL_FREE : MODEL_PRO;
+}
 
 // Reset daily counters when the day rolls over, weekly counters on ISO week change
 function ensureUsageBucket(user) {
@@ -533,11 +549,14 @@ app.get('/api/auth/me', authMiddleware, (req, res) => {
     // Migrate data on every read
     user.data = migrateUserData(user.data);
     saveUsers(users);
+    // Expose the *effective* plan (owner + time-decayed Pro) so the client
+    // doesn't have to repeat the logic.
+    const effectivePlan = getPlan(user, email);
     res.json({
       id: user.id,
       email: user.email || email,
       name: user.name,
-      data: user.data,
+      data: { ...user.data, effectivePlan },
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -556,49 +575,77 @@ app.post('/api/auth/sync', authMiddleware, (req, res) => {
 });
 
 // ===== AI CHAT (generic) =====
-async function callAnthropic(systemPrompt, messages, model, maxTokens = 4096) {
+// Convert Claude-style messages [{role:'user'|'assistant', content:'...'}]
+// into Gemini's `contents` format.
+function messagesToGeminiContents(messages) {
+  return (messages || []).map(m => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: String(m.content ?? '') }],
+  }));
+}
+
+function isInvalidModelError(errMsg = '') {
+  const s = String(errMsg).toLowerCase();
+  return s.includes('not found') || s.includes('invalid') || s.includes('unsupported')
+    || s.includes('does not exist') || s.includes('unknown model');
+}
+
+function isRateLimitError(err) {
+  const msg = String(err?.message || err || '').toLowerCase();
+  const status = err?.status || err?.code;
+  return status === 429 || status === 503 || status >= 500 || msg.includes('rate limit') || msg.includes('resource_exhausted');
+}
+
+// Non-streaming helper. Returns the Claude-shaped envelope the rest of the
+// codebase expects: { success: true, data: { content: [{ text }] }, model }.
+async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096) {
+  if (!genAI) return { success: false, error: 'GEMINI_API_KEY not configured', status: 500 };
+
   let currentModel = model || DEFAULT_MODEL;
   let lastError = null;
 
   for (let attempt = 0; attempt < 3; attempt++) {
+    const resolved = resolveModel(currentModel);
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 60000);
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({ model: currentModel, max_tokens: maxTokens, system: systemPrompt, messages }),
-        signal: controller.signal,
+
+      const m = genAI.getGenerativeModel({
+        model: resolved,
+        systemInstruction: systemPrompt ? { role: 'system', parts: [{ text: systemPrompt }] } : undefined,
+        generationConfig: { maxOutputTokens, temperature: 0.7 },
       });
+
+      const result = await m.generateContent(
+        { contents: messagesToGeminiContents(messages) },
+        { signal: controller.signal },
+      );
       clearTimeout(timeout);
 
-      if (response.ok) {
-        const data = await response.json();
-        return { success: true, data, model: currentModel };
-      }
-
-      const errorData = await response.json().catch(() => ({}));
-      lastError = errorData.error?.message || `API error: ${response.status}`;
-
-      if (response.status === 429 || response.status === 529 || response.status >= 500) {
-        if (attempt === 1 && currentModel !== FALLBACK_MODEL) currentModel = FALLBACK_MODEL;
+      const text = result?.response?.text?.() ?? '';
+      return {
+        success: true,
+        data: { content: [{ type: 'text', text }] },
+        model: resolved,
+      };
+    } catch (err) {
+      lastError = err?.message || String(err);
+      // 404/invalid model on a 3.x id → downgrade this process, retry same attempt
+      // No model downgrade — stay on 3.x. Surface the error if 3 is unavailable.
+      if (isRateLimitError(err)) {
+        if (attempt === 1) currentModel = fallbackFor(currentModel);
         if (attempt < 2) await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
         continue;
       }
-
-      return { success: false, error: lastError, status: response.status };
-    } catch (fetchErr) {
-      lastError = fetchErr.name === 'AbortError' ? 'Request timed out' : fetchErr.message;
-      if (attempt === 1 && currentModel !== FALLBACK_MODEL) currentModel = FALLBACK_MODEL;
-      if (attempt < 2) await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+      // Non-retryable
+      return { success: false, error: lastError, status: err?.status || 500 };
     }
   }
   return { success: false, error: lastError || 'All attempts failed' };
 }
+
+// Back-compat alias — all existing call sites use `callAnthropic`.
+const callAnthropic = callGemini;
 
 app.post('/api/chat', async (req, res) => {
   try {
@@ -843,86 +890,28 @@ app.post('/api/curriculum/:id/lesson/generate', authMiddleware, async (req, res)
     const settings = curriculum.settings || {};
     const { system, user } = buildLessonPrompt(settings, unit.title, lesson, previousLessons);
 
-    // Set SSE headers
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders();
-
-    // Stream from Anthropic
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 120000);
-
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: DEFAULT_MODEL,
-        max_tokens: 8192,
-        system,
-        messages: [{ role: 'user', content: user }],
-        stream: true,
-      }),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeout);
-
-    if (!response.ok) {
-      const err = await response.text();
-      res.write(`data: ${JSON.stringify({ error: err })}\n\n`);
-      res.end();
-      return;
-    }
-
-    let fullContent = '';
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop();
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6).trim();
-          if (data === '[DONE]') continue;
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
-              fullContent += parsed.delta.text;
-              res.write(`data: ${JSON.stringify({ content: parsed.delta.text })}\n\n`);
+    await streamAIResponse(
+      res,
+      system,
+      [{ role: 'user', content: user }],
+      async (fullContent) => {
+        // Persist generated lesson content
+        const usersAfter = loadUsers();
+        const curr = (usersAfter[email]?.data?.curricula || []).find(c => c.id === req.params.id);
+        if (curr) {
+          const u = (curr.units || []).find(u => u.id === unitId);
+          if (u) {
+            const l = (u.lessons || []).find(l => l.id === lessonId);
+            if (l) {
+              l.content = fullContent;
+              saveUsers(usersAfter);
             }
-          } catch {}
+          }
         }
-      }
-    }
-
-    // Save the full lesson content
-    const usersAfter = loadUsers();
-    const curr = (usersAfter[email].data?.curricula || []).find(c => c.id === req.params.id);
-    if (curr) {
-      const u = (curr.units || []).find(u => u.id === unitId);
-      if (u) {
-        const l = (u.lessons || []).find(l => l.id === lessonId);
-        if (l) {
-          l.content = fullContent;
-          saveUsers(usersAfter);
-        }
-      }
-    }
-
-    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-    res.end();
+      },
+      DEFAULT_MODEL,
+    );
+    return;
   } catch (e) {
     console.error('Lesson generation error:', e);
     if (!res.headersSent) {
@@ -1055,9 +1044,24 @@ function advancePhaseIfNeeded(lesson, fullContent) {
   return false;
 }
 
-// Helper: stream AI response as SSE
+// Helper: stream AI response as SSE, backed by Google Gemini.
+//
+// SSE event schema (unchanged from the old Anthropic impl — frontend consumers
+// depend on this exact shape):
+//   { content: "..." }                     -- text delta
+//   { source: { url, title } }             -- new source discovered
+//   { status: "searching"|"reading"|"no_sources" }
+//   { done: true, sources: [{url,title}] } -- end
+//   { error: "..." }
+//
+// Two modes:
+//   - Non-source: stream text deltas through as they arrive (token-by-token UX).
+//   - Source mode: buffer the entire response server-side, then once Gemini
+//     returns groundingMetadata at stream end, inject [n] markers at the
+//     correct segment indices and flush the rewritten text as a single content
+//     event followed by per-source events + the done event.
 async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOverride, opts = {}) {
-  const model = modelOverride || DEFAULT_MODEL;
+  const requestedModel = modelOverride || DEFAULT_MODEL;
   const enableWebSearch = !!opts.enableWebSearch;
   if (!res.headersSent) {
     res.setHeader('Content-Type', 'text/event-stream');
@@ -1066,149 +1070,130 @@ async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOv
     res.flushHeaders();
   }
 
+  if (!genAI) {
+    res.write(`data: ${JSON.stringify({ error: 'GEMINI_API_KEY not configured' })}\n\n`);
+    res.end();
+    return;
+  }
+
+  // Source mode: sources are retrieved automatically via Google Search
+  // grounding — tell the model it has the capability rather than browbeating
+  // it into using the tool.
+  const finalSystem = enableWebSearch
+    ? `${systemPrompt}
+
+---
+You have Google Search. Use it on every response to ground your answer in real web sources. Run 2-4 queries before writing, then base your explanation on what the search returns. Write naturally — do not mention that you searched, and do not include your own "Sources:" list (the UI shows one below the message).`
+    : systemPrompt;
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 180000);
 
   try {
-    // When source mode is on, MANDATE the web_search tool — otherwise Claude
-    // will cheerfully answer from memory with no citations. Also tell it to
-    // put inline [n] markers in its prose so the citation chips line up.
-    const finalSystem = enableWebSearch
-      ? `${systemPrompt}
+    const resolved = resolveModel(requestedModel);
+    const tools = enableWebSearch ? [{ googleSearch: {} }] : undefined;
+    const model = genAI.getGenerativeModel({
+      model: resolved,
+      systemInstruction: { role: 'system', parts: [{ text: finalSystem }] },
+      tools,
+      generationConfig: { maxOutputTokens: 8192, temperature: 0.7 },
+    });
 
-SOURCE MODE — HARD RULES (override any conflicting rules above):
-1. You MUST call the web_search tool before writing a single word of prose. Use 2–4 targeted queries. Do this silently — the user does not see you searching.
-2. Write the answer directly, as if you always knew it. The response must read like a normal teaching response, NOT a research summary.
-3. NEVER mention that you searched. NEVER write phrases like "based on my search", "according to the sources", "I looked this up", "recent searches show", "the web indicates", or anything similar. The user paid for citations, not a narration of your process.
-4. Every factual claim MUST be grounded in the search results you just retrieved — quote/paraphrase those results rather than relying on memory. The API will attach inline citations automatically to grounded text, so stay close to the sources.
-5. Do not include a "Sources:" section or a numbered bibliography in your own prose — the UI renders that separately. Just write the answer.`
-      : systemPrompt;
-
-    const body = {
-      model,
-      max_tokens: 8192,
-      system: finalSystem,
-      messages,
-      stream: true,
-    };
     if (enableWebSearch) {
-      // Anthropic's built-in web search tool — Claude fetches pages,
-      // cites them inline via citation blocks, and the final answer
-      // streams with a sources list we pass through to the client.
-      body.tools = [{ type: 'web_search_20250305', name: 'web_search', max_uses: 6 }];
-      // Force the model to invoke THIS specific tool at least once.
-      // 'any' allows Claude to skip when only one tool exists — naming
-      // it explicitly is more reliable.
-      body.tool_choice = { type: 'tool', name: 'web_search' };
       res.write(`data: ${JSON.stringify({ status: 'searching' })}\n\n`);
     }
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
 
-    if (!response.ok) {
-      const err = await response.text();
-      res.write(`data: ${JSON.stringify({ error: err })}\n\n`);
-      res.end();
-      return;
-    }
+    const result = await model.generateContentStream(
+      { contents: messagesToGeminiContents(messages) },
+      { signal: controller.signal },
+    );
 
-    let fullContent = '';
-    const sources = []; // { title, url } — citation order, each source shown gets a [n] in the text
-    const seenUrls = new Set();
-    // Track URLs we've seen from tool results (not yet cited inline) so we
-    // don't mis-number them when they later get cited. We ONLY assign [n]
-    // numbers in the order citations are emitted by the model.
-    const seenPendingUrls = new Set();
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
+    let buffered = '';
+    let finalResponse = null;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop();
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6).trim();
-          if (data === '[DONE]') continue;
-          try {
-            const parsed = JSON.parse(data);
-            // Text streaming
-            if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta' && parsed.delta?.text) {
-              fullContent += parsed.delta.text;
-              res.write(`data: ${JSON.stringify({ content: parsed.delta.text })}\n\n`);
-            }
-            // Inline citations — numbered [1], [2], ... in the ORDER they
-            // first appear in the prose. Claude emits these AFTER the text
-            // they cite, so we append a space+bracket marker directly.
-            if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'citations_delta' && parsed.delta?.citation) {
-              const c = parsed.delta.citation;
-              const url = c.url;
-              if (!url) continue;
-              let index;
-              if (!seenUrls.has(url)) {
-                seenUrls.add(url);
-                const src = { url, title: c.title || url };
-                sources.push(src);
-                index = sources.length;
-                res.write(`data: ${JSON.stringify({ source: src })}\n\n`);
-              } else {
-                index = sources.findIndex(s => s.url === url) + 1;
-              }
-              if (index) {
-                // Strip any trailing whitespace already present to avoid
-                // "word [3] " chains; just append a single space+marker.
-                const trimmed = fullContent.replace(/\s+$/, '');
-                const marker = (trimmed === fullContent ? ' ' : '') + `[${index}]`;
-                fullContent += marker;
-                res.write(`data: ${JSON.stringify({ content: marker })}\n\n`);
-              }
-            }
-            // Tool use progress surface
-            if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'server_tool_use') {
-              res.write(`data: ${JSON.stringify({ status: 'searching' })}\n\n`);
-            }
-            if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'web_search_tool_result') {
-              res.write(`data: ${JSON.stringify({ status: 'reading' })}\n\n`);
-              // DO NOT push these into `sources` yet — that would give
-              // them indices before they're cited, and inline [n] markers
-              // would skip (e.g. [6], [9], [10] instead of [1], [2], [3]).
-              // Just remember the URLs so we know about them.
-              const results = parsed.content_block?.content || [];
-              if (Array.isArray(results)) {
-                for (const r of results) {
-                  const url = r?.url;
-                  if (url) seenPendingUrls.add(url);
-                }
-              }
-            }
-          } catch {}
-        }
+    // Always stream tokens live — both source and non-source mode. In source
+    // mode, citation markers get appended at the end (once we have grounding
+    // metadata) rather than inline, because Gemini only returns supports
+    // after the stream closes.
+    for await (const chunk of result.stream) {
+      const text = chunk?.text?.() || '';
+      if (text) {
+        buffered += text;
+        res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
       }
     }
 
-    if (enableWebSearch && sources.length === 0) {
-      // Let the client surface "tried to search but got nothing"
-      res.write(`data: ${JSON.stringify({ status: 'no_sources' })}\n\n`);
+    try { finalResponse = await result.response; } catch {}
+    clearTimeout(timeout);
+
+    // --- Citation handling (source mode only) ---
+    const sources = [];
+    let appendedMarkers = '';
+    if (enableWebSearch) {
+      const gm = finalResponse?.candidates?.[0]?.groundingMetadata || {};
+      const chunksMeta = gm.groundingChunks || [];
+      const supports = gm.groundingSupports || [];
+
+      // Build URL → [n] map in the order supports reference each source.
+      const urlToIndex = new Map();
+      const orderedSupports = [...supports].sort((a, b) => {
+        const ea = a?.segment?.endIndex ?? 0;
+        const eb = b?.segment?.endIndex ?? 0;
+        return ea - eb;
+      });
+
+      for (const sup of orderedSupports) {
+        const chunkIdxs = sup?.groundingChunkIndices || [];
+        for (const ci of chunkIdxs) {
+          const ch = chunksMeta[ci];
+          const url = ch?.web?.uri || ch?.retrievedContext?.uri;
+          if (!url) continue;
+          if (!urlToIndex.has(url)) {
+            const idx = urlToIndex.size + 1;
+            urlToIndex.set(url, idx);
+            const title = ch?.web?.title || ch?.retrievedContext?.title || url;
+            sources.push({ url, title });
+          }
+        }
+      }
+
+      // Some grounding responses emit chunks without matching supports — add
+      // those URLs too so the sources list is never empty when grounding ran.
+      for (const ch of chunksMeta) {
+        const url = ch?.web?.uri || ch?.retrievedContext?.uri;
+        if (!url || urlToIndex.has(url)) continue;
+        const idx = urlToIndex.size + 1;
+        urlToIndex.set(url, idx);
+        const title = ch?.web?.title || ch?.retrievedContext?.title || url;
+        sources.push({ url, title });
+      }
+
+      for (const s of sources) {
+        res.write(`data: ${JSON.stringify({ source: s })}\n\n`);
+      }
+
+      if (sources.length > 0) {
+        // Append [1][2][3]... at the very end of the message as a single
+        // content event. Inline positioning isn't possible post-stream, so
+        // we clump them — the <Sources> list below the message gives the
+        // fully-clickable bibliography.
+        const markerText = ' ' + sources.map((_, i) => `[${i + 1}]`).join('');
+        appendedMarkers = markerText;
+        res.write(`data: ${JSON.stringify({ content: markerText })}\n\n`);
+      } else {
+        res.write(`data: ${JSON.stringify({ status: 'no_sources' })}\n\n`);
+      }
     }
-    if (onComplete) await onComplete(fullContent, sources);
+
+    const finalContent = buffered + appendedMarkers;
+    if (onComplete) await onComplete(finalContent, sources);
     res.write(`data: ${JSON.stringify({ done: true, sources })}\n\n`);
     res.end();
   } catch (e) {
     clearTimeout(timeout);
+    console.error('Gemini stream error:', e);
     if (!res.writableEnded) {
-      res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`);
+      res.write(`data: ${JSON.stringify({ error: e?.message || String(e) })}\n\n`);
       res.end();
     }
   }
@@ -1217,7 +1202,8 @@ SOURCE MODE — HARD RULES (override any conflicting rules above):
 // Lesson chat (conversational 5-phase)
 app.post('/api/curriculum/:id/lesson/:lessonId/chat', authMiddleware, requireMessageQuota, async (req, res) => {
   try {
-    const { message } = req.body;
+    const { message, sourced } = req.body;
+    req.sourced = !!sourced;
     if (!message) return res.status(400).json({ error: 'Message required' });
 
     const users = loadUsers();
@@ -1346,7 +1332,8 @@ app.post('/api/curriculum/:id/lesson/:lessonId/reset', authMiddleware, (req, res
 
 app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res) => {
   try {
-    const { message, sessionId, context } = req.body;
+    const { message, sessionId, context, sourced } = req.body;
+    req.sourced = !!sourced;
     if (!message) return res.status(400).json({ error: 'Message required' });
 
     const users = loadUsers();
@@ -2719,7 +2706,8 @@ app.post('/api/lessons/:id/reset', authMiddleware, (req, res) => {
 // Chat (SSE) — free-form single-lesson teaching. No phases; AI decides when done via [LESSON_DONE].
 app.post('/api/lessons/:id/chat', authMiddleware, requireMessageQuota, async (req, res) => {
   try {
-    const { message } = req.body || {};
+    const { message, sourced } = req.body || {};
+    req.sourced = !!sourced;
     if (!message) return res.status(400).json({ error: 'Message required' });
 
     const users = loadUsers();
@@ -2861,7 +2849,7 @@ app.post('/api/billing/create-checkout-session', authMiddleware, async (req, res
         price_data: {
           currency: 'usd',
           recurring: { interval: 'month' },
-          product_data: { name: 'RushilAI Pro', description: 'Unlimited messages, Sonnet 4.6, unlimited Quiz Bowl, Pro badge.' },
+          product_data: { name: 'RushilAI Pro', description: 'Unlimited messages, Gemini 3.1 Pro, unlimited Quiz Bowl, Pro badge.' },
           unit_amount: Math.round(usd * 100),
         },
       };
