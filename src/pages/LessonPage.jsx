@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, RotateCcw, ChevronLeft, ChevronRight, Trophy } from 'lucide-react';
 import { getCurriculum, getLessonHistory, sendLessonMessage, resetLesson } from '../api/curriculum';
 import ChatContainer from '../components/chat/ChatContainer';
+import { errorChatMessage } from '../utils/aiErrors';
 import PhaseIndicator from '../components/chat/PhaseIndicator';
 import LoadingSpinner from '../components/shared/LoadingSpinner';
 import Button from '../components/shared/Button';
@@ -114,7 +115,7 @@ export default function LessonPage() {
         setStreaming(false);
       },
       onError: (err) => {
-        setMessages(m => [...m, { role: 'assistant', content: `Error: ${err}` }]);
+        setMessages(m => [...m, errorChatMessage(err)]);
         setStreamingContent('');
         streamContentRef.current = '';
         setStreaming(false);

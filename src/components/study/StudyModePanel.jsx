@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { MessageSquare, History, Trash2, Plus, ChevronLeft } from 'lucide-react';
 import { sendStudyMessage, listStudySessions, getStudySession, deleteStudySession } from '../../api/curriculum';
 import ChatContainer from '../chat/ChatContainer';
+import { errorChatMessage } from '../../utils/aiErrors';
 
 export default function StudyModePanel({ className = '', initialMessage }) {
   const [messages, setMessages] = useState([]);
@@ -65,7 +66,8 @@ export default function StudyModePanel({ className = '', initialMessage }) {
         setStreaming(false);
       },
       onError: (err) => {
-        setMessages(m => [...m, { role: 'assistant', content: `Error: ${err}` }]);
+        // eslint-disable-next-line no-use-before-define
+        setMessages(m => [...m, errorChatMessage(err)]);
         setStreamingContent('');
         setStreamingSources([]);
         setSearchStatus(null);

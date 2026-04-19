@@ -11,6 +11,7 @@ import LoadingSpinner from '../../shared/LoadingSpinner';
 import ProgressBar from '../../curriculum/ProgressBar';
 import ChatContainer from '../../chat/ChatContainer';
 import MathText from '../../shared/MathText';
+import { errorChatMessage } from '../../../utils/aiErrors';
 
 const TYPE_ICONS = { lesson: BookOpen, practice: PenTool, essay: FileText, unit_test: ClipboardCheck };
 const TYPE_COLORS = { lesson: 'text-blue-400', practice: 'text-purple-400', essay: 'text-amber-400', unit_test: 'text-rose-400' };
@@ -118,7 +119,7 @@ export default function CurriculaApp() {
         setStreaming(false);
       },
       onError: err => {
-        setLessonMessages(m => [...m, { role: 'assistant', content: `Error: ${err}` }]);
+        setLessonMessages(m => [...m, errorChatMessage(err)]);
         setStreamingContent(''); setStreamingSources([]); setSearchStatus(null);
         streamRef.current = ''; streamSourcesRef.current = [];
         setStreaming(false);

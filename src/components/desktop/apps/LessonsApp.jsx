@@ -5,6 +5,7 @@ import {
   resetLesson, deleteLesson,
 } from '../../../api/lessons';
 import { consumePendingLesson } from '../../../utils/pendingLesson';
+import { errorChatMessage } from '../../../utils/aiErrors';
 import { DIFFICULTY_OPTIONS } from '../../../utils/constants';
 import Button from '../../shared/Button';
 import Input from '../../shared/Input';
@@ -153,7 +154,7 @@ export default function LessonsApp() {
         setStreaming(false);
       },
       onError: (err) => {
-        setMessages(m => [...m, { role: 'assistant', content: `Error: ${err}` }]);
+        setMessages(m => [...m, errorChatMessage(err)]);
         setStreamingContent(''); setStreamingSources([]); setSearchStatus(null);
         streamRef.current = ''; streamSourcesRef.current = [];
         setStreaming(false);

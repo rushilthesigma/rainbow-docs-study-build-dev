@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { BookOpen, Upload, ArrowLeft, Trash2, Loader2, Send, Sparkles, MessageCircle, GraduationCap } from 'lucide-react';
 import { listTextbooks, uploadTextbook, getTextbook, generateTextbookCurriculum, chatWithTextbook, deleteTextbook } from '../../../api/textbooks';
 import Button from '../../shared/Button';
+import { errorChatMessage } from '../../../utils/aiErrors';
 import LoadingSpinner from '../../shared/LoadingSpinner';
 
 // ===== CHAT VIEW =====
@@ -35,7 +36,7 @@ function TextbookChat({ textbookId, title, onBack }) {
       const data = await chatWithTextbook(textbookId, text);
       setMessages(prev => [...prev, { role: 'assistant', content: data.reply, timestamp: new Date().toISOString() }]);
     } catch (err) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err.message}` }]);
+      setMessages(prev => [...prev, errorChatMessage(err)]);
     }
     setSending(false);
   }

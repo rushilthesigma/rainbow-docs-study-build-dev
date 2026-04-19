@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from 'react';
 import { Swords, RotateCcw } from 'lucide-react';
 import { apiFetch } from '../../../api/client';
 import ChatContainer from '../../chat/ChatContainer';
+import { errorChatMessage } from '../../../utils/aiErrors';
 
 function buildSystem(side) {
   return `You are a skilled debate partner. The user is arguing ${side === 'for' ? 'FOR' : 'AGAINST'} the topic. You MUST argue the ${side === 'for' ? 'AGAINST' : 'FOR'} position.
@@ -41,7 +42,7 @@ export default function DebateApp() {
       const reply = result.content?.[0]?.text || 'I need a moment to formulate my argument...';
       setMessages(prev => [...prev, { role: 'assistant', content: reply, timestamp: new Date().toISOString() }]);
     } catch (err) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err.message}` }]);
+      setMessages(prev => [...prev, errorChatMessage(err)]);
     }
     setStreamingContent('');
     setStreaming(false);

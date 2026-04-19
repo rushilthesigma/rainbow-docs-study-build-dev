@@ -112,12 +112,16 @@ export default function ChatMessage({ message, isStreaming }) {
 
   const markdownRef = useRef(null);
 
+  const isError = !!message._error;
+
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-3`}>
       <div className={`max-w-[92%] rounded-2xl px-4 py-3 text-sm ${
         isUser
           ? 'bg-blue-600 text-white rounded-br-md'
-          : 'bg-white dark:bg-[#1e1e2e] border border-gray-200 dark:border-[#2A2A40] text-gray-800 dark:text-gray-200 rounded-bl-md'
+          : isError
+            ? 'bg-rose-50 dark:bg-rose-900/15 border border-rose-200 dark:border-rose-800/60 text-rose-700 dark:text-rose-300 rounded-bl-md'
+            : 'bg-white dark:bg-[#1e1e2e] border border-gray-200 dark:border-[#2A2A40] text-gray-800 dark:text-gray-200 rounded-bl-md'
       }`}>
         {isUser ? (
           <div>
