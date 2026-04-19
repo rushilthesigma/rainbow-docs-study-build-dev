@@ -57,6 +57,12 @@ export default function LandingPage() {
           </h1>
           <div ref={googleBtnRef} className="flex justify-center" />
           {loading && <p className="text-xs text-gray-400 mt-4">Signing in…</p>}
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-6">
+            For payment issues, contact{' '}
+            <a href="mailto:rushilkelapure@gmail.com" className="text-blue-600 hover:underline">
+              rushilkelapure@gmail.com
+            </a>.
+          </p>
         </div>
       </div>
       <p className="text-[11px] text-gray-400 dark:text-gray-500 pb-6 text-center">
