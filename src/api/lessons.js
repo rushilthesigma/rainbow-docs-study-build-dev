@@ -28,14 +28,15 @@ export async function resetLesson(id) {
 }
 
 // SSE chat — same shape as curriculum lesson chat. `sourced=true` → web-search (2x cost).
-export function sendLessonMessage(id, message, { onChunk, onDone, onError, onSource, onStatus }, sourced = false) {
+// `images` is an array of { dataUrl, mimeType } forwarded as inline_data to Gemini.
+export function sendLessonMessage(id, message, images, { onChunk, onDone, onError, onSource, onStatus }, sourced = false) {
   const token = getToken();
   const controller = new AbortController();
 
   fetch(`/api/lessons/${id}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ message, sourced }),
+    body: JSON.stringify({ message, sourced, images: (images || []).map(i => ({ dataUrl: i.dataUrl, mimeType: i.mimeType })) }),
     signal: controller.signal,
   })
     .then(async (response) => {

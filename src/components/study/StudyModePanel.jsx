@@ -23,7 +23,9 @@ export default function StudyModePanel({ className = '', initialMessage }) {
 
   function doSend(text, opts = {}) {
     const wasSourced = !!(opts.sourced ?? sourceMode);
+    const images = opts.images || [];
     const userMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
+    if (images.length) userMsg.images = images.map(i => ({ dataUrl: i.dataUrl, name: i.name }));
     setMessages(prev => [...prev, userMsg]);
     setStreaming(true);
     setStreamingContent('');
@@ -32,7 +34,7 @@ export default function StudyModePanel({ className = '', initialMessage }) {
     streamContentRef.current = '';
     streamSourcesRef.current = [];
 
-    const abort = sendStudyMessage(text, sessionId, {}, {
+    const abort = sendStudyMessage(text, sessionId, {}, images, {
       onChunk: (chunk) => {
         streamContentRef.current += chunk;
         setStreamingContent(streamContentRef.current);
@@ -75,9 +77,9 @@ export default function StudyModePanel({ className = '', initialMessage }) {
     abortRef.current = abort;
   }
 
-  const handleSend = useCallback((text) => {
+  const handleSend = useCallback((text, images) => {
     if (streaming) return;
-    doSend(text);
+    doSend(text, { images });
   }, [streaming, sessionId]);
 
   useEffect(() => {

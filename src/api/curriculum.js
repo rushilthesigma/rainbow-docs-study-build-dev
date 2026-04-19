@@ -114,13 +114,41 @@ function streamSSE(url, body, { onChunk, onDone, onError, onMeta, onSource, onSt
 }
 
 // Lesson chat (conversational). `sourced` = true → web-search backed answer (counts 2x).
-export function sendLessonMessage(curriculumId, lessonId, message, handlers, sourced = false) {
-  return streamSSE(`/api/curriculum/${curriculumId}/lesson/${lessonId}/chat`, { message, sourced }, handlers);
+// `images` is an optional array of { dataUrl, mimeType } for multimodal turns.
+export function sendLessonMessage(curriculumId, lessonId, message, handlersOrImages, handlersOrSourced, maybeSourced) {
+  // Backward-compat: old call signature was (id, lessonId, message, handlers, sourced).
+  let images = [], handlers, sourced = false;
+  if (Array.isArray(handlersOrImages)) {
+    images = handlersOrImages;
+    handlers = handlersOrSourced;
+    sourced = !!maybeSourced;
+  } else {
+    handlers = handlersOrImages;
+    sourced = !!handlersOrSourced;
+  }
+  return streamSSE(
+    `/api/curriculum/${curriculumId}/lesson/${lessonId}/chat`,
+    { message, sourced, images: (images || []).map(i => ({ dataUrl: i.dataUrl, mimeType: i.mimeType })) },
+    handlers,
+  );
 }
 
 // Study mode chat
-export function sendStudyMessage(message, sessionId, context, handlers, sourced = false) {
-  return streamSSE('/api/study/chat', { message, sessionId, context, sourced }, handlers);
+export function sendStudyMessage(message, sessionId, context, handlersOrImages, handlersOrSourced, maybeSourced) {
+  let images = [], handlers, sourced = false;
+  if (Array.isArray(handlersOrImages)) {
+    images = handlersOrImages;
+    handlers = handlersOrSourced;
+    sourced = !!maybeSourced;
+  } else {
+    handlers = handlersOrImages;
+    sourced = !!handlersOrSourced;
+  }
+  return streamSSE(
+    '/api/study/chat',
+    { message, sessionId, context, sourced, images: (images || []).map(i => ({ dataUrl: i.dataUrl, mimeType: i.mimeType })) },
+    handlers,
+  );
 }
 
 // Study session history

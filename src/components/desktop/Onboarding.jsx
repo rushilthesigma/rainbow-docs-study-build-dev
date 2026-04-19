@@ -80,8 +80,7 @@ export default function Onboarding({ onComplete }) {
 
         {step === 2 && (
           <div className="text-center">
-            <h2 className={`text-2xl font-bold ${textPrimary} mb-2`}>Choose your desktop</h2>
-            <p className={`${textMuted} text-sm mb-6`}>Pick a style that feels familiar.</p>
+            <h2 className={`text-2xl font-bold ${textPrimary} mb-6`}>Select UI</h2>
             <div className="grid grid-cols-2 gap-3 max-w-sm mx-auto mb-8">
               {[
                 { id: 'macos', label: 'macOS', desc: 'Dock + Menu Bar' },

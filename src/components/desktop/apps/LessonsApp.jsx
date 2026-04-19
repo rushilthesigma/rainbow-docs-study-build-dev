@@ -116,7 +116,9 @@ export default function LessonsApp() {
     const id = lessonId || activeLesson?.id;
     if (!id) return;
     const wasSourced = !!(opts.sourced ?? sourceMode);
+    const images = opts.images || [];
     const userMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
+    if (images.length) userMsg.images = images.map(i => ({ dataUrl: i.dataUrl, name: i.name }));
     setMessages(prev => [...prev, userMsg]);
     setStreaming(true);
     setStreamingContent('');
@@ -125,7 +127,7 @@ export default function LessonsApp() {
     streamRef.current = '';
     streamSourcesRef.current = [];
 
-    const abort = sendLessonMessage(id, text, {
+    const abort = sendLessonMessage(id, text, images, {
       onChunk: (c) => { streamRef.current += c; setStreamingContent(streamRef.current); if (searchStatus) setSearchStatus(null); },
       onSource: (src) => {
         streamSourcesRef.current = [...streamSourcesRef.current, src];
@@ -160,9 +162,9 @@ export default function LessonsApp() {
     abortRef.current = abort;
   }
 
-  const handleSend = useCallback((text) => {
+  const handleSend = useCallback((text, images) => {
     if (streaming || completed) return;
-    doSend(text);
+    doSend(text, null, { images });
   }, [streaming, completed, activeLesson]);
 
   async function handleReset() {

@@ -87,7 +87,9 @@ export default function CurriculaApp() {
 
   function doSendLesson(text, cid, lid, opts = {}) {
     const wasSourced = !!(opts.sourced ?? sourceMode);
+    const images = opts.images || [];
     const userMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
+    if (images.length) userMsg.images = images.map(i => ({ dataUrl: i.dataUrl, name: i.name }));
     setLessonMessages(prev => [...prev, userMsg]);
     setStreaming(true);
     setStreamingContent('');
@@ -96,7 +98,7 @@ export default function CurriculaApp() {
     streamRef.current = '';
     streamSourcesRef.current = [];
 
-    const abort = sendLessonMessage(cid || currentLesson?.curriculumId, lid || currentLesson?.id, text, {
+    const abort = sendLessonMessage(cid || currentLesson?.curriculumId, lid || currentLesson?.id, text, images, {
       onChunk: c => { streamRef.current += c; setStreamingContent(streamRef.current); if (searchStatus) setSearchStatus(null); },
       onSource: src => {
         streamSourcesRef.current = [...streamSourcesRef.current, src];
@@ -125,9 +127,9 @@ export default function CurriculaApp() {
     abortRef.current = abort;
   }
 
-  const handleLessonSend = useCallback((text) => {
+  const handleLessonSend = useCallback((text, images) => {
     if (streaming) return;
-    doSendLesson(text);
+    doSendLesson(text, null, null, { images });
   }, [streaming, currentLesson]);
 
   // ===== Assessment (unit_test / essay) — real quiz, not a chat tutor =====

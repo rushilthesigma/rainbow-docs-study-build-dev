@@ -575,13 +575,29 @@ app.post('/api/auth/sync', authMiddleware, (req, res) => {
 });
 
 // ===== AI CHAT (generic) =====
-// Convert Claude-style messages [{role:'user'|'assistant', content:'...'}]
-// into Gemini's `contents` format.
+// Convert Claude-style messages [{role:'user'|'assistant', content:'...', images?:[...]}]
+// into Gemini's `contents` format. When a message carries `images`, each image
+// is forwarded as inline_data so Gemini can see screenshots/photos alongside the prompt.
 function messagesToGeminiContents(messages) {
-  return (messages || []).map(m => ({
-    role: m.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: String(m.content ?? '') }],
-  }));
+  return (messages || []).map(m => {
+    const parts = [];
+    const imgs = Array.isArray(m.images) ? m.images : [];
+    for (const img of imgs) {
+      // Accept either `{ dataUrl, mimeType }` or `{ url: "data:...;base64,..." }`.
+      const dataUrl = img?.dataUrl || img?.url || '';
+      const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
+      if (match) {
+        parts.push({ inlineData: { mimeType: img.mimeType || match[1], data: match[2] } });
+      }
+    }
+    const text = String(m.content ?? '');
+    if (text) parts.push({ text });
+    if (!parts.length) parts.push({ text: '' });
+    return {
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts,
+    };
+  });
 }
 
 function isInvalidModelError(errMsg = '') {
@@ -1202,9 +1218,10 @@ You have Google Search. Use it on every response to ground your answer in real w
 // Lesson chat (conversational 5-phase)
 app.post('/api/curriculum/:id/lesson/:lessonId/chat', authMiddleware, requireMessageQuota, async (req, res) => {
   try {
-    const { message, sourced } = req.body;
+    const { message, sourced, images } = req.body;
     req.sourced = !!sourced;
-    if (!message) return res.status(400).json({ error: 'Message required' });
+    req.images = Array.isArray(images) ? images : [];
+    if (!message && !req.images.length) return res.status(400).json({ error: 'Message required' });
 
     const users = loadUsers();
     const email = findEmailById(users, req.userId);
@@ -1236,8 +1253,12 @@ app.post('/api/curriculum/:id/lesson/:lessonId/chat', authMiddleware, requireMes
       users[email].data.assessmentHistory || []
     );
 
-    // Build messages from chat history
+    // Build messages from chat history. Attach the current turn's images to
+    // the last user message so Gemini sees them as inline_data parts.
     const aiMessages = lesson.chatHistory.map(m => ({ role: m.role, content: m.content }));
+    if (req.images.length && aiMessages.length && aiMessages[aiMessages.length - 1].role === 'user') {
+      aiMessages[aiMessages.length - 1].images = req.images;
+    }
 
     const tierModel = modelForUser(users[email], email);
     await streamAIResponse(res, systemPrompt, aiMessages, async (fullContent, sources) => {
@@ -1333,9 +1354,10 @@ app.post('/api/curriculum/:id/lesson/:lessonId/reset', authMiddleware, (req, res
 
 app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res) => {
   try {
-    const { message, sessionId, context, sourced } = req.body;
+    const { message, sessionId, context, sourced, images } = req.body;
     req.sourced = !!sourced;
-    if (!message) return res.status(400).json({ error: 'Message required' });
+    req.images = Array.isArray(images) ? images : [];
+    if (!message && !req.images.length) return res.status(400).json({ error: 'Message required' });
 
     const users = loadUsers();
     const email = findEmailById(users, req.userId);
@@ -1359,6 +1381,9 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
     );
 
     const aiMessages = session.messages.map(m => ({ role: m.role, content: m.content }));
+    if (req.images.length && aiMessages.length && aiMessages[aiMessages.length - 1].role === 'user') {
+      aiMessages[aiMessages.length - 1].images = req.images;
+    }
 
     // Send sessionId in the first event
     res.setHeader('Content-Type', 'text/event-stream');
@@ -2708,9 +2733,10 @@ app.post('/api/lessons/:id/reset', authMiddleware, (req, res) => {
 // Chat (SSE) — free-form single-lesson teaching. No phases; AI decides when done via [LESSON_DONE].
 app.post('/api/lessons/:id/chat', authMiddleware, requireMessageQuota, async (req, res) => {
   try {
-    const { message, sourced } = req.body || {};
+    const { message, sourced, images } = req.body || {};
     req.sourced = !!sourced;
-    if (!message) return res.status(400).json({ error: 'Message required' });
+    req.images = Array.isArray(images) ? images : [];
+    if (!message && !req.images.length) return res.status(400).json({ error: 'Message required' });
 
     const users = loadUsers();
     const email = findEmailById(users, req.userId);
@@ -2732,6 +2758,9 @@ app.post('/api/lessons/:id/chat', authMiddleware, requireMessageQuota, async (re
       users[email].data.assessmentHistory || []
     );
     const aiMessages = lesson.chatHistory.map(m => ({ role: m.role, content: m.content }));
+    if (req.images?.length && aiMessages.length && aiMessages[aiMessages.length - 1].role === 'user') {
+      aiMessages[aiMessages.length - 1].images = req.images;
+    }
 
     const tierModel = modelForUser(users[email], email);
     await streamAIResponse(res, systemPrompt, aiMessages, async (fullContent, sources) => {

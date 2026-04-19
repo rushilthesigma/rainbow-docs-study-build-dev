@@ -126,7 +126,12 @@ export default function SettingsPage() {
         <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wide">AI Behavior</h3>
 
         {(() => {
-          const isProUser = user?.data?.effectivePlan === 'pro' || user?.data?.plan === 'pro';
+          // Pro check: effectivePlan (server-authoritative) OR stored plan OR owner email.
+          const ownerEmails = ['rushilkelapure@gmail.com'];
+          const emailLc = (user?.email || '').toLowerCase();
+          const isProUser = ownerEmails.includes(emailLc)
+            || user?.data?.effectivePlan === 'pro'
+            || user?.data?.plan === 'pro';
           async function setTier(v) {
             if (!isProUser) return;
             const next = { ...prefs, modelTier: v };
@@ -136,26 +141,27 @@ export default function SettingsPage() {
               await fetchUser();
             } catch (err) { console.error('Failed to save model tier:', err); }
           }
+          // Free users are always Flash — lock the UI so that's obvious.
+          const effectiveValue = isProUser ? (prefs.modelTier || 'pro') : 'flash';
           return (
             <div>
               <div className="flex items-center gap-2 mb-2">
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Model</label>
-                {!isProUser && (
+                {isProUser ? (
+                  <span className="text-[10px] text-gray-400">· auto-saves</span>
+                ) : (
                   <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
                     PRO ONLY
                   </span>
                 )}
-                {isProUser && (
-                  <span className="text-[10px] text-gray-400">· auto-saves</span>
-                )}
               </div>
-              <div className={isProUser ? '' : 'opacity-50 pointer-events-none'}>
+              <div className={isProUser ? '' : 'opacity-60 pointer-events-none'}>
                 <PillGroup
                   options={[
                     { value: 'pro', label: 'Pro', description: 'Gemini 3.1 Pro · smartest' },
                     { value: 'flash', label: 'Flash', description: 'Gemini 3 Flash · faster' },
                   ]}
-                  value={prefs.modelTier || 'pro'}
+                  value={effectiveValue}
                   onChange={setTier}
                 />
               </div>

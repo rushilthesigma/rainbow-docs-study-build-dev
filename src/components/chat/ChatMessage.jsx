@@ -120,7 +120,21 @@ export default function ChatMessage({ message, isStreaming }) {
           : 'bg-white dark:bg-[#1e1e2e] border border-gray-200 dark:border-[#2A2A40] text-gray-800 dark:text-gray-200 rounded-bl-md'
       }`}>
         {isUser ? (
-          <p className="whitespace-pre-wrap">{displayContent}</p>
+          <div>
+            {Array.isArray(message.images) && message.images.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {message.images.map((img, i) => (
+                  <img
+                    key={i}
+                    src={img.dataUrl || img.url}
+                    alt={img.name || `attachment-${i}`}
+                    className="max-w-[160px] max-h-[160px] rounded-lg object-cover border border-white/10"
+                  />
+                ))}
+              </div>
+            )}
+            {displayContent && <p className="whitespace-pre-wrap">{displayContent}</p>}
+          </div>
         ) : (
           <>
             {displayContent && (
