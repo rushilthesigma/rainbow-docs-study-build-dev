@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Zap, Crown, Loader2, Check, ExternalLink } from 'lucide-react';
+import { Zap, Crown, Loader2, Check, ExternalLink, AlertTriangle, X } from 'lucide-react';
 import {
   getBillingStatus, openBillingPortal,
   ownerGrantPro, ownerRevokePro, syncBilling,
@@ -10,6 +10,7 @@ const STRIPE_PAYMENT_LINK = 'https://buy.stripe.com/14A4gt7v70782E59jRdby01';
 
 export default function PlanSection() {
   const { user } = useAuth();
+  const [showPayWarning, setShowPayWarning] = useState(false);
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -41,6 +42,10 @@ export default function PlanSection() {
   }
 
   function upgrade() {
+    // Show the payment-safety warning first; actual redirect happens on confirm.
+    setShowPayWarning(true);
+  }
+  function confirmUpgrade() {
     const email = user?.email || '';
     const url = email
       ? `${STRIPE_PAYMENT_LINK}?prefilled_email=${encodeURIComponent(email)}`
@@ -134,6 +139,49 @@ export default function PlanSection() {
       {err && <p className="text-xs text-rose-500">{err}</p>}
 
       {status.isOwner && <OwnerGrantPanel onChanged={refresh} />}
+
+      {showPayWarning && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm px-4"
+          onClick={() => setShowPayWarning(false)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="relative w-full max-w-sm rounded-2xl bg-white dark:bg-[#161622] border border-gray-200 dark:border-[#2A2A40] shadow-2xl p-6"
+          >
+            <button
+              onClick={() => setShowPayWarning(false)}
+              className="absolute top-3 right-3 p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-[#1e1e2e]"
+              aria-label="Close"
+            >
+              <X size={16} />
+            </button>
+            <div className="w-12 h-12 rounded-xl bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 flex items-center justify-center mb-4">
+              <AlertTriangle size={22} />
+            </div>
+            <h2 className="text-base font-bold text-gray-900 dark:text-white mb-2">
+              Before you continue
+            </h2>
+            <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
+              We do <strong>NOT</strong> collect your credit card. Stripe handles all of the payments.
+            </p>
+            <div className="flex gap-2 mt-5">
+              <button
+                onClick={() => setShowPayWarning(false)}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-[#2A2A40] text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-[#1e1e2e]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmUpgrade}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-white text-sm font-semibold"
+              >
+                Continue to Stripe
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

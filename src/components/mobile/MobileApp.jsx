@@ -428,56 +428,20 @@ const TABS = [
 ];
 
 export default function MobileApp() {
-  const [tab, setTab] = useState('study');
-  const [subPage, setSubPage] = useState(null);
-
-  function renderContent() {
-    if (subPage) {
-      const back = () => setSubPage(null);
-      switch (subPage) {
-        case 'goals': return <MobileSubPage title="Goals" onBack={back}><GoalsPage /></MobileSubPage>;
-        case 'assessments': return <MobileSubPage title="Assessments" onBack={back}><AssessmentsPage /></MobileSubPage>;
-        case 'math': return <MobileSubPage title="Math Canvas" onBack={back} flex><MathPracticePage /></MobileSubPage>;
-        case 'debate': return <MobileSubPage title="Debate" onBack={back} flex><DebateApp /></MobileSubPage>;
-        case 'social': return <MobileSubPage title="Social" onBack={back} flex><SocialApp /></MobileSubPage>;
-        case 'textbook': return <MobileSubPage title="Textbooks" onBack={back}><TextbookApp /></MobileSubPage>;
-        case 'settings': return <MobileSubPage title="Settings" onBack={back}><SettingsPage /></MobileSubPage>;
-        default: return null;
-      }
-    }
-
-    switch (tab) {
-      case 'study': return <MobileStudy />;
-      case 'curricula': return <MobileCurricula />;
-      case 'flashcards': return <MobileFlashcards />;
-      case 'notes': return <MobileNotes />;
-      case 'more': return <MobileMore onNavigate={id => setSubPage(id)} />;
-      default: return <MobileStudy />;
-    }
-  }
-
+  // Mobile is disabled for now — show a coming-soon splash instead of the app.
+  // The rest of the mobile components (MobileStudy, MobileCurricula, etc.)
+  // stay defined above so we can re-enable them quickly when ready.
   return (
-    <div className="h-screen flex flex-col bg-[#F4F5F7] dark:bg-[#0D0D14]">
-      <FirstTipsModal />
-      <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-        {renderContent()}
+    <div className="min-h-screen flex flex-col items-center justify-center bg-[#F4F5F7] dark:bg-[#0D0D14] px-6 text-center">
+      <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 text-white flex items-center justify-center mb-5 shadow">
+        <BookOpen size={26} />
       </div>
-
-      {/* Bottom tab bar */}
-      <nav className="flex-shrink-0 bg-white dark:bg-[#161622] border-t border-gray-200 dark:border-[#2A2A40]" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
-        <div className="flex items-center justify-around h-14">
-          {TABS.map(t => {
-            const Icon = t.icon;
-            const active = subPage ? false : tab === t.id;
-            return (
-              <button key={t.id} onClick={() => { setTab(t.id); setSubPage(null); }} className={`flex flex-col items-center justify-center flex-1 h-full gap-0.5 ${active ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400'}`}>
-                <Icon size={20} strokeWidth={active ? 2.2 : 1.8} />
-                <span className="text-[10px] font-medium">{t.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </nav>
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-3">
+        Mobile Coming Soon
+      </h1>
+      <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed max-w-sm">
+        RushilAI doesn't work on mobile yet. This was because we are trying to put a quality computer product first, instead of trying to do two things at once. Sorry, and a mobile version will come soon.
+      </p>
     </div>
   );
 }
