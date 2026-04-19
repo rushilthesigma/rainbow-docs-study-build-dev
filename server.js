@@ -548,6 +548,19 @@ app.get('/api/auth/me', authMiddleware, (req, res) => {
     const user = users[email];
     // Migrate data on every read
     user.data = migrateUserData(user.data);
+
+    // Track visits. /api/auth/me is the first call after sign-in and on every
+    // subsequent page load, so we use it as the visit signal — debounced to
+    // 30 min so a quick refresh doesn't inflate the number.
+    const now = Date.now();
+    const VISIT_DEBOUNCE_MS = 30 * 60 * 1000;
+    user.data.visitCount = user.data.visitCount || 0;
+    if (!user.data.lastVisitAt || now - new Date(user.data.lastVisitAt).getTime() > VISIT_DEBOUNCE_MS) {
+      user.data.visitCount++;
+      user.data.lastVisitAt = new Date(now).toISOString();
+      user.data.firstVisitAt = user.data.firstVisitAt || user.data.lastVisitAt;
+    }
+
     saveUsers(users);
     // Expose the *effective* plan (owner + time-decayed Pro) so the client
     // doesn't have to repeat the logic.
@@ -3148,6 +3161,9 @@ app.get('/api/admin/users', authMiddleware, adminMiddleware, (req, res) => {
       // Cheap chat totals for the list view
       chatMessages: { study: totalStudyMsgs, lessons: totalLessonMsgs, curriculum: curriculumMsgs },
       usage: u.data?.usage || { day: null, messages: 0, quizBowlGames: 0 },
+      visitCount: u.data?.visitCount || 0,
+      lastVisitAt: u.data?.lastVisitAt || null,
+      firstVisitAt: u.data?.firstVisitAt || null,
       createdAt: u.createdAt,
       lastActiveAt: u.data?.studyStreaks?.lastActiveDate || null,
     };
@@ -3197,6 +3213,10 @@ app.get('/api/admin/users/:uid', authMiddleware, adminMiddleware, (req, res) => 
       stripeSubscriptionId: u.data?.stripeSubscriptionId || null,
       // Usage today
       usage: u.data?.usage || { day: null, messages: 0, quizBowlGames: 0 },
+      // Visit tracking
+      visitCount: u.data?.visitCount || 0,
+      lastVisitAt: u.data?.lastVisitAt || null,
+      firstVisitAt: u.data?.firstVisitAt || null,
       // Learning content
       curricula: (u.data?.curricula || []).map(c => ({
         id: c.id, title: c.title, unitCount: c.units?.length || 0,

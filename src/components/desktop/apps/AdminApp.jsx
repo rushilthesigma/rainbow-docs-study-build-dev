@@ -218,7 +218,7 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
                 {u.banned && <span className="px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-900/30 text-rose-500 text-[10px] font-medium">Banned</span>}
               </div>
               <p className="text-[10px] text-gray-400 truncate">
-                {u.handle ? `@${u.handle} · ` : ''}{u.email} · L{u.level} · {sumMsgs(u)} msgs · {u.curriculaCount} curr · {u.studySessionCount} study · {u.lessonCount} lessons
+                {u.handle ? `@${u.handle} · ` : ''}{u.email} · L{u.level} · {u.visitCount || 0} visits · {sumMsgs(u)} msgs · {u.curriculaCount} curr · {u.studySessionCount} study · {u.lessonCount} lessons
               </p>
             </div>
             <ChevronRight size={14} className="text-gray-300 dark:text-gray-600 group-hover:text-blue-500 flex-shrink-0" />
@@ -346,6 +346,8 @@ function OverviewTab({ u }) {
   const s = u.studyStreaks;
   return (
     <div className="grid grid-cols-2 gap-2">
+      <Stat label="Visits" value={u.visitCount || 0} />
+      <Stat label="Last visit" value={u.lastVisitAt ? new Date(u.lastVisitAt).toLocaleDateString() : '—'} />
       <Stat label="Level" value={u.profile?.level || 1} />
       <Stat label="XP" value={u.profile?.xp || 0} />
       <Stat label="Current streak" value={s?.currentStreak || 0} />
