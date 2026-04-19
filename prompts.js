@@ -52,13 +52,88 @@ function buildPrefsContext(prefs = {}) {
   return parts.join('\n');
 }
 
-function buildProfileContext(profile = {}) {
-  if (!profile || (!profile.strengths?.length && !profile.weaknesses?.length)) return '';
-  const parts = ['Student profile:'];
-  if (profile.level) parts.push(`Level ${profile.level}`);
-  if (profile.strengths?.length) parts.push(`Strengths: ${profile.strengths.join(', ')}`);
-  if (profile.weaknesses?.length) parts.push(`Weaknesses: ${profile.weaknesses.join(', ')}`);
-  return parts.join('. ') + '.';
+// Turn a topic key like "the-quadratic-formula" back into readable text.
+function prettifyTopicKey(k = '') {
+  return String(k).replace(/[-_]+/g, ' ').trim();
+}
+
+// Pull the most recent N wrong questions out of assessment history so the
+// tutor can address SPECIFIC mistakes, not just topic-level labels.
+function extractRecentWrongQuestions(assessmentHistory = [], limit = 8) {
+  const out = [];
+  for (const result of assessmentHistory || []) {
+    if (!result?.details) continue;
+    const topic = result.title || result.topic || '';
+    for (const d of result.details) {
+      if (d?.correct) continue;
+      if (!d?.question) continue;
+      out.push({
+        topic,
+        question: String(d.question).slice(0, 300),
+        userAnswer: d.answer || '—',
+        correctAnswer: d.correctAnswer || '—',
+        explanation: d.explanation ? String(d.explanation).slice(0, 200) : '',
+      });
+      if (out.length >= limit) return out;
+    }
+    if (out.length >= limit) return out;
+  }
+  return out;
+}
+
+// `profile` = user.data.profile
+// `assessmentHistory` = user.data.assessmentHistory (optional, for specific-mistake grounding)
+function buildProfileContext(profile = {}, assessmentHistory = []) {
+  const lines = [];
+
+  const hasBasics = profile?.strengths?.length || profile?.weaknesses?.length || profile?.level;
+  const wrongQs = extractRecentWrongQuestions(assessmentHistory, 8);
+
+  if (!hasBasics && !wrongQs.length) return '';
+
+  lines.push('═══ STUDENT PROFILE ═══');
+  if (profile?.level) lines.push(`Level: ${profile.level}${profile.xp != null ? ` (${profile.xp} XP)` : ''}`);
+
+  // Topic-level scores — show with exact percentages and attempt counts.
+  const topicScores = profile?.topicScores || {};
+  const scoredTopics = Object.entries(topicScores)
+    .map(([k, v]) => ({ key: k, topic: prettifyTopicKey(k), score: v?.score ?? 0, attempts: v?.attempts ?? 0 }))
+    .sort((a, b) => a.score - b.score);
+
+  const weakTopics = scoredTopics.filter(t => t.score < 70);
+  const strongTopics = scoredTopics.filter(t => t.score >= 85);
+
+  if (weakTopics.length) {
+    lines.push('');
+    lines.push('WEAK AREAS (lower score = needs more work):');
+    for (const t of weakTopics.slice(0, 6)) {
+      lines.push(`  • "${t.topic}" — ${t.score}% across ${t.attempts} attempt${t.attempts === 1 ? '' : 's'}`);
+    }
+  }
+  if (strongTopics.length) {
+    lines.push('');
+    lines.push('STRONG AREAS (can skip basics here):');
+    for (const t of strongTopics.slice(0, 4)) {
+      lines.push(`  • "${t.topic}" — ${t.score}%`);
+    }
+  }
+
+  // Specific recent mistakes — the critical "personalization" signal.
+  if (wrongQs.length) {
+    lines.push('');
+    lines.push('SPECIFIC RECENT MISTAKES (address these exact gaps when relevant):');
+    wrongQs.forEach((q, i) => {
+      lines.push(`  ${i + 1}. [${q.topic}] Q: ${q.question}`);
+      lines.push(`     Student said: ${q.userAnswer}  |  Correct: ${q.correctAnswer}`);
+      if (q.explanation) lines.push(`     Explanation given: ${q.explanation}`);
+    });
+  }
+
+  lines.push('');
+  lines.push('HOW TO USE THIS: When the lesson/topic touches any weak area, slow down and anchor the explanation in the exact questions the student got wrong above. Reference the specific mistake plainly ("you answered X on Y; here\'s why the right answer is Z"). For strong areas, skip the basics and move faster. Do not restate this profile to the student.');
+  lines.push('═══════════════════════');
+
+  return lines.join('\n');
 }
 
 // ===== CURRICULUM GENERATION =====
@@ -102,9 +177,9 @@ Return this exact JSON structure:
 
 // ===== CONVERSATIONAL LESSON PHASES =====
 
-export function buildLessonChatPrompt(phase, lesson, unit, settings, profile, prefs, chatHistory) {
+export function buildLessonChatPrompt(phase, lesson, unit, settings, profile, prefs, chatHistory, assessmentHistory = []) {
   const prefsCtx = buildPrefsContext(prefs);
-  const profileCtx = buildProfileContext(profile);
+  const profileCtx = buildProfileContext(profile, assessmentHistory);
   const previousLessons = chatHistory.length === 0 ? '' : '';
 
   const header = `You are a tutor teaching "${lesson.title}" in unit "${unit.title}".
@@ -197,9 +272,9 @@ Then on the next line output \`[STATUS: advance]\` so the system knows the lesso
 // ===== STANDALONE LESSONS (single-lesson app) =====
 // No rigid phase structure. The AI teaches the topic over however many turns it
 // needs, and decides on its own when the lesson is done.
-export function buildStandaloneLessonPrompt(lesson, settings, profile, prefs, chatHistory) {
+export function buildStandaloneLessonPrompt(lesson, settings, profile, prefs, chatHistory, assessmentHistory = []) {
   const prefsCtx = buildPrefsContext(prefs);
-  const profileCtx = buildProfileContext(profile);
+  const profileCtx = buildProfileContext(profile, assessmentHistory);
   const topic = lesson.topic || lesson.title;
   const difficulty = settings?.difficulty || lesson.difficulty || 'beginner';
   const turnCount = (chatHistory || []).filter(m => m.role === 'assistant').length;
@@ -252,9 +327,9 @@ CONTEXT: This is assistant turn #${turnCount + 1} of the conversation. On turn 1
 
 // ===== STUDY MODE =====
 
-export function buildStudyModePrompt(profile, goals, curricula, prefs) {
+export function buildStudyModePrompt(profile, goals, curricula, prefs, assessmentHistory = []) {
   const prefsCtx = buildPrefsContext(prefs);
-  const profileCtx = buildProfileContext(profile);
+  const profileCtx = buildProfileContext(profile, assessmentHistory);
 
   const goalCtx = (goals || []).filter(g => g.status === 'active').map(g => {
     const done = (g.milestones || []).filter(m => m.isCompleted).length;

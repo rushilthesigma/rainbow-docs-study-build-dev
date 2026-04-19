@@ -1,33 +1,20 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import renderMathInElement from 'katex/dist/contrib/auto-render.mjs';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { Check, X } from 'lucide-react';
 import MathText from '../shared/MathText';
 
-// Single KaTeX auto-render pass after markdown has mounted. Handles every
-// common delimiter: $...$, $$...$$, \(...\), \[...\]. No remark-math /
-// rehype-katex — those fight with prose dollar signs and with auto-render.
-function useMathAutoRender(ref, deps) {
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    try {
-      renderMathInElement(el, {
-        delimiters: [
-          { left: '$$', right: '$$', display: true },
-          { left: '\\[', right: '\\]', display: true },
-          { left: '\\(', right: '\\)', display: false },
-          { left: '$', right: '$', display: false },
-        ],
-        throwOnError: false,
-        ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'option'],
-        ignoredClasses: ['katex', 'katex-display'],
-      });
-    } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+// Normalize LaTeX delimiter variants that remark-math doesn't parse:
+//   \( ... \) and \[ ... \]  →  $ ... $ / $$ ... $$
+// KaTeX-inside-React via rehype-katex avoids the DOM reconciliation fight
+// that kills math on streaming re-renders.
+function normalizeMathDelimiters(s) {
+  return s
+    .replace(/\\\[([\s\S]+?)\\\]/g, (_, body) => `\n$$${body}$$\n`)
+    .replace(/\\\(([\s\S]+?)\\\)/g, (_, body) => `$${body}$`);
 }
 
 const CURSOR = '\u200B@@CURSOR@@';
@@ -117,12 +104,13 @@ export default function ChatMessage({ message, isStreaming }) {
     .replace(/\[STATUS:\s*(advance|stay|next)\s*\]/gi, '')
     .trim();
 
+  displayContent = normalizeMathDelimiters(displayContent);
+
   if (!displayContent && !quizJson && !isStreaming) return null;
 
   const contentWithCursor = isStreaming ? displayContent + CURSOR : displayContent;
 
   const markdownRef = useRef(null);
-  useMathAutoRender(markdownRef, [displayContent, isStreaming]);
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-3`}>
@@ -138,7 +126,8 @@ export default function ChatMessage({ message, isStreaming }) {
             {displayContent && (
               <div ref={markdownRef} className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1.5 prose-headings:my-2 prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-code:bg-gray-100 dark:prose-code:bg-[#161622] prose-code:px-1 prose-code:rounded prose-pre:bg-gray-900 dark:prose-pre:bg-[#0D0D14] prose-pre:rounded-lg">
                 <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
+                  remarkPlugins={[remarkGfm, remarkMath]}
+                  rehypePlugins={[rehypeKatex]}
                   components={{
                     p: ({ children, ...props }) => <p {...props}>{styleCitations(injectCursor(children), message.sources)}</p>,
                     li: ({ children, ...props }) => <li {...props}>{styleCitations(injectCursor(children), message.sources)}</li>,

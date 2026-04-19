@@ -1232,7 +1232,8 @@ app.post('/api/curriculum/:id/lesson/:lessonId/chat', authMiddleware, requireMes
     // Build system prompt for current phase
     const systemPrompt = buildLessonChatPrompt(
       lesson.phase, lesson, unit, curriculum.settings,
-      users[email].data.profile, users[email].data.preferences, lesson.chatHistory
+      users[email].data.profile, users[email].data.preferences, lesson.chatHistory,
+      users[email].data.assessmentHistory || []
     );
 
     // Build messages from chat history
@@ -1353,7 +1354,8 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
 
     const systemPrompt = buildStudyModePrompt(
       users[email].data.profile, users[email].data.goals,
-      users[email].data.curricula, users[email].data.preferences
+      users[email].data.curricula, users[email].data.preferences,
+      users[email].data.assessmentHistory || []
     );
 
     const aiMessages = session.messages.map(m => ({ role: m.role, content: m.content }));
@@ -2726,7 +2728,8 @@ app.post('/api/lessons/:id/chat', authMiddleware, requireMessageQuota, async (re
     const systemPrompt = buildStandaloneLessonPrompt(
       lesson,
       { difficulty: lesson.difficulty || 'beginner' },
-      users[email].data.profile, users[email].data.preferences, lesson.chatHistory
+      users[email].data.profile, users[email].data.preferences, lesson.chatHistory,
+      users[email].data.assessmentHistory || []
     );
     const aiMessages = lesson.chatHistory.map(m => ({ role: m.role, content: m.content }));
 

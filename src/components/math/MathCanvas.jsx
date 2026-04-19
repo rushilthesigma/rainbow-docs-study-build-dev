@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Pen, Eraser, Undo2, Trash2, Check, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
 import { apiFetch } from '../../api/client';
+import MathText from '../shared/MathText';
 
 const PEN_SIZES = { thin: 2, medium: 4, thick: 7 };
 
@@ -171,8 +172,8 @@ export default function MathCanvas({ className = '', topic: initialTopic }) {
       const result = await apiFetch('/api/chat', {
         method: 'POST',
         body: JSON.stringify({
-          system: 'You are a math problem generator. Output ONLY valid JSON. No markdown, no code fences.',
-          messages: [{ role: 'user', content: `Generate 5 math problems on "${topic}". Return JSON: {"problems": [{"text": "problem statement", "answer": "correct answer"}]}` }],
+          system: 'You are a math problem generator. Output ONLY valid JSON. No markdown, no code fences. Inside the "text" and "answer" string fields, wrap ALL math in LaTeX dollar delimiters ($...$ for inline, $$...$$ for display). Never use ASCII pseudo-math like x^2; write $x^2$.',
+          messages: [{ role: 'user', content: `Generate 5 math problems on "${topic}". Return JSON: {"problems": [{"text": "problem statement with $LaTeX$ math", "answer": "correct answer with $LaTeX$ math"}]}` }],
         }),
       });
       const text = result.content?.[0]?.text || '';
@@ -302,9 +303,9 @@ export default function MathCanvas({ className = '', topic: initialTopic }) {
         <div className="space-y-3">
           {problems.map((p, i) => (
             <div key={i} className={`rounded-xl p-3 border ${results[i]?.correct ? 'bg-emerald-50 dark:bg-emerald-900/10 border-emerald-200 dark:border-emerald-800' : 'bg-rose-50 dark:bg-rose-900/10 border-rose-200 dark:border-rose-800'}`}>
-              <p className="text-sm font-medium text-gray-800 dark:text-gray-200">{p.text}</p>
-              <p className="text-xs text-gray-500 mt-1">Your answer: {answers[i] || '—'}</p>
-              {results[i]?.explanation && <p className="text-xs text-gray-500 mt-1 italic">{results[i].explanation}</p>}
+              <MathText as="p" className="text-sm font-medium text-gray-800 dark:text-gray-200">{p.text}</MathText>
+              <MathText as="p" className="text-xs text-gray-500 mt-1">Your answer: {answers[i] || '—'}</MathText>
+              {results[i]?.explanation && <MathText as="p" className="text-xs text-gray-500 mt-1 italic">{results[i].explanation}</MathText>}
             </div>
           ))}
         </div>
@@ -329,7 +330,7 @@ export default function MathCanvas({ className = '', topic: initialTopic }) {
             </button>
           ))}
         </div>
-        <p className="flex-1 text-sm text-gray-800 dark:text-gray-200 font-medium truncate ml-2">{problem?.text}</p>
+        <MathText as="p" className="flex-1 text-sm text-gray-800 dark:text-gray-200 font-medium truncate ml-2">{problem?.text}</MathText>
       </div>
 
       {/* Toolbar */}

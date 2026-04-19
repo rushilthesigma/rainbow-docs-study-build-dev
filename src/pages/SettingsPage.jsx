@@ -127,6 +127,15 @@ export default function SettingsPage() {
 
         {(() => {
           const isProUser = user?.data?.effectivePlan === 'pro' || user?.data?.plan === 'pro';
+          async function setTier(v) {
+            if (!isProUser) return;
+            const next = { ...prefs, modelTier: v };
+            setPrefs(next);
+            try {
+              await syncData({ preferences: next });
+              await fetchUser();
+            } catch (err) { console.error('Failed to save model tier:', err); }
+          }
           return (
             <div>
               <div className="flex items-center gap-2 mb-2">
@@ -136,15 +145,18 @@ export default function SettingsPage() {
                     PRO ONLY
                   </span>
                 )}
+                {isProUser && (
+                  <span className="text-[10px] text-gray-400">· auto-saves</span>
+                )}
               </div>
               <div className={isProUser ? '' : 'opacity-50 pointer-events-none'}>
                 <PillGroup
                   options={[
-                    { value: 'pro', label: 'Pro', description: 'Smartest · slower' },
-                    { value: 'flash', label: 'Flash', description: 'Faster · lighter' },
+                    { value: 'pro', label: 'Pro', description: 'Gemini 3.1 Pro · smartest' },
+                    { value: 'flash', label: 'Flash', description: 'Gemini 3 Flash · faster' },
                   ]}
                   value={prefs.modelTier || 'pro'}
-                  onChange={v => isProUser && update('modelTier', v)}
+                  onChange={setTier}
                 />
               </div>
             </div>
