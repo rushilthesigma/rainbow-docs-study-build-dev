@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { syncData } from '../api/auth';
 import { DIFFICULTY_OPTIONS, LEARNING_STYLE_OPTIONS, LESSON_LENGTH_OPTIONS, TONE_OPTIONS, RIGOR_OPTIONS, TEMPO_OPTIONS, PERSONALITY_OPTIONS, FLUFF_OPTIONS } from '../utils/constants';
@@ -80,12 +80,28 @@ export default function SettingsPage() {
   const [prefs, setPrefs] = useState(user?.data?.preferences || {});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  // Track keys the user has touched locally. Server-side refreshes (fetchUser)
+  // will NOT clobber these until the user explicitly saves. This prevents the
+  // "I clicked Flash but it jumped back to Pro" flicker when the auto-save
+  // round-trips or when any other refresh fires.
+  const dirtyKeys = useRef(new Set());
 
   useEffect(() => {
-    if (user?.data?.preferences) setPrefs(user.data.preferences);
+    if (!user?.data?.preferences) return;
+    setPrefs(prev => {
+      const fromServer = user.data.preferences;
+      // Merge: start with server truth, but preserve any key the user has
+      // modified locally (and hasn't saved away yet).
+      const next = { ...fromServer };
+      for (const k of dirtyKeys.current) {
+        if (prev[k] !== undefined) next[k] = prev[k];
+      }
+      return next;
+    });
   }, [user]);
 
   function update(key, value) {
+    dirtyKeys.current.add(key);
     setPrefs(prev => ({ ...prev, [key]: value }));
     setSaved(false);
   }
@@ -94,6 +110,7 @@ export default function SettingsPage() {
     setSaving(true);
     try {
       await syncData({ preferences: prefs });
+      dirtyKeys.current.clear();
       await fetchUser();
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -136,10 +153,17 @@ export default function SettingsPage() {
             if (!isProUser) return;
             const next = { ...prefs, modelTier: v };
             setPrefs(next);
+            dirtyKeys.current.add('modelTier');
             try {
               await syncData({ preferences: next });
+              // Clear dirty AFTER the sync is persisted so the server-sourced
+              // refresh can safely write this value back.
+              dirtyKeys.current.delete('modelTier');
               await fetchUser();
-            } catch (err) { console.error('Failed to save model tier:', err); }
+            } catch (err) {
+              console.error('Failed to save model tier:', err);
+              // On error keep the key dirty so a future refresh doesn't revert it.
+            }
           }
           // Free users are always Flash — lock the UI so that's obvious.
           const effectiveValue = isProUser ? (prefs.modelTier || 'pro') : 'flash';
