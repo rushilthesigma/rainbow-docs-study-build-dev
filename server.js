@@ -627,11 +627,18 @@ function isRateLimitError(err) {
 
 // Non-streaming helper. Returns the Claude-shaped envelope the rest of the
 // codebase expects: { success: true, data: { content: [{ text }] }, model }.
-async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096) {
+// Pass opts.enableWebSearch=true to enable Google Search grounding (sources
+// surfaced on data.sources for the caller to use).
+async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096, opts = {}) {
   if (!genAI) return { success: false, error: 'GEMINI_API_KEY not configured', status: 500 };
 
   let currentModel = model || DEFAULT_MODEL;
   let lastError = null;
+
+  // Grounding consumes a significant share of the token budget for "thinking"
+  // and tool calls. Under ~2048 tokens we often get empty grounding metadata,
+  // so floor sourced calls at 4096 regardless of what the caller requested.
+  const effectiveMaxTokens = opts.enableWebSearch ? Math.max(maxOutputTokens, 4096) : maxOutputTokens;
 
   for (let attempt = 0; attempt < 3; attempt++) {
     const resolved = resolveModel(currentModel);
@@ -642,7 +649,8 @@ async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096)
       const m = genAI.getGenerativeModel({
         model: resolved,
         systemInstruction: systemPrompt ? { role: 'system', parts: [{ text: systemPrompt }] } : undefined,
-        generationConfig: { maxOutputTokens, temperature: 0.7 },
+        tools: opts.enableWebSearch ? [{ googleSearch: {} }] : undefined,
+        generationConfig: { maxOutputTokens: effectiveMaxTokens, temperature: 0.7 },
       });
 
       const result = await m.generateContent(
@@ -651,10 +659,79 @@ async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096)
       );
       clearTimeout(timeout);
 
-      const text = result?.response?.text?.() ?? '';
+      let text = result?.response?.text?.() ?? '';
+      // Extract grounded source list + inject inline [n] markers to match
+      // the streaming path's citation UX.
+      const gm = result?.response?.candidates?.[0]?.groundingMetadata || {};
+      const chunksMeta = gm.groundingChunks || [];
+      const supports = gm.groundingSupports || [];
+      const sources = [];
+      const urlToIndex = new Map();
+
+      // Append [n] markers to text: walk supports ordered by their segment
+      // endIndex (a UTF-8 byte offset) and splice in markers from right to left.
+      if (opts.enableWebSearch && supports.length) {
+        const orderedSupports = [...supports].sort((a, b) => (a?.segment?.endIndex ?? 0) - (b?.segment?.endIndex ?? 0));
+        for (const sup of orderedSupports) {
+          for (const ci of (sup?.groundingChunkIndices || [])) {
+            const ch = chunksMeta[ci];
+            const url = ch?.web?.uri || ch?.retrievedContext?.uri;
+            if (!url) continue;
+            if (!urlToIndex.has(url)) {
+              const idx = urlToIndex.size + 1;
+              urlToIndex.set(url, idx);
+              sources.push({ url, title: ch?.web?.title || ch?.retrievedContext?.title || url });
+            }
+          }
+        }
+        // Any URLs without matching supports — still surface them
+        for (const ch of chunksMeta) {
+          const url = ch?.web?.uri || ch?.retrievedContext?.uri;
+          if (!url || urlToIndex.has(url)) continue;
+          const idx = urlToIndex.size + 1;
+          urlToIndex.set(url, idx);
+          sources.push({ url, title: ch?.web?.title || ch?.retrievedContext?.title || url });
+        }
+        // Now build insertions: (byte endIndex → char index) + marker list.
+        const utf8 = Buffer.from(text, 'utf-8');
+        const byteToCharIndex = (byteIdx) => utf8.slice(0, Math.min(byteIdx, utf8.length)).toString('utf-8').length;
+        const insertions = [];
+        for (const sup of orderedSupports) {
+          const endByte = sup?.segment?.endIndex;
+          const chunkIdxs = sup?.groundingChunkIndices || [];
+          if (endByte == null || !chunkIdxs.length) continue;
+          const markers = [];
+          for (const ci of chunkIdxs) {
+            const ch = chunksMeta[ci];
+            const url = ch?.web?.uri || ch?.retrievedContext?.uri;
+            if (!url) continue;
+            const idx = urlToIndex.get(url);
+            if (idx) markers.push(`[${idx}]`);
+          }
+          if (markers.length) insertions.push({ at: byteToCharIndex(endByte), markers });
+        }
+        insertions.sort((a, b) => b.at - a.at);
+        let withCitations = text;
+        for (const ins of insertions) {
+          const before = withCitations.slice(0, ins.at);
+          const after = withCitations.slice(ins.at);
+          const leadingSpace = /\s$/.test(before) ? '' : ' ';
+          withCitations = before + leadingSpace + ins.markers.join('') + after;
+        }
+        text = withCitations;
+      } else if (opts.enableWebSearch) {
+        // Tool was enabled but the model didn't search / returned no supports.
+        // Still surface any raw chunks as a sources list (no inline markers).
+        for (const ch of chunksMeta) {
+          const url = ch?.web?.uri || ch?.retrievedContext?.uri;
+          if (!url || urlToIndex.has(url)) continue;
+          urlToIndex.set(url, urlToIndex.size + 1);
+          sources.push({ url, title: ch?.web?.title || ch?.retrievedContext?.title || url });
+        }
+      }
       return {
         success: true,
-        data: { content: [{ type: 'text', text }] },
+        data: { content: [{ type: 'text', text }], sources },
         model: resolved,
       };
     } catch (err) {
@@ -678,9 +755,9 @@ const callAnthropic = callGemini;
 
 app.post('/api/chat', async (req, res) => {
   try {
-    const { messages, system, model, max_tokens } = req.body;
+    const { messages, system, model, max_tokens, sourced } = req.body;
     const systemPrompt = system || 'You are a helpful AI assistant.';
-    const result = await callAnthropic(systemPrompt, messages, model, max_tokens || 4096);
+    const result = await callGemini(systemPrompt, messages, model, max_tokens || 4096, { enableWebSearch: !!sourced });
     if (result.success) return res.json(result.data);
     return res.status(result.status || 500).json({ error: result.error });
   } catch (e) { res.status(500).json({ error: e.message }); }

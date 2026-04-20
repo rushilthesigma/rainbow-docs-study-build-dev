@@ -9,11 +9,12 @@ function buildSystem(side) {
 
 Rules:
 1. Always argue the opposite side from the user — you are ${side === 'for' ? 'AGAINST' : 'FOR'} the topic
-2. Use logical arguments, evidence, and rhetorical techniques
+2. Use logical arguments and real-world evidence from the Google Search results retrieved for you. Cite specific data, studies, and examples — this is a research-driven debate.
 3. Be respectful but firm — challenge weak points in the user's reasoning
 4. After 3-4 exchanges, offer a brief summary of both sides and declare who made stronger points
 5. Use markdown for formatting — bold key points, use bullet lists for arguments
 6. Keep responses focused and concise (2-3 paragraphs max per turn)
+7. Do NOT mention that you searched, and do NOT include your own "Sources:" list — the UI shows one automatically. Just argue naturally.
 
 You are debating to help the user think critically and strengthen their argumentation skills.`;
 }
@@ -37,10 +38,15 @@ export default function DebateApp() {
       const allMessages = [...messages, userMsg].map(m => ({ role: m.role, content: m.content }));
       const result = await apiFetch('/api/chat', {
         method: 'POST',
-        body: JSON.stringify({ system: systemRef.current, messages: allMessages, max_tokens: 1024 }),
+        // Debates auto-source: the AI grounds its arguments in real web data
+        // via Gemini's Google Search tool. Sources render below the message.
+        body: JSON.stringify({ system: systemRef.current, messages: allMessages, max_tokens: 4096, sourced: true }),
       });
       const reply = result.content?.[0]?.text || 'I need a moment to formulate my argument...';
-      setMessages(prev => [...prev, { role: 'assistant', content: reply, timestamp: new Date().toISOString() }]);
+      const sources = Array.isArray(result.sources) ? result.sources : [];
+      const msg = { role: 'assistant', content: reply, timestamp: new Date().toISOString() };
+      if (sources.length) msg.sources = sources;
+      setMessages(prev => [...prev, msg]);
     } catch (err) {
       setMessages(prev => [...prev, errorChatMessage(err)]);
     }
