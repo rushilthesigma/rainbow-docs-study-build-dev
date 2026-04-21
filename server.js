@@ -14,7 +14,7 @@ const _require = createRequire(import.meta.url);
 const pdfParse = _require('pdf-parse');
 import {
   buildCurriculumPrompt, buildLessonPrompt, buildLessonChatPrompt,
-  buildStandaloneLessonPrompt, buildMathTutorPrompt,
+  buildStandaloneLessonPrompt,
   buildStudyModePrompt, buildGoalMilestonesPrompt, buildAssessmentPrompt,
   buildFlashcardPrompt, buildCueGenerationPrompt, buildSummaryPrompt,
 } from './prompts.js';
@@ -1431,9 +1431,7 @@ app.post('/api/curriculum/:id/lesson/:lessonId/chat', authMiddleware, requireMes
         .replace(/```/g, '')
         .replace(/\s*\[\d+\]\s*/g, ' ');
       if (/\[LESSON_COMPLETE\]/.test(cleanedCurr)) {
-        // Always mark complete — nothing below can block this.
         lesson.isCompleted = true;
-        lesson.completedAt = new Date().toISOString();
         ensureLessonCompletionFields(users[email].data);
         const jsonStr = extractLessonDoneJson(cleanedCurr);
         if (jsonStr) {
@@ -1441,6 +1439,7 @@ app.post('/api/curriculum/:id/lesson/:lessonId/chat', authMiddleware, requireMes
             const completionData = JSON.parse(jsonStr);
             lesson.phaseData = { ...lesson.phaseData, ...completionData };
             lesson.score = completionData.questionsCorrect;
+            // Update XP
             const xp = completionData.xpEarned || 25;
             users[email].data.profile.xp += xp;
             if (users[email].data.profile.xp >= users[email].data.profile.xpToNextLevel) {
@@ -1448,31 +1447,26 @@ app.post('/api/curriculum/:id/lesson/:lessonId/chat', authMiddleware, requireMes
               users[email].data.profile.xp -= users[email].data.profile.xpToNextLevel;
               users[email].data.profile.xpToNextLevel = Math.floor(users[email].data.profile.xpToNextLevel * 1.5);
             }
-          } catch (e) { console.warn('curriculum lesson completionData parse failed:', e.message); }
-        } else {
-          lesson.phaseData = { ...(lesson.phaseData || {}), xpEarned: 25 };
-          users[email].data.profile.xp = (users[email].data.profile.xp || 0) + 25;
+          } catch {}
         }
-        // Streak bookkeeping (isolated so a bad field can't stop the save).
-        try {
-          const today = new Date().toISOString().slice(0, 10);
-          const streaks = users[email].data.studyStreaks;
-          if (!users[email].data.dailyLog[today]) users[email].data.dailyLog[today] = { lessonsCompleted: 0 };
-          users[email].data.dailyLog[today].lessonsCompleted++;
-          if (streaks.lastActiveDate !== today) {
-            const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-            streaks.currentStreak = streaks.lastActiveDate === yesterday ? streaks.currentStreak + 1 : 1;
-            streaks.lastActiveDate = today;
-            if (streaks.currentStreak > streaks.longestStreak) streaks.longestStreak = streaks.currentStreak;
-          }
-          streaks.weeklyActivity[new Date().getDay()] = (streaks.weeklyActivity[new Date().getDay()] || 0) + 1;
-        } catch (e) { console.warn('curriculum lesson streak bookkeeping failed:', e.message); }
+        // Update streak
+        const today = new Date().toISOString().slice(0, 10);
+        const streaks = users[email].data.studyStreaks;
+        if (!users[email].data.dailyLog[today]) users[email].data.dailyLog[today] = { lessonsCompleted: 0 };
+        users[email].data.dailyLog[today].lessonsCompleted++;
+        if (streaks.lastActiveDate !== today) {
+          const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+          streaks.currentStreak = streaks.lastActiveDate === yesterday ? streaks.currentStreak + 1 : 1;
+          streaks.lastActiveDate = today;
+          if (streaks.currentStreak > streaks.longestStreak) streaks.longestStreak = streaks.currentStreak;
+        }
+        streaks.weeklyActivity[new Date().getDay()] = (streaks.weeklyActivity[new Date().getDay()] || 0) + 1;
       }
 
-      // Auto-complete goal milestones (also isolated).
-      try { checkGoalMilestones(users[email].data); } catch (e) { console.warn('checkGoalMilestones failed:', e.message); }
+      // Auto-complete goal milestones
+      checkGoalMilestones(users[email].data);
 
-      try { saveUsers(users); } catch (e) { console.error('saveUsers failed:', e.message); }
+      saveUsers(users);
     }, tierModel, { enableWebSearch: !!req.sourced });
   } catch (e) {
     console.error('Lesson chat error:', e);
@@ -2943,13 +2937,8 @@ app.post('/api/lessons/:id/chat', authMiddleware, requireMessageQuota, async (re
       const hasDoneMarker = /\[LESSON_(?:DONE|COMPLETE)\]/.test(cleaned);
       const doneMatch = hasDoneMarker ? extractLessonDoneJson(cleaned) : null;
       if (hasDoneMarker) {
-        // Core fact: mark complete. This MUST persist regardless of any
-        // downstream bookkeeping failure.
         lesson.isCompleted = true;
-        lesson.completedAt = new Date().toISOString();
         ensureLessonCompletionFields(users[email].data);
-
-        // XP + level (isolated so a parse failure can't block streak updates).
         if (doneMatch) {
           try {
             const completionData = JSON.parse(doneMatch);
@@ -2961,33 +2950,22 @@ app.post('/api/lessons/:id/chat', authMiddleware, requireMessageQuota, async (re
               users[email].data.profile.xp -= users[email].data.profile.xpToNextLevel;
               users[email].data.profile.xpToNextLevel = Math.floor(users[email].data.profile.xpToNextLevel * 1.5);
             }
-          } catch (e) { console.warn('lesson completionData parse failed:', e.message); }
-        } else {
-          // No JSON blob — still record a minimal completion so the client
-          // gets a consistent shape to render the completion banner.
-          lesson.completionData = lesson.completionData || { xpEarned: 20, summary: 'Lesson completed.' };
-          users[email].data.profile.xp = (users[email].data.profile.xp || 0) + 20;
+          } catch {}
         }
-
-        // Streak bookkeeping — defensive so a bad field can't kill the save below.
-        try {
-          const today = new Date().toISOString().slice(0, 10);
-          const streaks = users[email].data.studyStreaks;
-          if (!users[email].data.dailyLog[today]) users[email].data.dailyLog[today] = { lessonsCompleted: 0 };
-          users[email].data.dailyLog[today].lessonsCompleted++;
-          if (streaks.lastActiveDate !== today) {
-            const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-            streaks.currentStreak = streaks.lastActiveDate === yesterday ? streaks.currentStreak + 1 : 1;
-            streaks.lastActiveDate = today;
-            if (streaks.currentStreak > streaks.longestStreak) streaks.longestStreak = streaks.currentStreak;
-          }
-          streaks.weeklyActivity[new Date().getDay()] = (streaks.weeklyActivity[new Date().getDay()] || 0) + 1;
-        } catch (e) { console.warn('lesson streak bookkeeping failed:', e.message); }
+        const today = new Date().toISOString().slice(0, 10);
+        const streaks = users[email].data.studyStreaks;
+        if (!users[email].data.dailyLog[today]) users[email].data.dailyLog[today] = { lessonsCompleted: 0 };
+        users[email].data.dailyLog[today].lessonsCompleted++;
+        if (streaks.lastActiveDate !== today) {
+          const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+          streaks.currentStreak = streaks.lastActiveDate === yesterday ? streaks.currentStreak + 1 : 1;
+          streaks.lastActiveDate = today;
+          if (streaks.currentStreak > streaks.longestStreak) streaks.longestStreak = streaks.currentStreak;
+        }
+        streaks.weeklyActivity[new Date().getDay()] = (streaks.weeklyActivity[new Date().getDay()] || 0) + 1;
       }
 
-      // Always persist — whether the lesson completed or not, chat history
-      // + isCompleted flag + streak updates all need to survive.
-      try { saveUsers(users); } catch (e) { console.error('saveUsers failed:', e.message); }
+      saveUsers(users);
     }, tierModel, { enableWebSearch: !!req.sourced });
   } catch (e) {
     console.error('Standalone lesson chat error:', e);
@@ -2995,56 +2973,6 @@ app.post('/api/lessons/:id/chat', authMiddleware, requireMessageQuota, async (re
   }
 });
 
-
-// =========================================================
-// MATH TUTOR — single endpoint, stateless from the server's POV.
-// The client owns the conversation history (so users can fork / edit freely)
-// and passes it in on each turn along with topic + custom instructions.
-// =========================================================
-app.post('/api/math-tutor/chat', authMiddleware, requireMessageQuota, async (req, res) => {
-  try {
-    const { topic, customInstructions, messages, phase, images } = req.body || {};
-    if (!topic || typeof topic !== 'string') return res.status(400).json({ error: 'topic required' });
-    if (!Array.isArray(messages) || !messages.length) return res.status(400).json({ error: 'messages required' });
-    const validPhase = ['lesson', 'practice', 'grade'].includes(phase) ? phase : 'lesson';
-
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (!email) return res.status(404).json({ error: 'User not found' });
-    users[email].data = migrateUserData(users[email].data);
-
-    const systemPrompt = buildMathTutorPrompt(
-      topic,
-      customInstructions || '',
-      users[email].data.profile,
-      users[email].data.preferences,
-      users[email].data.assessmentHistory || [],
-      validPhase,
-    );
-
-    // Attach any images sent this turn to the last user message.
-    const aiMessages = messages.map(m => ({ role: m.role, content: m.content }));
-    const imgs = Array.isArray(images) ? images : [];
-    if (imgs.length && aiMessages.length && aiMessages[aiMessages.length - 1].role === 'user') {
-      aiMessages[aiMessages.length - 1].images = imgs;
-    }
-
-    const tierModel = modelForUser(users[email], email);
-    await streamAIResponse(
-      res,
-      systemPrompt,
-      aiMessages,
-      async () => {
-        // No server-side persistence — client holds state. Just consume the quota.
-      },
-      tierModel,
-      { enableWebSearch: false },
-    );
-  } catch (e) {
-    console.error('Math tutor chat error:', e);
-    if (!res.headersSent) res.status(500).json({ error: e.message });
-  }
-});
 
 // =========================================================
 // BILLING / PRO PLAN

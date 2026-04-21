@@ -1,4 +1,4 @@
-import { BookOpen, MessageSquare, Layers, FileText, Target, ClipboardCheck, PenTool, Settings, Swords, GraduationCap, Users, Shield, Zap, Lightbulb, Calculator } from 'lucide-react';
+import { BookOpen, MessageSquare, Layers, FileText, Target, ClipboardCheck, PenTool, Settings, Swords, GraduationCap, Users, Shield, Zap, Lightbulb } from 'lucide-react';
 
 const APP_REGISTRY = [
   { id: 'curricula', label: 'Curricula', icon: BookOpen, color: '#3b82f6', gradient: 'from-blue-500 to-blue-700' },
@@ -9,7 +9,6 @@ const APP_REGISTRY = [
   { id: 'goals', label: 'Goals', icon: Target, color: '#f59e0b', gradient: 'from-amber-400 to-orange-500' },
   { id: 'assessments', label: 'Assessments', icon: ClipboardCheck, color: '#ef4444', gradient: 'from-rose-400 to-red-600' },
   { id: 'math', label: 'Math Canvas', icon: PenTool, color: '#6366f1', gradient: 'from-indigo-400 to-indigo-600' },
-  { id: 'mathtutor', label: 'Math Tutor', icon: Calculator, color: '#4f46e5', gradient: 'from-indigo-500 to-violet-600' },
   { id: 'textbook', label: 'Textbooks', icon: GraduationCap, color: '#8b5cf6', gradient: 'from-violet-400 to-purple-600' },
   { id: 'social', label: 'Social', icon: Users, color: '#06b6d4', gradient: 'from-cyan-400 to-teal-500' },
   { id: 'quizbowl', label: 'Quiz Bowl', icon: Zap, color: '#f59e0b', gradient: 'from-amber-400 to-orange-500' },

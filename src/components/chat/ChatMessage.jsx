@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import { Check, X, Copy, Pencil } from 'lucide-react';
+import { Check, X } from 'lucide-react';
 import MathText from '../shared/MathText';
 
 // Normalize LaTeX delimiter variants that remark-math doesn't parse:
@@ -78,32 +78,9 @@ function InlineQuiz({ quizJson }) {
   );
 }
 
-export default function ChatMessage({ message, isStreaming, canEdit = false, onEdit }) {
+export default function ChatMessage({ message, isStreaming }) {
   const isUser = message.role === 'user';
   const raw = message.content || '';
-  const [editing, setEditing] = useState(false);
-  const [editText, setEditText] = useState(raw);
-  const [copied, setCopied] = useState(false);
-
-  async function handleCopy() {
-    // Copy the RAW markdown, not the rendered HTML, so it pastes cleanly
-    // into Notion / Obsidian / ChatGPT / anywhere.
-    const md = raw
-      .replace(/\[PHASE_COMPLETE\]/g, '')
-      .replace(/\[LESSON_(?:DONE|COMPLETE)\]\s*\{[\s\S]*?\}/g, '')
-      .replace(/\[LESSON_(?:DONE|COMPLETE)\]/g, '')
-      .replace(/\[QUIZ_START\][\s\S]*?\[QUIZ_END\]/g, '')
-      .replace(/\[MILESTONE_COMPLETE:[^\]]+\]/g, '')
-      .replace(/\[STATUS:\s*(advance|stay|next)\s*\]/gi, '')
-      .trim();
-    try { await navigator.clipboard.writeText(md); setCopied(true); setTimeout(() => setCopied(false), 1500); }
-    catch { /* ignore */ }
-  }
-
-  function saveEdit() {
-    if (typeof onEdit === 'function') onEdit(editText);
-    setEditing(false);
-  }
 
   // Extract quiz blocks — only render the inline quiz UI when the full block has arrived
   const quizMatch = raw.match(/\[QUIZ_START\]\s*([\s\S]*?)\s*\[QUIZ_END\]/);
@@ -188,19 +165,6 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
             )}
             {displayContent && <p className="whitespace-pre-wrap">{displayContent}</p>}
           </div>
-        ) : editing ? (
-          <div>
-            <textarea
-              value={editText}
-              onChange={e => setEditText(e.target.value)}
-              rows={Math.min(20, Math.max(4, editText.split('\n').length))}
-              className="w-full min-w-[320px] p-2 rounded-lg border border-gray-300 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-xs font-mono text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-blue-500/40"
-            />
-            <div className="flex gap-1.5 mt-2 justify-end">
-              <button onClick={() => { setEditing(false); setEditText(raw); }} className="px-3 py-1 rounded-lg text-[11px] text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#1e1e2e]">Cancel</button>
-              <button onClick={saveEdit} className="px-3 py-1 rounded-lg text-[11px] bg-blue-600 text-white font-medium hover:bg-blue-700">Save</button>
-            </div>
-          </div>
         ) : (
           <>
             {displayContent && (
@@ -231,29 +195,6 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
             {quizJson && <InlineQuiz quizJson={quizJson} />}
             {Array.isArray(message.sources) && message.sources.length > 0 && (
               <Sources sources={message.sources} />
-            )}
-            {!isStreaming && !isError && displayContent && (
-              <div className="mt-2 pt-2 flex items-center gap-1 opacity-40 hover:opacity-100 transition-opacity">
-                <button
-                  onClick={handleCopy}
-                  title="Copy as Markdown"
-                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-[#2A2A40]"
-                >
-                  {copied ? <><Check size={10} /> Copied</> : <><Copy size={10} /> Copy</>}
-                </button>
-                {canEdit && (
-                  <button
-                    onClick={() => { setEditing(true); setEditText(raw); }}
-                    title="Edit this message"
-                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-[#2A2A40]"
-                  >
-                    <Pencil size={10} /> Edit
-                  </button>
-                )}
-                {message._edited && (
-                  <span className="text-[9px] text-gray-400 italic ml-auto">edited</span>
-                )}
-              </div>
             )}
           </>
         )}
