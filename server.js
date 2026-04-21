@@ -1640,7 +1640,7 @@ app.get('/api/goals', authMiddleware, (req, res) => {
 
 app.post('/api/goals', authMiddleware, async (req, res) => {
   try {
-    const { title, description, linkedCurriculumIds, linkedLessonIds } = req.body;
+    const { title, description } = req.body;
     if (!title) return res.status(400).json({ error: 'Title required' });
 
     const users = loadUsers();
@@ -1670,10 +1670,7 @@ app.post('/api/goals', authMiddleware, async (req, res) => {
 
     const goal = {
       id: crypto.randomUUID(), title, description: description || '', createdAt: new Date().toISOString(),
-      status: 'active',
-      linkedCurriculumIds: Array.isArray(linkedCurriculumIds) ? linkedCurriculumIds : [],
-      linkedLessonIds: Array.isArray(linkedLessonIds) ? linkedLessonIds : [],
-      milestones, progress: 0,
+      status: 'active', linkedCurriculumIds: [], milestones, progress: 0,
     };
 
     users[email].data.goals.unshift(goal);
@@ -1910,8 +1907,6 @@ app.get('/api/notes', authMiddleware, (req, res) => {
     const notes = (users[email].data?.notes || []).map(n => ({
       id: n.id, title: n.title, type: n.type || 'regular', createdAt: n.createdAt, updatedAt: n.updatedAt,
       preview: (n.mainNotes || '').slice(0, 100),
-      linkedCurriculumId: n.linkedCurriculumId || null,
-      linkedLessonId: n.linkedLessonId || null,
     }));
     res.json({ notes });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1919,7 +1914,7 @@ app.get('/api/notes', authMiddleware, (req, res) => {
 
 app.post('/api/notes', authMiddleware, (req, res) => {
   try {
-    const { title, type, linkedCurriculumId, linkedLessonId } = req.body;
+    const { title, type } = req.body;
     const users = loadUsers();
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
@@ -1928,8 +1923,7 @@ app.post('/api/notes', authMiddleware, (req, res) => {
       id: crypto.randomUUID(), title: title || 'Untitled Note', type: type || 'regular',
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       cues: [], mainNotes: '', summary: '',
-      linkedCurriculumId: linkedCurriculumId || null,
-      linkedLessonId: linkedLessonId || null,
+      linkedCurriculumId: null, linkedLessonId: null,
     };
     users[email].data.notes.unshift(note);
     saveUsers(users);
@@ -1950,7 +1944,7 @@ app.get('/api/notes/:nid', authMiddleware, (req, res) => {
 
 app.put('/api/notes/:nid', authMiddleware, (req, res) => {
   try {
-    const { title, cues, mainNotes, summary, linkedCurriculumId, linkedLessonId } = req.body;
+    const { title, cues, mainNotes, summary } = req.body;
     const users = loadUsers();
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
@@ -1960,9 +1954,6 @@ app.put('/api/notes/:nid', authMiddleware, (req, res) => {
     if (cues !== undefined) note.cues = cues;
     if (mainNotes !== undefined) note.mainNotes = mainNotes;
     if (summary !== undefined) note.summary = summary;
-    // Use `null` to clear a link; `undefined` to leave unchanged.
-    if (linkedCurriculumId !== undefined) note.linkedCurriculumId = linkedCurriculumId || null;
-    if (linkedLessonId !== undefined) note.linkedLessonId = linkedLessonId || null;
     note.updatedAt = new Date().toISOString();
     saveUsers(users);
     res.json({ note });

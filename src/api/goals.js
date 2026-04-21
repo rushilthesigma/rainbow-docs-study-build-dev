@@ -4,15 +4,10 @@ export async function listGoals() {
   return apiFetch('/api/goals');
 }
 
-export async function createGoal(title, description, opts = {}) {
+export async function createGoal(title, description) {
   return apiFetch('/api/goals', {
     method: 'POST',
-    body: JSON.stringify({
-      title,
-      description,
-      linkedCurriculumIds: Array.isArray(opts.linkedCurriculumIds) ? opts.linkedCurriculumIds : [],
-      linkedLessonIds: Array.isArray(opts.linkedLessonIds) ? opts.linkedLessonIds : [],
-    }),
+    body: JSON.stringify({ title, description }),
   });
 }
 
