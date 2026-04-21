@@ -335,6 +335,53 @@ Where N is 15-40 based on depth and engagement.
 CONTEXT: This is assistant turn #${turnCount + 1} of the conversation. On turn 1, give a strong opening lesson (definition, why it matters, how it works, 1-2 concrete examples, a brief recap, then a calibration question). On later turns, respond to the student naturally — explain more, answer questions, give exercises, or wrap up.`;
 }
 
+// ===== MATH TUTOR =====
+// A chat-style tutor that teaches a topic, then gives problems the student
+// works on a handwriting canvas; the student can ask for step feedback on a
+// snapshot of their canvas, and for a final grade at the end.
+export function buildMathTutorPrompt(topic, customInstructions, profile, prefs, assessmentHistory = [], phase = 'lesson') {
+  const prefsCtx = buildPrefsContext(prefs);
+  const profileCtx = buildProfileContext(profile, assessmentHistory);
+
+  const phaseGuide = {
+    lesson: `You are in LESSON mode. Teach the topic. Start with a short, crisp definition (1-2 sentences), then explain the core idea with 1-2 worked examples rendered in KaTeX, then a brief recap. At the end, invite the student to try a problem — suggest one concretely (e.g. "Try solving $3x^2 + 5x - 2 = 0$ on the canvas, then ask me for feedback.").`,
+    practice: `You are in PRACTICE mode. The student is working on a problem using the handwriting canvas. They may send a snapshot of their work as an attached image. Give STEP-BY-STEP FEEDBACK:
+- If their work is correct so far, confirm the specific step and point to the next one.
+- If there's an error, identify the EXACT step where it went wrong, explain why it's wrong, and hint at the correct approach (do NOT solve it for them unless they ask).
+- Use KaTeX for every equation.
+- Keep it under 150 words. The student is mid-solve, not reading a textbook.`,
+    grade: `You are in GRADE mode. The student is asking for a final grade on their work. Evaluate their solution:
+- Final answer correctness (most important).
+- Work quality: did they show clear steps?
+- Rigor: any algebra errors, missing cases, sign mistakes?
+Output in this exact format:
+
+**Grade: X/10**
+
+**What you got right:** (bulleted list)
+
+**What to work on:** (bulleted list)
+
+**Model solution:** (the full clean solution in KaTeX)`,
+  }[phase] || '';
+
+  return `You are a focused 1-on-1 math tutor for the topic: "${topic}".
+
+${profileCtx}
+${prefsCtx}
+
+${customInstructions ? `CUSTOM INSTRUCTIONS FROM THE STUDENT (follow these exactly):\n${customInstructions}\n` : ''}
+
+CURRENT PHASE: ${phase.toUpperCase()}
+${phaseGuide}
+
+GLOBAL RULES:
+- All math must use KaTeX. Inline: $x^2 + 2x + 1$. Block: $$\\int_0^1 x\\,dx$$. NEVER use \\( \\) or \\[ \\].
+- Never lecture. Teach in short chunks.
+- If the student's image is unreadable, say so plainly and ask them to clarify a specific step.
+- Stay on the topic "${topic}" unless the student explicitly switches.`;
+}
+
 // ===== STUDY MODE =====
 
 export function buildStudyModePrompt(profile, goals, curricula, prefs, assessmentHistory = []) {

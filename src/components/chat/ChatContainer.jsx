@@ -3,7 +3,15 @@ import { ArrowDown } from 'lucide-react';
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 
-export default function ChatContainer({ messages, streamingContent, streamingSources, onSend, disabled, placeholder, header, className = '', sourceMode, onToggleSource, searchStatus }) {
+export default function ChatContainer({
+  messages, streamingContent, streamingSources, onSend, disabled, placeholder,
+  header, className = '', sourceMode, onToggleSource, searchStatus,
+  // Optional: hide the built-in input (caller supplies its own controls),
+  // and opt-in editing support (set of editable msg indices + handler).
+  hideInput = false,
+  editableIndices = null,
+  onEditMessage = null,
+}) {
   const scrollRef = useRef(null);
   // Track whether the user has intentionally scrolled up. If so, we stop
   // auto-scrolling so they can read older messages while the AI streams.
@@ -55,7 +63,13 @@ export default function ChatContainer({ messages, streamingContent, streamingSou
           </div>
         )}
         {displayMessages.map((msg, i) => (
-          <ChatMessage key={i} message={msg} isStreaming={msg._streaming} />
+          <ChatMessage
+            key={i}
+            message={msg}
+            isStreaming={msg._streaming}
+            canEdit={!msg._streaming && !!editableIndices && editableIndices.has && editableIndices.has(i) && typeof onEditMessage === 'function'}
+            onEdit={typeof onEditMessage === 'function' ? (newContent) => onEditMessage(i, newContent) : undefined}
+          />
         ))}
         {searchStatus && (
           <div className="flex items-center gap-2 px-3 py-2 text-[11px] text-amber-600 dark:text-amber-400">
@@ -73,13 +87,15 @@ export default function ChatContainer({ messages, streamingContent, streamingSou
           <ArrowDown size={12} /> New
         </button>
       )}
-      <ChatInput
-        onSend={onSend}
-        disabled={disabled}
-        placeholder={placeholder}
-        sourceMode={sourceMode}
-        onToggleSource={onToggleSource}
-      />
+      {!hideInput && (
+        <ChatInput
+          onSend={onSend}
+          disabled={disabled}
+          placeholder={placeholder}
+          sourceMode={sourceMode}
+          onToggleSource={onToggleSource}
+        />
+      )}
     </div>
   );
 }
