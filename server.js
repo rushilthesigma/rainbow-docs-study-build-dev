@@ -770,6 +770,19 @@ async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096,
 // Back-compat alias — all existing call sites use `callAnthropic`.
 const callAnthropic = callGemini;
 
+// Ensure the fields the completion handler touches exist. Older user records
+// may be missing these; without this, any lesson-complete save throws.
+function ensureLessonCompletionFields(data) {
+  if (!data) return;
+  if (!data.profile) data.profile = { level: 1, xp: 0, xpToNextLevel: 100, strengths: [], weaknesses: [], topicScores: {} };
+  if (typeof data.profile.xp !== 'number') data.profile.xp = 0;
+  if (typeof data.profile.xpToNextLevel !== 'number') data.profile.xpToNextLevel = 100;
+  if (typeof data.profile.level !== 'number') data.profile.level = 1;
+  if (!data.studyStreaks) data.studyStreaks = { lastActiveDate: null, currentStreak: 0, longestStreak: 0, weeklyActivity: {} };
+  if (!data.studyStreaks.weeklyActivity) data.studyStreaks.weeklyActivity = {};
+  if (!data.dailyLog) data.dailyLog = {};
+}
+
 // Pull the JSON blob that follows a [LESSON_DONE] / [LESSON_COMPLETE] marker.
 // Walks brace depth so nested objects are handled correctly. Tolerates code
 // fences and inline citation markers — caller should pre-sanitize if needed.
@@ -1339,7 +1352,12 @@ You have Google Search. Use it on every response to ground your answer in real w
     }
 
     const finalContent = buffered + appendedMarkers;
-    if (onComplete) await onComplete(finalContent, sources);
+    // Bookkeeping in onComplete (saving chat history, updating streaks, etc.)
+    // must never surface as an AI error — the AI response is already done.
+    if (onComplete) {
+      try { await onComplete(finalContent, sources); }
+      catch (bookkeepErr) { console.error('streamAIResponse onComplete threw:', bookkeepErr); }
+    }
     res.write(`data: ${JSON.stringify({ done: true, sources })}\n\n`);
     res.end();
   } catch (e) {
@@ -1414,6 +1432,7 @@ app.post('/api/curriculum/:id/lesson/:lessonId/chat', authMiddleware, requireMes
         .replace(/\s*\[\d+\]\s*/g, ' ');
       if (/\[LESSON_COMPLETE\]/.test(cleanedCurr)) {
         lesson.isCompleted = true;
+        ensureLessonCompletionFields(users[email].data);
         const jsonStr = extractLessonDoneJson(cleanedCurr);
         if (jsonStr) {
           try {
@@ -2919,6 +2938,7 @@ app.post('/api/lessons/:id/chat', authMiddleware, requireMessageQuota, async (re
       const doneMatch = hasDoneMarker ? extractLessonDoneJson(cleaned) : null;
       if (hasDoneMarker) {
         lesson.isCompleted = true;
+        ensureLessonCompletionFields(users[email].data);
         if (doneMatch) {
           try {
             const completionData = JSON.parse(doneMatch);
