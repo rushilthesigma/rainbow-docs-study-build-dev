@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Target, Plus, CheckCircle2, Circle, Trash2 } from 'lucide-react';
-import { listGoals, createGoal, deleteGoal, toggleMilestone } from '../api/goals';
+import { Target, Plus, CheckCircle2, Circle, Trash2, BookOpen } from 'lucide-react';
+import { listGoals, createGoal, deleteGoal, toggleMilestone, updateGoal } from '../api/goals';
 import Button from '../components/shared/Button';
 import Input from '../components/shared/Input';
 import ProgressBar from '../components/curriculum/ProgressBar';
 import LoadingSpinner from '../components/shared/LoadingSpinner';
+import CurriculumLessonPicker from '../components/shared/CurriculumLessonPicker';
 
 export default function GoalsPage() {
   const [goals, setGoals] = useState([]);
@@ -13,6 +14,7 @@ export default function GoalsPage() {
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [newLink, setNewLink] = useState(null); // { curriculumId, lessonId } | null
 
   useEffect(() => {
     listGoals().then(d => { setGoals(d.goals || []); setLoading(false); }).catch(() => setLoading(false));
@@ -23,11 +25,24 @@ export default function GoalsPage() {
     if (!title.trim()) return;
     setCreating(true);
     try {
-      const data = await createGoal(title.trim(), description.trim());
+      const data = await createGoal(title.trim(), description.trim(), {
+        linkedCurriculumIds: newLink?.curriculumId ? [newLink.curriculumId] : [],
+        linkedLessonIds: newLink?.lessonId ? [newLink.lessonId] : [],
+      });
       setGoals(prev => [data.goal, ...prev]);
-      setTitle(''); setDescription(''); setShowForm(false);
+      setTitle(''); setDescription(''); setShowForm(false); setNewLink(null);
     } catch (err) { console.error(err); }
     setCreating(false);
+  }
+
+  // Change a goal's linked curriculum/lesson after it's been created.
+  async function handleGoalLinkChange(goalId, next) {
+    const updates = {
+      linkedCurriculumIds: next?.curriculumId ? [next.curriculumId] : [],
+      linkedLessonIds: next?.lessonId ? [next.lessonId] : [],
+    };
+    setGoals(prev => prev.map(g => g.id === goalId ? { ...g, ...updates } : g));
+    try { await updateGoal(goalId, updates); } catch (err) { console.error(err); }
   }
 
   async function handleDelete(id) {
@@ -68,9 +83,13 @@ export default function GoalsPage() {
         <form onSubmit={handleCreate} className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-5 mb-4 space-y-3">
           <Input label="What's your goal?" placeholder="e.g., Master Linear Algebra" value={title} onChange={e => setTitle(e.target.value)} required />
           <Input label="Description (optional)" placeholder="Add context..." value={description} onChange={e => setDescription(e.target.value)} />
+          <div>
+            <CurriculumLessonPicker value={newLink} onChange={setNewLink} />
+            <p className="text-[10px] text-gray-400 mt-1">Optional — anchor this goal to a specific curriculum or lesson so AI milestone generation + the study assistant know what you're working toward.</p>
+          </div>
           <div className="flex gap-2">
             <Button type="submit" loading={creating} size="sm"><Plus size={14} /> Create Goal</Button>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setShowForm(false)}>Cancel</Button>
+            <Button type="button" variant="ghost" size="sm" onClick={() => { setShowForm(false); setNewLink(null); }}>Cancel</Button>
           </div>
           {creating && <p className="text-xs text-gray-400">AI is generating milestones...</p>}
         </form>
@@ -87,8 +106,15 @@ export default function GoalsPage() {
           {goals.map(goal => (
             <div key={goal.id} className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-5">
               <div className="flex items-start justify-between mb-3">
-                <div>
-                  <h3 className="font-semibold text-gray-900 dark:text-gray-100">{goal.title}</h3>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="font-semibold text-gray-900 dark:text-gray-100">{goal.title}</h3>
+                    {(goal.linkedCurriculumIds?.length > 0 || goal.linkedLessonIds?.length > 0) && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+                        <BookOpen size={9} /> linked
+                      </span>
+                    )}
+                  </div>
                   {goal.description && <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{goal.description}</p>}
                 </div>
                 <div className="flex items-center gap-2">
@@ -100,6 +126,17 @@ export default function GoalsPage() {
                   </button>
                 </div>
               </div>
+
+              <div className="mb-3">
+                <CurriculumLessonPicker
+                  compact
+                  value={(goal.linkedCurriculumIds?.[0] || goal.linkedLessonIds?.[0])
+                    ? { curriculumId: goal.linkedCurriculumIds?.[0] || null, lessonId: goal.linkedLessonIds?.[0] || null }
+                    : null}
+                  onChange={(next) => handleGoalLinkChange(goal.id, next)}
+                />
+              </div>
+
               <ProgressBar value={goal.progress || 0} max={100} size="sm" className="mb-3" />
               <div className="space-y-1.5">
                 {(goal.milestones || []).map(m => (

@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, FileText, Plus, Trash2, Layout, Sparkles } from 'lucide-react';
+import { ArrowLeft, FileText, Plus, Trash2, Layout, Sparkles, BookOpen } from 'lucide-react';
 import { listNotes, createNote, deleteNote, getNote, updateNote, generateCues, generateSummary } from '../../../api/notes';
 import Button from '../../shared/Button';
 import LoadingSpinner from '../../shared/LoadingSpinner';
 import Modal from '../../shared/Modal';
+import CurriculumLessonPicker from '../../shared/CurriculumLessonPicker';
 
 function NoteEditor({ noteId, onBack }) {
   const [note, setNote] = useState(null);
@@ -46,6 +47,13 @@ function NoteEditor({ noteId, onBack }) {
 
   const isCornell = note.type === 'cornell';
 
+  function handleLinkChange(next) {
+    const curriculumId = next?.curriculumId || null;
+    const lessonId = next?.lessonId || null;
+    setNote(prev => ({ ...prev, linkedCurriculumId: curriculumId, linkedLessonId: lessonId }));
+    save({ linkedCurriculumId: curriculumId, linkedLessonId: lessonId });
+  }
+
   return (
     <div className="flex flex-col flex-1 min-h-0">
       <div className="flex items-center justify-between mb-3 flex-shrink-0">
@@ -58,9 +66,17 @@ function NoteEditor({ noteId, onBack }) {
       <input
         value={note.title}
         onChange={e => handleChange('title', e.target.value)}
-        className="w-full text-xl font-bold bg-transparent border-none outline-none text-gray-900 dark:text-white placeholder-gray-400 mb-3 flex-shrink-0"
+        className="w-full text-xl font-bold bg-transparent border-none outline-none text-gray-900 dark:text-white placeholder-gray-400 mb-2 flex-shrink-0"
         placeholder="Note title..."
       />
+
+      <div className="mb-3 flex-shrink-0">
+        <CurriculumLessonPicker
+          compact
+          value={note.linkedCurriculumId ? { curriculumId: note.linkedCurriculumId, lessonId: note.linkedLessonId } : null}
+          onChange={handleLinkChange}
+        />
+      </div>
 
       {isCornell ? (
         <div className="flex flex-col flex-1 min-h-0 gap-3">
@@ -122,6 +138,8 @@ export default function NotesApp() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [selectedNoteId, setSelectedNoteId] = useState(null);
+  const [newLink, setNewLink] = useState(null); // { curriculumId, lessonId } | null
+  const [filterCurriculumId, setFilterCurriculumId] = useState(null);
 
   useEffect(() => {
     listNotes().then(d => { setNotes(d.notes || []); setLoading(false); }).catch(() => setLoading(false));
@@ -129,11 +147,15 @@ export default function NotesApp() {
 
   async function handleCreate(type) {
     try {
-      const data = await createNote('Untitled Note', type);
+      const data = await createNote('Untitled Note', type, {
+        linkedCurriculumId: newLink?.curriculumId,
+        linkedLessonId: newLink?.lessonId,
+      });
       setNotes(prev => [data.note, ...prev]);
       setSelectedNoteId(data.note.id);
       setView('editor');
       setShowCreate(false);
+      setNewLink(null);
     } catch {}
   }
 
@@ -163,7 +185,11 @@ export default function NotesApp() {
         <Button size="sm" onClick={() => setShowCreate(true)}><Plus size={14} /> New Note</Button>
       </div>
 
-      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="New Note">
+      <Modal open={showCreate} onClose={() => { setShowCreate(false); setNewLink(null); }} title="New Note">
+        <div className="mb-4">
+          <CurriculumLessonPicker value={newLink} onChange={setNewLink} />
+          <p className="text-[10px] text-gray-400 mt-1">Optional — link this note to a curriculum or lesson so you can find it again alongside your course.</p>
+        </div>
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Choose a note type:</p>
         <div className="grid grid-cols-2 gap-3">
           <button onClick={() => handleCreate('regular')} className="flex flex-col items-center gap-2 p-5 rounded-xl border border-gray-200 dark:border-[#2A2A40] hover:border-blue-400 dark:hover:border-blue-600 transition-colors text-center">
@@ -193,7 +219,14 @@ export default function NotesApp() {
                 {note.type === 'cornell' ? <Layout size={14} /> : <FileText size={14} />}
               </div>
               <div className="flex-1 min-w-0">
-                <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{note.title}</h3>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{note.title}</h3>
+                  {note.linkedCurriculumId && (
+                    <span className="inline-flex items-center gap-1 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+                      <BookOpen size={8} /> linked
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs text-gray-400">{note.type === 'cornell' ? 'Cornell' : 'Note'} · {new Date(note.updatedAt || note.createdAt).toLocaleDateString()}</p>
               </div>
               <button onClick={e => handleDelete(e, note.id)} className="p-1 rounded text-gray-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={13} /></button>

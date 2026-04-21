@@ -4,8 +4,15 @@ export async function listNotes() {
   return apiFetch('/api/notes');
 }
 
-export async function createNote(title, type = 'regular') {
-  return apiFetch('/api/notes', { method: 'POST', body: JSON.stringify({ title, type }) });
+export async function createNote(title, type = 'regular', opts = {}) {
+  return apiFetch('/api/notes', {
+    method: 'POST',
+    body: JSON.stringify({
+      title, type,
+      linkedCurriculumId: opts.linkedCurriculumId || null,
+      linkedLessonId: opts.linkedLessonId || null,
+    }),
+  });
 }
 
 export async function getNote(id) {
