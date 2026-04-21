@@ -3,6 +3,7 @@ import { Zap, Play, Check, X, Loader2, Lightbulb } from 'lucide-react';
 import { apiFetch } from '../../../api/client';
 import { useWindowManager } from '../../../context/WindowManagerContext';
 import { setPendingLesson } from '../../../utils/pendingLesson';
+import useBrowserBack from '../../../hooks/useBrowserBack';
 
 const DIFFICULTIES = ['Easy', 'Medium', 'Hard', 'Tournament'];
 const CATEGORIES = ['Science', 'History', 'Literature', 'Geography', 'Math', 'Art', 'Music', 'Philosophy', 'Pop Culture', 'Mixed'];
@@ -70,6 +71,7 @@ export default function QuizBowlApp() {
     openApp('lessons', 'Lessons');
   }
   const [view, setView] = useState('setup'); // 'setup' | 'playing' | 'review'
+  useBrowserBack(view !== 'setup', () => setView('setup'));
   const [questions, setQuestions] = useState([]);
   const [currentQ, setCurrentQ] = useState(0);
   const [generating, setGenerating] = useState(false);

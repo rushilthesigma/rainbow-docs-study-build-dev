@@ -71,11 +71,11 @@ export default function LessonPage() {
     return () => { if (abortRef.current) abortRef.current(); };
   }, [curriculumId, lessonId]);
 
-  function doSend(text) {
+  function doSend(text, opts = {}) {
     if (completed) return;
 
     const userMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
-    setMessages(prev => [...prev, userMsg]);
+    if (!opts.hideUserInDisplay) setMessages(prev => [...prev, userMsg]);
     setStreaming(true);
     setStreamingContent('');
     streamContentRef.current = '';
@@ -128,6 +128,23 @@ export default function LessonPage() {
     if (streaming) return;
     doSend(text);
   }, [streaming, completed, curriculumId, lessonId]);
+
+  function handleUserEdit(idx, newContent) {
+    if (streaming) return;
+    setMessages(prev => prev.slice(0, idx));
+    setTimeout(() => doSend(newContent), 30);
+  }
+  function handleAiInstruct(idx, instruction) {
+    if (streaming || !instruction?.trim()) return;
+    let userIdx = idx - 1;
+    while (userIdx >= 0 && messages[userIdx]?.role !== 'user') userIdx--;
+    if (userIdx < 0) return;
+    const prevUserText = messages[userIdx].content || '';
+    const userMsgSnapshot = messages[userIdx];
+    setMessages(prev => [...prev.slice(0, userIdx), userMsgSnapshot]);
+    const hidden = `${prevUserText}\n\n[SYSTEM NOTE: Regenerate your previous answer — this time ${instruction.trim()}. Do NOT acknowledge this instruction. Output the revised answer directly.]`;
+    setTimeout(() => doSend(hidden, { hideUserInDisplay: true }), 30);
+  }
 
   async function handleReset() {
     if (!confirm('Reset this lesson? Your conversation will be cleared.')) return;
@@ -212,6 +229,8 @@ export default function LessonPage() {
         placeholder={completed ? 'Lesson complete!' : streaming ? 'AI is responding...' : 'Type your response...'}
         header={phaseHeader}
         className="flex-1 min-h-0"
+        onUserEditMessage={handleUserEdit}
+        onAiInstruct={handleAiInstruct}
       />
 
       {/* Navigation */}

@@ -11,6 +11,8 @@ export default function ChatContainer({
   hideInput = false,
   editableIndices = null,
   onEditMessage = null,
+  onUserEditMessage = null,   // called when user edits their own message (restart semantics)
+  onAiInstruct = null,        // called with (index, instruction) for an AI redo request
 }) {
   const scrollRef = useRef(null);
   // Track whether the user has intentionally scrolled up. If so, we stop
@@ -62,15 +64,26 @@ export default function ChatContainer({
             Start the conversation...
           </div>
         )}
-        {displayMessages.map((msg, i) => (
-          <ChatMessage
-            key={i}
-            message={msg}
-            isStreaming={msg._streaming}
-            canEdit={!msg._streaming && !!editableIndices && editableIndices.has && editableIndices.has(i) && typeof onEditMessage === 'function'}
-            onEdit={typeof onEditMessage === 'function' ? (newContent) => onEditMessage(i, newContent) : undefined}
-          />
-        ))}
+        {displayMessages.map((msg, i) => {
+          const isEditable = !msg._streaming && (
+            // Explicit editable set (back-compat)
+            (!!editableIndices && editableIndices.has && editableIndices.has(i))
+            // Or any of the new per-role handlers are wired
+            || (typeof onUserEditMessage === 'function' && msg.role === 'user')
+            || (typeof onAiInstruct === 'function' && msg.role === 'assistant')
+          );
+          return (
+            <ChatMessage
+              key={i}
+              message={msg}
+              isStreaming={msg._streaming}
+              canEdit={isEditable}
+              onEdit={typeof onEditMessage === 'function' ? (newContent) => onEditMessage(i, newContent) : undefined}
+              onUserEdit={typeof onUserEditMessage === 'function' ? (newContent) => onUserEditMessage(i, newContent) : undefined}
+              onAiInstruct={typeof onAiInstruct === 'function' ? (instruction) => onAiInstruct(i, instruction) : undefined}
+            />
+          );
+        })}
         {searchStatus && (
           <div className="flex items-center gap-2 px-3 py-2 text-[11px] text-amber-600 dark:text-amber-400">
             <span className="inline-block w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />

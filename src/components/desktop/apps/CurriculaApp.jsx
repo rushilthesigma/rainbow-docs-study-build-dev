@@ -12,6 +12,7 @@ import ProgressBar from '../../curriculum/ProgressBar';
 import ChatContainer from '../../chat/ChatContainer';
 import MathText from '../../shared/MathText';
 import { errorChatMessage } from '../../../utils/aiErrors';
+import useBrowserBack from '../../../hooks/useBrowserBack';
 
 const TYPE_ICONS = { lesson: BookOpen, practice: PenTool, essay: FileText, unit_test: ClipboardCheck };
 const TYPE_COLORS = { lesson: 'text-blue-400', practice: 'text-purple-400', essay: 'text-amber-400', unit_test: 'text-rose-400' };
@@ -21,6 +22,14 @@ export default function CurriculaApp() {
   const [curricula, setCurricula] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedCurriculum, setSelectedCurriculum] = useState(null);
+
+  // Browser Back navigates up one level inside the curriculum stack instead
+  // of leaving the SPA. lesson → detail → list.
+  useBrowserBack(view !== 'list', () => {
+    if (view === 'lesson') setView('detail');
+    else if (view === 'assessment') setView('detail');
+    else setView('list');
+  });
 
   // Lesson view
   const [currentLesson, setCurrentLesson] = useState(null);
@@ -153,6 +162,60 @@ export default function CurriculaApp() {
         <span className="text-sm font-semibold text-gray-900 dark:text-white truncate">{currentLesson.title}</span>
       </div>
     );
+    function handleUserEdit(idx, newContent) {
+      if (streaming) return;
+      if (abortRef.current) try { abortRef.current(); } catch {}
+      setLessonMessages(prev => prev.slice(0, idx));
+      setTimeout(() => doSendLesson(newContent, null, null, {}), 30);
+    }
+    // Regenerate the AI bubble IN PLACE. The hidden instruction is sent to
+    // the server alongside the prior user text; the client transcript only
+    // shows the original user turn + the new AI reply.
+    function handleAiInstruct(idx, instruction) {
+      if (streaming || !instruction?.trim()) return;
+      let userIdx = idx - 1;
+      while (userIdx >= 0 && lessonMessages[userIdx]?.role !== 'user') userIdx--;
+      if (userIdx < 0) return;
+      const prevUserText = lessonMessages[userIdx].content || '';
+      const userMsgSnapshot = lessonMessages[userIdx];
+      if (abortRef.current) try { abortRef.current(); } catch {}
+      setLessonMessages(prev => [...prev.slice(0, userIdx), userMsgSnapshot]);
+      const hidden = `${prevUserText}\n\n[SYSTEM NOTE: Regenerate your previous answer — this time ${instruction.trim()}. Do NOT acknowledge this instruction. Just output the revised answer directly.]`;
+      setTimeout(() => doSendLessonRegenerate(hidden), 30);
+    }
+
+    // No visible user-msg added; only the AI reply appends on done.
+    function doSendLessonRegenerate(text) {
+      setStreaming(true); setStreamingContent(''); setStreamingSources([]);
+      streamRef.current = ''; streamSourcesRef.current = [];
+      const abort = sendLessonMessage(currentLesson?.curriculumId, currentLesson?.id, text, [], {
+        onChunk: c => { streamRef.current += c; setStreamingContent(streamRef.current); },
+        onSource: src => {
+          streamSourcesRef.current = [...streamSourcesRef.current, src];
+          setStreamingSources(streamSourcesRef.current);
+        },
+        onStatus: s => setSearchStatus(s),
+        onDone: () => {
+          const full = streamRef.current;
+          const sources = streamSourcesRef.current;
+          if (full) {
+            const msg = { role: 'assistant', content: full, timestamp: new Date().toISOString(), _edited: true };
+            if (sources.length) msg.sources = sources;
+            setLessonMessages(m => [...m, msg]);
+          }
+          setStreamingContent(''); setStreamingSources([]); setSearchStatus(null);
+          streamRef.current = ''; streamSourcesRef.current = [];
+          setStreaming(false);
+        },
+        onError: err => {
+          setLessonMessages(m => [...m, errorChatMessage(err)]);
+          setStreamingContent(''); setStreamingSources([]); setSearchStatus(null);
+          streamRef.current = ''; streamSourcesRef.current = [];
+          setStreaming(false);
+        },
+      }, !!sourceMode);
+      abortRef.current = abort;
+    }
     return (
       <ChatContainer
         messages={lessonMessages}
@@ -166,6 +229,8 @@ export default function CurriculaApp() {
         className="h-full"
         sourceMode={sourceMode}
         onToggleSource={setSourceMode}
+        onUserEditMessage={handleUserEdit}
+        onAiInstruct={handleAiInstruct}
       />
     );
   }

@@ -6,6 +6,7 @@ import {
 import { sendMathTutorMessage } from '../../../api/mathTutor';
 import ChatContainer from '../../chat/ChatContainer';
 import { errorChatMessage } from '../../../utils/aiErrors';
+import useBrowserBack from '../../../hooks/useBrowserBack';
 
 // Persist the in-progress tutor session across window closes.
 const STORAGE_KEY = 'covalent-math-tutor-state-v1';
@@ -44,13 +45,21 @@ function TutorCanvas({ onCaptureReady, dark }) {
     const canvas = canvasRef.current;
     if (!canvas || !ctxRef.current) return;
     const rect = canvas.getBoundingClientRect();
-    clearCanvas(ctxRef.current, rect.width, rect.height);
+    const ctx = ctxRef.current;
+    clearCanvas(ctx, rect.width, rect.height);
     for (const s of strokesRef.current) {
-      ctxRef.current.strokeStyle = s.tool === 'eraser' ? bgColor : penColor;
-      ctxRef.current.lineWidth = s.size;
-      ctxRef.current.beginPath();
-      s.points.forEach((p, i) => i === 0 ? ctxRef.current.moveTo(p.x, p.y) : ctxRef.current.lineTo(p.x, p.y));
-      ctxRef.current.stroke();
+      if (s.tool === 'eraser') {
+        ctx.save();
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.strokeStyle = 'rgba(0,0,0,1)';
+      } else {
+        ctx.strokeStyle = penColor;
+      }
+      ctx.lineWidth = s.size;
+      ctx.beginPath();
+      s.points.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+      ctx.stroke();
+      if (s.tool === 'eraser') ctx.restore();
     }
   }
 
@@ -65,29 +74,48 @@ function TutorCanvas({ onCaptureReady, dark }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onCaptureReady]);
 
+  // Re-initialize the backing store when layout changes (e.g. toolbar renders
+  // after mount, window resizes, dark mode flips). Without this, the backing
+  // store dimensions drift from the CSS dimensions and drawing lands at the
+  // wrong pixel.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    const ctx = canvas.getContext('2d');
-    ctx.scale(dpr, dpr);
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctxRef.current = ctx;
-    clearCanvas(ctx, rect.width, rect.height);
-    replayStrokes();
+    function sync() {
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      canvas.width = Math.round(rect.width * dpr);
+      canvas.height = Math.round(rect.height * dpr);
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctxRef.current = ctx;
+      clearCanvas(ctx, rect.width, rect.height);
+      replayStrokes();
+    }
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(canvas);
+    return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dark]);
 
+  // Use the native MouseEvent.offsetX/offsetY — it's always measured from the
+  // canvas element's own top-left in CSS pixels, so no stale-rect drift.
   function getPos(e) {
-    const rect = canvasRef.current.getBoundingClientRect();
+    const nativeEvent = e.nativeEvent || e;
     const touch = e.touches?.[0];
-    const clientX = touch ? touch.clientX : e.clientX;
-    const clientY = touch ? touch.clientY : e.clientY;
-    return { x: clientX - rect.left, y: clientY - rect.top };
+    if (touch) {
+      const rect = canvasRef.current.getBoundingClientRect();
+      return { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+    }
+    if (typeof nativeEvent.offsetX === 'number' && typeof nativeEvent.offsetY === 'number') {
+      return { x: nativeEvent.offsetX, y: nativeEvent.offsetY };
+    }
+    const rect = canvasRef.current.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   }
 
   function startDraw(e) {
@@ -96,8 +124,15 @@ function TutorCanvas({ onCaptureReady, dark }) {
     const pos = getPos(e);
     currentStrokeRef.current = [pos];
     const ctx = ctxRef.current;
-    ctx.strokeStyle = tool === 'eraser' ? bgColor : penColor;
-    ctx.lineWidth = tool === 'eraser' ? 20 : PEN_SIZES[penSize];
+    if (tool === 'eraser') {
+      ctx.save();
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.strokeStyle = 'rgba(0,0,0,1)';
+      ctx.lineWidth = 22;
+    } else {
+      ctx.strokeStyle = penColor;
+      ctx.lineWidth = PEN_SIZES[penSize];
+    }
     ctx.beginPath();
     ctx.moveTo(pos.x, pos.y);
   }
@@ -112,11 +147,13 @@ function TutorCanvas({ onCaptureReady, dark }) {
   function endDraw() {
     if (!drawing) return;
     setDrawing(false);
+    const ctx = ctxRef.current;
+    if (tool === 'eraser') ctx.restore();
     if (currentStrokeRef.current.length > 1) {
       strokesRef.current.push({
         points: currentStrokeRef.current,
         tool,
-        size: tool === 'eraser' ? 20 : PEN_SIZES[penSize],
+        size: tool === 'eraser' ? 22 : PEN_SIZES[penSize],
       });
     }
     currentStrokeRef.current = [];
@@ -164,6 +201,7 @@ function TutorCanvas({ onCaptureReady, dark }) {
 export default function MathTutorApp() {
   const persisted = loadState();
   const [view, setView] = useState(persisted?.view || 'setup'); // 'setup' | 'tutor'
+  useBrowserBack(view === 'tutor', () => setView('setup'));
   const [topic, setTopic] = useState(persisted?.topic || '');
   const [customInstructions, setCustomInstructions] = useState(persisted?.customInstructions || '');
   const [messages, setMessages] = useState(persisted?.messages || []);
@@ -351,11 +389,72 @@ export default function MathTutorApp() {
   // land on the right slot in the unfiltered `messages` array.
   const visibleIndices = messages.map((m, i) => m._hidden ? -1 : i).filter(i => i >= 0);
   const visibleMessages = visibleIndices.map(i => messages[i]);
-  const onMessageEdit = (visibleIdx, newContent) => {
+
+  // Editing a USER message restarts the conversation from that point:
+  // truncate everything at and after that index, then re-send the edited text.
+  function onUserEditMessage(visibleIdx, newContent) {
+    if (streaming) return;
     const realIdx = visibleIndices[visibleIdx];
     if (realIdx == null) return;
-    setMessages(prev => prev.map((m, i) => i === realIdx ? { ...m, content: newContent, _edited: true } : m));
-  };
+    if (abortRef.current) try { abortRef.current(); } catch {}
+    setMessages(prev => prev.slice(0, realIdx));
+    setTimeout(() => doSend({ text: newContent, phase: 'practice' }), 30);
+  }
+
+  // Editing an AI message REPLACES its content in place with a fresh answer.
+  // We keep every user message visible (including the original one), drop
+  // only the AI reply + anything after it, then stream a new reply that
+  // includes a hidden instruction the user gave us.
+  function onAiInstruct(visibleIdx, instruction) {
+    if (streaming || !instruction?.trim()) return;
+    const realIdx = visibleIndices[visibleIdx];
+    if (realIdx == null) return;
+    if (abortRef.current) try { abortRef.current(); } catch {}
+    // Truncate the AI reply + everything after it. The original user msg
+    // right before it stays in the visible transcript, unchanged.
+    const truncated = messages.slice(0, realIdx);
+    setMessages(truncated);
+
+    // Call streamAIResponse directly with augmented history — append the
+    // instruction to the last user message IN THE API REQUEST ONLY, not in
+    // the visible state. That way the user sees their original message
+    // verbatim, but the AI knows what to change.
+    const apiHistory = truncated.map(m => ({ role: m.role, content: m.content }));
+    if (apiHistory.length && apiHistory[apiHistory.length - 1].role === 'user') {
+      apiHistory[apiHistory.length - 1] = {
+        ...apiHistory[apiHistory.length - 1],
+        content: `${apiHistory[apiHistory.length - 1].content}\n\n[SYSTEM NOTE: Regenerate your previous answer — this time ${instruction.trim()}. Do NOT acknowledge this instruction in your response. Just produce the revised answer directly.]`,
+      };
+    }
+
+    setStreaming(true);
+    setStreamingContent('');
+    streamRef.current = '';
+    const body = {
+      topic: topic.trim(),
+      customInstructions: customInstructions.trim(),
+      phase: 'practice',
+      messages: apiHistory,
+      images: [],
+    };
+    const abort = sendMathTutorMessage(body, {
+      onChunk: (c) => { streamRef.current += c; setStreamingContent(streamRef.current); },
+      onDone: () => {
+        const full = streamRef.current;
+        if (full) setMessages(m => [...m, { role: 'assistant', content: full, timestamp: new Date().toISOString(), _edited: true }]);
+        setStreaming(false);
+        setStreamingContent('');
+        streamRef.current = '';
+      },
+      onError: (err) => {
+        setMessages(m => [...m, errorChatMessage(err)]);
+        setStreaming(false);
+        setStreamingContent('');
+        streamRef.current = '';
+      },
+    });
+    abortRef.current = abort;
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -398,8 +497,8 @@ export default function MathTutorApp() {
               streamingContent={streaming ? streamingContent : ''}
               streamingSources={[]}
               hideInput
-              editableIndices={new Set(visibleMessages.map((m, i) => m.role === 'assistant' ? i : -1).filter(i => i >= 0))}
-              onEditMessage={onMessageEdit}
+              onUserEditMessage={onUserEditMessage}
+              onAiInstruct={onAiInstruct}
               className="h-full border-0 rounded-none"
             />
           </div>

@@ -6,6 +6,7 @@ import {
 } from '../../../api/lessons';
 import { consumePendingLesson } from '../../../utils/pendingLesson';
 import { errorChatMessage } from '../../../utils/aiErrors';
+import useBrowserBack from '../../../hooks/useBrowserBack';
 import { DIFFICULTY_OPTIONS } from '../../../utils/constants';
 import Button from '../../shared/Button';
 import Input from '../../shared/Input';
@@ -17,6 +18,9 @@ export default function LessonsApp() {
   const [view, setView] = useState('list'); // list | new | lesson
   const [lessons, setLessons] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Browser Back → return to list instead of leaving the SPA.
+  useBrowserBack(view !== 'list', () => setView('list'));
 
   // New-lesson form
   const [topic, setTopic] = useState('');
@@ -223,6 +227,74 @@ export default function LessonsApp() {
       </div>
     );
 
+    // Editing a user message truncates the client display + re-sends the
+    // new text, getting a fresh reply.
+    function handleUserEdit(idx, newContent) {
+      if (streaming) return;
+      if (abortRef.current) try { abortRef.current(); } catch {}
+      setMessages(prev => prev.slice(0, idx));
+      setTimeout(() => doSend(newContent, activeLesson?.id), 30);
+    }
+    // Editing an AI message REPLACES the AI bubble in place. We drop the AI
+    // message + anything after it on the client, then send a hidden
+    // regenerate request to the server. The request looks like a normal
+    // user turn to the server but never appears in the visible transcript.
+    function handleAiInstruct(idx, instruction) {
+      if (streaming || !instruction?.trim()) return;
+      // Find the previous user message that prompted this AI reply.
+      let userIdx = idx - 1;
+      while (userIdx >= 0 && messages[userIdx]?.role !== 'user') userIdx--;
+      if (userIdx < 0) return;
+      const prevUserText = messages[userIdx].content || '';
+      if (abortRef.current) try { abortRef.current(); } catch {}
+      // Truncate to everything BEFORE the user msg we're regenerating against.
+      // We'll visually restore it by adding it back in the setTimeout so the
+      // display order is: ..., <unchanged user msg>, <new AI reply>.
+      const userMsgSnapshot = messages[userIdx];
+      setMessages(prev => [...prev.slice(0, userIdx), userMsgSnapshot]);
+      const hiddenText = `${prevUserText}\n\n[SYSTEM NOTE: Regenerate your previous answer — this time ${instruction.trim()}. Do NOT acknowledge this instruction. Just produce the revised answer directly.]`;
+      setTimeout(() => doSendRegenerate(hiddenText, activeLesson?.id), 30);
+    }
+    // Like doSend but does NOT add a user message to the visible state —
+    // we send `text` to the server (which records it in its own history)
+    // but the client display only gets the AI reply.
+    function doSendRegenerate(text, lessonId) {
+      const id = lessonId || activeLesson?.id;
+      if (!id) return;
+      setStreaming(true);
+      setStreamingContent('');
+      setStreamingSources([]);
+      streamRef.current = '';
+      streamSourcesRef.current = [];
+      const abort = sendLessonMessage(id, text, [], {
+        onChunk: (c) => { streamRef.current += c; setStreamingContent(streamRef.current); },
+        onSource: (src) => {
+          streamSourcesRef.current = [...streamSourcesRef.current, src];
+          setStreamingSources(streamSourcesRef.current);
+        },
+        onStatus: (s) => setSearchStatus(s),
+        onDone: () => {
+          const full = streamRef.current;
+          const sources = streamSourcesRef.current;
+          if (full) {
+            const aiMsg = { role: 'assistant', content: full, timestamp: new Date().toISOString(), _edited: true };
+            if (sources.length) aiMsg.sources = sources;
+            setMessages(m => [...m, aiMsg]);
+          }
+          setStreamingContent(''); setStreamingSources([]); setSearchStatus(null);
+          streamRef.current = ''; streamSourcesRef.current = [];
+          setStreaming(false);
+        },
+        onError: (err) => {
+          setMessages(m => [...m, errorChatMessage(err)]);
+          setStreamingContent(''); setStreamingSources([]); setSearchStatus(null);
+          streamRef.current = ''; streamSourcesRef.current = [];
+          setStreaming(false);
+        },
+      }, !!sourceMode);
+      abortRef.current = abort;
+    }
+
     return (
       <ChatContainer
         messages={messages}
@@ -236,6 +308,8 @@ export default function LessonsApp() {
         className="h-full"
         sourceMode={sourceMode}
         onToggleSource={setSourceMode}
+        onUserEditMessage={handleUserEdit}
+        onAiInstruct={handleAiInstruct}
       />
     );
   }

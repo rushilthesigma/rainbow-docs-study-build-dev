@@ -59,6 +59,69 @@ export default function DebateApp() {
     doSend(text);
   }
 
+  // Send a turn with an EXPLICIT history (bypasses doSend's stale closure).
+  async function sendWithHistory(history, text) {
+    const userMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
+    setMessages([...history, userMsg]);
+    setStreaming(true);
+    try {
+      const apiMessages = [...history, userMsg].map(m => ({ role: m.role, content: m.content }));
+      const result = await apiFetch('/api/chat', {
+        method: 'POST',
+        body: JSON.stringify({ system: systemRef.current, messages: apiMessages, max_tokens: 4096, sourced: true }),
+      });
+      const reply = result.content?.[0]?.text || 'I need a moment to formulate my argument...';
+      const sources = Array.isArray(result.sources) ? result.sources : [];
+      const msg = { role: 'assistant', content: reply, timestamp: new Date().toISOString() };
+      if (sources.length) msg.sources = sources;
+      setMessages(prev => [...prev, msg]);
+    } catch (err) {
+      setMessages(prev => [...prev, errorChatMessage(err)]);
+    }
+    setStreaming(false);
+  }
+
+  function handleUserEdit(idx, newContent) {
+    if (streaming) return;
+    sendWithHistory(messages.slice(0, idx), newContent);
+  }
+  // Regenerate AI in place. Don't show the instruction as a new user turn —
+  // reuse the prior user turn unchanged, pass a hidden instruction to the API.
+  async function handleAiInstruct(idx, instruction) {
+    if (streaming || !instruction?.trim()) return;
+    let userIdx = idx - 1;
+    while (userIdx >= 0 && messages[userIdx]?.role !== 'user') userIdx--;
+    if (userIdx < 0) return;
+    const prevUserText = messages[userIdx].content || '';
+    const userMsgSnapshot = messages[userIdx];
+    // Visible history: everything up to and including the original user msg.
+    const visibleHistory = [...messages.slice(0, userIdx), userMsgSnapshot];
+    setMessages(visibleHistory);
+    setStreaming(true);
+    try {
+      // API history swaps the LAST user msg for a version with the hidden
+      // instruction baked in — so the server/AI sees the instruction but the
+      // client transcript stays clean.
+      const apiHistory = visibleHistory.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
+      apiHistory.push({
+        role: 'user',
+        content: `${prevUserText}\n\n[SYSTEM NOTE: Regenerate your previous answer — this time ${instruction.trim()}. Do NOT acknowledge this instruction. Output the revised answer directly.]`,
+      });
+      const result = await apiFetch('/api/chat', {
+        method: 'POST',
+        body: JSON.stringify({ system: systemRef.current, messages: apiHistory, max_tokens: 4096, sourced: true }),
+      });
+      const reply = result.content?.[0]?.text || 'I need a moment to formulate my argument...';
+      const sources = Array.isArray(result.sources) ? result.sources : [];
+      const msg = { role: 'assistant', content: reply, timestamp: new Date().toISOString(), _edited: true };
+      if (sources.length) msg.sources = sources;
+      setMessages(prev => [...prev, msg]);
+    } catch (err) {
+      setMessages(prev => [...prev, errorChatMessage(err)]);
+    }
+    setStreaming(false);
+  }
+
   function handleReset() {
     setMessages([]); setStarted(false); setTopic(''); setSide(null);
   }
@@ -160,6 +223,8 @@ export default function DebateApp() {
       placeholder={streaming ? 'Formulating argument...' : 'Make your argument...'}
       header={header}
       className="h-full"
+      onUserEditMessage={handleUserEdit}
+      onAiInstruct={handleAiInstruct}
     />
   );
 }

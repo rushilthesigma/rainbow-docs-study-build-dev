@@ -5,6 +5,7 @@ import { BookOpen, Upload, ArrowLeft, Trash2, Loader2, Send, Sparkles, MessageCi
 import { listTextbooks, uploadTextbook, getTextbook, generateTextbookCurriculum, chatWithTextbook, deleteTextbook } from '../../../api/textbooks';
 import Button from '../../shared/Button';
 import { errorChatMessage } from '../../../utils/aiErrors';
+import ChatContainer from '../../chat/ChatContainer';
 import LoadingSpinner from '../../shared/LoadingSpinner';
 
 // ===== CHAT VIEW =====
@@ -25,15 +26,11 @@ function TextbookChat({ textbookId, title, onBack }) {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages]);
 
-  async function handleSend(e) {
-    e.preventDefault();
-    if (!input.trim() || sending) return;
-    const text = input.trim();
-    setInput('');
-    setMessages(prev => [...prev, { role: 'user', content: text, timestamp: new Date().toISOString() }]);
+  async function sendWithHistory(history, text) {
+    setMessages([...history, { role: 'user', content: text, timestamp: new Date().toISOString() }]);
     setSending(true);
     try {
-      const data = await chatWithTextbook(textbookId, text);
+      const data = await chatWithTextbook(textbookId, text, history);
       setMessages(prev => [...prev, { role: 'assistant', content: data.reply, timestamp: new Date().toISOString() }]);
     } catch (err) {
       setMessages(prev => [...prev, errorChatMessage(err)]);
@@ -41,53 +38,42 @@ function TextbookChat({ textbookId, title, onBack }) {
     setSending(false);
   }
 
-  return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-200 dark:border-[#2A2A40] flex-shrink-0">
-        <button onClick={onBack} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"><ArrowLeft size={16} /></button>
-        <MessageCircle size={14} className="text-blue-500" />
-        <span className="text-sm font-semibold text-gray-900 dark:text-white truncate">{title}</span>
-      </div>
+  async function handleSend(e) {
+    if (e?.preventDefault) e.preventDefault();
+    if (!input.trim() || sending) return;
+    const text = input.trim();
+    setInput('');
+    await sendWithHistory(messages, text);
+  }
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-2">
-        {messages.length === 0 && (
-          <div className="text-center py-8">
-            <MessageCircle size={28} className="text-blue-400 mx-auto mb-3" />
-            <p className="text-sm text-gray-500 dark:text-gray-400">Ask any question about your textbook</p>
-            <div className="flex flex-wrap gap-1.5 justify-center mt-3">
-              {['Summarize the key concepts', 'Explain the main topics', 'What are the important formulas?', 'Give me practice questions'].map(q => (
-                <button key={q} onClick={() => { setInput(q); }} className="px-2.5 py-1 rounded-lg bg-gray-100 dark:bg-[#1e1e2e] text-[11px] text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-[#2A2A40] transition-colors">{q}</button>
-              ))}
-            </div>
-          </div>
-        )}
-        {messages.map((msg, i) => (
-          <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[80%] px-3 py-2 rounded-2xl text-sm ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-md' : 'bg-gray-100 dark:bg-[#1e1e2e] text-gray-900 dark:text-gray-100 rounded-bl-md'}`}>
-              {msg.role === 'assistant' ? (
-                <div className="prose prose-sm dark:prose-invert max-w-none break-words [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
-                </div>
-              ) : (
-                <p className="whitespace-pre-wrap break-words">{msg.content}</p>
-              )}
-            </div>
-          </div>
-        ))}
-        {sending && (
-          <div className="flex justify-start">
-            <div className="px-3 py-2 rounded-2xl rounded-bl-md bg-gray-100 dark:bg-[#1e1e2e]">
-              <Loader2 size={14} className="animate-spin text-blue-500" />
-            </div>
-          </div>
-        )}
-      </div>
+  function handleUserEdit(idx, newContent) {
+    if (sending) return;
+    sendWithHistory(messages.slice(0, idx), newContent);
+  }
+  function handleAiInstruct(idx, instruction) {
+    if (sending || !instruction?.trim()) return;
+    sendWithHistory(messages.slice(0, idx + 1), `Redo your previous response. This time: ${instruction.trim()}`);
+  }
 
-      <form onSubmit={handleSend} className="flex items-center gap-2 px-3 py-2 border-t border-gray-200 dark:border-[#2A2A40] flex-shrink-0">
-        <input value={input} onChange={e => setInput(e.target.value)} placeholder="Ask about your textbook..." className="flex-1 px-3 py-2 rounded-xl border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622] text-sm text-gray-900 dark:text-white outline-none" />
-        <button type="submit" disabled={!input.trim() || sending} className="p-2 rounded-xl bg-blue-600 text-white disabled:opacity-40 hover:bg-blue-700"><Send size={14} /></button>
-      </form>
+  const header = (
+    <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-200 dark:border-[#2A2A40] flex-shrink-0 bg-white dark:bg-[#161622]">
+      <button onClick={onBack} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"><ArrowLeft size={16} /></button>
+      <MessageCircle size={14} className="text-blue-500" />
+      <span className="text-sm font-semibold text-gray-900 dark:text-white truncate">{title}</span>
     </div>
+  );
+
+  return (
+    <ChatContainer
+      messages={messages}
+      onSend={(text) => sendWithHistory(messages, text)}
+      disabled={sending}
+      placeholder={sending ? 'Thinking…' : 'Ask about your textbook...'}
+      header={header}
+      className="h-full"
+      onUserEditMessage={handleUserEdit}
+      onAiInstruct={handleAiInstruct}
+    />
   );
 }
 

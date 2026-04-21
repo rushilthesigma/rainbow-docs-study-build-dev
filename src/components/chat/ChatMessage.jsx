@@ -78,11 +78,12 @@ function InlineQuiz({ quizJson }) {
   );
 }
 
-export default function ChatMessage({ message, isStreaming, canEdit = false, onEdit }) {
+export default function ChatMessage({ message, isStreaming, canEdit = false, onEdit, onUserEdit, onAiInstruct }) {
   const isUser = message.role === 'user';
   const raw = message.content || '';
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(raw);
+  const [instructText, setInstructText] = useState('');
   const [copied, setCopied] = useState(false);
 
   async function handleCopy() {
@@ -100,8 +101,21 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
     catch { /* ignore */ }
   }
 
-  function saveEdit() {
-    if (typeof onEdit === 'function') onEdit(editText);
+  function saveUserEdit() {
+    // User edits RESTART the conversation from this point — the parent
+    // truncates history and re-sends the edited text to the AI.
+    const fn = onUserEdit || onEdit;
+    if (typeof fn === 'function') fn(editText);
+    setEditing(false);
+  }
+
+  function submitInstruct() {
+    // Intent: REPLACE this AI message with a fresh one that honors the
+    // instruction. The parent is responsible for dropping this message +
+    // everything after and asking the AI to regenerate the reply in place.
+    if (!instructText.trim() || typeof onAiInstruct !== 'function') return;
+    onAiInstruct(instructText.trim());
+    setInstructText('');
     setEditing(false);
   }
 
@@ -173,34 +187,57 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
             : 'bg-white dark:bg-[#1e1e2e] border border-gray-200 dark:border-[#2A2A40] text-gray-800 dark:text-gray-200 rounded-bl-md'
       }`}>
         {isUser ? (
-          <div>
-            {Array.isArray(message.images) && message.images.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {message.images.map((img, i) => (
-                  <img
-                    key={i}
-                    src={img.dataUrl || img.url}
-                    alt={img.name || `attachment-${i}`}
-                    className="max-w-[160px] max-h-[160px] rounded-lg object-cover border border-white/10"
-                  />
-                ))}
+          editing ? (
+            <div>
+              <textarea
+                value={editText}
+                onChange={e => setEditText(e.target.value)}
+                rows={Math.min(12, Math.max(3, editText.split('\n').length))}
+                className="w-full min-w-[280px] p-2 rounded-lg bg-blue-500/30 text-white placeholder-blue-200 text-sm outline-none border border-white/20 focus:border-white/60"
+                autoFocus
+              />
+              <p className="text-[10px] text-white/70 mt-1">Saving will restart the conversation from this point.</p>
+              <div className="flex gap-1.5 mt-2 justify-end">
+                <button onClick={() => { setEditing(false); setEditText(raw); }} className="px-3 py-1 rounded-lg text-[11px] text-white/80 hover:bg-white/10">Cancel</button>
+                <button onClick={saveUserEdit} className="px-3 py-1 rounded-lg text-[11px] bg-white text-blue-700 font-medium hover:bg-blue-50">Save &amp; Restart</button>
               </div>
-            )}
-            {displayContent && <p className="whitespace-pre-wrap">{displayContent}</p>}
-          </div>
-        ) : editing ? (
-          <div>
-            <textarea
-              value={editText}
-              onChange={e => setEditText(e.target.value)}
-              rows={Math.min(20, Math.max(4, editText.split('\n').length))}
-              className="w-full min-w-[320px] p-2 rounded-lg border border-gray-300 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-xs font-mono text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-blue-500/40"
-            />
-            <div className="flex gap-1.5 mt-2 justify-end">
-              <button onClick={() => { setEditing(false); setEditText(raw); }} className="px-3 py-1 rounded-lg text-[11px] text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#1e1e2e]">Cancel</button>
-              <button onClick={saveEdit} className="px-3 py-1 rounded-lg text-[11px] bg-blue-600 text-white font-medium hover:bg-blue-700">Save</button>
             </div>
-          </div>
+          ) : (
+            <div className="group relative">
+              {Array.isArray(message.images) && message.images.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {message.images.map((img, i) => (
+                    <img
+                      key={i}
+                      src={img.dataUrl || img.url}
+                      alt={img.name || `attachment-${i}`}
+                      className="max-w-[160px] max-h-[160px] rounded-lg object-cover border border-white/10"
+                    />
+                  ))}
+                </div>
+              )}
+              {displayContent && <p className="whitespace-pre-wrap">{displayContent}</p>}
+              {!isStreaming && canEdit && (
+                <div className="mt-2 pt-1.5 flex items-center gap-1 opacity-40 group-hover:opacity-100 transition-opacity justify-end">
+                  <button
+                    onClick={handleCopy}
+                    title="Copy as text"
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-white/80 hover:text-white hover:bg-white/10"
+                  >
+                    {copied ? <><Check size={10} /> Copied</> : <><Copy size={10} /> Copy</>}
+                  </button>
+                  <button
+                    onClick={() => { setEditing(true); setEditText(raw); }}
+                    title="Edit this message"
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-white/80 hover:text-white hover:bg-white/10"
+                  >
+                    <Pencil size={10} /> Edit
+                  </button>
+                  {message._edited && <span className="text-[9px] text-white/60 italic ml-auto">edited</span>}
+                </div>
+              )}
+            </div>
+          )
         ) : (
           <>
             {displayContent && (
@@ -232,7 +269,33 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
             {Array.isArray(message.sources) && message.sources.length > 0 && (
               <Sources sources={message.sources} />
             )}
-            {!isStreaming && !isError && displayContent && (
+            {!isStreaming && !isError && displayContent && editing && typeof onAiInstruct === 'function' && (
+              <div className="mt-3 pt-3 border-t border-gray-200 dark:border-[#2A2A40]">
+                <label className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider block mb-1.5">
+                  What should the AI change?
+                </label>
+                <div className="flex gap-1.5 items-start">
+                  <input
+                    autoFocus
+                    value={instructText}
+                    onChange={e => setInstructText(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && instructText.trim()) submitInstruct(); }}
+                    placeholder="e.g. shorter, more examples, include the formula…"
+                    className="flex-1 px-2.5 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-blue-500/40"
+                  />
+                  <button
+                    onClick={() => { setEditing(false); setInstructText(''); }}
+                    className="px-2 py-1 rounded text-[10px] text-gray-500 hover:bg-gray-100 dark:hover:bg-[#2A2A40]"
+                  >Cancel</button>
+                  <button
+                    onClick={submitInstruct}
+                    disabled={!instructText.trim()}
+                    className="px-3 py-1 rounded-lg text-[10px] bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-40"
+                  >Redo</button>
+                </div>
+              </div>
+            )}
+            {!isStreaming && !isError && displayContent && !editing && (
               <div className="mt-2 pt-2 flex items-center gap-1 opacity-40 hover:opacity-100 transition-opacity">
                 <button
                   onClick={handleCopy}
@@ -241,17 +304,14 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
                 >
                   {copied ? <><Check size={10} /> Copied</> : <><Copy size={10} /> Copy</>}
                 </button>
-                {canEdit && (
+                {canEdit && typeof onAiInstruct === 'function' && (
                   <button
-                    onClick={() => { setEditing(true); setEditText(raw); }}
-                    title="Edit this message"
+                    onClick={() => { setEditing(true); setInstructText(''); }}
+                    title="Tell the AI what to change about this response"
                     className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-[#2A2A40]"
                   >
                     <Pencil size={10} /> Edit
                   </button>
-                )}
-                {message._edited && (
-                  <span className="text-[9px] text-gray-400 italic ml-auto">edited</span>
                 )}
               </div>
             )}

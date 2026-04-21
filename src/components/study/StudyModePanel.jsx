@@ -27,7 +27,9 @@ export default function StudyModePanel({ className = '', initialMessage }) {
     const images = opts.images || [];
     const userMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
     if (images.length) userMsg.images = images.map(i => ({ dataUrl: i.dataUrl, name: i.name }));
-    setMessages(prev => [...prev, userMsg]);
+    // Used by the AI-instruct regenerate flow: hide the hidden-instruction
+    // user turn from the visible transcript while still sending it to the API.
+    if (!opts.hideUserInDisplay) setMessages(prev => [...prev, userMsg]);
     setStreaming(true);
     setStreamingContent('');
     setStreamingSources([]);
@@ -206,6 +208,27 @@ export default function StudyModePanel({ className = '', initialMessage }) {
     </div>
   );
 
+  function handleUserEdit(idx, newContent) {
+    if (streaming) return;
+    if (abortRef.current) try { abortRef.current(); } catch {}
+    setMessages(prev => prev.slice(0, idx));
+    setTimeout(() => doSend(newContent), 30);
+  }
+  // Regenerate the AI bubble in place — do not show the instruction as a
+  // user turn. We rely on doSend-with-hidden-first-message pattern.
+  function handleAiInstruct(idx, instruction) {
+    if (streaming || !instruction?.trim()) return;
+    let userIdx = idx - 1;
+    while (userIdx >= 0 && messages[userIdx]?.role !== 'user') userIdx--;
+    if (userIdx < 0) return;
+    const prevUserText = messages[userIdx].content || '';
+    const userMsgSnapshot = messages[userIdx];
+    if (abortRef.current) try { abortRef.current(); } catch {}
+    setMessages(prev => [...prev.slice(0, userIdx), userMsgSnapshot]);
+    const hidden = `${prevUserText}\n\n[SYSTEM NOTE: Regenerate your previous answer — this time ${instruction.trim()}. Do NOT acknowledge this instruction. Just output the revised answer directly.]`;
+    setTimeout(() => doSend(hidden, { hideUserInDisplay: true }), 30);
+  }
+
   return (
     <ChatContainer
       messages={messages}
@@ -219,6 +242,8 @@ export default function StudyModePanel({ className = '', initialMessage }) {
       className={className}
       sourceMode={sourceMode}
       onToggleSource={setSourceMode}
+      onUserEditMessage={handleUserEdit}
+      onAiInstruct={handleAiInstruct}
     />
   );
 }

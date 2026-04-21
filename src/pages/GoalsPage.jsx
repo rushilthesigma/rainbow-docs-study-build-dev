@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Target, Plus, CheckCircle2, Circle, Trash2 } from 'lucide-react';
+import { Target, Plus, CheckCircle2, Circle, Trash2, Wand2, Loader2 } from 'lucide-react';
 import { listGoals, createGoal, deleteGoal, toggleMilestone } from '../api/goals';
+import { apiFetch } from '../api/client';
 import Button from '../components/shared/Button';
 import Input from '../components/shared/Input';
 import ProgressBar from '../components/curriculum/ProgressBar';
 import LoadingSpinner from '../components/shared/LoadingSpinner';
+import Modal from '../components/shared/Modal';
 
 export default function GoalsPage() {
   const [goals, setGoals] = useState([]);
@@ -13,6 +15,10 @@ export default function GoalsPage() {
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [showAI, setShowAI] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState(null);
 
   useEffect(() => {
     listGoals().then(d => { setGoals(d.goals || []); setLoading(false); }).catch(() => setLoading(false));
@@ -45,6 +51,35 @@ export default function GoalsPage() {
     } catch (err) { console.error(err); }
   }
 
+  // AI drafts a goal title + description from the user's rough prompt, then
+  // the existing createGoal endpoint generates milestones.
+  async function handleAIGenerate() {
+    if (!aiPrompt.trim() || aiBusy) return;
+    setAiBusy(true); setAiError(null);
+    try {
+      const system = `You turn a learner's rough intent into a crisp goal. Output ONLY valid JSON: {"title":"short title, max 8 words","description":"1-2 sentence description with what they'll do and roughly how they'll measure success"}. No markdown, no fences.`;
+      const result = await apiFetch('/api/chat', {
+        method: 'POST',
+        body: JSON.stringify({ system, messages: [{ role: 'user', content: aiPrompt.trim() }], max_tokens: 500 }),
+      });
+      const text = result.content?.[0]?.text || '';
+      let parsed = null;
+      try { parsed = JSON.parse(text); } catch {
+        const m = text.match(/\{[\s\S]*\}/);
+        if (m) { try { parsed = JSON.parse(m[0]); } catch {} }
+      }
+      if (!parsed?.title) throw new Error('AI did not return a usable goal.');
+      // createGoal already generates milestones server-side.
+      const data = await createGoal(parsed.title, parsed.description || '');
+      setGoals(prev => [data.goal, ...prev]);
+      setShowAI(false);
+      setAiPrompt('');
+    } catch (e) {
+      setAiError(e?.message || 'Generation failed. Try again.');
+    }
+    setAiBusy(false);
+  }
+
   if (loading) return <div className="flex items-center justify-center h-64"><LoadingSpinner size={28} /></div>;
 
   return (
@@ -59,10 +94,38 @@ export default function GoalsPage() {
             <p className="text-sm text-gray-500 dark:text-gray-400">{goals.filter(g => g.status === 'active').length} active</p>
           </div>
         </div>
-        <Button onClick={() => setShowForm(!showForm)} size="sm">
-          <Plus size={16} /> New Goal
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button onClick={() => setShowAI(true)} size="sm" variant="ghost">
+            <Wand2 size={14} /> Generate with AI
+          </Button>
+          <Button onClick={() => setShowForm(!showForm)} size="sm">
+            <Plus size={16} /> New Goal
+          </Button>
+        </div>
       </div>
+
+      <Modal open={showAI} onClose={() => { setShowAI(false); setAiError(null); }} title="Generate goal with AI">
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">What do you want to accomplish?</label>
+            <textarea
+              value={aiPrompt}
+              onChange={e => setAiPrompt(e.target.value)}
+              rows={3}
+              placeholder="e.g., Get better at calculus before finals in 6 weeks. Focus on integrals and series."
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-500/40 resize-none"
+            />
+          </div>
+          <p className="text-[11px] text-gray-400">AI will draft a title + description. Milestones are then generated automatically.</p>
+          {aiError && <p className="text-xs text-rose-500">{aiError}</p>}
+          <div className="flex gap-2 justify-end">
+            <Button size="sm" variant="ghost" onClick={() => { setShowAI(false); setAiError(null); }}>Cancel</Button>
+            <Button size="sm" onClick={handleAIGenerate} disabled={!aiPrompt.trim() || aiBusy}>
+              {aiBusy ? <><Loader2 size={14} className="animate-spin" /> Generating…</> : <><Wand2 size={14} /> Generate</>}
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {showForm && (
         <form onSubmit={handleCreate} className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-5 mb-4 space-y-3">
