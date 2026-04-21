@@ -120,6 +120,16 @@ function isOwner(email) {
   return OWNER_EMAILS.includes(email?.toLowerCase());
 }
 
+// Advisors: auto-Pro, get a red "Advisor" badge in UIs, and can see
+// beta/early-access features (flagged in /api/auth/me as isBeta:true).
+const ADVISOR_EMAILS = ['william.qiao.yang@gmail.com'];
+function isAdvisor(email) {
+  return ADVISOR_EMAILS.includes((email || '').toLowerCase());
+}
+function canSeeBeta(email) {
+  return isOwner(email) || isAdvisor(email);
+}
+
 // ===== Stripe =====
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
@@ -150,6 +160,7 @@ function weekKey(d = new Date()) {
 // downgrade them here rather than running a cron.
 function getPlan(user, email) {
   if (isOwner(email)) return 'pro';
+  if (isAdvisor(email)) return 'pro';
   if (!user?.data) return 'free';
   if (user.data.plan !== 'pro') return 'free';
   if (!user.data.proUntil) return 'pro'; // untimed grant (owner-granted)
@@ -562,14 +573,20 @@ app.get('/api/auth/me', authMiddleware, (req, res) => {
     }
 
     saveUsers(users);
-    // Expose the *effective* plan (owner + time-decayed Pro) so the client
-    // doesn't have to repeat the logic.
+    // Expose the *effective* plan (owner + advisor + time-decayed Pro) so the
+    // client doesn't have to repeat the logic. Also surface role flags.
     const effectivePlan = getPlan(user, email);
     res.json({
       id: user.id,
       email: user.email || email,
       name: user.name,
-      data: { ...user.data, effectivePlan },
+      data: {
+        ...user.data,
+        effectivePlan,
+        isOwner: isOwner(email),
+        isAdvisor: isAdvisor(email),
+        isBeta: canSeeBeta(email),
+      },
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -2955,6 +2972,8 @@ app.get('/api/billing/status', authMiddleware, (req, res) => {
     res.json({
       plan,
       isOwner: isOwner(email),
+      isAdvisor: isAdvisor(email),
+      isBeta: canSeeBeta(email),
       proUntil: users[email].data.proUntil || null,
       proGrantedBy: users[email].data.proGrantedBy || null,
       limits: {

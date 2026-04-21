@@ -10,6 +10,12 @@ import {
 } from '../../../api/admin';
 import { ownerGrantPro, ownerRevokePro } from '../../../api/billing';
 import LoadingSpinner from '../../shared/LoadingSpinner';
+import AdvisorBadge from '../../shared/AdvisorBadge';
+
+// Advisor emails mirrored from server so the admin table can tag rows without
+// an extra lookup. Keep in sync with ADVISOR_EMAILS in server.js.
+const ADVISOR_EMAILS = new Set(['william.qiao.yang@gmail.com']);
+const isAdvisorEmail = (email) => ADVISOR_EMAILS.has((email || '').toLowerCase());
 
 /* ====================== TOP-LEVEL ====================== */
 export default function AdminApp() {
@@ -214,7 +220,7 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{u.name || u.email}</p>
-                {u.plan === 'pro' && <ProPill />}
+                {isAdvisorEmail(u.email) ? <AdvisorBadge /> : (u.plan === 'pro' && <ProPill />)}
                 {u.banned && <span className="px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-900/30 text-rose-500 text-[10px] font-medium">Banned</span>}
               </div>
               <p className="text-[10px] text-gray-400 truncate">
@@ -276,7 +282,7 @@ function UserDetail({ user: u, onBack, onBan, onDelete, onGrantPro, onRevokePro,
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-lg font-bold text-gray-900 dark:text-white truncate">{u.name || 'Unknown'}</h2>
-            {u.plan === 'pro' && <ProPill />}
+            {isAdvisorEmail(u.email) ? <AdvisorBadge /> : (u.plan === 'pro' && <ProPill />)}
             {u.banned && <span className="px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-900/30 text-rose-600 text-xs font-medium">Banned</span>}
           </div>
           <p className="text-xs text-gray-500 truncate">
@@ -450,7 +456,7 @@ function BillingTab({ u }) {
         <div className="flex items-center justify-between">
           <span className="text-xs text-gray-500 uppercase tracking-wider">Plan</span>
           <div className="flex items-center gap-1.5">
-            {u.plan === 'pro' ? <ProPill /> : <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 dark:bg-[#2A2A40] text-gray-500">FREE</span>}
+            {isAdvisorEmail(u.email) ? <AdvisorBadge /> : (u.plan === 'pro' ? <ProPill /> : <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 dark:bg-[#2A2A40] text-gray-500">FREE</span>)}
           </div>
         </div>
         <KV label="Granted by" value={u.proGrantedBy || '—'} />

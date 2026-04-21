@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Zap, Crown, Loader2, Check, ExternalLink, AlertTriangle, X } from 'lucide-react';
+import AdvisorBadge from './AdvisorBadge';
 import {
   getBillingStatus, openBillingPortal,
   ownerGrantPro, ownerRevokePro, syncBilling,
@@ -83,7 +84,8 @@ export default function PlanSection() {
         <div>
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wide">Plan</h3>
-            {pro && (
+            {status.isAdvisor && <AdvisorBadge />}
+            {pro && !status.isAdvisor && (
               <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-yellow-500 text-white shadow-sm">
                 <Crown size={10} /> PRO
               </span>
