@@ -263,6 +263,8 @@ This is the PRACTICE phase.
 
 ADVANCE / COMPLETE CRITERION — use \`[STATUS: stay]\` while exercises remain. On the final turn (after feedback on the last exercise and a wrap-up summary) output the completion marker on its own line:
 [LESSON_COMPLETE]{"questionsAsked":N,"questionsCorrect":N,"xpEarned":N,"summary":"2-3 sentence summary"}
+
+CRITICAL: output the marker as plain text on its own line. Do NOT wrap it in a code fence. Do NOT write "json" before the braces. The JSON must be valid and single-line with double quotes. Nothing comes after the closing brace.
 Then on the next line output \`[STATUS: advance]\` so the system knows the lesson is truly done. Use real numbers; XP 10-50 based on performance.`,
   };
 
@@ -320,7 +322,15 @@ You — the tutor — decide when the student has actually learned the topic. Th
 
 [LESSON_DONE]{"xpEarned":N,"summary":"2-3 sentence summary of what was covered"}
 
-Where N is 15-40 based on depth and engagement. Do NOT emit this on early turns. Do NOT emit any other status marker — no [STATUS: ...], no [PHASE_COMPLETE], no fake markers. Only [LESSON_DONE] and only when the lesson is genuinely finished.
+CRITICAL FORMATTING RULES FOR THE MARKER — VIOLATIONS BREAK THE APP:
+- Output the marker as PLAIN TEXT on its own line. Do NOT wrap it in a code fence (no backticks, no \`\`\`json blocks).
+- Do NOT output "json" or any label before the curly brace.
+- The JSON must be valid and on one line: {"xpEarned":25,"summary":"..."} — double quotes, no trailing commas.
+- Nothing comes after the closing } of the JSON. The marker is the last thing in your response.
+- Only emit this marker when the lesson is GENUINELY finished. Do NOT emit on early turns.
+- Do NOT emit other status markers — no [STATUS: ...], no [PHASE_COMPLETE], no fake markers. Only [LESSON_DONE].
+
+Where N is 15-40 based on depth and engagement.
 
 CONTEXT: This is assistant turn #${turnCount + 1} of the conversation. On turn 1, give a strong opening lesson (definition, why it matters, how it works, 1-2 concrete examples, a brief recap, then a calibration question). On later turns, respond to the student naturally — explain more, answer questions, give exercises, or wrap up.`;
 }

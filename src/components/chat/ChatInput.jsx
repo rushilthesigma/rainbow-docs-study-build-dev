@@ -31,24 +31,6 @@ export default function ChatInput({
     if (!disabled) inputRef.current?.focus();
   }, [disabled]);
 
-  // ⌘/Ctrl+Shift+L toggles source mode when the toggle is available. Works
-  // globally while the chat is mounted; we skip when target is a form field
-  // other than our textarea so the user can still type in other inputs.
-  useEffect(() => {
-    if (typeof onToggleSource !== 'function') return;
-    function onKey(e) {
-      const mod = e.metaKey || e.ctrlKey;
-      if (!mod || !e.shiftKey) return;
-      if (e.key.toLowerCase() !== 'l') return;
-      const t = e.target;
-      const inOtherField = t && (t.tagName === 'INPUT' || (t.tagName === 'TEXTAREA' && t !== inputRef.current));
-      if (inOtherField) return;
-      e.preventDefault();
-      onToggleSource(!sourceMode);
-    }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onToggleSource, sourceMode]);
 
   async function handleFiles(files) {
     const list = Array.from(files || []).filter(f => f.type.startsWith('image/'));
@@ -165,7 +147,7 @@ export default function ChatInput({
           <button
             type="button"
             onClick={() => onToggleSource(!sourceMode)}
-            title="Search the web and cite sources. Costs 2 messages. (⌘/Ctrl+Shift+L)"
+            title="Search the web and cite sources. Costs 2 messages."
             className={`inline-flex items-center gap-1.5 text-[11px] font-medium rounded-full px-2 py-0.5 transition-colors ${
               sourceMode
                 ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/40'
@@ -174,7 +156,6 @@ export default function ChatInput({
           >
             <Globe size={11} />
             {sourceMode ? 'Source mode ON · 2x' : 'Source mode'}
-            <kbd className="ml-1 hidden sm:inline text-[9px] font-mono opacity-60">⌘⇧L</kbd>
           </button>
           {sourceMode && (
             <span className="text-[10px] text-amber-600/80 dark:text-amber-400/80">AI will search the web and cite</span>

@@ -94,15 +94,41 @@ export default function ChatMessage({ message, isStreaming }) {
   if (quizStreaming) displayContent = displayContent.replace(/\[QUIZ_START\][\s\S]*$/, '');
   displayContent = displayContent.replace(/\[LESSON_DONE\]\s*\{[^}]*$/g, '');
 
+  // Balanced-brace stripper: removes `[LESSON_DONE|LESSON_COMPLETE]` + its
+  // trailing JSON even when the JSON has nested braces or is wrapped in a
+  // code fence. Also strips the fence itself if present.
+  function stripDoneMarker(s) {
+    const rx = /```(?:json|javascript|js)?\s*/gi;
+    s = s.replace(rx, '').replace(/```/g, '');
+    const mark = s.search(/\[LESSON_(?:DONE|COMPLETE)\]/);
+    if (mark < 0) return s;
+    const markerEnd = mark + (s.slice(mark).match(/\[LESSON_(?:DONE|COMPLETE)\]/)[0].length);
+    const rest = s.slice(markerEnd);
+    const braceStart = rest.indexOf('{');
+    if (braceStart < 0) return s.slice(0, mark);
+    // Walk braces
+    let depth = 0, inStr = false, esc = false, i = braceStart;
+    for (; i < rest.length; i++) {
+      const ch = rest[i];
+      if (inStr) {
+        if (esc) { esc = false; continue; }
+        if (ch === '\\') { esc = true; continue; }
+        if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') { inStr = true; continue; }
+      if (ch === '{') depth++;
+      else if (ch === '}') { depth--; if (depth === 0) { i++; break; } }
+    }
+    return s.slice(0, mark) + rest.slice(i);
+  }
+
   displayContent = displayContent
     .replace(/\[PHASE_COMPLETE\]/g, '')
-    .replace(/\[LESSON_COMPLETE\]\s*\{[^}]*\}/g, '')
-    .replace(/\[LESSON_DONE\]\s*\{[^}]*\}/g, '')
-    .replace(/\[LESSON_DONE\]/g, '')
     .replace(/\[QUIZ_START\][\s\S]*?\[QUIZ_END\]/g, '')
     .replace(/\[MILESTONE_COMPLETE:[^\]]+\]/g, '')
-    .replace(/\[STATUS:\s*(advance|stay|next)\s*\]/gi, '')
-    .trim();
+    .replace(/\[STATUS:\s*(advance|stay|next)\s*\]/gi, '');
+  displayContent = stripDoneMarker(displayContent).trim();
 
   displayContent = normalizeMathDelimiters(displayContent);
 

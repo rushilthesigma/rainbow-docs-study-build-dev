@@ -753,6 +753,36 @@ async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096,
 // Back-compat alias — all existing call sites use `callAnthropic`.
 const callAnthropic = callGemini;
 
+// Pull the JSON blob that follows a [LESSON_DONE] / [LESSON_COMPLETE] marker.
+// Walks brace depth so nested objects are handled correctly. Tolerates code
+// fences and inline citation markers — caller should pre-sanitize if needed.
+function extractLessonDoneJson(text) {
+  const markerIdx = text.search(/\[LESSON_(?:DONE|COMPLETE)\]/);
+  if (markerIdx < 0) return null;
+  const after = text.slice(markerIdx).replace(/^\[LESSON_(?:DONE|COMPLETE)\]/, '');
+  const start = after.indexOf('{');
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < after.length; i++) {
+    const ch = after[i];
+    if (inString) {
+      if (escape) { escape = false; continue; }
+      if (ch === '\\') { escape = true; continue; }
+      if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return after.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
 app.post('/api/chat', async (req, res) => {
   try {
     const { messages, system, model, max_tokens, sourced } = req.body;
@@ -1360,14 +1390,17 @@ app.post('/api/curriculum/:id/lesson/:lessonId/chat', authMiddleware, requireMes
       // Phase transition: model signal OR turn-cap fallback
       advancePhaseIfNeeded(lesson, fullContent);
 
-      // Check for lesson completion
-      if (fullContent.includes('[LESSON_COMPLETE]')) {
+      // Check for lesson completion — sanitize code fences + citation markers first.
+      const cleanedCurr = fullContent
+        .replace(/```(?:json|javascript|js)?\s*/gi, '')
+        .replace(/```/g, '')
+        .replace(/\s*\[\d+\]\s*/g, ' ');
+      if (/\[LESSON_COMPLETE\]/.test(cleanedCurr)) {
         lesson.isCompleted = true;
-        // Parse completion data
-        const match = fullContent.match(/\[LESSON_COMPLETE\]\s*(\{[^}]+\})/);
-        if (match) {
+        const jsonStr = extractLessonDoneJson(cleanedCurr);
+        if (jsonStr) {
           try {
-            const completionData = JSON.parse(match[1]);
+            const completionData = JSON.parse(jsonStr);
             lesson.phaseData = { ...lesson.phaseData, ...completionData };
             lesson.score = completionData.questionsCorrect;
             // Update XP
@@ -2859,13 +2892,19 @@ app.post('/api/lessons/:id/chat', authMiddleware, requireMessageQuota, async (re
       lesson.chatHistory.push(assistantMsg);
 
       // Completion — AI-decided. Accepts [LESSON_DONE] (new) and [LESSON_COMPLETE] (legacy).
-      const doneMatch = fullContent.match(/\[LESSON_(?:DONE|COMPLETE)\]\s*(\{[^}]+\})/);
-      const hasDoneMarker = doneMatch || /\[LESSON_(?:DONE|COMPLETE)\]/.test(fullContent);
+      // Gemini sometimes wraps the JSON in code fences and source-mode inserts
+      // [n] citation markers in the text, so we sanitize before matching.
+      const cleaned = fullContent
+        .replace(/```(?:json|javascript|js)?\s*/gi, '')
+        .replace(/```/g, '')
+        .replace(/\s*\[\d+\]\s*/g, ' '); // strip inline [1][2]... citations
+      const hasDoneMarker = /\[LESSON_(?:DONE|COMPLETE)\]/.test(cleaned);
+      const doneMatch = hasDoneMarker ? extractLessonDoneJson(cleaned) : null;
       if (hasDoneMarker) {
         lesson.isCompleted = true;
         if (doneMatch) {
           try {
-            const completionData = JSON.parse(doneMatch[1]);
+            const completionData = JSON.parse(doneMatch);
             lesson.completionData = completionData;
             const xp = completionData.xpEarned || 20;
             users[email].data.profile.xp = (users[email].data.profile.xp || 0) + xp;
