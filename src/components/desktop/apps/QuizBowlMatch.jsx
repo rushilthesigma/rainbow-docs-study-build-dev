@@ -54,6 +54,10 @@ export default function QuizBowlMatch({ user, onExit }) {
   const [wrongFlash, setWrongFlash] = useState(null);
 
   const abortRef = useRef(null);
+  // Declared early because handleBuzz and the SSE handlers need it. `const`
+  // is block-scoped with a TDZ, so referencing `myId` before its declaration
+  // throws ReferenceError — which is what made the view render blank.
+  const myId = user?.id;
 
   // ----- Connect SSE stream once we have a match code -----
   useEffect(() => {
@@ -186,7 +190,6 @@ export default function QuizBowlMatch({ user, onExit }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [view, buzz, handleBuzz]);
 
-  const myId = user?.id;
   const iBuzzed = buzz && buzz.userId === myId;
   const isHost = match?.hostId === myId;
 
