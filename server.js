@@ -3750,14 +3750,21 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
   res.json({ ok: true });
 
   try {
-    const sys = `You are a quiz bowl question writer. Write pyramidal tossup questions — each starts with obscure clues and progressively gets easier. Output ONLY valid JSON, no markdown.\n\nFormat: {"questions":[{"text":"Full question text...","answer":"Answer"}]}`;
-    const userMsg = `Generate ${questionCount} pyramidal quiz bowl questions in category "${category}" at ${difficulty} difficulty. Return JSON: {"questions":[{"text":"...","answer":"..."}]}`;
-    const result = await callGemini(sys, [{ role: 'user', content: userMsg }], DEFAULT_MODEL, 4096);
+    const sys = `You are a quiz bowl question writer. Write pyramidal tossup questions — each starts with obscure clues and progressively gets easier. Output ONLY valid JSON with no markdown, no code fences, no prose before or after.
+
+Exact format:
+{"questions":[{"text":"Full question text here.","answer":"Answer"}]}`;
+    const userMsg = `Generate ${questionCount} pyramidal quiz bowl questions in category "${category}" at ${difficulty} difficulty. Return ONLY the JSON object described — nothing else.`;
+    // Flash is faster + more reliable for raw-JSON tasks; Pro's thinking
+    // tokens often consume the budget before emitting output.
+    const result = await callGemini(sys, [{ role: 'user', content: userMsg }], GEMINI_FLASH, 8192);
     if (!result.success) throw new Error(result.error || 'Question generation failed');
     const text = result.data.content?.[0]?.text || '';
-    let parsed;
-    try { parsed = JSON.parse(text); } catch { const m = text.match(/\{[\s\S]*\}/); if (m) try { parsed = JSON.parse(m[0]); } catch {} }
-    if (!parsed?.questions?.length) throw new Error('Failed to parse questions');
+    const parsed = parseAIJson(text);
+    if (!parsed?.questions?.length) {
+      console.error('[match] parse failed. raw:', text.slice(0, 500));
+      throw new Error('Failed to parse questions');
+    }
 
     // Double-check the match still exists — someone may have left during gen.
     if (!matches.has(match.code)) return;
