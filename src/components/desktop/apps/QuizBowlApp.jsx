@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import { Zap, Play, Check, X, Loader2, Lightbulb } from 'lucide-react';
+import { Zap, Play, Check, X, Loader2, Lightbulb, Users } from 'lucide-react';
 import { apiFetch } from '../../../api/client';
 import { useWindowManager } from '../../../context/WindowManagerContext';
 import { setPendingLesson } from '../../../utils/pendingLesson';
 import useBrowserBack from '../../../hooks/useBrowserBack';
+import { useAuth } from '../../../context/AuthContext';
+import QuizBowlMatch from './QuizBowlMatch';
 
 const DIFFICULTIES = ['Easy', 'Medium', 'Hard', 'Tournament'];
 const CATEGORIES = ['Science', 'History', 'Literature', 'Geography', 'Math', 'Art', 'Music', 'Philosophy', 'Pop Culture', 'Mixed'];
@@ -70,8 +72,9 @@ export default function QuizBowlApp() {
     setPendingLesson({ topic, difficulty: 'beginner' });
     openApp('lessons', 'Lessons');
   }
-  const [view, setView] = useState('setup'); // 'setup' | 'playing' | 'review'
+  const [view, setView] = useState('setup'); // 'setup' | 'playing' | 'review' | 'multiplayer'
   useBrowserBack(view !== 'setup', () => setView('setup'));
+  const { user } = useAuth();
   const [questions, setQuestions] = useState([]);
   const [currentQ, setCurrentQ] = useState(0);
   const [generating, setGenerating] = useState(false);
@@ -281,6 +284,11 @@ export default function QuizBowlApp() {
     );
   }
 
+  // ===== MULTIPLAYER =====
+  if (view === 'multiplayer') {
+    return <QuizBowlMatch user={user} onExit={() => setView('setup')} />;
+  }
+
   // ===== SETUP =====
   return (
     <div className="h-full overflow-y-auto">
@@ -289,6 +297,18 @@ export default function QuizBowlApp() {
           <Zap size={32} className="text-amber-500 mx-auto mb-3" />
           <h2 className="text-lg font-bold text-gray-900 dark:text-white">Quiz Bowl</h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Pyramidal tossups — buzz when you know</p>
+        </div>
+
+        <button
+          onClick={() => setView('multiplayer')}
+          className="w-full py-3 rounded-xl border-2 border-amber-400 bg-gradient-to-r from-amber-500/10 to-orange-500/10 hover:from-amber-500/20 hover:to-orange-500/20 text-amber-700 dark:text-amber-300 text-sm font-semibold inline-flex items-center justify-center gap-2"
+        >
+          <Users size={14} /> Play head-to-head →
+        </button>
+        <div className="flex items-center gap-3">
+          <div className="flex-1 h-px bg-gray-200 dark:bg-[#2A2A40]" />
+          <span className="text-[10px] text-gray-400 uppercase tracking-wider">or solo</span>
+          <div className="flex-1 h-px bg-gray-200 dark:bg-[#2A2A40]" />
         </div>
         {error && <p className="text-xs text-rose-500 px-3 py-2 rounded-lg bg-rose-50 dark:bg-rose-900/15">{error}</p>}
         <Selector label="Category" options={CATEGORIES} value={category} onChange={setCategory} />

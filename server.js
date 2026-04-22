@@ -3564,6 +3564,290 @@ app.get('/api/health', (req, res) => {
 });
 
 
+// =========================================================
+// QUIZ BOWL — Head-to-head buzz multiplayer.
+//
+// Design choices to eliminate the lag that killed the old version:
+//   - NO POLLING. Clients subscribe to an SSE stream per match and server
+//     pushes every state transition.
+//   - Word-by-word reveal runs CLIENT-SIDE from a shared `questionStartedAt`
+//     timestamp, so both players see an identical reveal without per-tick
+//     server round trips.
+//   - Buzz is atomic on the server: first POST to /buzz that arrives wins;
+//     all subsequent buzz POSTs get a 409 and the UI freezes as the loser.
+//   - State is in-memory; matches expire 1h after last activity.
+// =========================================================
+const matches = new Map(); // matchId (code) -> state
+
+function newMatchCode() {
+  // 6-char alphanumeric, uppercase for easy sharing. Collisions: retry.
+  const alph = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 1/I/O/0 confusion
+  for (let tries = 0; tries < 8; tries++) {
+    let code = '';
+    for (let i = 0; i < 6; i++) code += alph[Math.floor(Math.random() * alph.length)];
+    if (!matches.has(code)) return code;
+  }
+  return `M${Date.now().toString(36).slice(-5).toUpperCase()}`;
+}
+
+function pushMatchEvent(match, type, payload) {
+  const body = `data: ${JSON.stringify({ type, ...payload })}\n\n`;
+  for (const p of match.players) {
+    if (p.stream && !p.stream.writableEnded) {
+      try { p.stream.write(body); } catch {}
+    }
+  }
+}
+
+function publicMatchState(match) {
+  return {
+    code: match.code,
+    state: match.state,
+    players: match.players.map(p => ({ userId: p.userId, name: p.name, score: match.scores[p.userId] || 0 })),
+    currentIdx: match.currentIdx,
+    totalQuestions: match.questions.length,
+    currentQuestion: match.state === 'playing' && match.questions[match.currentIdx]
+      ? { text: match.questions[match.currentIdx].text, startedAt: match.questionStartedAt }
+      : null,
+    buzzWinner: match.buzzWinner,
+    buzzAt: match.buzzAt,
+    hostId: match.hostId,
+    category: match.category,
+    difficulty: match.difficulty,
+    revealSpeedMs: match.revealSpeedMs,
+  };
+}
+
+function cleanupExpiredMatches() {
+  const now = Date.now();
+  for (const [code, match] of matches) {
+    if (now - match.lastActivity > 60 * 60 * 1000) {
+      for (const p of match.players) {
+        if (p.stream && !p.stream.writableEnded) { try { p.stream.end(); } catch {} }
+      }
+      matches.delete(code);
+    }
+  }
+}
+setInterval(cleanupExpiredMatches, 5 * 60 * 1000);
+
+// POST /api/quizbowl/match — create a new match with AI-generated questions.
+app.post('/api/quizbowl/match', authMiddleware, async (req, res) => {
+  try {
+    const { category = 'Mixed', difficulty = 'Medium', questionCount = 10, revealSpeedMs = 140 } = req.body || {};
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+
+    // Generate pyramidal questions via Gemini.
+    const sys = `You are a quiz bowl question writer. Write pyramidal tossup questions. Each question starts with obscure clues and progressively gets easier. Output ONLY valid JSON, no markdown.
+
+Format: {"questions":[{"text":"Full question text...","answer":"Answer"}]}`;
+    const userMsg = `Generate ${questionCount} pyramidal quiz bowl questions in category "${category}" at ${difficulty} difficulty. Return JSON: {"questions":[{"text":"...","answer":"..."}]}`;
+    const result = await callGemini(sys, [{ role: 'user', content: userMsg }], DEFAULT_MODEL, 4096);
+    if (!result.success) return res.status(500).json({ error: result.error || 'Question generation failed' });
+    const text = result.data.content?.[0]?.text || '';
+    let parsed;
+    try { parsed = JSON.parse(text); } catch { const m = text.match(/\{[\s\S]*\}/); if (m) try { parsed = JSON.parse(m[0]); } catch {} }
+    if (!parsed?.questions?.length) return res.status(500).json({ error: 'Failed to parse questions' });
+
+    const code = newMatchCode();
+    const match = {
+      code,
+      state: 'waiting', // waiting | playing | reveal | finished
+      questions: parsed.questions,
+      currentIdx: 0,
+      questionStartedAt: null,
+      buzzWinner: null,
+      buzzAt: null,
+      players: [{ userId: req.userId, name: users[email].name || email.split('@')[0], stream: null }],
+      hostId: req.userId,
+      scores: { [req.userId]: 0 },
+      category, difficulty, revealSpeedMs,
+      createdAt: Date.now(),
+      lastActivity: Date.now(),
+    };
+    matches.set(code, match);
+    res.json({ code, match: publicMatchState(match) });
+  } catch (e) { console.error('match create failed', e); res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/quizbowl/match/:code/join — second player joins.
+app.post('/api/quizbowl/match/:code/join', authMiddleware, (req, res) => {
+  const match = matches.get(req.params.code);
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+  if (match.players.some(p => p.userId === req.userId)) {
+    match.lastActivity = Date.now();
+    return res.json({ match: publicMatchState(match) });
+  }
+  if (match.players.length >= 2) return res.status(409).json({ error: 'Match is full' });
+  if (match.state !== 'waiting') return res.status(409).json({ error: 'Match already started' });
+
+  const users = loadUsers();
+  const email = findEmailById(users, req.userId);
+  if (!email) return res.status(404).json({ error: 'User not found' });
+  match.players.push({ userId: req.userId, name: users[email].name || email.split('@')[0], stream: null });
+  match.scores[req.userId] = 0;
+  match.lastActivity = Date.now();
+  pushMatchEvent(match, 'player_joined', { match: publicMatchState(match) });
+  res.json({ match: publicMatchState(match) });
+});
+
+// GET /api/quizbowl/match/:code/stream — SSE subscription for state pushes.
+app.get('/api/quizbowl/match/:code/stream', authMiddleware, (req, res) => {
+  const match = matches.get(req.params.code);
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+  const player = match.players.find(p => p.userId === req.userId);
+  if (!player) return res.status(403).json({ error: 'Not a player in this match' });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+  player.stream = res;
+  match.lastActivity = Date.now();
+  // Send current snapshot immediately so the client can render without a
+  // separate GET round trip.
+  res.write(`data: ${JSON.stringify({ type: 'snapshot', match: publicMatchState(match) })}\n\n`);
+
+  // Heartbeat every 20s to keep proxies from killing the stream.
+  const heartbeat = setInterval(() => {
+    try { res.write(': heartbeat\n\n'); } catch {}
+  }, 20000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    if (player.stream === res) player.stream = null;
+  });
+});
+
+// POST /api/quizbowl/match/:code/start — host starts the match.
+app.post('/api/quizbowl/match/:code/start', authMiddleware, (req, res) => {
+  const match = matches.get(req.params.code);
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+  if (match.hostId !== req.userId) return res.status(403).json({ error: 'Only the host can start' });
+  if (match.players.length < 2) return res.status(409).json({ error: 'Waiting for second player' });
+  match.state = 'playing';
+  match.currentIdx = 0;
+  match.questionStartedAt = Date.now();
+  match.buzzWinner = null;
+  match.buzzAt = null;
+  match.lastActivity = Date.now();
+  pushMatchEvent(match, 'question_start', {
+    idx: 0,
+    text: match.questions[0].text,
+    startedAt: match.questionStartedAt,
+    match: publicMatchState(match),
+  });
+  res.json({ ok: true });
+});
+
+// POST /api/quizbowl/match/:code/buzz — atomic; first-in wins.
+app.post('/api/quizbowl/match/:code/buzz', authMiddleware, (req, res) => {
+  const match = matches.get(req.params.code);
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+  if (match.state !== 'playing') return res.status(409).json({ error: 'Not in a live question' });
+  if (!match.players.some(p => p.userId === req.userId)) return res.status(403).json({ error: 'Not a player' });
+  if (match.buzzWinner) return res.status(409).json({ error: 'Already buzzed', winner: match.buzzWinner });
+
+  match.buzzWinner = req.userId;
+  match.buzzAt = Date.now();
+  match.lastActivity = Date.now();
+  pushMatchEvent(match, 'buzz', { userId: req.userId, buzzAt: match.buzzAt });
+  res.json({ ok: true, buzzAt: match.buzzAt });
+});
+
+// POST /api/quizbowl/match/:code/answer — only the buzz winner can submit.
+app.post('/api/quizbowl/match/:code/answer', authMiddleware, (req, res) => {
+  const match = matches.get(req.params.code);
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+  if (match.state !== 'playing') return res.status(409).json({ error: 'Not in a live question' });
+  if (match.buzzWinner !== req.userId) return res.status(403).json({ error: 'You did not buzz first' });
+
+  const answer = String(req.body?.answer || '').trim();
+  const correctAnswer = match.questions[match.currentIdx].answer;
+  // Fuzzy compare: normalize + Levenshtein.
+  function norm(s) { return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s]/g, '').trim(); }
+  function lev(a, b) {
+    const m = a.length, n = b.length;
+    if (!m) return n; if (!n) return m;
+    const d = Array.from({ length: m + 1 }, (_, i) => [i]);
+    for (let j = 1; j <= n; j++) d[0][j] = j;
+    for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++)
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] !== b[j - 1] ? 1 : 0));
+    return d[m][n];
+  }
+  const a = norm(answer); const c = norm(correctAnswer);
+  const thresh = Math.max(1, Math.floor(c.length * 0.25));
+  const correct = !!a && (a === c || c.includes(a) || a.includes(c) || lev(a, c) <= thresh
+    || c.split(/[\s,]+/).some(w => w.length > 2 && (a.includes(w) || lev(a, w) <= 1)));
+
+  if (correct) {
+    match.scores[req.userId] = (match.scores[req.userId] || 0) + 1;
+    match.state = 'reveal';
+    match.lastActivity = Date.now();
+    pushMatchEvent(match, 'answer_result', {
+      userId: req.userId, correct: true, answer, correctAnswer,
+      scores: match.scores,
+    });
+  } else {
+    // Wrong answer — the other player gets to hear the rest / buzz.
+    match.state = 'reveal';
+    match.lastActivity = Date.now();
+    pushMatchEvent(match, 'answer_result', {
+      userId: req.userId, correct: false, answer, correctAnswer,
+      scores: match.scores,
+    });
+  }
+  res.json({ ok: true, correct });
+});
+
+// POST /api/quizbowl/match/:code/next — host advances to the next question.
+app.post('/api/quizbowl/match/:code/next', authMiddleware, (req, res) => {
+  const match = matches.get(req.params.code);
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+  if (match.hostId !== req.userId) return res.status(403).json({ error: 'Only the host can advance' });
+
+  const nextIdx = match.currentIdx + 1;
+  if (nextIdx >= match.questions.length) {
+    match.state = 'finished';
+    match.lastActivity = Date.now();
+    pushMatchEvent(match, 'match_end', { scores: match.scores });
+    return res.json({ ok: true, finished: true });
+  }
+  match.currentIdx = nextIdx;
+  match.state = 'playing';
+  match.questionStartedAt = Date.now();
+  match.buzzWinner = null;
+  match.buzzAt = null;
+  match.lastActivity = Date.now();
+  pushMatchEvent(match, 'question_start', {
+    idx: nextIdx,
+    text: match.questions[nextIdx].text,
+    startedAt: match.questionStartedAt,
+    match: publicMatchState(match),
+  });
+  res.json({ ok: true });
+});
+
+// POST /api/quizbowl/match/:code/leave — graceful exit.
+app.post('/api/quizbowl/match/:code/leave', authMiddleware, (req, res) => {
+  const match = matches.get(req.params.code);
+  if (!match) return res.json({ ok: true });
+  const idx = match.players.findIndex(p => p.userId === req.userId);
+  if (idx >= 0) {
+    try { match.players[idx].stream?.end(); } catch {}
+    match.players.splice(idx, 1);
+  }
+  match.lastActivity = Date.now();
+  if (!match.players.length) {
+    matches.delete(match.code);
+  } else {
+    pushMatchEvent(match, 'player_left', { userId: req.userId, match: publicMatchState(match) });
+  }
+  res.json({ ok: true });
+});
+
 // SPA fallback (Express 5 syntax)
 app.get('/{*path}', (req, res) => {
   if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });

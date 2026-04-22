@@ -1,0 +1,411 @@
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Zap, Users, Copy, Loader2, Check, X, Trophy, Play, LogOut } from 'lucide-react';
+import {
+  createMatch, joinMatch, startMatch, buzzMatch, answerMatch, nextMatchQuestion,
+  leaveMatch, streamMatch,
+} from '../../../api/quizMatch';
+
+// Client-side word-by-word reveal: compute from `startedAt` timestamp so
+// both players render identically, no polling required.
+function useWordReveal(text, startedAt, speedMs, frozen, frozenAt) {
+  const words = text ? text.split(/\s+/) : [];
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!text || frozen) return;
+    const tick = () => setNow(Date.now());
+    const id = setInterval(tick, 50);
+    return () => clearInterval(id);
+  }, [text, frozen, startedAt]);
+  if (!text) return { revealed: '', wordIndex: 0, totalWords: 0, done: false };
+  const clock = frozen ? (frozenAt || now) : now;
+  const elapsed = Math.max(0, clock - (startedAt || clock));
+  const idx = Math.min(words.length - 1, Math.floor(elapsed / speedMs));
+  return {
+    revealed: words.slice(0, idx + 1).join(' '),
+    wordIndex: idx, totalWords: words.length,
+    done: idx >= words.length - 1,
+  };
+}
+
+export default function QuizBowlMatch({ user, onExit }) {
+  // view: 'menu' (create/join) | 'lobby' (waiting) | 'playing' | 'finished'
+  const [view, setView] = useState('menu');
+  const [code, setCode] = useState('');
+  const [joinCodeInput, setJoinCodeInput] = useState('');
+  const [category, setCategory] = useState('Mixed');
+  const [difficulty, setDifficulty] = useState('Medium');
+  const [questionCount, setQuestionCount] = useState(10);
+  const [revealSpeedMs, setRevealSpeedMs] = useState(140);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [match, setMatch] = useState(null);
+
+  // Current question state pushed from server
+  const [question, setQuestion] = useState(null); // { text, startedAt }
+  const [buzz, setBuzz] = useState(null);         // { userId, buzzAt } | null
+  const [answer, setAnswer] = useState('');
+  const [answerResult, setAnswerResult] = useState(null); // { userId, correct, answer, correctAnswer }
+
+  const abortRef = useRef(null);
+
+  // ----- Connect SSE stream once we have a match code -----
+  useEffect(() => {
+    if (!code) return;
+    const abort = streamMatch(code, {
+      onSnapshot: (m) => {
+        setMatch(m);
+        // Rehydrate current question on reconnect / late join.
+        if (m.state === 'playing' && m.currentQuestion) {
+          setQuestion(m.currentQuestion);
+          if (m.buzzWinner) setBuzz({ userId: m.buzzWinner, buzzAt: m.buzzAt });
+          setAnswerResult(null);
+          setView('playing');
+        } else if (m.state === 'waiting') {
+          setView('lobby');
+        } else if (m.state === 'finished') {
+          setView('finished');
+        }
+      },
+      onPlayerJoined: (m) => setMatch(m),
+      onPlayerLeft:   (m) => setMatch(m.match || m),
+      onQuestionStart: ({ text, startedAt, match: m }) => {
+        setMatch(m);
+        setQuestion({ text, startedAt });
+        setBuzz(null);
+        setAnswer('');
+        setAnswerResult(null);
+        setView('playing');
+      },
+      onBuzz: ({ userId, buzzAt }) => setBuzz({ userId, buzzAt }),
+      onAnswerResult: (data) => {
+        setAnswerResult(data);
+        setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: data.scores[p.userId] || 0 })) } : prev);
+      },
+      onMatchEnd: ({ scores }) => {
+        setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: scores[p.userId] || 0 })) } : prev);
+        setView('finished');
+      },
+      onError: (err) => setError(err),
+    });
+    abortRef.current = abort;
+    return () => { try { abort(); } catch {} };
+  }, [code]);
+
+  // ----- Actions -----
+  async function handleCreate() {
+    if (busy) return;
+    setBusy(true); setError(null);
+    try {
+      const res = await createMatch({ category, difficulty, questionCount, revealSpeedMs });
+      setCode(res.code);
+      setMatch(res.match);
+      setView('lobby');
+    } catch (e) { setError(e.message || 'Failed to create match'); }
+    setBusy(false);
+  }
+
+  async function handleJoin() {
+    const c = joinCodeInput.trim().toUpperCase();
+    if (!c || busy) return;
+    setBusy(true); setError(null);
+    try {
+      const res = await joinMatch(c);
+      setCode(c);
+      setMatch(res.match);
+      setView('lobby');
+    } catch (e) { setError(e.message || 'Failed to join'); }
+    setBusy(false);
+  }
+
+  async function handleStart() {
+    try { await startMatch(code); } catch (e) { setError(e.message); }
+  }
+
+  const handleBuzz = useCallback(async () => {
+    if (!question || buzz) return;
+    // Optimistic: freeze my reveal immediately. If the server rejects (opponent
+    // buzzed first) the SSE `buzz` event will correct everyone to the winner.
+    setBuzz({ userId: user?.id || 'me', buzzAt: Date.now(), _optimistic: true });
+    try {
+      await buzzMatch(code);
+    } catch (e) {
+      // 409 = someone else buzzed first. Keep the buzz state — the SSE event
+      // will overwrite with the real winner within ~50ms.
+    }
+  }, [question, buzz, code, user?.id]);
+
+  async function handleSubmitAnswer() {
+    if (!answer.trim()) return;
+    try { await answerMatch(code, answer.trim()); } catch (e) { setError(e.message); }
+  }
+
+  async function handleNext() {
+    try { await nextMatchQuestion(code); } catch (e) { setError(e.message); }
+  }
+
+  async function handleLeave() {
+    try { await leaveMatch(code); } catch {}
+    setCode(''); setMatch(null); setQuestion(null); setBuzz(null); setAnswerResult(null);
+    setView('menu');
+    onExit?.();
+  }
+
+  // Space / Enter shortcuts during playing view.
+  useEffect(() => {
+    if (view !== 'playing') return;
+    function onKey(e) {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.key === ' ' && !buzz) { e.preventDefault(); handleBuzz(); }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [view, buzz, handleBuzz]);
+
+  const myId = user?.id;
+  const iBuzzed = buzz && buzz.userId === myId;
+  const isHost = match?.hostId === myId;
+
+  // ============ MENU ============
+  if (view === 'menu') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <div className="p-5 space-y-5 max-w-md mx-auto">
+          <div className="text-center">
+            <Users size={28} className="text-amber-500 mx-auto mb-2" />
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white">Head-to-Head Quiz Bowl</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Two players, pyramidal buzz-in, live.</p>
+          </div>
+
+          {error && <p className="text-xs text-rose-500 px-3 py-2 rounded-lg bg-rose-50 dark:bg-rose-900/15">{error}</p>}
+
+          <div className="rounded-xl border border-gray-200 dark:border-[#2A2A40] p-4 space-y-3">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Create a match</p>
+            <Selector label="Category" value={category} onChange={setCategory}
+              options={['Science','History','Literature','Geography','Math','Art','Music','Philosophy','Pop Culture','Mixed']} />
+            <Selector label="Difficulty" value={difficulty} onChange={setDifficulty}
+              options={['Easy','Medium','Hard','Tournament']} grid="grid-cols-4" />
+            <div>
+              <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">Questions: {questionCount}</label>
+              <input type="range" min="5" max="20" step="5" value={questionCount} onChange={e => setQuestionCount(Number(e.target.value))} className="w-full" />
+            </div>
+            <button onClick={handleCreate} disabled={busy} className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold disabled:opacity-50 inline-flex items-center justify-center gap-2">
+              {busy ? <><Loader2 size={14} className="animate-spin" /> Generating…</> : <><Play size={14} /> Create & Share Code</>}
+            </button>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 dark:border-[#2A2A40] p-4 space-y-3">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Join a match</p>
+            <div className="flex gap-2">
+              <input
+                value={joinCodeInput}
+                onChange={e => setJoinCodeInput(e.target.value.toUpperCase())}
+                placeholder="6-LETTER CODE"
+                maxLength={6}
+                className="flex-1 px-3 py-2.5 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-sm font-mono tracking-wider text-center text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-500/40"
+              />
+              <button onClick={handleJoin} disabled={!joinCodeInput.trim() || busy} className="px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold disabled:opacity-50">Join</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ============ LOBBY ============
+  if (view === 'lobby') {
+    const waiting = (match?.players?.length || 0) < 2;
+    return (
+      <div className="h-full overflow-y-auto">
+        <div className="p-5 space-y-4 max-w-md mx-auto">
+          <div className="text-center">
+            <Users size={28} className="text-amber-500 mx-auto mb-2" />
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white">Waiting for opponent</h2>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 dark:border-[#2A2A40] p-4 text-center">
+            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Share this code</p>
+            <div className="flex items-center justify-center gap-2">
+              <p className="text-3xl font-mono font-bold tracking-[0.3em] text-amber-600 dark:text-amber-400">{code}</p>
+              <button onClick={() => { navigator.clipboard.writeText(code); }} className="p-1.5 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-gray-100 dark:hover:bg-[#1e1e2e]" title="Copy code">
+                <Copy size={14} />
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            {(match?.players || []).map(p => (
+              <div key={p.userId} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white dark:bg-[#161622] border border-gray-200 dark:border-[#2A2A40]">
+                <div className="w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center text-xs font-bold">
+                  {(p.name || '?')[0]?.toUpperCase()}
+                </div>
+                <span className="text-sm font-medium text-gray-900 dark:text-white">{p.name}</span>
+                {p.userId === match?.hostId && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">HOST</span>}
+                {p.userId === myId && <span className="text-[9px] text-gray-400 ml-auto">you</span>}
+              </div>
+            ))}
+            {waiting && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-gray-300 dark:border-gray-600 text-xs text-gray-400 italic">
+                <Loader2 size={12} className="animate-spin" /> Waiting for player 2…
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-2">
+            <button onClick={handleLeave} className="flex-1 py-2.5 rounded-xl border border-gray-200 dark:border-[#2A2A40] text-sm font-medium text-gray-700 dark:text-gray-300 inline-flex items-center justify-center gap-1.5">
+              <LogOut size={12} /> Leave
+            </button>
+            {isHost && (
+              <button onClick={handleStart} disabled={waiting} className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white text-sm font-semibold inline-flex items-center justify-center gap-1.5">
+                <Play size={12} /> Start match
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ============ PLAYING ============
+  if (view === 'playing' && match) {
+    return <PlayingView
+      match={match} question={question} buzz={buzz} answerResult={answerResult}
+      answer={answer} setAnswer={setAnswer}
+      onBuzz={handleBuzz} onSubmitAnswer={handleSubmitAnswer} onNext={handleNext}
+      onLeave={handleLeave}
+      iBuzzed={iBuzzed} isHost={isHost} myId={myId}
+      revealSpeedMs={match.revealSpeedMs || 140}
+    />;
+  }
+
+  // ============ FINISHED ============
+  if (view === 'finished') {
+    const sorted = [...(match?.players || [])].sort((a, b) => (b.score || 0) - (a.score || 0));
+    const winner = sorted[0];
+    const amIWinner = winner?.userId === myId;
+    return (
+      <div className="h-full overflow-y-auto">
+        <div className="p-5 space-y-5 max-w-md mx-auto text-center">
+          <Trophy size={40} className={`mx-auto ${amIWinner ? 'text-amber-500' : 'text-gray-400'}`} />
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+            {amIWinner ? 'You won!' : winner ? `${winner.name} won` : 'Match over'}
+          </h2>
+          <div className="space-y-2">
+            {sorted.map((p, i) => (
+              <div key={p.userId} className={`flex items-center gap-3 px-4 py-2.5 rounded-xl ${i === 0 ? 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800' : 'bg-gray-50 dark:bg-[#1e1e2e] border border-gray-200 dark:border-[#2A2A40]'}`}>
+                <span className="text-sm font-bold text-gray-500 w-5">#{i + 1}</span>
+                <span className="flex-1 text-left text-sm font-medium text-gray-900 dark:text-white">{p.name}{p.userId === myId ? ' (you)' : ''}</span>
+                <span className="text-sm font-bold tabular-nums">{p.score || 0}</span>
+              </div>
+            ))}
+          </div>
+          <button onClick={handleLeave} className="w-full py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium">Back to menu</button>
+        </div>
+      </div>
+    );
+  }
+
+  return <div className="p-5 text-center text-sm text-gray-400"><Loader2 size={14} className="animate-spin inline mr-1" /> Loading…</div>;
+}
+
+// ===== PLAYING VIEW =====
+function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, onBuzz, onSubmitAnswer, onNext, onLeave, iBuzzed, isHost, myId, revealSpeedMs }) {
+  const frozen = !!buzz || !!answerResult;
+  const frozenAt = buzz?.buzzAt || answerResult?.buzzAt || null;
+  const { revealed, wordIndex, totalWords } = useWordReveal(question?.text || '', question?.startedAt || 0, revealSpeedMs, frozen, frozenAt);
+
+  const buzzerName = buzz ? (match.players.find(p => p.userId === buzz.userId)?.name || 'Opponent') : '';
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-200 dark:border-[#2A2A40] flex-shrink-0 bg-white dark:bg-[#161622]">
+        <Zap size={14} className="text-amber-500" />
+        <span className="text-sm font-semibold text-gray-900 dark:text-white">Q{(match.currentIdx || 0) + 1}/{match.totalQuestions}</span>
+        <div className="flex-1 flex items-center gap-2 justify-center">
+          {match.players.map(p => (
+            <div key={p.userId} className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs ${p.userId === myId ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' : 'bg-gray-100 dark:bg-[#1e1e2e] text-gray-700 dark:text-gray-300'}`}>
+              <span className="font-medium">{p.name}{p.userId === myId ? ' (you)' : ''}</span>
+              <span className="font-bold tabular-nums">{p.score || 0}</span>
+            </div>
+          ))}
+        </div>
+        <button onClick={onLeave} className="text-xs text-gray-400 hover:text-rose-500"><LogOut size={12} /></button>
+      </div>
+
+      {/* Question */}
+      <div className="flex-1 overflow-y-auto p-5">
+        <p className="text-base leading-relaxed text-gray-900 dark:text-gray-100">
+          {revealed}
+          {!frozen && wordIndex < totalWords - 1 && (
+            <span className="inline-block w-0.5 h-4 bg-amber-500 animate-pulse ml-1 align-middle" />
+          )}
+        </p>
+        {buzz && !answerResult && (
+          <p className="text-xs text-amber-600 dark:text-amber-400 mt-3">
+            <Zap size={10} className="inline mr-0.5" /> {iBuzzed ? 'You buzzed — answer now!' : `${buzzerName} buzzed first`}
+          </p>
+        )}
+      </div>
+
+      {/* Action bar */}
+      <div className="px-4 py-3 border-t border-gray-200 dark:border-[#2A2A40] flex-shrink-0 space-y-2 bg-white dark:bg-[#161622]">
+        {!buzz && !answerResult && (
+          <>
+            <button onClick={onBuzz} className="w-full py-4 rounded-xl bg-red-600 hover:bg-red-700 text-white text-lg font-bold uppercase tracking-wider active:scale-95 transition-transform">BUZZ</button>
+            <p className="text-[10px] text-gray-400 text-center">Press SPACE to buzz</p>
+          </>
+        )}
+
+        {buzz && !answerResult && iBuzzed && (
+          <div className="flex gap-2">
+            <input
+              autoFocus value={answer} onChange={e => setAnswer(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && answer.trim() && onSubmitAnswer()}
+              placeholder="Type your answer…"
+              className="flex-1 px-4 py-3 rounded-xl border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-sm outline-none focus:ring-2 focus:ring-amber-500/40"
+            />
+            <button onClick={onSubmitAnswer} disabled={!answer.trim()} className="px-5 py-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold disabled:opacity-40">Submit</button>
+          </div>
+        )}
+
+        {buzz && !answerResult && !iBuzzed && (
+          <div className="w-full py-3 rounded-xl bg-gray-100 dark:bg-[#1e1e2e] text-center text-xs text-gray-500">
+            <Loader2 size={12} className="animate-spin inline mr-1" /> {buzzerName} is answering…
+          </div>
+        )}
+
+        {answerResult && (
+          <>
+            <div className={`p-3 rounded-xl text-center ${answerResult.correct ? 'bg-emerald-500/10 border-2 border-emerald-500' : 'bg-rose-500/10 border-2 border-rose-500'}`}>
+              <p className={`text-sm font-bold ${answerResult.correct ? 'text-emerald-600' : 'text-rose-600'}`}>
+                {answerResult.correct
+                  ? (answerResult.userId === myId ? 'CORRECT — +1' : `${buzzerName} got it`)
+                  : (answerResult.userId === myId ? 'WRONG' : `${buzzerName} was wrong`)}
+              </p>
+              <p className="text-xs text-gray-700 dark:text-gray-300 mt-1">Answer: <strong>{answerResult.correctAnswer}</strong></p>
+            </div>
+            {isHost ? (
+              <button onClick={onNext} className="w-full py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold">Next question →</button>
+            ) : (
+              <p className="text-[11px] text-center text-gray-400">Waiting for host to advance…</p>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Small presentational helper
+function Selector({ label, options, value, onChange, grid }) {
+  return (
+    <div>
+      <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">{label}</label>
+      <div className={grid ? `grid ${grid} gap-1.5` : 'flex flex-wrap gap-1.5'}>
+        {options.map(o => (
+          <button key={o} onClick={() => onChange(o)} className={`px-2.5 py-1 rounded-lg text-xs font-medium ${value === o ? 'bg-amber-500 text-white' : 'bg-gray-100 dark:bg-[#1e1e2e] text-gray-700 dark:text-gray-300'}`}>{o}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
