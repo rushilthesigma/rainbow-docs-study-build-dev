@@ -78,7 +78,9 @@ function streamSSE(url, body, { onChunk, onDone, onError, onMeta, onSource, onSt
     .then(async (response) => {
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
-        onError?.(err.error || `Request failed: ${response.status}`, err);
+        // Pass the full payload so the renderer can distinguish quota errors
+        // (HTTP 402 + `error: 'message_limit_reached'`) from generic failures.
+        onError?.({ ...err, status: response.status, _code: err.error }, err);
         return;
       }
       const reader = response.body.getReader();

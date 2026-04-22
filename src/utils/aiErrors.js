@@ -2,7 +2,48 @@
 // Keep messages short, specific, and actionable. Never expose stack traces
 // or full upstream JSON payloads to end users.
 export function friendlyAIError(raw) {
-  const msg = String(raw?.message || raw?.error || raw || '').toLowerCase();
+  // Server plan-limit responses carry a structured code. Handle those first
+  // so they never fall through to generic "AI error" messaging.
+  const code = raw?._code || raw?.code || raw?.error;
+  const serverMsg = typeof raw?.message === 'string' ? raw.message : '';
+  if (code === 'message_limit_reached') {
+    return {
+      title: 'Free plan credits used up',
+      body: serverMsg || "You've hit today's free-plan message limit. Upgrade to Pro for unlimited, or come back tomorrow when your credits reset.",
+      planLimit: true,
+    };
+  }
+  if (code === 'curriculum_limit_reached') {
+    return {
+      title: 'Free plan credits used up',
+      body: serverMsg || "Free plans include 1 curriculum per week. Upgrade to Pro for unlimited curricula.",
+      planLimit: true,
+    };
+  }
+  if (code === 'debate_limit_reached') {
+    return {
+      title: 'Free plan credits used up',
+      body: serverMsg || "Free plans include 1 debate per week. Upgrade to Pro for unlimited debates.",
+      planLimit: true,
+    };
+  }
+  if (code === 'quizbowl_limit_reached') {
+    return {
+      title: 'Free plan credits used up',
+      body: serverMsg || "Free plans include a few Quiz Bowl games per day. Upgrade to Pro for unlimited.",
+      planLimit: true,
+    };
+  }
+  // HTTP 402 always means "plan limit" in this app, regardless of code.
+  if (raw?.status === 402) {
+    return {
+      title: 'Free plan credits used up',
+      body: serverMsg || "You've hit your plan's limit. Upgrade to Pro for unlimited.",
+      planLimit: true,
+    };
+  }
+
+  const msg = String(serverMsg || raw?.error || raw || '').toLowerCase();
 
   if (!msg || msg === 'undefined' || msg === 'null') {
     return { title: 'Something went wrong', body: 'The AI didn\'t respond. Try sending again in a moment.' };
@@ -33,9 +74,13 @@ export function friendlyAIError(raw) {
     return { title: 'Session expired', body: 'Please sign in again to continue.' };
   }
 
-  // Quota exceeded (our app-level limits)
-  if (msg.includes('daily message limit') || msg.includes('weekly limit') || msg.includes('free plan')) {
-    return { title: 'Limit reached', body: raw?.message || raw?.error || 'You\'ve hit your plan\'s limit. Upgrade to Pro for unlimited.' };
+  // Quota exceeded (fallback string-match for pre-structured errors)
+  if (msg.includes('daily message limit') || msg.includes('weekly limit') || msg.includes('free plan') || msg.includes('free-plan') || msg.includes('hit the free') || msg.includes('upgrade to pro')) {
+    return {
+      title: 'Free plan credits used up',
+      body: serverMsg || 'You\'ve hit your plan\'s limit. Upgrade to Pro for unlimited, or come back tomorrow.',
+      planLimit: true,
+    };
   }
 
   // Safety / content filter
@@ -62,11 +107,15 @@ export function friendlyAIError(raw) {
 
 // Shape of the placeholder we insert into a chat `messages` array on error.
 export function errorChatMessage(raw) {
-  const { title, body } = friendlyAIError(raw);
+  const { title, body, planLimit } = friendlyAIError(raw);
+  const bodyWithCta = planLimit
+    ? `${body}\n\n[Upgrade to Pro →](/settings)`
+    : body;
   return {
     role: 'assistant',
-    content: `**${title}.** ${body}`,
+    content: `**${title}.** ${bodyWithCta}`,
     _error: true,
+    _planLimit: !!planLimit,
     timestamp: new Date().toISOString(),
   };
 }

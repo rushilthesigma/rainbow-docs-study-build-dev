@@ -42,7 +42,9 @@ export function sendLessonMessage(id, message, images, { onChunk, onDone, onErro
     .then(async (response) => {
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
-        onError?.(err.error || `Request failed: ${response.status}`);
+        // Pass the full error object so aiErrors.js can use the human-readable
+        // `message` field and the error code for quota-exhausted cases.
+        onError?.({ ...err, status: response.status, _code: err.error });
         return;
       }
       const reader = response.body.getReader();

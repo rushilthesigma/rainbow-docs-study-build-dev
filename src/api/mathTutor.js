@@ -17,7 +17,7 @@ export function sendMathTutorMessage(body, { onChunk, onDone, onError, onStatus 
     .then(async (response) => {
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
-        onError?.(err.error || `Request failed: ${response.status}`);
+        onError?.({ ...err, status: response.status, _code: err.error });
         return;
       }
       const reader = response.body.getReader();
