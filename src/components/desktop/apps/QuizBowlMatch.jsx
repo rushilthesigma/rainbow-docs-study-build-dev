@@ -46,6 +46,12 @@ export default function QuizBowlMatch({ user, onExit }) {
   const [buzz, setBuzz] = useState(null);         // { userId, buzzAt } | null
   const [answer, setAnswer] = useState('');
   const [answerResult, setAnswerResult] = useState(null); // { userId, correct, answer, correctAnswer }
+  // Set of userIds locked out of buzzing on the CURRENT question (they
+  // already tried and got it wrong). Resets when question_start fires.
+  const [lockedOut, setLockedOut] = useState([]);
+  // Flash a "Wrong — <name>" banner for ~1.5s when a wrong answer arrives
+  // while the question is still live.
+  const [wrongFlash, setWrongFlash] = useState(null);
 
   const abortRef = useRef(null);
 
@@ -78,9 +84,20 @@ export default function QuizBowlMatch({ user, onExit }) {
         setBuzz(null);
         setAnswer('');
         setAnswerResult(null);
+        setLockedOut([]);
+        setWrongFlash(null);
         setView('playing');
       },
       onBuzz: ({ userId, buzzAt }) => setBuzz({ userId, buzzAt }),
+      onWrongAnswer: ({ userId, answer: wrongAns, lockedOut: lock, questionStartedAt: newStart }) => {
+        // Resume the reveal for the still-playing player; show a brief flash.
+        setBuzz(null);
+        setAnswer('');
+        setLockedOut(lock || []);
+        if (newStart && question) setQuestion(q => q ? { ...q, startedAt: newStart } : q);
+        setWrongFlash({ userId, answer: wrongAns });
+        setTimeout(() => setWrongFlash(null), 1800);
+      },
       onAnswerResult: (data) => {
         setAnswerResult(data);
         setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: data.scores[p.userId] || 0 })) } : prev);
@@ -131,16 +148,16 @@ export default function QuizBowlMatch({ user, onExit }) {
 
   const handleBuzz = useCallback(async () => {
     if (!question || buzz) return;
+    if (lockedOut.includes(myId)) return; // already got this question wrong
     // Optimistic: freeze my reveal immediately. If the server rejects (opponent
     // buzzed first) the SSE `buzz` event will correct everyone to the winner.
     setBuzz({ userId: user?.id || 'me', buzzAt: Date.now(), _optimistic: true });
     try {
       await buzzMatch(code);
     } catch (e) {
-      // 409 = someone else buzzed first. Keep the buzz state — the SSE event
-      // will overwrite with the real winner within ~50ms.
+      // 409 = someone else buzzed first, or you're locked out. SSE corrects.
     }
-  }, [question, buzz, code, user?.id]);
+  }, [question, buzz, code, user?.id, lockedOut, myId]);
 
   async function handleSubmitAnswer() {
     if (!answer.trim()) return;
@@ -330,6 +347,7 @@ export default function QuizBowlMatch({ user, onExit }) {
       onBuzz={handleBuzz} onSubmitAnswer={handleSubmitAnswer} onNext={handleNext}
       onLeave={handleLeave}
       iBuzzed={iBuzzed} isHost={isHost} myId={myId}
+      lockedOut={lockedOut} wrongFlash={wrongFlash}
       revealSpeedMs={match.revealSpeedMs || 140}
     />;
   }
@@ -365,12 +383,14 @@ export default function QuizBowlMatch({ user, onExit }) {
 }
 
 // ===== PLAYING VIEW =====
-function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, onBuzz, onSubmitAnswer, onNext, onLeave, iBuzzed, isHost, myId, revealSpeedMs }) {
+function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, onBuzz, onSubmitAnswer, onNext, onLeave, iBuzzed, isHost, myId, lockedOut = [], wrongFlash, revealSpeedMs }) {
   const frozen = !!buzz || !!answerResult;
   const frozenAt = buzz?.buzzAt || answerResult?.buzzAt || null;
   const { revealed, wordIndex, totalWords } = useWordReveal(question?.text || '', question?.startedAt || 0, revealSpeedMs, frozen, frozenAt);
 
   const buzzerName = buzz ? (match.players.find(p => p.userId === buzz.userId)?.name || 'Opponent') : '';
+  const wrongName = wrongFlash ? (match.players.find(p => p.userId === wrongFlash.userId)?.name || 'Opponent') : '';
+  const iAmLocked = lockedOut.includes(myId);
 
   return (
     <div className="flex flex-col h-full">
@@ -406,11 +426,21 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
 
       {/* Action bar */}
       <div className="px-4 py-3 border-t border-gray-200 dark:border-[#2A2A40] flex-shrink-0 space-y-2 bg-white dark:bg-[#161622]">
-        {!buzz && !answerResult && (
+        {wrongFlash && !buzz && !answerResult && (
+          <div className="px-3 py-1.5 rounded-lg bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300 text-center">
+            {wrongFlash.userId === myId ? 'Wrong' : `${wrongName} was wrong`}{wrongFlash.answer ? ` — "${wrongFlash.answer}"` : ''} · question continues
+          </div>
+        )}
+        {!buzz && !answerResult && !iAmLocked && (
           <>
             <button onClick={onBuzz} className="w-full py-4 rounded-xl bg-red-600 hover:bg-red-700 text-white text-lg font-bold uppercase tracking-wider active:scale-95 transition-transform">BUZZ</button>
             <p className="text-[10px] text-gray-400 text-center">Press SPACE to buzz</p>
           </>
+        )}
+        {!buzz && !answerResult && iAmLocked && (
+          <div className="w-full py-3 rounded-xl bg-gray-100 dark:bg-[#1e1e2e] text-center text-xs text-gray-500">
+            You're locked out of this question. Wait for the next.
+          </div>
         )}
 
         {buzz && !answerResult && iBuzzed && (

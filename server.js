@@ -3594,7 +3594,13 @@ function pushMatchEvent(match, type, payload) {
   const body = `data: ${JSON.stringify({ type, ...payload })}\n\n`;
   for (const p of match.players) {
     if (p.stream && !p.stream.writableEnded) {
-      try { p.stream.write(body); } catch {}
+      try {
+        p.stream.write(body);
+        // Force the event out of any Node/proxy buffer. Without this the
+        // opponent occasionally sits on 'generating' because question_start
+        // is sitting in a write buffer waiting for more data.
+        if (typeof p.stream.flush === 'function') p.stream.flush();
+      } catch {}
     }
   }
 }
@@ -3692,12 +3698,15 @@ app.get('/api/quizbowl/match/:code/stream', authMiddleware, (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  // Tell nginx / Render proxies not to buffer this stream.
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
   player.stream = res;
   match.lastActivity = Date.now();
   // Send current snapshot immediately so the client can render without a
   // separate GET round trip.
   res.write(`data: ${JSON.stringify({ type: 'snapshot', match: publicMatchState(match) })}\n\n`);
+  if (typeof res.flush === 'function') res.flush();
 
   // Heartbeat every 20s to keep proxies from killing the stream.
   const heartbeat = setInterval(() => {
@@ -3758,6 +3767,7 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
     match.questionStartedAt = Date.now();
     match.buzzWinner = null;
     match.buzzAt = null;
+    match.lockedOutForQ = {};
     match.lastActivity = Date.now();
     pushMatchEvent(match, 'question_start', {
       idx: 0,
@@ -3814,6 +3824,7 @@ app.post('/api/quizbowl/match/:code/answer', authMiddleware, (req, res) => {
     || c.split(/[\s,]+/).some(w => w.length > 2 && (a.includes(w) || lev(a, w) <= 1)));
 
   if (correct) {
+    // Correct: question ends, score awarded, host advances next.
     match.scores[req.userId] = (match.scores[req.userId] || 0) + 1;
     match.state = 'reveal';
     match.lastActivity = Date.now();
@@ -3822,13 +3833,35 @@ app.post('/api/quizbowl/match/:code/answer', authMiddleware, (req, res) => {
       scores: match.scores,
     });
   } else {
-    // Wrong answer — the other player gets to hear the rest / buzz.
-    match.state = 'reveal';
-    match.lastActivity = Date.now();
-    pushMatchEvent(match, 'answer_result', {
-      userId: req.userId, correct: false, answer, correctAnswer,
-      scores: match.scores,
-    });
+    // Wrong: lock out this player for the REST of the current question,
+    // clear the buzz, and RESUME reading for the other player. We shift
+    // `questionStartedAt` forward by the paused duration so the reveal
+    // picks up from where it was when they buzzed.
+    if (!match.lockedOutForQ) match.lockedOutForQ = {};
+    match.lockedOutForQ[req.userId] = true;
+    const pausedMs = Date.now() - (match.buzzAt || Date.now());
+    match.questionStartedAt = (match.questionStartedAt || Date.now()) + pausedMs;
+    const stillPlaying = match.players.filter(p => !match.lockedOutForQ[p.userId]);
+
+    // If both players are locked out, nobody can answer — reveal answer, move on.
+    if (stillPlaying.length === 0) {
+      match.state = 'reveal';
+      match.lastActivity = Date.now();
+      pushMatchEvent(match, 'answer_result', {
+        userId: req.userId, correct: false, answer, correctAnswer,
+        scores: match.scores, finalMiss: true,
+      });
+    } else {
+      match.buzzWinner = null;
+      match.buzzAt = null;
+      match.state = 'playing';
+      match.lastActivity = Date.now();
+      pushMatchEvent(match, 'wrong_answer', {
+        userId: req.userId, answer, correctAnswer,
+        lockedOut: Object.keys(match.lockedOutForQ),
+        questionStartedAt: match.questionStartedAt,
+      });
+    }
   }
   res.json({ ok: true, correct });
 });
@@ -3851,6 +3884,7 @@ app.post('/api/quizbowl/match/:code/next', authMiddleware, (req, res) => {
   match.questionStartedAt = Date.now();
   match.buzzWinner = null;
   match.buzzAt = null;
+  match.lockedOutForQ = {};
   match.lastActivity = Date.now();
   pushMatchEvent(match, 'question_start', {
     idx: nextIdx,

@@ -53,6 +53,7 @@ export function streamMatch(code, handlers) {
             else if (t === 'start_failed') handlers.onStartFailed?.(data);
             else if (t === 'question_start') handlers.onQuestionStart?.(data);
             else if (t === 'buzz') handlers.onBuzz?.(data);
+            else if (t === 'wrong_answer') handlers.onWrongAnswer?.(data);
             else if (t === 'answer_result') handlers.onAnswerResult?.(data);
             else if (t === 'match_end') handlers.onMatchEnd?.(data);
             else if (t === 'player_left') handlers.onPlayerLeft?.(data);
