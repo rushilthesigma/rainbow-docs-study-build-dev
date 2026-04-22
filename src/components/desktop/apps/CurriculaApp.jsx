@@ -329,14 +329,23 @@ export default function CurriculaApp() {
       ) : (
         <div className="space-y-2">
           {curricula.map(c => {
-            const total = (c.units || []).reduce((s, u) => s + (u.lessons || []).length, 0);
-            const done = (c.units || []).reduce((s, u) => s + (u.lessons || []).filter(l => l.isCompleted).length, 0);
+            // The /api/curriculum LIST response strips `units` but supplies
+            // pre-computed counters. Prefer those; fall back to recomputing
+            // for full-curriculum objects just written into state after a
+            // generate/edit.
+            const total = typeof c.totalLessons === 'number'
+              ? c.totalLessons
+              : (c.units || []).reduce((s, u) => s + (u.lessons || []).length, 0);
+            const done = typeof c.completedLessons === 'number'
+              ? c.completedLessons
+              : (c.units || []).reduce((s, u) => s + (u.lessons || []).filter(l => l.isCompleted).length, 0);
+            const units = typeof c.unitCount === 'number' ? c.unitCount : (c.units?.length || 0);
             return (
               <div key={c.id} onClick={() => openCurriculum(c.id)} className="flex items-center gap-4 bg-white dark:bg-[#1e1e2e] rounded-xl border border-gray-200 dark:border-[#2A2A40] px-4 py-3 cursor-pointer hover:border-blue-300 dark:hover:border-blue-700 transition-colors">
                 <div className="w-9 h-9 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center flex-shrink-0"><BookOpen size={16} className="text-blue-500" /></div>
                 <div className="flex-1 min-w-0">
                   <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{c.title}</h3>
-                  <p className="text-xs text-gray-400 mt-0.5">{done}/{total} lessons · {c.units?.length || 0} units</p>
+                  <p className="text-xs text-gray-400 mt-0.5">{done}/{total} lessons · {units} unit{units === 1 ? '' : 's'}</p>
                 </div>
               </div>
             );
