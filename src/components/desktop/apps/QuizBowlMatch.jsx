@@ -28,10 +28,11 @@ function useWordReveal(text, startedAt, speedMs, frozen, frozenAt) {
 }
 
 export default function QuizBowlMatch({ user, onExit }) {
-  // view: 'menu' (create/join) | 'lobby' (waiting) | 'playing' | 'finished'
+  // view: 'menu' (create/join) | 'lobby' (invite + configure) | 'generating' | 'playing' | 'finished'
   const [view, setView] = useState('menu');
   const [code, setCode] = useState('');
   const [joinCodeInput, setJoinCodeInput] = useState('');
+  // Settings are chosen AFTER the opponent joins, in the lobby view.
   const [category, setCategory] = useState('Mixed');
   const [difficulty, setDifficulty] = useState('Medium');
   const [questionCount, setQuestionCount] = useState(10);
@@ -54,12 +55,13 @@ export default function QuizBowlMatch({ user, onExit }) {
     const abort = streamMatch(code, {
       onSnapshot: (m) => {
         setMatch(m);
-        // Rehydrate current question on reconnect / late join.
         if (m.state === 'playing' && m.currentQuestion) {
           setQuestion(m.currentQuestion);
           if (m.buzzWinner) setBuzz({ userId: m.buzzWinner, buzzAt: m.buzzAt });
           setAnswerResult(null);
           setView('playing');
+        } else if (m.state === 'generating') {
+          setView('generating');
         } else if (m.state === 'waiting') {
           setView('lobby');
         } else if (m.state === 'finished') {
@@ -68,6 +70,8 @@ export default function QuizBowlMatch({ user, onExit }) {
       },
       onPlayerJoined: (m) => setMatch(m),
       onPlayerLeft:   (m) => setMatch(m.match || m),
+      onGenerating:   (m) => { setMatch(m); setView('generating'); },
+      onStartFailed:  (data) => { setError(data.error || 'Failed to start match'); setMatch(data.match); setView('lobby'); },
       onQuestionStart: ({ text, startedAt, match: m }) => {
         setMatch(m);
         setQuestion({ text, startedAt });
@@ -92,11 +96,13 @@ export default function QuizBowlMatch({ user, onExit }) {
   }, [code]);
 
   // ----- Actions -----
+  // Instant — no LLM call here. The host will pick settings in the lobby
+  // after player 2 joins, then press Start which runs question generation.
   async function handleCreate() {
     if (busy) return;
     setBusy(true); setError(null);
     try {
-      const res = await createMatch({ category, difficulty, questionCount, revealSpeedMs });
+      const res = await createMatch();
       setCode(res.code);
       setMatch(res.match);
       setView('lobby');
@@ -118,7 +124,9 @@ export default function QuizBowlMatch({ user, onExit }) {
   }
 
   async function handleStart() {
-    try { await startMatch(code); } catch (e) { setError(e.message); }
+    setError(null);
+    try { await startMatch(code, { category, difficulty, questionCount, revealSpeedMs }); }
+    catch (e) { setError(e.message); }
   }
 
   const handleBuzz = useCallback(async () => {
@@ -178,29 +186,26 @@ export default function QuizBowlMatch({ user, onExit }) {
 
           {error && <p className="text-xs text-rose-500 px-3 py-2 rounded-lg bg-rose-50 dark:bg-rose-900/15">{error}</p>}
 
-          <div className="rounded-xl border border-gray-200 dark:border-[#2A2A40] p-4 space-y-3">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Create a match</p>
-            <Selector label="Category" value={category} onChange={setCategory}
-              options={['Science','History','Literature','Geography','Math','Art','Music','Philosophy','Pop Culture','Mixed']} />
-            <Selector label="Difficulty" value={difficulty} onChange={setDifficulty}
-              options={['Easy','Medium','Hard','Tournament']} grid="grid-cols-4" />
-            <div>
-              <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">Questions: {questionCount}</label>
-              <input type="range" min="5" max="20" step="5" value={questionCount} onChange={e => setQuestionCount(Number(e.target.value))} className="w-full" />
-            </div>
-            <button onClick={handleCreate} disabled={busy} className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold disabled:opacity-50 inline-flex items-center justify-center gap-2">
-              {busy ? <><Loader2 size={14} className="animate-spin" /> Generating…</> : <><Play size={14} /> Create & Share Code</>}
-            </button>
+          {/* Create is now instant — you get an invite code first, settings later. */}
+          <button onClick={handleCreate} disabled={busy} className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold disabled:opacity-50 inline-flex items-center justify-center gap-2">
+            {busy ? <><Loader2 size={14} className="animate-spin" /> Creating…</> : <><Play size={14} /> Create invite code</>}
+          </button>
+
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-px bg-gray-200 dark:bg-[#2A2A40]" />
+            <span className="text-[10px] text-gray-400 uppercase tracking-wider">or</span>
+            <div className="flex-1 h-px bg-gray-200 dark:bg-[#2A2A40]" />
           </div>
 
           <div className="rounded-xl border border-gray-200 dark:border-[#2A2A40] p-4 space-y-3">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Join a match</p>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Join with code</p>
             <div className="flex gap-2">
               <input
                 value={joinCodeInput}
                 onChange={e => setJoinCodeInput(e.target.value.toUpperCase())}
                 placeholder="6-LETTER CODE"
                 maxLength={6}
+                onKeyDown={e => e.key === 'Enter' && handleJoin()}
                 className="flex-1 px-3 py-2.5 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-sm font-mono tracking-wider text-center text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-500/40"
               />
               <button onClick={handleJoin} disabled={!joinCodeInput.trim() || busy} className="px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold disabled:opacity-50">Join</button>
@@ -211,27 +216,37 @@ export default function QuizBowlMatch({ user, onExit }) {
     );
   }
 
-  // ============ LOBBY ============
+  // ============ LOBBY (invite code + configure-on-join) ============
   if (view === 'lobby') {
-    const waiting = (match?.players?.length || 0) < 2;
+    const playerCount = match?.players?.length || 0;
+    const waiting = playerCount < 2;
     return (
       <div className="h-full overflow-y-auto">
         <div className="p-5 space-y-4 max-w-md mx-auto">
           <div className="text-center">
             <Users size={28} className="text-amber-500 mx-auto mb-2" />
-            <h2 className="text-lg font-bold text-gray-900 dark:text-white">Waiting for opponent</h2>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white">
+              {waiting ? 'Waiting for opponent' : (isHost ? 'Configure match' : 'Waiting for host')}
+            </h2>
           </div>
 
+          {error && <p className="text-xs text-rose-500 px-3 py-2 rounded-lg bg-rose-50 dark:bg-rose-900/15">{error}</p>}
+
+          {/* Invite code — always visible in lobby */}
           <div className="rounded-xl border border-gray-200 dark:border-[#2A2A40] p-4 text-center">
-            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Share this code</p>
+            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Invite code</p>
             <div className="flex items-center justify-center gap-2">
               <p className="text-3xl font-mono font-bold tracking-[0.3em] text-amber-600 dark:text-amber-400">{code}</p>
               <button onClick={() => { navigator.clipboard.writeText(code); }} className="p-1.5 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-gray-100 dark:hover:bg-[#1e1e2e]" title="Copy code">
                 <Copy size={14} />
               </button>
             </div>
+            <p className="text-[10px] text-gray-400 mt-2">
+              {waiting ? 'Send this to a friend so they can join' : 'Opponent joined — ready to configure'}
+            </p>
           </div>
 
+          {/* Player list */}
           <div className="space-y-2">
             {(match?.players || []).map(p => (
               <div key={p.userId} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white dark:bg-[#161622] border border-gray-200 dark:border-[#2A2A40]">
@@ -250,17 +265,59 @@ export default function QuizBowlMatch({ user, onExit }) {
             )}
           </div>
 
+          {/* Configure — only visible once both players are in, host only */}
+          {!waiting && isHost && (
+            <div className="rounded-xl border border-amber-200 dark:border-amber-800/60 bg-amber-50/30 dark:bg-amber-900/10 p-4 space-y-3">
+              <p className="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wider">Game settings</p>
+              <Selector label="Category" value={category} onChange={setCategory}
+                options={['Science','History','Literature','Geography','Math','Art','Music','Philosophy','Pop Culture','Mixed']} />
+              <Selector label="Difficulty" value={difficulty} onChange={setDifficulty}
+                options={['Easy','Medium','Hard','Tournament']} grid="grid-cols-4" />
+              <div>
+                <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">Questions: {questionCount}</label>
+                <input type="range" min="5" max="20" step="5" value={questionCount} onChange={e => setQuestionCount(Number(e.target.value))} className="w-full" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">
+                  Reading speed: {revealSpeedMs}ms/word <span className="text-gray-400">({revealSpeedMs <= 90 ? 'fast' : revealSpeedMs <= 160 ? 'normal' : 'slow'})</span>
+                </label>
+                <input type="range" min="60" max="300" step="10" value={revealSpeedMs} onChange={e => setRevealSpeedMs(Number(e.target.value))} className="w-full" />
+              </div>
+            </div>
+          )}
+
+          {!waiting && !isHost && (
+            <div className="rounded-xl border border-gray-200 dark:border-[#2A2A40] p-4 text-center text-xs text-gray-500">
+              Host is configuring the match. Questions will drop in shortly.
+            </div>
+          )}
+
           <div className="flex gap-2">
             <button onClick={handleLeave} className="flex-1 py-2.5 rounded-xl border border-gray-200 dark:border-[#2A2A40] text-sm font-medium text-gray-700 dark:text-gray-300 inline-flex items-center justify-center gap-1.5">
               <LogOut size={12} /> Leave
             </button>
             {isHost && (
               <button onClick={handleStart} disabled={waiting} className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white text-sm font-semibold inline-flex items-center justify-center gap-1.5">
-                <Play size={12} /> Start match
+                <Play size={12} /> Generate &amp; start
               </button>
             )}
           </div>
         </div>
+      </div>
+    );
+  }
+
+  // ============ GENERATING ============
+  if (view === 'generating') {
+    return (
+      <div className="h-full flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-14 h-14 rounded-2xl bg-amber-500/10 flex items-center justify-center mb-4">
+          <Loader2 size={26} className="animate-spin text-amber-500" />
+        </div>
+        <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-1">Generating questions…</h2>
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          {(match?.questionCount || questionCount)} {match?.category || category} · {match?.difficulty || difficulty}
+        </p>
       </div>
     );
   }

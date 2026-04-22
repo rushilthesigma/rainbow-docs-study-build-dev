@@ -3631,31 +3631,20 @@ function cleanupExpiredMatches() {
 }
 setInterval(cleanupExpiredMatches, 5 * 60 * 1000);
 
-// POST /api/quizbowl/match — create a new match with AI-generated questions.
-app.post('/api/quizbowl/match', authMiddleware, async (req, res) => {
+// POST /api/quizbowl/match — create an empty match (instant). Question
+// generation is deferred until /start so the host can configure the game
+// AFTER the opponent has joined.
+app.post('/api/quizbowl/match', authMiddleware, (req, res) => {
   try {
-    const { category = 'Mixed', difficulty = 'Medium', questionCount = 10, revealSpeedMs = 140 } = req.body || {};
     const users = loadUsers();
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
 
-    // Generate pyramidal questions via Gemini.
-    const sys = `You are a quiz bowl question writer. Write pyramidal tossup questions. Each question starts with obscure clues and progressively gets easier. Output ONLY valid JSON, no markdown.
-
-Format: {"questions":[{"text":"Full question text...","answer":"Answer"}]}`;
-    const userMsg = `Generate ${questionCount} pyramidal quiz bowl questions in category "${category}" at ${difficulty} difficulty. Return JSON: {"questions":[{"text":"...","answer":"..."}]}`;
-    const result = await callGemini(sys, [{ role: 'user', content: userMsg }], DEFAULT_MODEL, 4096);
-    if (!result.success) return res.status(500).json({ error: result.error || 'Question generation failed' });
-    const text = result.data.content?.[0]?.text || '';
-    let parsed;
-    try { parsed = JSON.parse(text); } catch { const m = text.match(/\{[\s\S]*\}/); if (m) try { parsed = JSON.parse(m[0]); } catch {} }
-    if (!parsed?.questions?.length) return res.status(500).json({ error: 'Failed to parse questions' });
-
     const code = newMatchCode();
     const match = {
       code,
-      state: 'waiting', // waiting | playing | reveal | finished
-      questions: parsed.questions,
+      state: 'waiting', // waiting | configuring | generating | playing | reveal | finished
+      questions: [],
       currentIdx: 0,
       questionStartedAt: null,
       buzzWinner: null,
@@ -3663,7 +3652,7 @@ Format: {"questions":[{"text":"Full question text...","answer":"Answer"}]}`;
       players: [{ userId: req.userId, name: users[email].name || email.split('@')[0], stream: null }],
       hostId: req.userId,
       scores: { [req.userId]: 0 },
-      category, difficulty, revealSpeedMs,
+      category: 'Mixed', difficulty: 'Medium', revealSpeedMs: 140,
       createdAt: Date.now(),
       lastActivity: Date.now(),
     };
@@ -3721,25 +3710,67 @@ app.get('/api/quizbowl/match/:code/stream', authMiddleware, (req, res) => {
   });
 });
 
-// POST /api/quizbowl/match/:code/start — host starts the match.
-app.post('/api/quizbowl/match/:code/start', authMiddleware, (req, res) => {
+// POST /api/quizbowl/match/:code/start — host configures + starts.
+// Accepts { category, difficulty, questionCount, revealSpeedMs }. Question
+// generation happens HERE (so no Gemini spend for matches that don't launch).
+app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => {
   const match = matches.get(req.params.code);
   if (!match) return res.status(404).json({ error: 'Match not found' });
   if (match.hostId !== req.userId) return res.status(403).json({ error: 'Only the host can start' });
   if (match.players.length < 2) return res.status(409).json({ error: 'Waiting for second player' });
-  match.state = 'playing';
-  match.currentIdx = 0;
-  match.questionStartedAt = Date.now();
-  match.buzzWinner = null;
-  match.buzzAt = null;
+  if (match.state === 'generating' || match.state === 'playing') {
+    return res.status(409).json({ error: 'Match already starting' });
+  }
+
+  const {
+    category = match.category || 'Mixed',
+    difficulty = match.difficulty || 'Medium',
+    questionCount = 10,
+    revealSpeedMs = match.revealSpeedMs || 140,
+  } = req.body || {};
+
+  // Persist settings + flip to "generating" so the opponent sees a spinner.
+  match.category = category;
+  match.difficulty = difficulty;
+  match.revealSpeedMs = revealSpeedMs;
+  match.state = 'generating';
   match.lastActivity = Date.now();
-  pushMatchEvent(match, 'question_start', {
-    idx: 0,
-    text: match.questions[0].text,
-    startedAt: match.questionStartedAt,
-    match: publicMatchState(match),
-  });
+  pushMatchEvent(match, 'generating', { match: publicMatchState(match) });
+
+  // Tell the client we're working even before the LLM returns.
   res.json({ ok: true });
+
+  try {
+    const sys = `You are a quiz bowl question writer. Write pyramidal tossup questions — each starts with obscure clues and progressively gets easier. Output ONLY valid JSON, no markdown.\n\nFormat: {"questions":[{"text":"Full question text...","answer":"Answer"}]}`;
+    const userMsg = `Generate ${questionCount} pyramidal quiz bowl questions in category "${category}" at ${difficulty} difficulty. Return JSON: {"questions":[{"text":"...","answer":"..."}]}`;
+    const result = await callGemini(sys, [{ role: 'user', content: userMsg }], DEFAULT_MODEL, 4096);
+    if (!result.success) throw new Error(result.error || 'Question generation failed');
+    const text = result.data.content?.[0]?.text || '';
+    let parsed;
+    try { parsed = JSON.parse(text); } catch { const m = text.match(/\{[\s\S]*\}/); if (m) try { parsed = JSON.parse(m[0]); } catch {} }
+    if (!parsed?.questions?.length) throw new Error('Failed to parse questions');
+
+    // Double-check the match still exists — someone may have left during gen.
+    if (!matches.has(match.code)) return;
+    match.questions = parsed.questions;
+    match.currentIdx = 0;
+    match.state = 'playing';
+    match.questionStartedAt = Date.now();
+    match.buzzWinner = null;
+    match.buzzAt = null;
+    match.lastActivity = Date.now();
+    pushMatchEvent(match, 'question_start', {
+      idx: 0,
+      text: match.questions[0].text,
+      startedAt: match.questionStartedAt,
+      match: publicMatchState(match),
+    });
+  } catch (e) {
+    console.error('match start/generate failed', e);
+    match.state = 'waiting';
+    match.lastActivity = Date.now();
+    pushMatchEvent(match, 'start_failed', { error: e.message, match: publicMatchState(match) });
+  }
 });
 
 // POST /api/quizbowl/match/:code/buzz — atomic; first-in wins.

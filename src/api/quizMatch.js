@@ -5,7 +5,10 @@ export const createMatch = (opts) => apiFetch('/api/quizbowl/match', {
   body: JSON.stringify(opts || {}),
 });
 export const joinMatch = (code) => apiFetch(`/api/quizbowl/match/${code}/join`, { method: 'POST' });
-export const startMatch = (code) => apiFetch(`/api/quizbowl/match/${code}/start`, { method: 'POST' });
+export const startMatch = (code, settings) => apiFetch(`/api/quizbowl/match/${code}/start`, {
+  method: 'POST',
+  body: JSON.stringify(settings || {}),
+});
 export const buzzMatch = (code) => apiFetch(`/api/quizbowl/match/${code}/buzz`, { method: 'POST' });
 export const answerMatch = (code, answer) => apiFetch(`/api/quizbowl/match/${code}/answer`, {
   method: 'POST',
@@ -46,6 +49,8 @@ export function streamMatch(code, handlers) {
             const t = data.type;
             if (t === 'snapshot') handlers.onSnapshot?.(data.match);
             else if (t === 'player_joined') handlers.onPlayerJoined?.(data.match);
+            else if (t === 'generating') handlers.onGenerating?.(data.match);
+            else if (t === 'start_failed') handlers.onStartFailed?.(data);
             else if (t === 'question_start') handlers.onQuestionStart?.(data);
             else if (t === 'buzz') handlers.onBuzz?.(data);
             else if (t === 'answer_result') handlers.onAnswerResult?.(data);
