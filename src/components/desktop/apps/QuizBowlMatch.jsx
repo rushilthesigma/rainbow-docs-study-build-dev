@@ -193,7 +193,7 @@ export default function QuizBowlMatch({ user, onExit }) {
   // ============ MENU ============
   if (view === 'menu') {
     return (
-      <div className="h-full overflow-y-auto">
+      <div className="h-full overflow-y-auto bg-white dark:bg-[#161622]">
         <div className="p-5 space-y-5 max-w-md mx-auto">
           <div className="text-center">
             <Users size={28} className="text-amber-500 mx-auto mb-2" />
@@ -238,7 +238,7 @@ export default function QuizBowlMatch({ user, onExit }) {
     const playerCount = match?.players?.length || 0;
     const waiting = playerCount < 2;
     return (
-      <div className="h-full overflow-y-auto">
+      <div className="h-full overflow-y-auto bg-white dark:bg-[#161622]">
         <div className="p-5 space-y-4 max-w-md mx-auto">
           <div className="text-center">
             <Users size={28} className="text-amber-500 mx-auto mb-2" />
@@ -327,7 +327,7 @@ export default function QuizBowlMatch({ user, onExit }) {
   // ============ GENERATING ============
   if (view === 'generating') {
     return (
-      <div className="h-full flex flex-col items-center justify-center p-6 text-center">
+      <div className="h-full flex flex-col items-center justify-center p-6 text-center bg-white dark:bg-[#161622]">
         <div className="w-14 h-14 rounded-2xl bg-amber-500/10 flex items-center justify-center mb-4">
           <Loader2 size={26} className="animate-spin text-amber-500" />
         </div>
@@ -358,7 +358,7 @@ export default function QuizBowlMatch({ user, onExit }) {
     const winner = sorted[0];
     const amIWinner = winner?.userId === myId;
     return (
-      <div className="h-full overflow-y-auto">
+      <div className="h-full overflow-y-auto bg-white dark:bg-[#161622]">
         <div className="p-5 space-y-5 max-w-md mx-auto text-center">
           <Trophy size={40} className={`mx-auto ${amIWinner ? 'text-amber-500' : 'text-gray-400'}`} />
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
@@ -379,21 +379,30 @@ export default function QuizBowlMatch({ user, onExit }) {
     );
   }
 
-  return <div className="p-5 text-center text-sm text-gray-400"><Loader2 size={14} className="animate-spin inline mr-1" /> Loading…</div>;
+  return <div className="h-full flex items-center justify-center text-sm text-gray-400 bg-white dark:bg-[#161622]"><Loader2 size={14} className="animate-spin inline mr-1" /> Loading…</div>;
 }
 
 // ===== PLAYING VIEW =====
 function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, onBuzz, onSubmitAnswer, onNext, onLeave, iBuzzed, isHost, myId, lockedOut = [], wrongFlash, revealSpeedMs }) {
   const frozen = !!buzz || !!answerResult;
   const frozenAt = buzz?.buzzAt || answerResult?.buzzAt || null;
+  // ALL hooks must be called before any early return — otherwise React will
+  // unmount the tree and the screen can go black on the next render.
   const { revealed, wordIndex, totalWords } = useWordReveal(question?.text || '', question?.startedAt || 0, revealSpeedMs, frozen, frozenAt);
 
-  const buzzerName = buzz ? (match.players.find(p => p.userId === buzz.userId)?.name || 'Opponent') : '';
-  const wrongName = wrongFlash ? (match.players.find(p => p.userId === wrongFlash.userId)?.name || 'Opponent') : '';
+  // Question can briefly be null after the snapshot/before question_start —
+  // render a neutral placeholder instead of crashing on `match.players`.
+  if (!match || !Array.isArray(match.players)) {
+    return <div className="p-5 text-center text-sm text-gray-400 bg-white dark:bg-[#0D0D14] h-full"><Loader2 size={14} className="animate-spin inline mr-1" /> Loading match…</div>;
+  }
+
+  const players = match.players || [];
+  const buzzerName = buzz ? (players.find(p => p.userId === buzz.userId)?.name || 'Opponent') : '';
+  const wrongName = wrongFlash ? (players.find(p => p.userId === wrongFlash.userId)?.name || 'Opponent') : '';
   const iAmLocked = lockedOut.includes(myId);
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0 bg-gray-50 dark:bg-[#0D0D14]">
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-200 dark:border-[#2A2A40] flex-shrink-0 bg-white dark:bg-[#161622]">
         <Zap size={14} className="text-amber-500" />
