@@ -3643,7 +3643,7 @@ function scheduleQuestionTimeout(match) {
   if (!q) return;
   const words = (q.text || '').split(/\s+/).filter(Boolean).length || 1;
   const speed = match.revealSpeedMs || 140;
-  const graceMs = 10000; // 10s after full read
+  const graceMs = 5000; // 5s after full read
   const totalMs = words * speed + graceMs;
   match.questionTimeoutId = setTimeout(() => {
     if (!matches.has(match.code)) return;
