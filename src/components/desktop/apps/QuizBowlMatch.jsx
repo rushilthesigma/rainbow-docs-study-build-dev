@@ -80,7 +80,9 @@ export default function QuizBowlMatch({ user, onExit }) {
   const [question, setQuestion] = useState(null); // { text, startedAt }
   const [buzz, setBuzz] = useState(null);         // { userId, buzzAt } | null
   const [answer, setAnswer] = useState('');
-  const [answerResult, setAnswerResult] = useState(null); // { userId, correct, answer, correctAnswer }
+  const [answerResult, setAnswerResult] = useState(null); // { userId, correct, answer, correctAnswer, autoAdvanceInMs? }
+  // Date.now() when the question will auto-advance. null if host must manually advance.
+  const [autoAdvanceDeadline, setAutoAdvanceDeadline] = useState(null);
   // Set of userIds locked out of buzzing on the CURRENT question (they
   // already tried and got it wrong). Resets when question_start fires.
   const [lockedOut, setLockedOut] = useState([]);
@@ -123,6 +125,7 @@ export default function QuizBowlMatch({ user, onExit }) {
         setBuzz(null);
         setAnswer('');
         setAnswerResult(null);
+        setAutoAdvanceDeadline(null);
         setLockedOut([]);
         setWrongFlash(null);
         setView('playing');
@@ -139,6 +142,7 @@ export default function QuizBowlMatch({ user, onExit }) {
       },
       onAnswerResult: (data) => {
         setAnswerResult(data);
+        setAutoAdvanceDeadline(data.autoAdvanceInMs ? Date.now() + data.autoAdvanceInMs : null);
         setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: data.scores[p.userId] || 0 })) } : prev);
       },
       onMatchEnd: ({ scores }) => {
@@ -386,6 +390,7 @@ export default function QuizBowlMatch({ user, onExit }) {
       onLeave={handleLeave}
       iBuzzed={iBuzzed} isHost={isHost} myId={myId}
       lockedOut={lockedOut} wrongFlash={wrongFlash}
+      autoAdvanceDeadline={autoAdvanceDeadline}
       revealSpeedMs={match.revealSpeedMs || 140}
     />;
   }
@@ -421,7 +426,7 @@ export default function QuizBowlMatch({ user, onExit }) {
 }
 
 // ===== PLAYING VIEW =====
-function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, onBuzz, onSubmitAnswer, onNext, onLeave, iBuzzed, isHost, myId, lockedOut = [], wrongFlash, revealSpeedMs }) {
+function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, onBuzz, onSubmitAnswer, onNext, onLeave, iBuzzed, isHost, myId, lockedOut = [], wrongFlash, autoAdvanceDeadline, revealSpeedMs }) {
   const frozen = !!buzz || !!answerResult;
   const frozenAt = buzz?.buzzAt || answerResult?.buzzAt || null;
   // ALL hooks must be called before any early return — otherwise React will
@@ -510,21 +515,52 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
 
         {answerResult && (
           <>
-            <div className={`p-3 rounded-xl text-center ${answerResult.correct ? 'bg-emerald-500/10 border-2 border-emerald-500' : 'bg-rose-500/10 border-2 border-rose-500'}`}>
-              <p className={`text-sm font-bold ${answerResult.correct ? 'text-emerald-600' : 'text-rose-600'}`}>
+            <div className={`p-3 rounded-xl text-center ${answerResult.correct ? 'bg-emerald-500/10 border-2 border-emerald-500' : answerResult.timeout || !answerResult.userId ? 'bg-gray-100 dark:bg-[#1e1e2e] border-2 border-gray-300 dark:border-[#2A2A40]' : 'bg-rose-500/10 border-2 border-rose-500'}`}>
+              <p className={`text-sm font-bold ${answerResult.correct ? 'text-emerald-600' : answerResult.timeout || !answerResult.userId ? 'text-gray-600 dark:text-gray-300' : 'text-rose-600'}`}>
                 {answerResult.correct
                   ? (answerResult.userId === myId ? 'CORRECT — +1' : `${buzzerName} got it`)
-                  : (answerResult.userId === myId ? 'WRONG' : `${buzzerName} was wrong`)}
+                  : (answerResult.timeout || !answerResult.userId)
+                    ? "No one got it"
+                    : (answerResult.userId === myId ? 'WRONG' : `${buzzerName} was wrong`)}
               </p>
               <p className="text-xs text-gray-700 dark:text-gray-300 mt-1">Answer: <strong>{answerResult.correctAnswer}</strong></p>
             </div>
-            {isHost ? (
-              <button onClick={onNext} className="w-full py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold">Next question →</button>
-            ) : (
-              <p className="text-[11px] text-center text-gray-400">Waiting for host to advance…</p>
-            )}
+            <AutoAdvanceCountdown deadline={autoAdvanceDeadline} isHost={isHost} onNext={onNext} />
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Live countdown until the server auto-advances. Refreshes every 100ms.
+// `deadline` is a Date.now() timestamp; when it passes, we stop ticking and
+// the server-pushed question_start event will drop us into the next question.
+function AutoAdvanceCountdown({ deadline, isHost, onNext }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!deadline) return;
+    const id = setInterval(() => setNow(Date.now()), 100);
+    return () => clearInterval(id);
+  }, [deadline]);
+  if (!deadline) {
+    return isHost
+      ? <button onClick={onNext} className="w-full py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold">Next question →</button>
+      : <p className="text-[11px] text-center text-gray-400">Waiting for host to advance…</p>;
+  }
+  const msLeft = Math.max(0, deadline - now);
+  const secondsLeft = Math.ceil(msLeft / 1000);
+  const pct = Math.max(0, Math.min(100, (msLeft / 5000) * 100));
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400">
+        <span>Next question in <strong className="text-gray-900 dark:text-white tabular-nums">{secondsLeft}s</strong></span>
+        {isHost && (
+          <button onClick={onNext} className="text-blue-500 hover:text-blue-600 font-medium">Skip →</button>
+        )}
+      </div>
+      <div className="h-1 rounded-full bg-gray-200 dark:bg-[#2A2A40] overflow-hidden">
+        <div className="h-full bg-blue-500 transition-all duration-100" style={{ width: `${pct}%` }} />
       </div>
     </div>
   );
