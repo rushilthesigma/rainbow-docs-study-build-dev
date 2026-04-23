@@ -3605,6 +3605,73 @@ function pushMatchEvent(match, type, payload) {
   }
 }
 
+// Advance to next question (or end match). Used by host /next endpoint
+// AND by the auto-advance timer that fires 5s after any reveal state.
+function advanceMatchToNextQuestion(match) {
+  if (match.revealTimeoutId) { clearTimeout(match.revealTimeoutId); match.revealTimeoutId = null; }
+  if (match.questionTimeoutId) { clearTimeout(match.questionTimeoutId); match.questionTimeoutId = null; }
+  const nextIdx = match.currentIdx + 1;
+  if (nextIdx >= match.questions.length) {
+    match.state = 'finished';
+    match.lastActivity = Date.now();
+    pushMatchEvent(match, 'match_end', { scores: match.scores });
+    return;
+  }
+  match.currentIdx = nextIdx;
+  match.state = 'playing';
+  match.questionStartedAt = Date.now();
+  match.buzzWinner = null;
+  match.buzzAt = null;
+  match.lockedOutForQ = {};
+  match.lastActivity = Date.now();
+  pushMatchEvent(match, 'question_start', {
+    idx: nextIdx,
+    text: match.questions[nextIdx].text,
+    startedAt: match.questionStartedAt,
+    match: publicMatchState(match),
+  });
+  scheduleQuestionTimeout(match);
+}
+
+// Server-side "time's up" for the current question. If no correct answer
+// comes in by the time the question has been fully read + a grace period,
+// reveal the answer and auto-advance. This is what the user means by
+// "at the end of the question, everyone shouldn't have to buzz wrong to move on."
+function scheduleQuestionTimeout(match) {
+  if (match.questionTimeoutId) clearTimeout(match.questionTimeoutId);
+  const q = match.questions[match.currentIdx];
+  if (!q) return;
+  const words = (q.text || '').split(/\s+/).filter(Boolean).length || 1;
+  const speed = match.revealSpeedMs || 140;
+  const graceMs = 10000; // 10s after full read
+  const totalMs = words * speed + graceMs;
+  match.questionTimeoutId = setTimeout(() => {
+    if (!matches.has(match.code)) return;
+    if (match.state !== 'playing') return; // already in reveal or advanced
+    match.state = 'reveal';
+    match.lastActivity = Date.now();
+    pushMatchEvent(match, 'answer_result', {
+      userId: null,
+      correct: false,
+      answer: '',
+      correctAnswer: q.answer,
+      scores: match.scores,
+      timeout: true,
+      autoAdvanceInMs: 5000,
+    });
+    scheduleAutoAdvance(match, 5000);
+  }, totalMs);
+}
+
+function scheduleAutoAdvance(match, delayMs = 5000) {
+  if (match.revealTimeoutId) clearTimeout(match.revealTimeoutId);
+  match.revealTimeoutId = setTimeout(() => {
+    if (!matches.has(match.code)) return;
+    if (match.state !== 'reveal') return; // host already advanced
+    advanceMatchToNextQuestion(match);
+  }, delayMs);
+}
+
 function publicMatchState(match) {
   return {
     code: match.code,
@@ -3782,6 +3849,7 @@ Exact format:
       startedAt: match.questionStartedAt,
       match: publicMatchState(match),
     });
+    scheduleQuestionTimeout(match);
   } catch (e) {
     console.error('match start/generate failed', e);
     match.state = 'waiting';
@@ -3801,6 +3869,8 @@ app.post('/api/quizbowl/match/:code/buzz', authMiddleware, (req, res) => {
   match.buzzWinner = req.userId;
   match.buzzAt = Date.now();
   match.lastActivity = Date.now();
+  // Pause the "question end" timeout while the buzzer decides on an answer.
+  if (match.questionTimeoutId) { clearTimeout(match.questionTimeoutId); match.questionTimeoutId = null; }
   pushMatchEvent(match, 'buzz', { userId: req.userId, buzzAt: match.buzzAt });
   res.json({ ok: true, buzzAt: match.buzzAt });
 });
@@ -3831,33 +3901,31 @@ app.post('/api/quizbowl/match/:code/answer', authMiddleware, (req, res) => {
     || c.split(/[\s,]+/).some(w => w.length > 2 && (a.includes(w) || lev(a, w) <= 1)));
 
   if (correct) {
-    // Correct: question ends, score awarded, host advances next.
+    // Correct: question ends. Score awarded. Auto-advance in 5s.
     match.scores[req.userId] = (match.scores[req.userId] || 0) + 1;
     match.state = 'reveal';
     match.lastActivity = Date.now();
     pushMatchEvent(match, 'answer_result', {
       userId: req.userId, correct: true, answer, correctAnswer,
-      scores: match.scores,
+      scores: match.scores, autoAdvanceInMs: 5000,
     });
+    scheduleAutoAdvance(match, 5000);
   } else {
-    // Wrong: lock out this player for the REST of the current question,
-    // clear the buzz, and RESUME reading for the other player. We shift
-    // `questionStartedAt` forward by the paused duration so the reveal
-    // picks up from where it was when they buzzed.
+    // Wrong: lock out this player, give the other a second chance.
     if (!match.lockedOutForQ) match.lockedOutForQ = {};
     match.lockedOutForQ[req.userId] = true;
     const pausedMs = Date.now() - (match.buzzAt || Date.now());
     match.questionStartedAt = (match.questionStartedAt || Date.now()) + pausedMs;
     const stillPlaying = match.players.filter(p => !match.lockedOutForQ[p.userId]);
-
-    // If both players are locked out, nobody can answer — reveal answer, move on.
     if (stillPlaying.length === 0) {
+      // Everyone locked out → question over, auto-advance.
       match.state = 'reveal';
       match.lastActivity = Date.now();
       pushMatchEvent(match, 'answer_result', {
         userId: req.userId, correct: false, answer, correctAnswer,
-        scores: match.scores, finalMiss: true,
+        scores: match.scores, finalMiss: true, autoAdvanceInMs: 5000,
       });
+      scheduleAutoAdvance(match, 5000);
     } else {
       match.buzzWinner = null;
       match.buzzAt = null;
@@ -3868,6 +3936,8 @@ app.post('/api/quizbowl/match/:code/answer', authMiddleware, (req, res) => {
         lockedOut: Object.keys(match.lockedOutForQ),
         questionStartedAt: match.questionStartedAt,
       });
+      // Resume the end-of-question timeout for the remaining player(s).
+      scheduleQuestionTimeout(match);
     }
   }
   res.json({ ok: true, correct });
@@ -3878,28 +3948,8 @@ app.post('/api/quizbowl/match/:code/next', authMiddleware, (req, res) => {
   const match = matches.get(req.params.code);
   if (!match) return res.status(404).json({ error: 'Match not found' });
   if (match.hostId !== req.userId) return res.status(403).json({ error: 'Only the host can advance' });
-
-  const nextIdx = match.currentIdx + 1;
-  if (nextIdx >= match.questions.length) {
-    match.state = 'finished';
-    match.lastActivity = Date.now();
-    pushMatchEvent(match, 'match_end', { scores: match.scores });
-    return res.json({ ok: true, finished: true });
-  }
-  match.currentIdx = nextIdx;
-  match.state = 'playing';
-  match.questionStartedAt = Date.now();
-  match.buzzWinner = null;
-  match.buzzAt = null;
-  match.lockedOutForQ = {};
-  match.lastActivity = Date.now();
-  pushMatchEvent(match, 'question_start', {
-    idx: nextIdx,
-    text: match.questions[nextIdx].text,
-    startedAt: match.questionStartedAt,
-    match: publicMatchState(match),
-  });
-  res.json({ ok: true });
+  advanceMatchToNextQuestion(match);
+  res.json({ ok: true, finished: match.state === 'finished' });
 });
 
 // POST /api/quizbowl/match/:code/leave — graceful exit.
