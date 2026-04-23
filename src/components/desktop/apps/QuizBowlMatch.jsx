@@ -7,19 +7,54 @@ import {
 
 // Client-side word-by-word reveal: compute from `startedAt` timestamp so
 // both players render identically, no polling required.
+//
+// Uses refs for frozen/frozenAt so the interval callback reads the latest
+// value (no stale closure). When frozen flips true, we LOCK the displayed
+// word index at the word that was visible at `frozenAt` and never move it
+// forward again until a new startedAt arrives (next question or resume).
 function useWordReveal(text, startedAt, speedMs, frozen, frozenAt) {
-  const words = text ? text.split(/\s+/) : [];
-  const [now, setNow] = useState(() => Date.now());
+  const [, setTick] = useState(0);
+  const frozenRef = useRef(frozen);
+  const frozenAtRef = useRef(frozenAt);
+  const lockedIdxRef = useRef(null); // when frozen, the word index to pin at
+
+  // Keep refs in sync with props.
   useEffect(() => {
-    if (!text || frozen) return;
-    const tick = () => setNow(Date.now());
-    const id = setInterval(tick, 50);
+    frozenRef.current = frozen;
+    frozenAtRef.current = frozenAt;
+    if (!frozen) lockedIdxRef.current = null; // resume → recompute every tick
+  }, [frozen, frozenAt]);
+
+  // Drive re-renders while actively reading. When frozen goes true, the
+  // interval callback short-circuits so `now` never advances the display.
+  useEffect(() => {
+    if (!text) return;
+    const id = setInterval(() => {
+      if (frozenRef.current) return;
+      setTick(t => (t + 1) | 0);
+    }, 50);
     return () => clearInterval(id);
-  }, [text, frozen, startedAt]);
+  }, [text, startedAt]);
+
   if (!text) return { revealed: '', wordIndex: 0, totalWords: 0, done: false };
-  const clock = frozen ? (frozenAt || now) : now;
-  const elapsed = Math.max(0, clock - (startedAt || clock));
-  const idx = Math.min(words.length - 1, Math.floor(elapsed / speedMs));
+  const words = text.split(/\s+/);
+  const start = startedAt || Date.now();
+
+  // When frozen, lock the index to what it was at frozenAt. If frozenAt is
+  // missing, lock to whatever it is right now.
+  let idx;
+  if (frozen) {
+    if (lockedIdxRef.current == null) {
+      const pinClock = frozenAt || Date.now();
+      const e = Math.max(0, pinClock - start);
+      lockedIdxRef.current = Math.min(words.length - 1, Math.floor(e / speedMs));
+    }
+    idx = lockedIdxRef.current;
+  } else {
+    const elapsed = Math.max(0, Date.now() - start);
+    idx = Math.min(words.length - 1, Math.floor(elapsed / speedMs));
+  }
+
   return {
     revealed: words.slice(0, idx + 1).join(' '),
     wordIndex: idx, totalWords: words.length,
