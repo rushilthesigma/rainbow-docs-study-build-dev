@@ -300,6 +300,8 @@ function createDefaultData() {
     studySessions: [],
     assessmentHistory: [],
     lessons: [],
+    gems: [],                     // custom user-defined AI assistants
+
     // ----- Billing / plan state -----
     plan: 'free',                 // 'free' | 'pro'
     proUntil: null,               // ISO string or null — when paid sub expires; null = untimed (admin grant / owner)
@@ -2309,6 +2311,151 @@ app.get('/api/assessment/history', authMiddleware, (req, res) => {
     if (!email) return res.status(404).json({ error: 'User not found' });
     res.json({ history: users[email].data?.assessmentHistory || [] });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== GEMS (custom user-defined AI assistants) =====
+// Each gem is a named assistant with a saved system prompt + icon + color.
+// Persistent chat per gem. Used for things like "Essay Editor", "Interview
+// Coach", "Debate Partner" — whatever the student dreams up.
+app.get('/api/gems', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    // Strip chatHistory from list payload to keep it small.
+    const list = (users[email].data.gems || []).map(g => ({
+      ...g, chatHistory: undefined, messageCount: (g.chatHistory || []).length,
+    }));
+    res.json({ gems: list });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/gems', authMiddleware, (req, res) => {
+  try {
+    const { name, description, instructions, icon, color } = req.body || {};
+    if (!name?.trim() || !instructions?.trim()) {
+      return res.status(400).json({ error: 'Name and instructions are required' });
+    }
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const gem = {
+      id: crypto.randomUUID(),
+      name: name.trim().slice(0, 60),
+      description: (description || '').trim().slice(0, 200),
+      instructions: instructions.trim().slice(0, 4000),
+      icon: icon || 'Sparkles',
+      color: color || 'violet',
+      chatHistory: [],
+      createdAt: new Date().toISOString(),
+    };
+    users[email].data.gems.unshift(gem);
+    saveUsers(users);
+    res.json({ gem });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/gems/:id', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const gem = (users[email].data.gems || []).find(g => g.id === req.params.id);
+    if (!gem) return res.status(404).json({ error: 'Gem not found' });
+    const { name, description, instructions, icon, color } = req.body || {};
+    if (name !== undefined) gem.name = String(name).slice(0, 60);
+    if (description !== undefined) gem.description = String(description).slice(0, 200);
+    if (instructions !== undefined) gem.instructions = String(instructions).slice(0, 4000);
+    if (icon !== undefined) gem.icon = icon;
+    if (color !== undefined) gem.color = color;
+    saveUsers(users);
+    res.json({ gem });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/gems/:id', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    users[email].data.gems = (users[email].data.gems || []).filter(g => g.id !== req.params.id);
+    saveUsers(users);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/gems/:id/history', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const gem = (users[email].data.gems || []).find(g => g.id === req.params.id);
+    if (!gem) return res.status(404).json({ error: 'Gem not found' });
+    res.json({ gem: { ...gem }, chatHistory: gem.chatHistory || [] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/gems/:id/reset', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const gem = (users[email].data.gems || []).find(g => g.id === req.params.id);
+    if (!gem) return res.status(404).json({ error: 'Gem not found' });
+    gem.chatHistory = [];
+    saveUsers(users);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/gems/:id/chat', authMiddleware, requireMessageQuota, async (req, res) => {
+  try {
+    const { message, sourced } = req.body || {};
+    if (!message?.trim()) return res.status(400).json({ error: 'Message required' });
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const gem = (users[email].data.gems || []).find(g => g.id === req.params.id);
+    if (!gem) return res.status(404).json({ error: 'Gem not found' });
+
+    // Append user turn, persist immediately so history is consistent if the
+    // stream is interrupted.
+    if (!Array.isArray(gem.chatHistory)) gem.chatHistory = [];
+    gem.chatHistory.push({ role: 'user', content: message, timestamp: new Date().toISOString() });
+    saveUsers(users);
+
+    const system = `You are "${gem.name}", a custom AI assistant. Follow these instructions exactly:\n\n${gem.instructions}\n\nStay in character. Use markdown where helpful.`;
+    const history = gem.chatHistory.slice(-30).map(m => ({ role: m.role, content: m.content }));
+    const model = modelForUser(users[email], email);
+
+    await streamAIResponse(
+      res, system, history,
+      (fullContent, sources) => {
+        const after = loadUsers();
+        const g = (after[email]?.data?.gems || []).find(x => x.id === gem.id);
+        if (g) {
+          if (!Array.isArray(g.chatHistory)) g.chatHistory = [];
+          const msg = { role: 'assistant', content: fullContent, timestamp: new Date().toISOString() };
+          if (sources?.length) msg.sources = sources;
+          g.chatHistory.push(msg);
+          saveUsers(after);
+        }
+      },
+      model,
+      { enableWebSearch: !!sourced },
+    );
+  } catch (e) {
+    console.error('Gem chat error:', e);
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+    else { res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`); res.end(); }
+  }
 });
 
 // ===== PROFILE =====
