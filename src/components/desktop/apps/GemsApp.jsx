@@ -355,7 +355,7 @@ export default function GemsApp() {
       {gems.length === 0 ? (
         <div className="space-y-4">
           <div className="text-center py-6">
-            <Gem size={28} className="text-violet-500 mx-auto mb-3" />
+            <Brain size={28} className="text-violet-500 mx-auto mb-3" />
             <p className="text-sm text-gray-500 mb-1">No minds yet.</p>
             <p className="text-xs text-gray-400">Pick a template to start, or build one from scratch.</p>
           </div>
