@@ -4,7 +4,7 @@ const APP_REGISTRY = [
   { id: 'curricula', label: 'Curricula', icon: BookOpen, color: '#3b82f6', gradient: 'from-blue-500 to-blue-700' },
   { id: 'lessons', label: 'Lessons', icon: Lightbulb, color: '#eab308', gradient: 'from-yellow-400 to-amber-600' },
   { id: 'study', label: 'Study Mode', icon: MessageSquare, color: '#3b82f6', gradient: 'from-sky-400 to-blue-600' },
-  { id: 'gems', label: 'Gems', icon: Gem, color: '#8b5cf6', gradient: 'from-violet-500 to-purple-600' },
+  { id: 'gems', label: 'Minds', icon: Gem, color: '#8b5cf6', gradient: 'from-violet-500 to-purple-600' },
   { id: 'flashcards', label: 'Flashcards', icon: Layers, color: '#a855f7', gradient: 'from-purple-500 to-purple-700' },
   { id: 'notes', label: 'Notes', icon: FileText, color: '#10b981', gradient: 'from-emerald-400 to-emerald-600' },
   { id: 'goals', label: 'Goals', icon: Target, color: '#f59e0b', gradient: 'from-amber-400 to-orange-500' },

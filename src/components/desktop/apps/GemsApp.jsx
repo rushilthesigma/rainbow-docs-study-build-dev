@@ -144,7 +144,7 @@ export default function GemsApp() {
 
   async function handleDelete(id, e) {
     e?.stopPropagation();
-    if (!confirm('Delete this gem and its chat?')) return;
+    if (!confirm('Delete this mind and its chat?')) return;
     try {
       await deleteGem(id);
       setGems(prev => prev.filter(g => g.id !== id));
@@ -202,7 +202,7 @@ export default function GemsApp() {
 
   async function handleReset() {
     if (!activeGem) return;
-    if (!confirm('Clear this gem\u2019s chat?')) return;
+    if (!confirm('Clear this mind\u2019s chat?')) return;
     try {
       await resetGemChat(activeGem.id);
       setMessages([]);
@@ -247,7 +247,7 @@ export default function GemsApp() {
         <button onClick={() => setView(view === 'edit' ? 'chat' : 'list')} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 mb-4">
           <ArrowLeft size={16} /> Back
         </button>
-        <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-1">{view === 'edit' ? 'Edit gem' : 'New gem'}</h2>
+        <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-1">{view === 'edit' ? 'Edit mind' : 'New mind'}</h2>
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
           Give your assistant a name, a personality, and a task. The instructions become its system prompt.
         </p>
@@ -326,7 +326,7 @@ export default function GemsApp() {
               onClick={view === 'edit' ? saveEdit : saveNew}
               disabled={!form.name.trim() || !form.instructions.trim() || saving}
             >
-              {saving ? <><Loader2 size={14} className="animate-spin" /> Saving</> : <>{view === 'edit' ? 'Save changes' : 'Create gem'}</>}
+              {saving ? <><Loader2 size={14} className="animate-spin" /> Saving</> : <>{view === 'edit' ? 'Save changes' : 'Create mind'}</>}
             </Button>
             {view === 'edit' && (
               <Button variant="secondary" onClick={(e) => handleDelete(activeGem.id, e)}>
@@ -346,17 +346,17 @@ export default function GemsApp() {
     <div>
       <div className="flex items-center justify-between mb-5">
         <div>
-          <h2 className="text-lg font-bold text-gray-900 dark:text-white">Gems</h2>
+          <h2 className="text-lg font-bold text-gray-900 dark:text-white">Minds</h2>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Custom AI assistants you build yourself.</p>
         </div>
-        <Button size="sm" onClick={() => openNew()}><Plus size={14} /> New Gem</Button>
+        <Button size="sm" onClick={() => openNew()}><Plus size={14} /> New Mind</Button>
       </div>
 
       {gems.length === 0 ? (
         <div className="space-y-4">
           <div className="text-center py-6">
             <Gem size={28} className="text-violet-500 mx-auto mb-3" />
-            <p className="text-sm text-gray-500 mb-1">No gems yet.</p>
+            <p className="text-sm text-gray-500 mb-1">No minds yet.</p>
             <p className="text-xs text-gray-400">Pick a template to start, or build one from scratch.</p>
           </div>
           <div className="grid sm:grid-cols-2 gap-2">
@@ -424,7 +424,7 @@ export default function GemsApp() {
               onClick={() => openNew()}
               className="w-full text-xs text-gray-400 hover:text-blue-500 py-2 rounded-lg border border-dashed border-gray-200 dark:border-[#2A2A40] hover:border-blue-300"
             >
-              + New gem
+              + New mind
             </button>
           </div>
         </div>
