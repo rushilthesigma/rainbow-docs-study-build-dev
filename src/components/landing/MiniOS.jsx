@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { AuthContext } from '../../context/AuthContext';
 import { WindowManagerProvider } from '../../context/WindowManagerContext';
+import { DemoModeProvider } from '../../context/DemoModeContext';
 import { setToken } from '../../api/client';
 import { devLogin } from '../../api/auth';
 import AppWindow from '../desktop/AppWindow';
@@ -129,6 +130,7 @@ export default function MiniOS() {
 
       {/* ========== App viewport — the REAL AppWindow runs here ========== */}
       <DemoAuthProvider>
+      <DemoModeProvider>
         <WindowManagerProvider>
           <div
             className="relative bg-gradient-to-br from-slate-200 via-blue-100 to-indigo-200 dark:from-[#0a0a12] dark:via-[#10101c] dark:to-[#161622]"
@@ -144,6 +146,7 @@ export default function MiniOS() {
             </div>
           </div>
         </WindowManagerProvider>
+      </DemoModeProvider>
       </DemoAuthProvider>
 
       {/* ========== Dock — spans full width below the app ========== */}

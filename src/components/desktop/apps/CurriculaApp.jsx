@@ -3,6 +3,7 @@ import { ArrowLeft, Plus, Sparkles, Loader2, BookOpen, ChevronDown, ChevronRight
 import { listCurricula, generateCurriculum, getCurriculum, sendLessonMessage, getLessonHistory, editCurriculumWithAI } from '../../../api/curriculum';
 import { apiFetch } from '../../../api/client';
 import { useWindowManager } from '../../../context/WindowManagerContext';
+import { useDemoMode } from '../../../context/DemoModeContext';
 import { DEFAULT_SETTINGS, DIFFICULTY_OPTIONS, LEARNING_STYLE_OPTIONS } from '../../../utils/constants';
 import Button from '../../shared/Button';
 import Input from '../../shared/Input';
@@ -29,6 +30,7 @@ export default function CurriculaApp() {
   // just skip the math-tutor handoff rather than crashing.
   let wm = null;
   try { wm = useWindowManager(); } catch {}
+  const isDemo = useDemoMode();
 
   // Browser Back navigates up one level inside the curriculum stack instead
   // of leaving the SPA. lesson → detail → list.
@@ -313,12 +315,14 @@ export default function CurriculaApp() {
           <div className="flex flex-col items-center justify-center py-16 px-4">
             <Loader2 size={32} className="animate-spin text-blue-500 mb-4" />
             <p className="text-sm text-gray-500 mb-5">Generating <span className="font-medium text-gray-700 dark:text-gray-300">{settings.topic}</span>...</p>
-            <div className="max-w-sm text-center rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-4 py-3">
-              <p className="text-[12px] font-semibold text-amber-800 dark:text-amber-300 mb-0.5">Please don&apos;t leave the app.</p>
-              <p className="text-[11px] text-amber-700 dark:text-amber-400">
-                Full curriculum generation takes 20–40 seconds. Switching tabs or closing this window will cancel the request.
-              </p>
-            </div>
+            {isDemo && (
+              <div className="max-w-sm text-center rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-4 py-3">
+                <p className="text-[12px] font-semibold text-amber-800 dark:text-amber-300 mb-0.5">Please don&apos;t leave the app.</p>
+                <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                  Full curriculum generation takes 20–40 seconds. Switching tabs or closing this window will cancel the request.
+                </p>
+              </div>
+            )}
           </div>
         ) : (
           <div className="space-y-4">
