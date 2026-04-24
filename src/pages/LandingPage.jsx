@@ -69,32 +69,26 @@ export default function LandingPage() {
             <a href="#not-a-wrapper" className="text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors">Why us</a>
             <a href="#integrity" className="text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors">Academic use</a>
           </div>
-          <a href="#sign-in-bar" className="ml-auto inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-blue-600 text-white hover:bg-blue-700 transition-colors text-[12px] font-medium shadow-sm">
-            Sign in
-          </a>
+          <button
+            onClick={() => {
+              const btn = googleBtnRef.current?.querySelector('div[role=button], button');
+              if (btn) btn.click();
+              else if (window.google?.accounts?.id) window.google.accounts.id.prompt();
+            }}
+            className="ml-auto inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-blue-600 text-white hover:bg-blue-700 transition-colors text-[12px] font-medium shadow-sm"
+          >
+            {loading ? <><Loader size={11} className="animate-spin" /> Signing in…</> : 'Sign in'}
+          </button>
         </div>
       </header>
 
-      {/* ================================================================= */}
-      {/* Sign-in — quiet centered strip. No gradient, no overlay hacks.    */}
-      {/* Neutral surface, single line of copy, Google button sits below it.*/}
-      {/* ================================================================= */}
-      <section id="sign-in-bar" className="px-6 py-10 bg-white dark:bg-[#0f0f18] border-b border-gray-200 dark:border-[#2A2A40]">
-        <div className="max-w-6xl mx-auto flex flex-col items-center text-center gap-4">
-          <h2 className="text-[22px] md:text-[26px] leading-tight font-semibold tracking-tight text-gray-900 dark:text-white">
-            Sign in to get started — free, unlimited.
-          </h2>
-          <div ref={googleBtnRef} className="[&>div]:rounded-full" />
-          {loading && (
-            <p className="text-[12px] text-gray-500 inline-flex items-center gap-1.5">
-              <Loader size={12} className="animate-spin" /> Signing in…
-            </p>
-          )}
-          <p className="text-[11px] text-gray-400 dark:text-gray-500">
-            One click with Google · no credit card · no trial timer
-          </p>
-        </div>
-      </section>
+      {/* Google button is still required for auth to work — rendered
+          off-screen so the "Sign in" link in the header can trigger it. */}
+      <div
+        ref={googleBtnRef}
+        aria-hidden="true"
+        style={{ position: 'absolute', left: '-9999px', top: 0, visibility: 'hidden' }}
+      />
 
       {/* ================================================================= */}
       {/* MAIN TOP — Live mini-OS preview. Visitor sees the actual product, */}
