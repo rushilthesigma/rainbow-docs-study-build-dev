@@ -76,38 +76,23 @@ export default function LandingPage() {
       </header>
 
       {/* ================================================================= */}
-      {/* HUGE SIGN-IN BAR — top of page. Custom-styled "Sign in" button     */}
-      {/* overlays the actual Google button (fixed 260×48 so the overlay    */}
-      {/* and the underlying click target line up). Overlay is              */}
-      {/* pointer-events: none so clicks pass through.                      */}
+      {/* Sign-in — quiet centered strip. No gradient, no overlay hacks.    */}
+      {/* Neutral surface, single line of copy, Google button sits below it.*/}
       {/* ================================================================= */}
-      <section id="sign-in-bar" className="px-6 py-10 md:py-14 bg-gradient-to-br from-blue-600 to-indigo-700 text-white">
-        <div className="max-w-6xl mx-auto flex flex-col md:flex-row md:items-center md:justify-between gap-8">
-          <div className="text-center md:text-left max-w-xl">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-white/80 mb-2">Free forever · no credit card</p>
-            <h2 className="text-[24px] md:text-[32px] leading-[1.15] font-semibold tracking-tight mb-2">
-              Sign in to get started.
-            </h2>
-            <p className="text-[14px] leading-relaxed text-white/80">
-              Unlimited AI messages, full curricula, graded practice, and math drills — free, permanently.
+      <section id="sign-in-bar" className="px-6 py-10 bg-white dark:bg-[#0f0f18] border-b border-gray-200 dark:border-[#2A2A40]">
+        <div className="max-w-6xl mx-auto flex flex-col items-center text-center gap-4">
+          <h2 className="text-[22px] md:text-[26px] leading-tight font-semibold tracking-tight text-gray-900 dark:text-white">
+            Sign in to get started — free, unlimited.
+          </h2>
+          <div ref={googleBtnRef} className="[&>div]:rounded-full" />
+          {loading && (
+            <p className="text-[12px] text-gray-500 inline-flex items-center gap-1.5">
+              <Loader size={12} className="animate-spin" /> Signing in…
             </p>
-          </div>
-
-          <div className="flex justify-center md:justify-end">
-            <div
-              className="relative"
-              style={{ width: 260, height: 48 }}
-            >
-              {/* Real Google button (the click target). */}
-              <div ref={googleBtnRef} className="absolute inset-0 [&>div]:w-full [&>div]:h-full" />
-              {/* Styled overlay. pointer-events: none → clicks reach Google. */}
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-full bg-white text-gray-900 font-semibold text-[14px] shadow-md">
-                {loading
-                  ? <span className="inline-flex items-center gap-2"><Loader size={14} className="animate-spin" /> Signing in…</span>
-                  : 'Sign in'}
-              </div>
-            </div>
-          </div>
+          )}
+          <p className="text-[11px] text-gray-400 dark:text-gray-500">
+            One click with Google · no credit card · no trial timer
+          </p>
         </div>
       </section>
 
