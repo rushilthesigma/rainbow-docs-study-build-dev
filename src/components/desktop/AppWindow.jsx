@@ -8,7 +8,6 @@ import SocialApp from './apps/SocialApp';
 import AdminApp from './apps/AdminApp';
 import QuizBowlApp from './apps/QuizBowlApp';
 import MathTutorApp from './apps/MathTutorApp';
-import GemsApp from './apps/GemsApp';
 import StudyPage from '../../pages/StudyPage';
 import GoalsPage from '../../pages/GoalsPage';
 import AssessmentsPage from '../../pages/AssessmentsPage';
@@ -25,7 +24,6 @@ const APP_COMPONENTS = {
   assessments: AssessmentsPage,
   math: MathPracticePage,
   mathtutor: MathTutorApp,
-  gems: GemsApp,
   textbook: TextbookApp,
   social: SocialApp,
   quizbowl: QuizBowlApp,

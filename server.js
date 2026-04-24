@@ -300,7 +300,6 @@ function createDefaultData() {
     studySessions: [],
     assessmentHistory: [],
     lessons: [],
-    gems: [],                     // custom user-defined AI assistants
 
     // ----- Billing / plan state -----
     plan: 'free',                 // 'free' | 'pro'
@@ -2313,10 +2312,12 @@ app.get('/api/assessment/history', authMiddleware, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ===== GEMS (custom user-defined AI assistants) =====
-// Each gem is a named assistant with a saved system prompt + icon + color.
-// Persistent chat per gem. Used for things like "Essay Editor", "Interview
-// Coach", "Debate Partner" — whatever the student dreams up.
+// ===== GEMS (removed) =====
+// Endpoints intentionally deleted per product direction. Left as a
+// breadcrumb so nobody tries to re-add them without discussion.
+app.get('/api/gems-removed-marker', authMiddleware, (req, res) => { res.status(410).json({ error: 'Removed' }); });
+
+/*
 app.get('/api/gems', authMiddleware, (req, res) => {
   try {
     const users = loadUsers();
@@ -2457,6 +2458,7 @@ app.post('/api/gems/:id/chat', authMiddleware, requireMessageQuota, async (req, 
     else { res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`); res.end(); }
   }
 });
+*/
 
 // ===== PROFILE =====
 
