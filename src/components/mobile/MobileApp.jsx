@@ -17,7 +17,6 @@ import SettingsPage from '../../pages/SettingsPage';
 import DebateApp from '../desktop/apps/DebateApp';
 import SocialApp from '../desktop/apps/SocialApp';
 import TextbookApp from '../desktop/apps/TextbookApp';
-import FirstTipsModal from '../desktop/FirstTipsModal';
 import Button from '../shared/Button';
 import Input from '../shared/Input';
 import PillGroup from '../shared/PillGroup';

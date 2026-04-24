@@ -89,6 +89,10 @@ export default function QuizBowlMatch({ user, onExit }) {
   // Flash a "Wrong — <name>" banner for ~1.5s when a wrong answer arrives
   // while the question is still live.
   const [wrongFlash, setWrongFlash] = useState(null);
+  // When the server ends the match because the opponent left/disconnected
+  // mid-game we want the finished view to say "Opponent left" instead of
+  // declaring a winner off of partial scores.
+  const [abandoned, setAbandoned] = useState(null); // { leftBy, reason? } | null
 
   const abortRef = useRef(null);
   // Declared early because handleBuzz and the SSE handlers need it. `const`
@@ -145,8 +149,18 @@ export default function QuizBowlMatch({ user, onExit }) {
         setAutoAdvanceDeadline(data.autoAdvanceInMs ? Date.now() + data.autoAdvanceInMs : null);
         setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: data.scores[p.userId] || 0 })) } : prev);
       },
-      onMatchEnd: ({ scores }) => {
+      onMatchEnd: ({ scores, abandoned: wasAbandoned, leftBy, reason }) => {
         setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: scores[p.userId] || 0 })) } : prev);
+        // Cancel any in-flight question UI state. The server has already
+        // cleared its timers, but the local "auto-advance in 5s" timer on
+        // the reveal screen would otherwise keep counting down visually.
+        setQuestion(null);
+        setBuzz(null);
+        setAnswer('');
+        setAnswerResult(null);
+        setAutoAdvanceDeadline(null);
+        setWrongFlash(null);
+        if (wasAbandoned) setAbandoned({ leftBy, reason });
         setView('finished');
       },
       onError: (err) => setError(err),
@@ -214,6 +228,7 @@ export default function QuizBowlMatch({ user, onExit }) {
   async function handleLeave() {
     try { await leaveMatch(code); } catch {}
     setCode(''); setMatch(null); setQuestion(null); setBuzz(null); setAnswerResult(null);
+    setAbandoned(null);
     setView('menu');
     onExit?.();
   }
@@ -400,13 +415,24 @@ export default function QuizBowlMatch({ user, onExit }) {
     const sorted = [...(match?.players || [])].sort((a, b) => (b.score || 0) - (a.score || 0));
     const winner = sorted[0];
     const amIWinner = winner?.userId === myId;
+    const opponentAbandoned = !!abandoned && abandoned.leftBy !== myId;
+    const iAbandoned = !!abandoned && abandoned.leftBy === myId;
     return (
       <div className="h-full overflow-y-auto bg-white dark:bg-[#161622]">
         <div className="p-5 space-y-5 max-w-md mx-auto text-center">
-          <Trophy size={40} className={`mx-auto ${amIWinner ? 'text-amber-500' : 'text-gray-400'}`} />
+          <Trophy size={40} className={`mx-auto ${amIWinner && !opponentAbandoned ? 'text-amber-500' : 'text-gray-400'}`} />
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-            {amIWinner ? 'You won!' : winner ? `${winner.name} won` : 'Match over'}
+            {opponentAbandoned
+              ? 'Opponent left the match'
+              : iAbandoned
+                ? 'Match ended'
+                : amIWinner ? 'You won!' : winner ? `${winner.name} won` : 'Match over'}
           </h2>
+          {opponentAbandoned && (
+            <p className="text-xs text-gray-500 dark:text-gray-400 -mt-3">
+              {abandoned?.reason === 'disconnect' ? 'They disconnected mid-game.' : 'They pressed leave mid-game.'}
+            </p>
+          )}
           <div className="space-y-2">
             {sorted.map((p, i) => (
               <div key={p.userId} className={`flex items-center gap-3 px-4 py-2.5 rounded-xl ${i === 0 ? 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800' : 'bg-gray-50 dark:bg-[#1e1e2e] border border-gray-200 dark:border-[#2A2A40]'}`}>

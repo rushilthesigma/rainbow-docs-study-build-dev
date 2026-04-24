@@ -17,6 +17,7 @@ import {
   buildStandaloneLessonPrompt, buildMathTutorPrompt,
   buildStudyModePrompt, buildGoalMilestonesPrompt, buildAssessmentPrompt,
   buildFlashcardPrompt, buildCueGenerationPrompt, buildSummaryPrompt,
+  buildTopicSuggestionsPrompt,
 } from './prompts.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -155,21 +156,13 @@ function weekKey(d = new Date()) {
   return `${date.getUTCFullYear()}-W${String(weekNum).padStart(2, '0')}`;
 }
 
-// Normalizes and returns the live plan for a user. Owners are always Pro.
-// Stripe-paid Pro users auto-expire when proUntil passes; we gracefully
-// downgrade them here rather than running a cron.
-function getPlan(user, email) {
-  if (isOwner(email)) return 'pro';
-  if (isAdvisor(email)) return 'pro';
-  if (!user?.data) return 'free';
-  if (user.data.plan !== 'pro') return 'free';
-  if (!user.data.proUntil) return 'pro'; // untimed grant (owner-granted)
-  if (new Date(user.data.proUntil).getTime() > Date.now()) return 'pro';
-  // Lease expired — downgrade in-memory; persistence happens next saveUsers
-  user.data.plan = 'free';
-  return 'free';
-}
-function isPro(user, email) { return getPlan(user, email) === 'pro'; }
+// Every authenticated user is Pro. The paid-tier gates have been removed
+// from the product — we keep the function so the 100+ call sites that use
+// `getPlan` / `isPro` / `modelForUser` still work without edits, they just
+// always see "pro" now. Owner/advisor email checks live separately (for
+// admin surfaces) and are unaffected.
+function getPlan(/* user, email */) { return 'pro'; }
+function isPro(/* user, email */) { return true; }
 // Pro users can opt into the smaller/faster model via preferences.modelTier.
 // Free users always get FREE (Flash) regardless of preference.
 function modelForUser(user, email) {
@@ -844,6 +837,188 @@ app.post('/api/debate/start', authMiddleware, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ===== PUBLIC LANDING-PAGE DEMO =====
+// Unauthenticated, heavily rate-limited endpoints so the live preview on
+// the marketing page can actually generate a real curriculum without a
+// visitor having to sign in first. Abuse vectors:
+//   - spam: mitigated by per-IP count (5 gens / hour)
+//   - cost:  mitigated by forcing MODEL_FREE (Flash) + 2 units * 3 lessons cap
+// State lives in-memory; restart wipes limits (fine).
+const demoIpLimits = new Map(); // ip -> { count, firstAt }
+const DEMO_RATE_MAX = 50;                   // plenty for demo-kicking without abuse
+const DEMO_RATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+
+function demoAllowed(ip) {
+  const now = Date.now();
+  const rec = demoIpLimits.get(ip) || { count: 0, firstAt: now };
+  if (now - rec.firstAt > DEMO_RATE_WINDOW_MS) {
+    rec.count = 0;
+    rec.firstAt = now;
+  }
+  rec.count += 1;
+  demoIpLimits.set(ip, rec);
+  return rec.count <= DEMO_RATE_MAX;
+}
+function getClientIp(req) {
+  return (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
+    || req.socket?.remoteAddress
+    || 'unknown';
+}
+
+app.post('/api/demo/curriculum/generate', async (req, res) => {
+  try {
+    const ip = getClientIp(req);
+    if (!demoAllowed(ip)) {
+      return res.status(429).json({ error: 'Demo rate limit reached. Sign up for unlimited.' });
+    }
+    const topic = String(req.body?.topic || '').trim().slice(0, 80);
+    const difficulty = ['beginner','intermediate','advanced'].includes(req.body?.difficulty)
+      ? req.body.difficulty : 'intermediate';
+    if (!topic) return res.status(400).json({ error: 'Topic is required' });
+
+    // Condensed prompt for the demo — force a compact structure so
+    // generation is under 5s and the preview feels snappy.
+    const system = 'You are an expert curriculum designer. Output ONLY valid JSON. No markdown, no code fences, no explanation.';
+    const user = `Design a compact learning curriculum for: "${topic}" at the ${difficulty} level.
+
+Return JSON with EXACTLY 2 units. Each unit has 3 lessons. Each lesson has a "type" from: "lesson", "math_tutor" (step-by-step math only), "essay" (graded essay), "unit_test".
+
+{
+  "title": "Course title",
+  "description": "1 sentence description",
+  "units": [
+    {
+      "title": "Unit 1 title",
+      "lessons": [
+        { "title": "Lesson 1", "description": "One line", "type": "lesson" },
+        { "title": "Lesson 2", "description": "One line", "type": "lesson" },
+        { "title": "Lesson 3 (assessment)", "description": "One line", "type": "unit_test" }
+      ]
+    },
+    { "title": "Unit 2 title", "lessons": [ ...same shape... ] }
+  ]
+}`;
+
+    let result = await callGemini(system, [{ role: 'user', content: user }], MODEL_FREE, 2048);
+    if (!result.success) return res.status(500).json({ error: result.error || 'AI failed' });
+
+    let text = result.data.content?.[0]?.text || '';
+    let parsed = parseAIJson(text);
+
+    // Retry once with a much stricter prompt if the first pass didn't give
+    // us valid JSON — the Flash model occasionally wraps output in prose.
+    if (!parsed?.units) {
+      const retry = await callGemini(
+        'Output ONLY a single valid JSON object. No markdown. No code fences. No explanation. Nothing before or after the JSON. Start with { and end with }.',
+        [{ role: 'user', content: `${user}\n\nCRITICAL: Output ONLY the JSON object. Nothing else.` }],
+        MODEL_FREE, 2048,
+      );
+      if (retry.success) {
+        text = retry.data.content?.[0]?.text || '';
+        parsed = parseAIJson(text);
+      }
+    }
+
+    if (!parsed?.units) {
+      console.warn('Demo curriculum parse failed. Raw text (first 500):', text.slice(0, 500));
+      return res.status(500).json({ error: 'The AI response was malformed. Try a different topic.' });
+    }
+
+    // Tag a client-side id onto each entity so the UI has stable keys.
+    const curriculumId = `demo-${Date.now()}`;
+    parsed.id = curriculumId;
+    parsed.isDemo = true;
+    parsed.units = (parsed.units || []).slice(0, 2).map((u, ui) => ({
+      ...u,
+      id: `${curriculumId}-u${ui}`,
+      lessons: (u.lessons || []).slice(0, 4).map((l, li) => ({
+        ...l,
+        id: `${curriculumId}-u${ui}-l${li}`,
+        type: ['lesson','math_tutor','essay','unit_test','practice'].includes(l.type) ? l.type : 'lesson',
+        isCompleted: false,
+      })),
+    }));
+
+    res.json({ curriculum: parsed });
+  } catch (e) {
+    console.error('Demo curriculum error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Generate a small flashcard deck on any topic. Public, rate-limited.
+app.post('/api/demo/flashcards/generate', async (req, res) => {
+  try {
+    const ip = getClientIp(req);
+    if (!demoAllowed(ip)) return res.status(429).json({ error: 'Demo rate limit reached. Sign up for unlimited.' });
+    const topic = String(req.body?.topic || '').trim().slice(0, 80);
+    if (!topic) return res.status(400).json({ error: 'Topic is required' });
+
+    const system = 'You are a flashcard author. Output ONLY valid JSON — no markdown, no fences, no explanation.';
+    const user = `Generate 8 flashcards on "${topic}". Each card is short (front: question/prompt, back: 1-2 sentence answer). Return JSON:
+{ "cards": [ { "front": "...", "back": "..." }, ... 8 total ... ] }`;
+    const result = await callGemini(system, [{ role: 'user', content: user }], MODEL_FREE, 1536);
+    if (!result.success) return res.status(500).json({ error: result.error || 'AI failed' });
+    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
+    const cards = Array.isArray(parsed?.cards) ? parsed.cards.slice(0, 8) : [];
+    if (!cards.length) return res.status(500).json({ error: 'Malformed AI response. Try a different topic.' });
+    res.json({ cards });
+  } catch (e) {
+    console.error('Demo flashcards error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Stream a tutor response for the demo. Supports BOTH one-shot (pass
+// `topic`) and multi-turn conversations (pass `messages: [{role,content}...]`).
+// Multi-turn powers the back-and-forth chat in the landing-page mini OS.
+app.post('/api/demo/lesson/stream', async (req, res) => {
+  try {
+    const ip = getClientIp(req);
+    if (!demoAllowed(ip)) {
+      return res.status(429).json({ error: 'Demo rate limit reached. Sign up for unlimited.' });
+    }
+
+    // Prefer a conversation history when provided. Falls back to a single-
+    // topic prompt for the legacy call sites.
+    let messages = Array.isArray(req.body?.messages) ? req.body.messages : null;
+    const topic = String(req.body?.topic || '').trim().slice(0, 120);
+    const context = String(req.body?.context || '').trim().slice(0, 200);
+
+    let system;
+    if (messages && messages.length) {
+      // Sanitize + cap. We trust only 'user'/'assistant' roles.
+      messages = messages
+        .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+        .slice(-20)
+        .map(m => ({ role: m.role, content: m.content.slice(0, 6000) }));
+      if (!messages.length) return res.status(400).json({ error: 'No messages' });
+      system = 'You are a warm, conversational tutor. Use markdown — headings (##), bold, bulleted lists, numbered steps, and code blocks where useful. Keep replies under 250 words unless the student asks for depth. End with one short check-for-understanding question when it fits.';
+    } else {
+      if (!topic) return res.status(400).json({ error: 'Topic or messages required' });
+      system = 'You are a warm, conversational tutor. Use markdown — headings (##), bold, bulleted lists, numbered steps, and code blocks where useful. Keep the opening to 150-220 words.';
+      messages = [{
+        role: 'user',
+        content: `Give me an opening lesson on "${topic}"${context ? ` (context: ${context})` : ''}. Start with a 1-sentence hook, then the core idea (## heading), one worked example, and finish with a short check-for-understanding question.`,
+      }];
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    await streamAIResponse(res, system, messages, () => {}, MODEL_FREE);
+  } catch (e) {
+    console.error('Demo lesson stream error:', e);
+    try {
+      if (!res.headersSent) res.status(500).json({ error: e.message });
+      else { res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`); res.end(); }
+    } catch {}
+  }
+});
+
 // ===== CURRICULUM ROUTES =====
 
 // Generate a new curriculum
@@ -918,12 +1093,29 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
         };
       });
 
-      // For math curricula, add a practice lesson with math canvas after every 2nd lesson
+      // For math curricula: add a Math Tutor step-by-step drill (handwriting
+      // canvas + step grading) + a free-form Practice Problems lesson. The
+      // Math Tutor walks through a guided worked problem; Practice is the
+      // student's turn on the same topic.
       if (isMathCurriculum && lessons.length >= 2) {
+        const mathTutorLesson = {
+          id: `${curriculumId}-u${ui}-mathtutor`,
+          title: `${unit.title} — Math Tutor`,
+          description: `Walk through worked problems for ${unit.title} with step-by-step feedback on a handwriting canvas.`,
+          type: 'math_tutor',
+          tool: 'math_tutor',
+          practiceTopic: unit.title,
+          chatHistory: [],
+          phase: null,
+          phaseData: {},
+          content: null,
+          isCompleted: false,
+          score: null,
+        };
         const practiceLesson = {
           id: `${curriculumId}-u${ui}-practice`,
           title: `${unit.title} — Practice Problems`,
-          description: `Solve practice problems for ${unit.title} using the math canvas`,
+          description: `Solve practice problems for ${unit.title} using the math canvas.`,
           type: 'practice',
           tool: 'math_canvas',
           practiceTopic: unit.title,
@@ -934,11 +1126,29 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
           isCompleted: false,
           score: null,
         };
-        // Insert before the last lesson
-        lessons.splice(lessons.length - 1, 0, practiceLesson);
+        // Insert Math Tutor before the last concept lesson, Practice before the unit test.
+        lessons.splice(lessons.length - 1, 0, mathTutorLesson);
+        lessons.push(practiceLesson);
+      } else if (lessons.length >= 2) {
+        // For NON-math curricula: add a graded essay per unit. It routes to
+        // the existing assessment/essay flow (prompt + rubric + AI grading).
+        const essayLesson = {
+          id: `${curriculumId}-u${ui}-essay`,
+          title: `${unit.title} — Graded Essay`,
+          description: `Write a graded short essay on ${unit.title}. Feedback is scored against a rubric.`,
+          type: 'essay',
+          chatHistory: [],
+          phase: null,
+          phaseData: {},
+          content: null,
+          isCompleted: false,
+          score: null,
+        };
+        // Essay goes before the unit test so students write before the MCQ check.
+        lessons.push(essayLesson);
       }
 
-      // Add unit test at end
+      // Add unit test at end (always last).
       lessons.push({
         id: `${curriculumId}-u${ui}-test`,
         title: `${unit.title} — Assessment`,
@@ -2113,6 +2323,84 @@ app.get('/api/profile', authMiddleware, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ===== TOPIC SUGGESTIONS =====
+// Returns 3 AI-generated topic suggestions personalized to the student's
+// history. Cached per-user on user.data.topicSuggestions for 30 min so
+// mounting the hub repeatedly doesn't burn an LLM call each time. Pass
+// ?refresh=1 to bypass the cache.
+const TOPIC_SUGGESTIONS_TTL_MS = 30 * 60 * 1000; // 30 min
+
+app.get('/api/suggestions/topics', authMiddleware, async (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const userData = users[email].data;
+
+    const cached = userData.topicSuggestions;
+    const fresh = cached && (Date.now() - (cached.generatedAt || 0)) < TOPIC_SUGGESTIONS_TTL_MS;
+    if (fresh && !req.query.refresh) {
+      return res.json({ suggestions: cached.suggestions || [], cached: true });
+    }
+
+    // Build a compact history digest for the prompt.
+    const curricula = (userData.curricula || []).map(c => ({
+      title: c.title,
+      description: c.description || c.settings?.topic || '',
+    }));
+    // Flatten all lessons across curricula + the standalone lessons list.
+    const curriculumLessons = (userData.curricula || []).flatMap(c =>
+      (c.units || []).flatMap(u => (u.lessons || []).map(l => ({
+        title: l.title,
+        difficulty: c.settings?.difficulty,
+        isCompleted: !!l.isCompleted,
+      })))
+    );
+    const standaloneLessons = (userData.lessons || []).map(l => ({
+      title: l.title || l.topic,
+      difficulty: l.difficulty,
+      isCompleted: !!l.isCompleted,
+    }));
+    const lessons = [...standaloneLessons, ...curriculumLessons];
+    const goals = (userData.goals || []).filter(g => g.status !== 'complete');
+
+    // Weak spots: topics the student got wrong on recent assessments. We
+    // grab question text from the 10 most recent assessment attempts and
+    // surface up to 10 missed ones.
+    const history = userData.assessmentHistory || [];
+    const weakSpots = [];
+    for (const h of history.slice(-10)) {
+      for (const d of (h.details || h.result?.details || [])) {
+        if (d.correct === false && d.question) weakSpots.push(d.question.slice(0, 100));
+        if (weakSpots.length >= 10) break;
+      }
+      if (weakSpots.length >= 10) break;
+    }
+
+    const { system, user } = buildTopicSuggestionsPrompt({ curricula, lessons, goals, weakSpots });
+    const model = modelForUser(users[email], email);
+    const result = await callGemini(system, [{ role: 'user', content: user }], model, 1024);
+    if (!result.success) {
+      return res.status(result.status || 500).json({ error: result.error || 'Failed to generate suggestions' });
+    }
+    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
+    const suggestions = Array.isArray(parsed?.suggestions) ? parsed.suggestions.slice(0, 3) : [];
+    if (suggestions.length === 0) {
+      return res.status(502).json({ error: 'AI returned no suggestions' });
+    }
+
+    // Cache back onto user
+    userData.topicSuggestions = { suggestions, generatedAt: Date.now() };
+    saveUsers(users);
+
+    res.json({ suggestions, cached: false });
+  } catch (e) {
+    console.error('Topic suggestions error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ===== SOCIAL =====
 
 // Social data file
@@ -2448,7 +2736,7 @@ RULES:
 - Output ONLY a valid JSON object with the updated curriculum. No markdown, no explanation.
 - Preserve existing ids on units/lessons whenever you keep them. For new units/lessons generate new ids using the pattern "\${curriculumId}-u\${n}" and "\${curriculumId}-u\${n}-l\${m}" with sensible numbers.
 - Every unit must have a "lessons" array and "locked":false.
-- Every lesson must have "id", "title", "description", and "type" (one of: "lesson", "practice", "essay", "unit_test").
+- Every lesson must have "id", "title", "description", and "type" (one of: "lesson", "math_tutor", "practice", "essay", "unit_test"). "math_tutor" = step-by-step worked problems on a handwriting canvas (math only). "essay" = a graded short essay (scored against a rubric).
 - DO NOT invent user progress fields like chatHistory, isCompleted, score, phase — the server preserves those on the client side.
 - If the instruction is ambiguous, use your best judgment. Do NOT refuse.
 
@@ -3672,6 +3960,40 @@ function scheduleAutoAdvance(match, delayMs = 5000) {
   }, delayMs);
 }
 
+// When a player's SSE stream closes mid-game (tab close, network drop), give
+// them 10s to reconnect before ending the match. Prevents dangling timers
+// that kept the question "running" on the server even though the player
+// couldn't see it anymore. A fresh /stream call cancels the grace.
+function scheduleDisconnectAbandon(match, userId, graceMs = 10000) {
+  if (!match.disconnectTimers) match.disconnectTimers = {};
+  if (match.disconnectTimers[userId]) clearTimeout(match.disconnectTimers[userId]);
+  match.disconnectTimers[userId] = setTimeout(() => {
+    delete match.disconnectTimers[userId];
+    if (!matches.has(match.code)) return;
+    if (!['playing', 'reveal', 'generating'].includes(match.state)) return;
+    if (match.questionTimeoutId) { clearTimeout(match.questionTimeoutId); match.questionTimeoutId = null; }
+    if (match.revealTimeoutId)   { clearTimeout(match.revealTimeoutId);   match.revealTimeoutId = null; }
+    match.state = 'finished';
+    match.buzzWinner = null;
+    match.buzzAt = null;
+    pushMatchEvent(match, 'match_end', {
+      scores: match.scores,
+      abandoned: true,
+      leftBy: userId,
+      reason: 'disconnect',
+    });
+    match.players = match.players.filter(p => p.userId !== userId);
+    if (!match.players.length) matches.delete(match.code);
+  }, graceMs);
+}
+
+function cancelDisconnectAbandon(match, userId) {
+  if (match.disconnectTimers?.[userId]) {
+    clearTimeout(match.disconnectTimers[userId]);
+    delete match.disconnectTimers[userId];
+  }
+}
+
 function publicMatchState(match) {
   return {
     code: match.code,
@@ -3770,6 +4092,9 @@ app.get('/api/quizbowl/match/:code/stream', authMiddleware, (req, res) => {
   res.flushHeaders();
   player.stream = res;
   match.lastActivity = Date.now();
+  // Fresh stream = reconnect. If we were about to abandon this player,
+  // cancel that grace timer — they're back.
+  cancelDisconnectAbandon(match, req.userId);
   // Send current snapshot immediately so the client can render without a
   // separate GET round trip.
   res.write(`data: ${JSON.stringify({ type: 'snapshot', match: publicMatchState(match) })}\n\n`);
@@ -3783,6 +4108,12 @@ app.get('/api/quizbowl/match/:code/stream', authMiddleware, (req, res) => {
   req.on('close', () => {
     clearInterval(heartbeat);
     if (player.stream === res) player.stream = null;
+    // If the game is live and the player is still a member, schedule a
+    // 10s abandon. Cancelled if they reconnect (see stream-open above).
+    if (['playing', 'reveal', 'generating'].includes(match.state) &&
+        match.players.some(p => p.userId === req.userId)) {
+      scheduleDisconnectAbandon(match, req.userId);
+    }
   });
 });
 
@@ -3953,6 +4284,14 @@ app.post('/api/quizbowl/match/:code/next', authMiddleware, (req, res) => {
 });
 
 // POST /api/quizbowl/match/:code/leave — graceful exit.
+//
+// Leaving during a LIVE question (state=playing | reveal | generating) is
+// treated as abandoning the match — we cancel ALL scheduled timers
+// (question_end, auto_advance) and push `match_end` with abandoned=true.
+// Without this, the questionTimeoutId / revealTimeoutId we scheduled
+// earlier would keep firing and the remaining player would see the
+// question "still going" even though their opponent bailed. That's the
+// "stopping doesn't stop the question" bug.
 app.post('/api/quizbowl/match/:code/leave', authMiddleware, (req, res) => {
   const match = matches.get(req.params.code);
   if (!match) return res.json({ ok: true });
@@ -3962,9 +4301,25 @@ app.post('/api/quizbowl/match/:code/leave', authMiddleware, (req, res) => {
     match.players.splice(idx, 1);
   }
   match.lastActivity = Date.now();
+
+  const wasLive = ['playing', 'reveal', 'generating'].includes(match.state);
+  if (wasLive) {
+    if (match.questionTimeoutId) { clearTimeout(match.questionTimeoutId); match.questionTimeoutId = null; }
+    if (match.revealTimeoutId)   { clearTimeout(match.revealTimeoutId);   match.revealTimeoutId = null; }
+    match.state = 'finished';
+    match.buzzWinner = null;
+    match.buzzAt = null;
+    pushMatchEvent(match, 'match_end', {
+      scores: match.scores,
+      abandoned: true,
+      leftBy: req.userId,
+    });
+  }
+
   if (!match.players.length) {
     matches.delete(match.code);
-  } else {
+  } else if (!wasLive) {
+    // Lobby / waiting state: nobody is playing yet, just notify.
     pushMatchEvent(match, 'player_left', { userId: req.userId, match: publicMatchState(match) });
   }
   res.json({ ok: true });

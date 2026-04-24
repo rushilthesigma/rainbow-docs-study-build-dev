@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, Plus, Sparkles, Loader2, BookOpen, ChevronDown, ChevronRight, CheckCircle2, Circle, Lock, ClipboardCheck, PenTool, FileText, Check, X, Trophy, Wand2, Paperclip, Upload } from 'lucide-react';
+import { ArrowLeft, Plus, Sparkles, Loader2, BookOpen, ChevronDown, ChevronRight, CheckCircle2, Circle, Lock, ClipboardCheck, PenTool, FileText, Check, X, Trophy, Wand2, Paperclip, Upload, Calculator } from 'lucide-react';
 import { listCurricula, generateCurriculum, getCurriculum, sendLessonMessage, getLessonHistory, editCurriculumWithAI } from '../../../api/curriculum';
 import { apiFetch } from '../../../api/client';
+import { useWindowManager } from '../../../context/WindowManagerContext';
 import { DEFAULT_SETTINGS, DIFFICULTY_OPTIONS, LEARNING_STYLE_OPTIONS } from '../../../utils/constants';
 import Button from '../../shared/Button';
 import Input from '../../shared/Input';
@@ -11,17 +12,23 @@ import LoadingSpinner from '../../shared/LoadingSpinner';
 import ProgressBar from '../../curriculum/ProgressBar';
 import ChatContainer from '../../chat/ChatContainer';
 import MathText from '../../shared/MathText';
+import TopicSuggestions from '../../shared/TopicSuggestions';
 import { errorChatMessage } from '../../../utils/aiErrors';
 import useBrowserBack from '../../../hooks/useBrowserBack';
 
-const TYPE_ICONS = { lesson: BookOpen, practice: PenTool, essay: FileText, unit_test: ClipboardCheck };
-const TYPE_COLORS = { lesson: 'text-blue-400', practice: 'text-purple-400', essay: 'text-amber-400', unit_test: 'text-rose-400' };
+const TYPE_ICONS = { lesson: BookOpen, math_tutor: Calculator, practice: PenTool, essay: FileText, unit_test: ClipboardCheck };
+const TYPE_COLORS = { lesson: 'text-blue-400', math_tutor: 'text-indigo-400', practice: 'text-purple-400', essay: 'text-amber-400', unit_test: 'text-rose-400' };
 
 export default function CurriculaApp() {
   const [view, setView] = useState('list');
   const [curricula, setCurricula] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedCurriculum, setSelectedCurriculum] = useState(null);
+  // WindowManager is optional — the desktop shell provides it, but if this
+  // component is ever rendered outside of one (mobile, for instance) we
+  // just skip the math-tutor handoff rather than crashing.
+  let wm = null;
+  try { wm = useWindowManager(); } catch {}
 
   // Browser Back navigates up one level inside the curriculum stack instead
   // of leaving the SPA. lesson → detail → list.
@@ -79,6 +86,19 @@ export default function CurriculaApp() {
     // Unit-test typed lessons go to a real assessment quiz, not the chat tutor.
     if (lesson.type === 'unit_test' || lesson.type === 'essay') {
       setView('assessment');
+      return;
+    }
+    // Math Tutor lessons pop open the Math Tutor app in its own window so
+    // the full handwriting-canvas + step-feedback experience is available.
+    if (lesson.type === 'math_tutor' && wm?.openApp) {
+      try {
+        window.dispatchEvent(new CustomEvent('cov-math-tutor-seed', {
+          detail: { topic: lesson.practiceTopic || lesson.title },
+        }));
+      } catch {}
+      wm.openApp('mathtutor', 'Math Tutor');
+      // Stay on the curriculum detail so progress is visible when they come back.
+      setView('detail');
       return;
     }
     setView('lesson');
@@ -290,9 +310,15 @@ export default function CurriculaApp() {
         <button onClick={() => setView('list')} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 mb-4"><ArrowLeft size={16} /> Back</button>
         <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-4">New Curriculum</h2>
         {generating ? (
-          <div className="flex flex-col items-center justify-center py-16">
+          <div className="flex flex-col items-center justify-center py-16 px-4">
             <Loader2 size={32} className="animate-spin text-blue-500 mb-4" />
-            <p className="text-sm text-gray-500">Generating <span className="font-medium text-gray-700 dark:text-gray-300">{settings.topic}</span>...</p>
+            <p className="text-sm text-gray-500 mb-5">Generating <span className="font-medium text-gray-700 dark:text-gray-300">{settings.topic}</span>...</p>
+            <div className="max-w-sm text-center rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-4 py-3">
+              <p className="text-[12px] font-semibold text-amber-800 dark:text-amber-300 mb-0.5">Please don&apos;t leave the app.</p>
+              <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                Full curriculum generation takes 20–40 seconds. Switching tabs or closing this window will cancel the request.
+              </p>
+            </div>
           </div>
         ) : (
           <div className="space-y-4">
@@ -314,12 +340,32 @@ export default function CurriculaApp() {
   // List view
   if (loading) return <div className="flex items-center justify-center h-48"><LoadingSpinner size={24} /></div>;
 
+  // Clicking an AI suggestion jumps straight into the new-curriculum form
+  // with the topic pre-filled and difficulty inferred from the suggestion.
+  function handleSuggestionPick(s) {
+    setSettings(p => ({
+      ...p,
+      topic: s.topic || '',
+      difficulty: s.difficulty || p.difficulty,
+    }));
+    setGenError(null);
+    setView('new');
+  }
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-bold text-gray-900 dark:text-white">My Curricula</h2>
         <Button size="sm" onClick={() => setView('new')}><Plus size={14} /> New</Button>
       </div>
+
+      <TopicSuggestions
+        title="Suggested curricula"
+        pickLabel="Generate"
+        onPick={handleSuggestionPick}
+        className="mb-4"
+      />
+
       {curricula.length === 0 ? (
         <div className="text-center py-12">
           <BookOpen size={32} className="text-blue-400 mx-auto mb-3" />

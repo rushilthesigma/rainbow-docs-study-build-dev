@@ -10,3 +10,6 @@ textbooks.json
 parties.json
 *.log
 .DS_Store
+
+# Stashed Figma-style workspace revamp (restorable if we ever want it back)
+.figma-revamp/

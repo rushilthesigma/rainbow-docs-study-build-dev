@@ -518,6 +518,52 @@ Return JSON: { "summary": "..." }`,
   };
 }
 
+// ===== TOPIC SUGGESTIONS =====
+// Generate 3 personalized study topics based on what the student has
+// already worked on. We send the AI a compact history digest (curricula,
+// recent lessons, weak spots from assessments) and ask for 3 ideas that
+// build on existing knowledge, patch weak spots, or stretch into an
+// adjacent area.
+export function buildTopicSuggestionsPrompt({ curricula = [], lessons = [], goals = [], weakSpots = [] }) {
+  const currList = curricula.map(c => `- ${c.title}${c.description ? ` (${c.description.slice(0, 80)})` : ''}`).join('\n') || '(none)';
+  const lessonList = lessons.slice(0, 20).map(l => `- ${l.title || l.topic} [${l.difficulty || 'n/a'}]${l.isCompleted ? ' ✓' : ''}`).join('\n') || '(none)';
+  const goalList = goals.slice(0, 5).map(g => `- ${g.title}`).join('\n') || '(none)';
+  const weakList = weakSpots.slice(0, 10).map(w => `- ${w}`).join('\n') || '(none detected)';
+
+  return {
+    system: 'You are a study coach recommending the next topic a student should learn. Output ONLY valid JSON. No markdown, no explanation, no code fences.',
+    user: `A student needs 3 fresh study-topic recommendations. Use their history to pick topics that (a) build naturally on what they already know, (b) patch observed weak spots, or (c) are a smart adjacent area.
+
+Existing curricula:
+${currList}
+
+Recent lessons:
+${lessonList}
+
+Active goals:
+${goalList}
+
+Weak spots from past assessments:
+${weakList}
+
+Rules:
+- Each topic must be a concrete, lesson-sized subject (e.g. "Photosynthesis light reactions", NOT "Biology").
+- Do NOT suggest a topic the student has already completed.
+- Mix it up: one "build on strength", one "patch weakness" (if any weak spots exist), one "stretch".
+- "reason" is ONE short sentence (max 12 words) explaining WHY this topic is a good fit.
+- "difficulty" is one of: "beginner", "intermediate", "advanced".
+
+Return JSON exactly in this shape:
+{
+  "suggestions": [
+    { "topic": "...", "reason": "...", "difficulty": "beginner" },
+    { "topic": "...", "reason": "...", "difficulty": "intermediate" },
+    { "topic": "...", "reason": "...", "difficulty": "advanced" }
+  ]
+}`,
+  };
+}
+
 // Legacy: static lesson generation (kept as fallback)
 export function buildLessonPrompt(settings, unitTitle, lesson, previousLessons) {
   const wordCount = LENGTH_WORD_MAP[settings.lessonLength] || LENGTH_WORD_MAP.medium;

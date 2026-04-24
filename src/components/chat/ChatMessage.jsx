@@ -176,20 +176,15 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
   const markdownRef = useRef(null);
 
   const isError = !!message._error;
-  // Plan-limit notices use an amber/gold palette so they don't look like
-  // something went wrong — this is expected user-facing behavior.
-  const isPlanLimit = !!message._planLimit;
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-3`}>
       <div className={`max-w-[92%] rounded-2xl px-4 py-3 text-sm ${
         isUser
           ? 'bg-blue-600 text-white rounded-br-md'
-          : isPlanLimit
-            ? 'bg-amber-50 dark:bg-amber-900/15 border border-amber-300 dark:border-amber-700/60 text-amber-800 dark:text-amber-200 rounded-bl-md'
-            : isError
-              ? 'bg-rose-50 dark:bg-rose-900/15 border border-rose-200 dark:border-rose-800/60 text-rose-700 dark:text-rose-300 rounded-bl-md'
-              : 'bg-white dark:bg-[#1e1e2e] border border-gray-200 dark:border-[#2A2A40] text-gray-800 dark:text-gray-200 rounded-bl-md'
+          : isError
+            ? 'bg-rose-50 dark:bg-rose-900/15 border border-rose-200 dark:border-rose-800/60 text-rose-700 dark:text-rose-300 rounded-bl-md'
+            : 'bg-white dark:bg-[#1e1e2e] border border-gray-200 dark:border-[#2A2A40] text-gray-800 dark:text-gray-200 rounded-bl-md'
       }`}>
         {isUser ? (
           editing ? (

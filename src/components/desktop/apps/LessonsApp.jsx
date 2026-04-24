@@ -12,6 +12,7 @@ import Button from '../../shared/Button';
 import Input from '../../shared/Input';
 import PillGroup from '../../shared/PillGroup';
 import LoadingSpinner from '../../shared/LoadingSpinner';
+import TopicSuggestions from '../../shared/TopicSuggestions';
 import ChatContainer from '../../chat/ChatContainer';
 
 export default function LessonsApp() {
@@ -82,6 +83,31 @@ export default function LessonsApp() {
     setCreating(true); setCreateError(null);
     try {
       const { lesson } = await createLesson(topic.trim(), difficulty);
+      setLessons(prev => [lesson, ...prev.filter(l => l.id !== lesson.id)]);
+      setTopic('');
+      await openLesson(lesson);
+    } catch (err) {
+      setCreateError(err.message || 'Failed to create lesson');
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  // Click on an AI suggestion: jump into the same "Preparing lesson..." UX
+  // the manual create flow uses, then auto-open the lesson when it's ready.
+  // Uses setTopic/setDifficulty so if creation fails, the form is already
+  // filled out and the user can just hit Start Lesson again.
+  async function handleSuggestionPick(s) {
+    if (creating) return;
+    const pickedTopic = (s?.topic || '').trim();
+    if (!pickedTopic) return;
+    setTopic(pickedTopic);
+    setDifficulty(s.difficulty || 'beginner');
+    setCreateError(null);
+    setView('new');
+    setCreating(true);
+    try {
+      const { lesson } = await createLesson(pickedTopic, s.difficulty || 'beginner');
       setLessons(prev => [lesson, ...prev.filter(l => l.id !== lesson.id)]);
       setTopic('');
       await openLesson(lesson);
@@ -354,7 +380,7 @@ export default function LessonsApp() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-lg font-bold text-gray-900 dark:text-white">Lessons</h2>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Single topics, taught one at a time.</p>
@@ -363,6 +389,13 @@ export default function LessonsApp() {
           <Plus size={14} /> New Lesson
         </Button>
       </div>
+
+      <TopicSuggestions
+        title="Recommended topics"
+        pickLabel="Teach me"
+        onPick={handleSuggestionPick}
+        className="mb-4"
+      />
 
       {lessons.length === 0 ? (
         <div className="text-center py-12">

@@ -10,7 +10,6 @@ import { Settings, Save, User } from 'lucide-react';
 import { useUIPreference } from '../context/UIPreferenceContext';
 
 import { WALLPAPER_LIST } from '../components/desktop/DesktopBackground';
-import PlanSection from '../components/shared/PlanSection';
 
 function Dropdown({ label, value, options, onChange }) {
   const [open, setOpen] = useState(false);
@@ -132,9 +131,6 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Plan / Pro */}
-      <PlanSection />
-
       {/* Interface Mode */}
       <InterfaceSection />
 
@@ -143,43 +139,27 @@ export default function SettingsPage() {
         <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wide">AI Behavior</h3>
 
         {(() => {
-          // Pro check: effectivePlan (server-authoritative) OR stored plan OR owner email.
-          const ownerEmails = ['rushilkelapure@gmail.com'];
-          const emailLc = (user?.email || '').toLowerCase();
-          const isProUser = ownerEmails.includes(emailLc)
-            || user?.data?.effectivePlan === 'pro'
-            || user?.data?.plan === 'pro';
+          // Everyone gets the full model picker — no tier gating.
           async function setTier(v) {
-            if (!isProUser) return;
             const next = { ...prefs, modelTier: v };
             setPrefs(next);
             dirtyKeys.current.add('modelTier');
             try {
               await syncData({ preferences: next });
-              // Clear dirty AFTER the sync is persisted so the server-sourced
-              // refresh can safely write this value back.
               dirtyKeys.current.delete('modelTier');
               await fetchUser();
             } catch (err) {
               console.error('Failed to save model tier:', err);
-              // On error keep the key dirty so a future refresh doesn't revert it.
             }
           }
-          // Free users are always Flash — lock the UI so that's obvious.
-          const effectiveValue = isProUser ? (prefs.modelTier || 'pro') : 'flash';
+          const effectiveValue = prefs.modelTier || 'pro';
           return (
             <div>
               <div className="flex items-center gap-2 mb-2">
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Model</label>
-                {isProUser ? (
-                  <span className="text-[10px] text-gray-400">· auto-saves</span>
-                ) : (
-                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
-                    PRO ONLY
-                  </span>
-                )}
+                <span className="text-[10px] text-gray-400">· auto-saves</span>
               </div>
-              <div className={isProUser ? '' : 'opacity-60 pointer-events-none'}>
+              <div>
                 <PillGroup
                   options={[
                     { value: 'pro', label: 'Pro', description: 'Gemini 3.1 Pro · smartest' },
