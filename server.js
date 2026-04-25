@@ -17,7 +17,7 @@ import {
   buildStandaloneLessonPrompt, buildMathTutorPrompt,
   buildStudyModePrompt, buildGoalMilestonesPrompt, buildAssessmentPrompt,
   buildFlashcardPrompt, buildCueGenerationPrompt, buildSummaryPrompt,
-  buildTopicSuggestionsPrompt,
+  buildTopicSuggestionsPrompt, buildSlideshowPrompt,
 } from './prompts.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -300,6 +300,8 @@ function createDefaultData() {
     studySessions: [],
     assessmentHistory: [],
     lessons: [],
+    slideshows: [],               // AI-generated slide decks
+
 
     // ----- Billing / plan state -----
     plan: 'free',                 // 'free' | 'pro'
@@ -402,25 +404,58 @@ function checkGoalMilestones(data) {
   }
 }
 
-// Robust JSON parser with multiple fallback strategies
+// Robust JSON parser with multiple fallback strategies. The slideshow AI
+// flow was failing ~half the time on "outer-brace extract" because slides
+// have nested objects (elements) and the first/last brace heuristic could
+// slurp prose from around the JSON. This version walks the string finding
+// the first balanced JSON object/array and also strips common Gemini
+// preamble like `json\n{ ... }`.
 function parseAIJson(text) {
-  // Strategy 1: Direct parse
-  try { return JSON.parse(text); } catch {}
-  // Strategy 2: Strip markdown code fences
-  const stripped = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
-  try { return JSON.parse(stripped); } catch {}
-  // Strategy 3: Extract outermost JSON object
-  const firstBrace = text.indexOf('{');
-  const lastBrace = text.lastIndexOf('}');
-  if (firstBrace !== -1 && lastBrace > firstBrace) {
-    try { return JSON.parse(text.slice(firstBrace, lastBrace + 1)); } catch {}
+  if (!text || typeof text !== 'string') return null;
+  const trimmed = text.trim();
+
+  // Strategy 1: direct parse (happens when responseMimeType=application/json).
+  try { return JSON.parse(trimmed); } catch {}
+
+  // Strategy 2: strip ``` fences + leading "json" label.
+  const defenced = trimmed
+    .replace(/^```(?:json)?\s*\n?/i, '')
+    .replace(/\n?```\s*$/i, '')
+    .replace(/^json\s*\n/i, '')
+    .trim();
+  try { return JSON.parse(defenced); } catch {}
+
+  // Strategy 3: find the first balanced JSON object or array by walking
+  // characters, tracking string state + brace depth. Much more reliable
+  // than first-{-to-last-} when the model includes prose.
+  for (const opener of ['{', '[']) {
+    const closer = opener === '{' ? '}' : ']';
+    const start = defenced.indexOf(opener);
+    if (start < 0) continue;
+    let depth = 0, inStr = false, escape = false;
+    for (let i = start; i < defenced.length; i++) {
+      const c = defenced[i];
+      if (escape) { escape = false; continue; }
+      if (c === '\\' && inStr) { escape = true; continue; }
+      if (c === '"') { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (c === opener) depth++;
+      else if (c === closer) {
+        depth--;
+        if (depth === 0) {
+          const candidate = defenced.slice(start, i + 1);
+          try { return JSON.parse(candidate); } catch {}
+          // Try a small repair pass — strip trailing commas which Gemini
+          // sometimes emits despite JSON rules.
+          try {
+            return JSON.parse(candidate.replace(/,(\s*[}\]])/g, '$1'));
+          } catch {}
+          break;
+        }
+      }
+    }
   }
-  // Strategy 4: Extract JSON array
-  const firstBracket = text.indexOf('[');
-  const lastBracket = text.lastIndexOf(']');
-  if (firstBracket !== -1 && lastBracket > firstBracket) {
-    try { return JSON.parse(text.slice(firstBracket, lastBracket + 1)); } catch {}
-  }
+
   return null;
 }
 
@@ -661,7 +696,14 @@ async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096,
         model: resolved,
         systemInstruction: systemPrompt ? { role: 'system', parts: [{ text: systemPrompt }] } : undefined,
         tools: opts.enableWebSearch ? [{ googleSearch: {} }] : undefined,
-        generationConfig: { maxOutputTokens: effectiveMaxTokens, temperature: 0.7 },
+        generationConfig: {
+          maxOutputTokens: effectiveMaxTokens,
+          temperature: Number.isFinite(opts.temperature) ? opts.temperature : 0.7,
+          // jsonMode: true forces Gemini to emit strictly valid JSON, no
+          // prose, no markdown fences. Dramatically reduces parseAIJson
+          // failures on structured outputs like slides.
+          ...(opts.jsonMode ? { responseMimeType: 'application/json' } : {}),
+        },
       });
 
       const result = await m.generateContent(
@@ -1612,11 +1654,15 @@ app.post('/api/curriculum/:id/lesson/:lessonId/chat', authMiddleware, requireMes
     // Add user message
     lesson.chatHistory.push({ role: 'user', content: message, timestamp: new Date().toISOString() });
 
-    // Build system prompt for current phase
+    // Build system prompt for current phase. Pass the WHOLE curriculum so the
+    // prompt builder can compose a "course memory" block — what was already
+    // taught (with scores + summaries), what's coming up, where this lesson
+    // sits — so the AI builds on prior lessons instead of re-teaching them.
     const systemPrompt = buildLessonChatPrompt(
       lesson.phase, lesson, unit, curriculum.settings,
       users[email].data.profile, users[email].data.preferences, lesson.chatHistory,
-      users[email].data.assessmentHistory || []
+      users[email].data.assessmentHistory || [],
+      curriculum
     );
 
     // Build messages from chat history. Attach the current turn's images to
@@ -2459,6 +2505,1157 @@ app.post('/api/gems/:id/chat', authMiddleware, requireMessageQuota, async (req, 
   }
 });
 */
+
+// ===== SLIDESHOWS =====
+// AI-generated + manually-built presentation decks. Full CRUD, templates,
+// inline image support (image URLs), speaker notes, multiple layouts.
+
+// Slide-deck templates for the "Start blank" flow. Each returns a seed
+// array of slides with placeholder content the user then edits.
+// Safe numeric clamp for freeform slide element coords.
+function clamp(n, lo, hi) { n = Number(n); if (!Number.isFinite(n)) return lo; return Math.max(lo, Math.min(hi, n)); }
+
+// Strip <script>, javascript: URLs, and on* event handlers from pasted
+// SVG markup. Keeps the markup rendered-only, never executed.
+function sanitizeSvg(raw) {
+  if (!raw) return '';
+  let s = String(raw).slice(0, 50_000);
+  // Only allow content starting with <svg or a single tag — reject anything else.
+  s = s.replace(/<script[\s\S]*?<\/script>/gi, '');
+  s = s.replace(/ on[a-z]+\s*=\s*"[^"]*"/gi, '');
+  s = s.replace(/ on[a-z]+\s*=\s*'[^']*'/gi, '');
+  s = s.replace(/javascript:/gi, '');
+  // Require the content to contain an <svg> root.
+  if (!/<svg[\s>]/i.test(s)) return '';
+  return s;
+}
+
+function buildTemplateSlides(id, title, deckId) {
+  function s(i, layout, title, subtitle, bullets, notes = '', extras = {}) {
+    return {
+      id: `${deckId}-${i}`, layout, title, subtitle: subtitle || '',
+      bullets: bullets || [], notes, image: extras.image || '', imageCaption: extras.imageCaption || '',
+    };
+  }
+  switch (id) {
+    case 'pitch':
+      return [
+        s(0, 'title',   title || 'Our Pitch',      'One-line hook for the product', [],      'Open strong. State the problem in one sentence.'),
+        s(1, 'content', 'The Problem',             '', ['Pain point 1', 'Pain point 2', 'Who feels it most'], 'Make it visceral — name the user.'),
+        s(2, 'content', 'Our Solution',            '', ['Core feature', 'What makes us different', 'Why it works'], 'Demo here if you have one.'),
+        s(3, 'content', 'Why Now',                 '', ['Shift 1', 'Shift 2', 'Shift 3'], 'Timing is everything.'),
+        s(4, 'content', 'Traction',                '', ['Users / revenue', 'Growth rate', 'Notable signals'], 'Hard numbers only.'),
+        s(5, 'content', 'The Team',                '', ['Founder 1 — role', 'Founder 2 — role', 'Advisors'], 'Why this team can win.'),
+        s(6, 'summary', 'The Ask',                 '', ['Amount raising', 'Use of funds', 'Timeline'], 'End with a clear ask.'),
+      ];
+    case 'lesson':
+      return [
+        s(0, 'title',   title || 'Lesson title',  'A 1-sentence hook', [], 'Start by naming what the student will walk away with.'),
+        s(1, 'content', 'What it is',             '', ['Definition', 'Everyday analogy', 'Why it matters'], ''),
+        s(2, 'content', 'How it works',           '', ['Step 1', 'Step 2', 'Step 3'], ''),
+        s(3, 'content', 'Worked example',         '', ['Given: …', 'Process: …', 'Answer: …'], 'Walk through each step out loud.'),
+        s(4, 'content', 'Common mistakes',        '', ['Mistake 1 → correct view', 'Mistake 2 → correct view'], ''),
+        s(5, 'summary', 'Recap',                  '', ['Key idea', 'What to practice next'], ''),
+      ];
+    case 'bookreport':
+      return [
+        s(0, 'title',   title || 'Book Report', 'Author · Year', [], ''),
+        s(1, 'content', 'Premise',              '', ['Setting', 'Main character(s)', 'Central conflict'], ''),
+        s(2, 'content', 'Plot summary',         '', ['Act 1', 'Act 2', 'Act 3'], 'Keep it under 90 seconds to read aloud.'),
+        s(3, 'content', 'Themes',               '', ['Theme 1 — supporting quote', 'Theme 2 — supporting quote'], ''),
+        s(4, 'quote',   '"A resonant quote from the book."', '— Character / page #', [], ''),
+        s(5, 'content', 'What I took away',     '', ['Insight 1', 'Insight 2'], ''),
+        s(6, 'summary', 'Rating & recommendation', '', ['Who should read this', 'Who should skip'], ''),
+      ];
+    case 'project':
+      return [
+        s(0, 'title',   title || 'Project proposal', 'Working title', [], ''),
+        s(1, 'content', 'Background',          '', ['Context', 'What exists today', 'Gap'], ''),
+        s(2, 'content', 'Goal',                '', ['What we\u2019re building', 'Who it\u2019s for'], ''),
+        s(3, 'content', 'Approach',            '', ['Phase 1', 'Phase 2', 'Phase 3'], ''),
+        s(4, 'content', 'Timeline',            '', ['Week 1-2', 'Week 3-4', 'Week 5+'], ''),
+        s(5, 'content', 'Risks',               '', ['Risk 1 → mitigation', 'Risk 2 → mitigation'], ''),
+        s(6, 'summary', 'Success metrics',     '', ['How we\u2019ll measure it', 'What \u201cdone\u201d looks like'], ''),
+      ];
+    case 'class':
+      return [
+        s(0, 'title',   title || 'Class Presentation', 'Your name · Class · Date', [], ''),
+        s(1, 'content', 'Overview',            '', ['What this talk covers', 'Why it matters'], ''),
+        s(2, 'imageRight', 'Visual context',   '', ['Key point tied to the image', 'Second point'], 'Describe the image out loud.', { image: '', imageCaption: 'Replace with an image URL on the right panel' }),
+        s(3, 'content', 'Deep dive',           '', ['Point A', 'Point B', 'Point C'], ''),
+        s(4, 'twoCol',  'Compare & contrast',  '', ['Option 1 pro', 'Option 2 pro', 'Option 1 con', 'Option 2 con'], ''),
+        s(5, 'summary', 'Takeaways & Q&A',     '', ['Main idea 1', 'Main idea 2', 'Happy to take questions'], ''),
+      ];
+    case 'blank':
+    default:
+      return [
+        s(0, 'title',   title || 'Untitled slideshow', 'Click to edit your subtitle', [], ''),
+        s(1, 'content', 'New section',                 '', ['First point', 'Second point'], ''),
+        s(2, 'summary', 'Key takeaways',               '', ['Takeaway 1', 'Takeaway 2'], ''),
+      ];
+  }
+}
+
+// AI-generated + manually-built presentation decks. One-shot generation,
+app.get('/api/slideshows', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const list = (users[email].data.slideshows || []).map(s => ({
+      id: s.id, title: s.title, topic: s.topic,
+      slideCount: (s.slides || []).length,
+      createdAt: s.createdAt,
+    }));
+    res.json({ slideshows: list });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/slideshows/:id', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const deck = (users[email].data.slideshows || []).find(s => s.id === req.params.id);
+    if (!deck) return res.status(404).json({ error: 'Not found' });
+    // Heal legacy slides on read — runs the same mechanical contrast fixer
+    // over the stored slides before responding. Nothing unreadable should
+    // ever reach the client, even if it predates the current fix.
+    let mutated = false;
+    deck.slides = (deck.slides || []).map(s => {
+      if (!Array.isArray(s.elements) || !s.elements.length) return s;
+      const fixed = autoFixSlide(s);
+      if (JSON.stringify(fixed.elements) !== JSON.stringify(s.elements) ||
+          fixed.background !== s.background) mutated = true;
+      return fixed;
+    });
+    if (mutated) saveUsers(users);
+    res.json({ slideshow: deck });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/slideshows/:id', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    users[email].data.slideshows = (users[email].data.slideshows || []).filter(s => s.id !== req.params.id);
+    saveUsers(users);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Create a blank slideshow. Body: { title } — everything else defaults.
+// Starts with a single title slide that the user then builds on top of.
+app.post('/api/slideshows', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+
+    const title = String(req.body?.title || 'Untitled slideshow').trim().slice(0, 200);
+    const templateId = String(req.body?.template || 'blank');
+    const deckId = crypto.randomUUID();
+    const slides = buildTemplateSlides(templateId, title, deckId);
+    const deck = {
+      id: deckId,
+      title,
+      subtitle: '',
+      topic: title,
+      slides,
+      settings: { manual: true, template: templateId },
+      createdAt: new Date().toISOString(),
+    };
+    users[email].data.slideshows.unshift(deck);
+    saveUsers(users);
+    res.json({ slideshow: deck });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== Per-slide AI helpers =====
+//
+// The AI gets a detailed design brief (archetypes, hierarchy rules, color
+// pairings, positioning math) so what comes back is composable — we insert
+// the returned `elements[]` as-is instead of synthesizing a boring
+// title/bullets layout from scratch. The prompt is the difference between
+// "looks like a form" and "looks designed."
+const SLIDE_DESIGN_SYSTEM = `You are a senior presentation designer composing ONE slide. Each slide must feel considered — not a formulaic bullets-under-title layout. Surprise the viewer when the content invites it.
+
+## Archetypes — pick one that SUITS the content, don't default
+- HERO: huge centered title, tiny supporting line. Use for section openers.
+- STAT: one massive number or short phrase (100+ fontSize), small explanation. Use for data points.
+- CONTENT: title + 3-4 supporting points. For concepts that need elaboration.
+- QUOTE: large italic quote with a small attribution below. For memorable lines.
+- IMAGE_DOMINANT: a prominent image on one side (40-55% width), text on the other.
+- TIMELINE: 3-5 short elements arranged horizontally or on a diagonal.
+- COMPARISON: two columns, headers aligned.
+- ASYMMETRIC: break the symmetry — offset title, unexpected alignment.
+
+## Composition rules
+- Visual hierarchy: ONE dominant element (biggest font AND boldest weight). Everything else recedes.
+- Whitespace: 25-40% of the canvas empty. Never cram.
+- Padding: ≥5% from every edge.
+- Background + text must have a WCAG contrast ratio of 4.5+. NON-NEGOTIABLE. Common safe pairings:
+    light bg (#ffffff, #f9fafb, #fef3c7, #dbeafe, #d1fae5) ↔ dark text (#111827, #1f2937)
+    dark bg (#0f172a, #1e293b, #111827, #1e1e2e, #2563eb) ↔ light text (#ffffff, #f3f4f6)
+- Accent color: at most ONE element in a vivid accent (ex: #2563eb, #dc2626, #059669).
+- Don't put any element entirely inside another.
+- Use varied positions: not everything flush-left from x=8.
+
+## Visual elements (no images)
+Do NOT use "image" elements. Instead, create visual interest with:
+- An "icon" element (kind: "icon", iconName: one of Lightbulb, Rocket, Target, Flame, Star, Zap, Sparkles, Heart, Brain, BookOpen, GraduationCap, Briefcase, Award, Trophy, Medal, Crown, TrendingUp, BarChart3, PieChart, Activity, Gauge, DollarSign, Globe, MapPin, Flag, Leaf, Trees, Sun, Cloud, Atom, Microscope, Cog, Cpu, MessageSquare, Mail, Bell, Calendar, Clock, CheckCircle, AlertTriangle, Shield, Lock, Eye, Search). Size it generously (w 10-20, h 15-30).
+- A "shape" element (kind: "shape", shape: "rect" | "circle" | "pill"). Use behind or beside text as an accent. A big pale-colored pill behind a stat can make a slide pop.
+- At most ONE icon and/or ONE shape per slide. Restraint wins.
+
+## Font sizes (keep hierarchy snappy, not subtle)
+- HERO / SECTION titles: 72-100
+- STAT number: 100-160
+- Content slide title: 44-60
+- Subtitle: 20-26
+- Body / bullets: 20-28
+- Captions / small labels: 14-18
+
+Weights: 700 for titles, 600 for emphasis, 500 for subtitles, 400 for body.
+
+## Coordinate system
+x, y, w, h are PERCENTAGES of the slide (0-100). Each element stays within 3-97 on every axis. Elements must NOT overlap significantly.
+
+## Bullets
+If the content is a list, pack lines into ONE text element with "\\n" between them. Do NOT create one element per bullet.
+
+## Output
+Return ONLY valid JSON — no markdown, no code fences, no commentary:
+{
+  "background": "#RRGGBB",
+  "notes": "1-2 sentences the presenter says aloud",
+  "layout": "title" | "content" | "summary" | "quote" | "freeform",
+  "elements": [
+    { "kind": "text",  "x": 8, "y": 12, "w": 84, "h": 20, "text": "...", "fontSize": 56, "fontWeight": "700", "italic": false, "underline": false, "align": "left", "color": "#RRGGBB" },
+    { "kind": "image", "x": 55, "y": 20, "w": 40, "h": 60, "searchQuery": "Krebs cycle diagram" }
+  ]
+}
+
+Typically 2-5 elements per slide. Vary your archetypes across a deck — don't repeat the same shape. Compose something you'd actually be proud to present.`;
+
+// Generate a single slide on a topic and insert it after `insertAfter`
+// (default: append to the end of the deck).
+app.post('/api/slideshows/:id/ai/slide', authMiddleware, async (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const deck = (users[email].data.slideshows || []).find(s => s.id === req.params.id);
+    if (!deck) return res.status(404).json({ error: 'Deck not found' });
+
+    const topic = String(req.body?.topic || '').trim().slice(0, 160);
+    const insertAfter = Number.isFinite(Number(req.body?.insertAfter))
+      ? Math.max(-1, Math.min((deck.slides || []).length - 1, Number(req.body.insertAfter)))
+      : (deck.slides || []).length - 1;
+    if (!topic) return res.status(400).json({ error: 'Topic required' });
+
+    const nid = `${deck.id}-ai${Date.now()}`;
+    const model = modelForUser(users[email], email);
+
+    // SAME SHAPE AS THE WHOLE-DECK GENERATOR. One slide, one JSON object
+    // with title/subtitle/bullets/notes/layout. That's the contract that
+    // already works for `/api/slideshows/generate`; reuse it here so the
+    // client renders via the legacy SlideCanvas that already looks right.
+    const system = `You are a senior presentation designer composing ONE slide. Your job is to produce something that looks considered and non-formulaic. Don't default to the same "title + 3 bullets" layout every time — pick the archetype that genuinely fits the content.
+
+Think about:
+- Which archetype suits this specific topic (title / content / summary / quote).
+- A short, punchy title under 10 words.
+- Bullets that are parallel, non-redundant, and each say something specific.
+- Speaker notes that sound like a real presenter talking, not a description of the slide.
+
+NEVER include images. NEVER suggest imagery. Just strong typography + tight copy.
+
+Output ONLY valid JSON — no markdown, no fences.`;
+    const user = `Deck title: "${deck.title || 'Untitled'}".
+Topic: "${topic}".
+
+Compose the slide. Archetype choices:
+- "title" — short punchy title + 1-sentence subtitle, bullets empty.
+- "content" — title + 3-5 bullets. Use when the topic needs explanation.
+- "summary" — "Key takeaways" feel — title + 3-5 bullets.
+- "quote" — title = the quote itself, subtitle = attribution ("— Name").
+
+JSON shape:
+{
+  "title": "...",
+  "subtitle": "",
+  "bullets": [],           // 3-5 short points, each under 18 words, or [] for title/quote
+  "notes": "1-2 sentence speaker note",
+  "layout": "title" | "content" | "summary" | "quote"
+}`;
+
+    const aiResult = await callGemini(system, [{ role: 'user', content: user }], model, 1500, { jsonMode: true, temperature: 0.85 });
+    if (!aiResult.success) return res.status(500).json({ error: aiResult.error || 'AI call failed' });
+    const parsed = parseAIJson(aiResult.data.content?.[0]?.text || '');
+    if (!parsed?.title) return res.status(500).json({ error: 'AI response missing title' });
+
+    const newSlide = {
+      id: nid,
+      layout: ['title','content','summary','quote','twoCol','freeform'].includes(parsed.layout) ? parsed.layout : 'content',
+      title: String(parsed.title).slice(0, 200),
+      subtitle: String(parsed.subtitle || '').slice(0, 300),
+      bullets: Array.isArray(parsed.bullets) ? parsed.bullets.slice(0, 6).map(b => String(b).slice(0, 300)) : [],
+      notes: String(parsed.notes || '').slice(0, 1000),
+      image: '', imageCaption: '',
+      // Legacy field stays null — renderer uses theme default. Matches how
+      // the bulk-generated slides work.
+      background: null,
+      elements: [],
+    };
+
+    deck.slides.splice(insertAfter + 1, 0, newSlide);
+    saveUsers(users);
+    console.log(`AI slide inserted at ${insertAfter + 1} — layout=${newSlide.layout}, ${newSlide.bullets.length} bullets`);
+    res.json({ slideshow: deck, insertedAt: insertAfter + 1 });
+  } catch (e) { console.error('AI slide error:', e); res.status(500).json({ error: e.message }); }
+});
+
+// ===== Programmatic slide-design validator =====
+// The text-only "self critique" pass was unreliable — the AI would happily
+// rationalize a black-on-black slide as fine. Instead we compute the real
+// problems (WCAG contrast, overlap, out-of-bounds, font-size hierarchy),
+// hand the list back to the AI so it has a concrete fix list, and loop
+// until the slide validates. If the loop exhausts, we mechanically
+// auto-fix the worst issues (contrast gets flipped, out-of-bounds gets
+// clamped) so the user never sees a black-on-black slide.
+
+function hexToRgb(hex) {
+  if (typeof hex !== 'string') return null;
+  let h = hex.replace('#', '');
+  if (h.length === 3) h = h.split('').map(c => c + c).join('');
+  if (h.length < 6) return null;
+  const n = parseInt(h.slice(0, 6), 16);
+  if (!Number.isFinite(n)) return null;
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+function relLuminance({ r, g, b }) {
+  const toLin = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+  return 0.2126 * toLin(r) + 0.7152 * toLin(g) + 0.0722 * toLin(b);
+}
+function contrastRatio(a, b) {
+  const ra = hexToRgb(a), rb = hexToRgb(b);
+  if (!ra || !rb) return 1;
+  const la = relLuminance(ra), lb = relLuminance(rb);
+  const L1 = Math.max(la, lb), L2 = Math.min(la, lb);
+  return (L1 + 0.05) / (L2 + 0.05);
+}
+// Hard minimum — 4.5 on anything. The "3.0 for large text" WCAG allowance
+// was letting borderline-unreadable dark-on-dark slides through.
+const MIN_CONTRAST = 4.5;
+function pickHighContrastText(bgHex) {
+  const whiteC = contrastRatio('#ffffff', bgHex);
+  const blackC = contrastRatio('#111827', bgHex);
+  return whiteC >= blackC ? '#ffffff' : '#111827';
+}
+function rectsOverlap(a, b) {
+  return !(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y);
+}
+
+function validateSlideDesign(slide) {
+  const issues = [];
+  const bg = slide.background || '#ffffff';
+  const els = Array.isArray(slide.elements) ? slide.elements : [];
+  if (!els.length) issues.push('Slide has no elements.');
+
+  els.forEach((el, i) => {
+    const id = `element[${i}]`;
+    if (el.kind === 'text') {
+      const ratio = contrastRatio(el.color || '#111827', bg);
+      if (ratio < MIN_CONTRAST) {
+        issues.push(`${id}: low contrast (${ratio.toFixed(2)} vs required ${MIN_CONTRAST}). Text color ${el.color} on background ${bg}. Change text color to a strongly contrasting hex.`);
+      }
+    }
+    // Bounds: must fit with ≥5% padding on left/top, ≥3% on right/bottom.
+    if (el.x < 3 || el.y < 3 || el.x + el.w > 97 || el.y + el.h > 97) {
+      issues.push(`${id}: out of bounds or too close to the edge (x=${el.x}, y=${el.y}, w=${el.w}, h=${el.h}). Keep every element inside 3-97% on each axis.`);
+    }
+  });
+
+  // Significant overlaps between text elements (>15% of either box covered).
+  for (let i = 0; i < els.length; i++) {
+    for (let j = i + 1; j < els.length; j++) {
+      const a = els[i], b = els[j];
+      if (a.kind === 'text' && b.kind === 'text' && rectsOverlap(a, b)) {
+        const ix = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
+        const iy = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+        const overlapArea = ix * iy;
+        const aArea = a.w * a.h, bArea = b.w * b.h;
+        const pct = overlapArea / Math.min(aArea, bArea);
+        if (pct > 0.15) {
+          issues.push(`element[${i}] and element[${j}] overlap significantly. Reposition so they don\u2019t.`);
+        }
+      }
+    }
+  }
+
+  // Hierarchy: need one element ≥ 32px AND at least one smaller element
+  // (when more than one text element exists).
+  const textEls = els.filter(e => e.kind === 'text');
+  if (textEls.length >= 2) {
+    const maxFs = Math.max(...textEls.map(e => Number(e.fontSize) || 0));
+    const minFs = Math.min(...textEls.map(e => Number(e.fontSize) || 0));
+    if (maxFs < 32) issues.push('No dominant element — the largest text is under 32px. Make one element clearly the title (40+).');
+    if (maxFs / Math.max(1, minFs) < 1.6) issues.push('Hierarchy is flat — the biggest text should be at least 1.6× the smallest.');
+  }
+
+  return issues;
+}
+
+// Mechanical last-resort fix: flip text colors to a high-contrast choice
+// against the background, clamp every element into bounds. Guarantees the
+// slide is at least readable even if the AI never produces a clean version.
+function autoFixSlide(slide) {
+  const bg = slide.background || '#ffffff';
+  const els = (slide.elements || []).map(el => {
+    const fixed = { ...el };
+    if (fixed.kind === 'text') {
+      const ratio = contrastRatio(fixed.color || '#111827', bg);
+      if (ratio < MIN_CONTRAST) fixed.color = pickHighContrastText(bg);
+    }
+    fixed.x = Math.max(3, Math.min(97, fixed.x));
+    fixed.y = Math.max(3, Math.min(97, fixed.y));
+    fixed.w = Math.max(5, Math.min(97 - fixed.x, fixed.w));
+    fixed.h = Math.max(3, Math.min(97 - fixed.y, fixed.h));
+    return fixed;
+  });
+  return { ...slide, background: bg, elements: els };
+}
+
+// ===== Web image lookup (Wikipedia) =====
+// Free, no API key. The AI emits image elements with a `searchQuery`
+// field; we resolve each one to a real URL before persisting.
+async function searchWikipediaImage(query) {
+  const q = String(query || '').trim();
+  if (!q) return null;
+  try {
+    // Direct page summary first — cleanest thumbnail match.
+    const summary = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(q)}`, {
+      headers: { 'User-Agent': 'RushilAI/1.0 (rushilkelapure@gmail.com)' },
+    }).then(r => r.ok ? r.json() : null).catch(() => null);
+    if (summary?.originalimage?.source) return summary.originalimage.source;
+    if (summary?.thumbnail?.source) return summary.thumbnail.source;
+    // Fall back to site-wide search + page images.
+    const search = await fetch(
+      `https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrsearch=${encodeURIComponent(q)}&gsrlimit=3&prop=pageimages&piprop=original|thumbnail&pithumbsize=1200`,
+      { headers: { 'User-Agent': 'RushilAI/1.0' } },
+    ).then(r => r.ok ? r.json() : null).catch(() => null);
+    const pages = search?.query?.pages;
+    if (pages) {
+      for (const k of Object.keys(pages)) {
+        const p = pages[k];
+        if (p.original?.source) return p.original.source;
+        if (p.thumbnail?.source) return p.thumbnail.source;
+      }
+    }
+  } catch (e) { console.warn('Wikipedia image search failed:', e.message); }
+  return null;
+}
+
+// Strip adjectives / articles from a query to get at the main noun.
+// "a detailed diagram of the Krebs cycle" → "Krebs cycle".
+function simplifyQuery(q) {
+  const cleaned = String(q || '')
+    .replace(/\b(a|an|the|some|this|that|these|those|of|for|with|showing|illustrating|diagram|photo|image|picture|detailed|abstract|colorful|modern|professional)\b/gi, ' ')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned;
+}
+
+async function searchWebImage(query) {
+  // Try the original query, then a simplified noun-phrase version.
+  const original = String(query || '').trim();
+  const simplified = simplifyQuery(original);
+  const attempts = [...new Set([original, simplified].filter(Boolean))];
+  for (const q of attempts) {
+    const url = await searchWikipediaImage(q);
+    if (url) return url;
+  }
+  return null;
+}
+
+// Walk a composed slide, resolving any AI-requested image elements.
+// If we CAN'T find an image, the element is dropped entirely so the user
+// never sees a "no image" placeholder box.
+async function resolveSlideImageQueries(slide) {
+  if (!Array.isArray(slide.elements)) return slide;
+  const resolved = [];
+  for (const el of slide.elements) {
+    if (el.kind !== 'image') { resolved.push(el); continue; }
+    // Already has a real URL (http/https/data: from paste) — keep.
+    if (el.src && /^(https?:|data:)/i.test(el.src)) { resolved.push(el); continue; }
+    // Gather queries in priority order: searchQuery, query, slide title.
+    const queries = [el.searchQuery, el.query, slide.title].filter(Boolean);
+    let url = null;
+    for (const q of queries) {
+      url = await searchWebImage(q);
+      if (url) break;
+    }
+    if (url) {
+      resolved.push({ ...el, src: url });
+    } else {
+      console.log(`Dropping image element — no match for queries: ${queries.join(' | ')}`);
+    }
+  }
+  slide.elements = resolved;
+  return slide;
+}
+
+// ============================================================
+// Hand-designed slide template library. Each template is a complete,
+// polished layout — positioning, typography, color pairings, everything —
+// with text slots addressed by `role`. The AI no longer designs slides
+// from scratch; it PICKS which template fits the topic and FILLS the
+// role slots. Because the designs are human-quality, every generated
+// slide looks good by construction.
+// ============================================================
+const SLIDE_TEMPLATES = [
+  {
+    id: 'hero-light',
+    match: 'Intro, section opener, chapter title, "welcome to X". Use when the slide is a high-energy title.',
+    background: '#ffffff',
+    layout: 'title',
+    elements: [
+      { kind: 'text', role: 'title',    x: 8,  y: 36, w: 84, h: 18, fontSize: 88, fontWeight: '700', color: '#111827', align: 'center' },
+      { kind: 'text', role: 'subtitle', x: 15, y: 58, w: 70, h: 8,  fontSize: 24, fontWeight: '400', color: '#6b7280', align: 'center' },
+    ],
+  },
+  {
+    id: 'hero-dark',
+    match: 'Dramatic opener, bold statement, powerful section transition on dark background.',
+    background: '#0f172a',
+    layout: 'title',
+    elements: [
+      { kind: 'text', role: 'title',    x: 8,  y: 36, w: 84, h: 18, fontSize: 88, fontWeight: '700', color: '#ffffff', align: 'center' },
+      { kind: 'text', role: 'subtitle', x: 15, y: 58, w: 70, h: 8,  fontSize: 22, fontWeight: '400', color: '#94a3b8', align: 'center' },
+    ],
+  },
+  {
+    id: 'stat-hero',
+    match: 'A headline number, percentage, or short phrase as the whole story. For data points.',
+    background: '#ffffff',
+    layout: 'freeform',
+    elements: [
+      { kind: 'text', role: 'stat',     x: 6,  y: 20, w: 88, h: 40, fontSize: 140, fontWeight: '800', color: '#2563eb', align: 'center' },
+      { kind: 'text', role: 'title',    x: 15, y: 62, w: 70, h: 8,  fontSize: 26, fontWeight: '600', color: '#111827', align: 'center' },
+      { kind: 'text', role: 'subtitle', x: 15, y: 74, w: 70, h: 12, fontSize: 18, fontWeight: '400', color: '#6b7280', align: 'center' },
+    ],
+  },
+  {
+    id: 'content-classic',
+    match: 'Default concept slide. Title + supporting points below. Use when the topic needs explanation.',
+    background: '#ffffff',
+    layout: 'content',
+    elements: [
+      { kind: 'text', role: 'title', x: 6, y: 8,  w: 88, h: 12, fontSize: 50, fontWeight: '700', color: '#111827', align: 'left' },
+      { kind: 'text', role: 'body',  x: 6, y: 26, w: 88, h: 65, fontSize: 24, fontWeight: '400', color: '#1f2937', align: 'left' },
+    ],
+  },
+  {
+    id: 'content-with-image',
+    match: 'Concept + a photo or diagram. Title and bullets on the left, image on the right. Use when a visual would help.',
+    background: '#ffffff',
+    layout: 'freeform',
+    elements: [
+      { kind: 'text', role: 'title', x: 5,  y: 10, w: 50, h: 12, fontSize: 42, fontWeight: '700', color: '#111827', align: 'left' },
+      { kind: 'text', role: 'body',  x: 5,  y: 28, w: 50, h: 64, fontSize: 20, fontWeight: '400', color: '#1f2937', align: 'left' },
+      { kind: 'image', role: 'image', x: 58, y: 10, w: 37, h: 82 },
+    ],
+  },
+  {
+    id: 'quote',
+    match: 'A memorable quote. For rhetorical emphasis, literary passages, or pull-quote style.',
+    background: '#fef3c7',
+    layout: 'quote',
+    elements: [
+      { kind: 'text', role: 'quote',       x: 8,  y: 28, w: 84, h: 34, fontSize: 44, fontWeight: '500', color: '#111827', align: 'center', italic: true },
+      { kind: 'text', role: 'attribution', x: 20, y: 68, w: 60, h: 6,  fontSize: 20, fontWeight: '500', color: '#92400e', align: 'center' },
+    ],
+  },
+  {
+    id: 'summary-bold',
+    match: 'Key takeaways / wrap-up / recap slide. 3-5 short points on a soft background.',
+    background: '#dbeafe',
+    layout: 'summary',
+    elements: [
+      { kind: 'text', role: 'title', x: 6, y: 10, w: 88, h: 12, fontSize: 46, fontWeight: '700', color: '#1e3a8a', align: 'left' },
+      { kind: 'text', role: 'body',  x: 6, y: 28, w: 88, h: 62, fontSize: 24, fontWeight: '500', color: '#1e3a8a', align: 'left' },
+    ],
+  },
+  {
+    id: 'asymmetric-dark',
+    match: 'Bold section transition. Oversized title, small tagline, dark background, offset layout.',
+    background: '#111827',
+    layout: 'freeform',
+    elements: [
+      { kind: 'text', role: 'title',    x: 5, y: 20, w: 68, h: 44, fontSize: 104, fontWeight: '800', color: '#ffffff', align: 'left' },
+      { kind: 'text', role: 'subtitle', x: 5, y: 68, w: 52, h: 6,  fontSize: 18, fontWeight: '400', color: '#94a3b8', align: 'left' },
+    ],
+  },
+  {
+    id: 'two-column',
+    match: 'Comparison — side-by-side ideas, pro/con, before/after, option A vs option B.',
+    background: '#ffffff',
+    layout: 'twoCol',
+    elements: [
+      { kind: 'text', role: 'title',    x: 6,  y: 8,  w: 88, h: 10, fontSize: 42, fontWeight: '700', color: '#111827', align: 'left' },
+      { kind: 'text', role: 'colA',     x: 6,  y: 24, w: 42, h: 66, fontSize: 20, fontWeight: '400', color: '#1f2937', align: 'left' },
+      { kind: 'text', role: 'colB',     x: 52, y: 24, w: 42, h: 66, fontSize: 20, fontWeight: '400', color: '#1f2937', align: 'left' },
+    ],
+  },
+  {
+    id: 'warm-content',
+    match: 'Friendly / humanist content slide. Warmer palette. For people-focused topics.',
+    background: '#fef3c7',
+    layout: 'content',
+    elements: [
+      { kind: 'text', role: 'title', x: 6, y: 10, w: 88, h: 12, fontSize: 48, fontWeight: '700', color: '#92400e', align: 'left' },
+      { kind: 'text', role: 'body',  x: 6, y: 28, w: 88, h: 62, fontSize: 22, fontWeight: '400', color: '#78350f', align: 'left' },
+    ],
+  },
+];
+
+// Heuristic template picker — simple feature matching on the topic so the
+// server picks a sensible layout EVERY time, even if the AI call fails.
+function pickTemplateForTopic(topic, deckTitle) {
+  const t = String(topic || '').trim();
+  const lower = t.toLowerCase();
+  // Quote-ish: wrapped in quotes, or contains " said " / " quote "
+  if (/^["\u201c\u2018]/.test(t) || /\bsaid\b|\bquote\b|\bquoted\b/i.test(lower)) return SLIDE_TEMPLATES.find(x => x.id === 'quote');
+  // Stat-ish: starts with a number, or contains %, or "billion/million/thousand"
+  if (/^\s*\$?\d/.test(t) || /%|billion|million|thousand|\bpercent\b|\b\d+x\b/i.test(lower)) return SLIDE_TEMPLATES.find(x => x.id === 'stat-hero');
+  // Comparison
+  if (/\bvs\.?\b|\bversus\b|\bcompare\b|\bcomparison\b|\bpros? and cons?\b|\bbefore and after\b/i.test(lower)) return SLIDE_TEMPLATES.find(x => x.id === 'two-column');
+  // Summary / recap / takeaways
+  if (/\btakeaways?\b|\bsummary\b|\brecap\b|\bconclusion\b|\bkey points?\b|\bin short\b/i.test(lower)) return SLIDE_TEMPLATES.find(x => x.id === 'summary-bold');
+  // Hero / section opener (short — likely a section title)
+  if (t.split(/\s+/).length <= 4 && t.length < 40) return SLIDE_TEMPLATES.find(x => x.id === 'hero-light');
+  // Topics that obviously have a visual (people, places, natural phenomena, diagrams)
+  if (/\bdiagram\b|\bhistory\b|\bmap\b|\barchitecture\b|\bart\b|\bphotograph\b|\bspecies\b|\bplant\b|\banimal\b|\bcountry\b|\bcity\b|\bbiography\b/i.test(lower)) return SLIDE_TEMPLATES.find(x => x.id === 'content-with-image');
+  // Default: classic content slide
+  return SLIDE_TEMPLATES.find(x => x.id === 'content-classic');
+}
+
+// Minimal copy-only prompt. The AI fills ONLY the slots the chosen
+// template actually defines — no picking, no design.
+function buildSlotPrompt(tmpl, topic, deckTitle) {
+  const roleLines = tmpl.elements.map(el => {
+    if (el.kind === 'image') return `- imageQuery (string) — a specific noun phrase for a web image search. Example: "Abraham Lincoln portrait"`;
+    switch (el.role) {
+      case 'title':    return `- title (string, under 10 words) — the slide's headline`;
+      case 'subtitle': return `- subtitle (string, 1 short sentence) — supporting line`;
+      case 'body':     return `- body (string) — 3-5 short points SEPARATED BY \\n. Each under 16 words. No bullet characters.`;
+      case 'stat':     return `- stat (string, under 12 chars) — the headline number/phrase (e.g. "42%", "147B")`;
+      case 'quote':       return `- quote (string) — the actual quote text`;
+      case 'attribution': return `- attribution (string) — the speaker/source (e.g. "— Abraham Lincoln")`;
+      case 'colA':     return `- colA (string) — content for the left column. \\n-separated list ok.`;
+      case 'colB':     return `- colB (string) — content for the right column. \\n-separated list ok.`;
+      default:         return `- ${el.role} (string)`;
+    }
+  }).join('\n');
+
+  return `Deck title: "${deckTitle}".
+Topic for THIS slide: "${topic}".
+Archetype: ${tmpl.id} — ${tmpl.match}
+
+Write the slide's copy. Fill every slot below with ACTUAL content about the topic — do NOT return placeholder text, instructions, or empty strings. If you can't think of content for a slot, invent plausible content for the topic.
+
+Required slots (exact keys):
+${roleLines}
+
+Also include "notes" (string) — 1-2 sentences of speaker notes.
+
+Output ONLY JSON:
+{
+${tmpl.elements.map(el => el.kind === 'image' ? '  "imageQuery": "..."' : `  "${el.role}": "..."`).join(',\n')},
+  "notes": "..."
+}`;
+}
+
+// Merge a chosen template + the AI's slot content into a full slide.
+// Every text element gets its copy; image elements get their searchQuery.
+function materializeTemplateSlide(tmpl, slots, id) {
+  const elements = tmpl.elements.map((el, j) => {
+    const base = {
+      id: `${id}-el${j}`,
+      kind: el.kind,
+      x: el.x, y: el.y, w: el.w, h: el.h,
+      fontSize: el.fontSize || 20,
+      fontWeight: el.fontWeight || '400',
+      italic: !!el.italic,
+      underline: !!el.underline,
+      align: el.align || 'left',
+      color: el.color || '#111827',
+      text: '',
+      src: '',
+      searchQuery: '',
+    };
+    if (el.kind === 'text') {
+      base.text = String(slots?.[el.role] || '').slice(0, 1000);
+    } else if (el.kind === 'image') {
+      base.searchQuery = String(slots?.imageQuery || slots?.[el.role] || '').slice(0, 160);
+    }
+    return base;
+  });
+  // Drop text elements the AI left empty — keeps the design clean.
+  const filtered = elements.filter(el => el.kind === 'image' || (el.text && el.text.trim()));
+  return {
+    id,
+    layout: tmpl.layout || 'freeform',
+    title: slots?.title || '',
+    subtitle: slots?.subtitle || '',
+    bullets: [],
+    notes: '',
+    image: '', imageCaption: '',
+    background: tmpl.background,
+    elements: filtered,
+  };
+}
+
+// Pass 1 of "generate a slide from a topic": the AI drafts the raw
+// content (title, bullets, notes, layout) — no positioning, no design
+// yet. This gives the design pass the same anchor material that the
+// improve flow naturally has (the slide the user already built),
+// so both paths produce equally good final layouts.
+async function draftSlideContent(topic, model) {
+  const system = 'You are a presentation content writer. Output ONLY valid JSON. No markdown, no commentary.';
+  const user = `Draft the CONTENT for a single slide about: "${topic}". Decide the archetype (title, stat, content, summary, quote, freeform) based on what fits the topic best.
+
+Return this exact shape:
+{
+  "title": "Short slide title under 10 words",
+  "subtitle": "Optional 1-sentence supporting line, or empty string",
+  "bullets": ["3-5 short supporting points, each under 16 words, OR empty array if the slide archetype doesn't use bullets"],
+  "notes": "1-3 sentences of speaker notes",
+  "layout": "title" | "content" | "summary" | "quote" | "freeform",
+  "imageIdea": "A specific noun-phrase search term if a photo/diagram would add value, or empty string"
+}`;
+  try {
+    const result = await callGemini(system, [{ role: 'user', content: user }], model, 1200, { jsonMode: true, temperature: 0.85 });
+    if (!result.success) return null;
+    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
+    if (!parsed?.title) return null;
+    return parsed;
+  } catch { return null; }
+}
+
+// Shared pipeline used by BOTH "generate a new slide" AND "improve this
+// slide". The two endpoints differ only in what they do with the result
+// (insert vs replace). Everything else — the design prompt, retry loop,
+// validation, auto-fix, image resolution, searchQuery cleanup — is
+// identical so outputs are equally good.
+async function composeAndFinalizeSlide({ users, email, deck, topic, instruction, priorSlide, targetId, fallbackTitle }) {
+  const model = modelForUser(users[email], email);
+  const deckCtx = `Deck title: "${deck.title}".`;
+  const seedContext = instruction
+    ? `${deckCtx}\nInstruction for this slide: "${instruction}".\n`
+    : `${deckCtx}\n`;
+  // When we have a prior slide, pass it through the compose loop so the AI
+  // can retain what's working and change what isn't.
+  const { slide: composed, attempts, issues, autoFixed } =
+    await aiComposeSlide(topic, seedContext, model, priorSlide);
+  if (!composed) {
+    return { error: `Could not produce a valid slide after ${attempts} attempts.` };
+  }
+  let slide = sanitizeComposedSlide(composed, targetId, fallbackTitle || topic);
+  slide = await resolveSlideImageQueries(slide);
+  slide.elements = slide.elements.map(el => { const { searchQuery, ...rest } = el; return rest; });
+  return { slide, attempts, issues, autoFixed };
+}
+
+// Multi-pass AI composition loop. Generates a draft, checks it against the
+// programmatic validator, and if it fails, sends the specific issue list
+// BACK to the AI so the next attempt has concrete targets. Up to 4
+// attempts; if it never validates, auto-fix the best attempt so we always
+// return a readable slide.
+async function aiComposeSlide(topic, seedContext, model, priorSlide = null) {
+  let bestCandidate = null;
+  let bestIssueCount = Infinity;
+  let lastIssues = null;
+
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const issueBlock = lastIssues?.length
+      ? `\nThe previous draft had THESE issues — fix EVERY one of them:\n- ${lastIssues.join('\n- ')}\n`
+      : '';
+    const priorBlock = priorSlide
+      ? `\nCurrent slide you are improving:\n${JSON.stringify(priorSlide)}\n`
+      : '';
+    const user = `${seedContext}${priorBlock}${issueBlock}
+Compose a single slide about: "${topic}". Output ONLY the design-system JSON — background, notes, layout, elements[].`;
+
+    const result = await callGemini(
+      SLIDE_DESIGN_SYSTEM,
+      [{ role: 'user', content: user }],
+      model,
+      3500,
+      { temperature: 0.95, jsonMode: true },
+    );
+    if (!result.success) continue;
+
+    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
+    if (!parsed || !Array.isArray(parsed.elements) || !parsed.elements.length) {
+      lastIssues = ['Output was not valid JSON with an elements array.'];
+      continue;
+    }
+
+    const issues = validateSlideDesign(parsed);
+    if (!issues.length) return { slide: parsed, attempts: attempt + 1, issues: [] };
+
+    if (issues.length < bestIssueCount) {
+      bestIssueCount = issues.length;
+      bestCandidate = parsed;
+    }
+    lastIssues = issues;
+  }
+
+  // Loop exhausted — auto-fix the least-bad draft.
+  const fallback = bestCandidate ? autoFixSlide(bestCandidate) : null;
+  return { slide: fallback, attempts: 4, issues: lastIssues || [], autoFixed: true };
+}
+
+// Clamps, validates, and normalizes an AI-composed slide. Critically:
+// ALWAYS persists an explicit background. Without one, the client
+// fell back to the app theme — and the validator's assumption of white
+// disagreed with a dark-themed render → black-on-black slides.
+function sanitizeComposedSlide(parsed, id, fallbackTopic) {
+  const validColor = (c) => typeof c === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : null;
+  const layout = ['title','content','summary','twoCol','quote','freeform'].includes(parsed.layout)
+    ? parsed.layout : 'freeform';
+  const background = validColor(parsed.background) || '#ffffff';
+  const elements = (parsed.elements || []).slice(0, 10).map((el, j) => ({
+    id: `${id}-el${j}`,
+    kind: el.kind === 'image' ? 'image' : 'text',
+    x: clamp(Number(el.x) || 0, 0, 100),
+    y: clamp(Number(el.y) || 0, 0, 100),
+    w: clamp(Number(el.w) || 40, 5, 100),
+    h: clamp(Number(el.h) || 10, 3, 100),
+    text: el.kind === 'image' ? '' : String(el.text || '').slice(0, 1000),
+    src: el.kind === 'image' ? String(el.src || '').slice(0, 2_000_000) : '',
+    // Preserved through sanitize so `resolveSlideImageQueries` can look it
+    // up. Stripped after image resolution (never persisted long-term).
+    searchQuery: el.kind === 'image' ? String(el.searchQuery || el.query || '').slice(0, 160) : '',
+    fontSize: clamp(Number(el.fontSize) || 20, 8, 160),
+    fontWeight: ['400','500','600','700','800'].includes(String(el.fontWeight)) ? String(el.fontWeight) : '400',
+    italic: !!el.italic,
+    underline: !!el.underline,
+    align: ['left','center','right'].includes(el.align) ? el.align : 'left',
+    // If no color (or invalid), pick whichever of black/white contrasts better with the background.
+    color: validColor(el.color) || pickHighContrastText(background),
+  }));
+  // Keep elements in-bounds: if anything extends past 100, pull it back.
+  for (const el of elements) {
+    if (el.x + el.w > 100) el.w = Math.max(5, 100 - el.x);
+    if (el.y + el.h > 100) el.h = Math.max(3, 100 - el.y);
+  }
+  // Always run the mechanical contrast fixer — guarantees no unreadable
+  // slide ever gets persisted, no matter what the AI produced.
+  return autoFixSlide({
+    id,
+    layout,
+    title: (elements[0]?.text || fallbackTopic || '').slice(0, 200),
+    subtitle: '',
+    bullets: [],
+    notes: String(parsed.notes || '').slice(0, 1000),
+    image: '', imageCaption: '',
+    background,
+    elements,
+  });
+}
+
+// Improve / rewrite an existing slide with a free-text instruction. Uses
+// the same design system as the generator so the rewritten slide is a
+// fully composed layout, not a plain bulleted form.
+app.post('/api/slideshows/:id/ai/improve', authMiddleware, async (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const deck = (users[email].data.slideshows || []).find(s => s.id === req.params.id);
+    if (!deck) return res.status(404).json({ error: 'Deck not found' });
+
+    const idx = Number(req.body?.slideIndex);
+    if (!Number.isFinite(idx) || idx < 0 || idx >= (deck.slides || []).length) {
+      return res.status(400).json({ error: 'slideIndex out of range' });
+    }
+    const instruction = String(req.body?.instruction || 'Improve clarity, hierarchy, and visual balance.').slice(0, 400);
+    const target = deck.slides[idx];
+
+    const priorSlide = {
+      title: target.title, subtitle: target.subtitle,
+      bullets: target.bullets, notes: target.notes,
+      layout: target.layout, background: target.background,
+      elements: Array.isArray(target.elements) ? target.elements : [],
+    };
+    const result = await composeAndFinalizeSlide({
+      users, email, deck,
+      // "Topic" for improve = what the current slide is about, with the
+      // instruction providing the delta. The shared helper puts both into
+      // the prompt the same way the generator does.
+      topic: target.title || deck.title,
+      instruction,
+      priorSlide,
+      targetId: target.id,
+      fallbackTitle: target.title,
+    });
+    if (result.error) return res.status(500).json({ error: result.error });
+
+    const updated = result.slide;
+    console.log(`AI slide improved in ${result.attempts} attempt(s)${result.autoFixed ? ' (auto-fixed)' : ''}. Remaining issues: ${result.issues?.length || 0}`);
+    // Preserve the slide's stable id + speaker notes unless the AI provided new ones.
+    updated.id = target.id;
+    if (!updated.notes) updated.notes = target.notes;
+    deck.slides[idx] = updated;
+    saveUsers(users);
+    res.json({ slideshow: deck, slideIndex: idx });
+  } catch (e) { console.error('AI improve error:', e); res.status(500).json({ error: e.message }); }
+});
+
+// ===== Vision-based slide review =====
+// Client renders the slide to a PNG, we ship it straight to Gemini's
+// multimodal endpoint with the slide JSON and ask for concrete element
+// adjustments (new x/y/w/h/color/fontSize). The returned patches are
+// applied to the slide and the new slide ships back to the client, which
+// animates the elements into their new positions.
+app.post('/api/slideshows/:id/ai/review-image', authMiddleware, async (req, res) => {
+  try {
+    if (!genAI) return res.status(500).json({ error: 'AI not configured' });
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const deck = (users[email].data.slideshows || []).find(s => s.id === req.params.id);
+    if (!deck) return res.status(404).json({ error: 'Deck not found' });
+
+    const idx = Number(req.body?.slideIndex);
+    if (!Number.isFinite(idx) || idx < 0 || idx >= (deck.slides || []).length) {
+      return res.status(400).json({ error: 'slideIndex out of range' });
+    }
+    const image = String(req.body?.imageBase64 || '');
+    const base64 = image.replace(/^data:image\/\w+;base64,/, '');
+    if (!base64 || base64.length < 100) return res.status(400).json({ error: 'Invalid image' });
+
+    const slide = deck.slides[idx];
+    const designPrompt = `You are a senior presentation designer reviewing a slide someone just rendered.
+
+You'll get the RENDERED IMAGE of the slide plus the underlying JSON. Look at the image, judge the design, and return element-level adjustments.
+
+Slide JSON (elements are indexed by array position):
+${JSON.stringify({ background: slide.background, elements: slide.elements }, null, 2)}
+
+Rules for your output:
+- Look at the IMAGE, not just the JSON — trust what you see.
+- If the text is unreadable on the background, fix it by changing the element color AND/OR the slide background.
+- If an element is cut off, overlapping another element, or visually cramped, reposition it.
+- If the hierarchy is flat, bump the most-important element's fontSize.
+- Keep it MINIMAL — only patch elements that actually need it.
+- All coords are 0-100 percentages of the slide.
+
+Output ONLY JSON in this exact shape (no prose, no markdown):
+{
+  "rating": 1-10,
+  "feedback": "1-2 sentence design note",
+  "background": "#RRGGBB" | null,     // null = leave as-is
+  "adjustments": [
+    {
+      "index": 0,                      // element index in the slide's elements array
+      "patch": {                       // any subset of these fields
+        "x": 10, "y": 20, "w": 80, "h": 15,
+        "fontSize": 42, "fontWeight": "700",
+        "color": "#111827", "align": "left"
+      }
+    }
+  ]
+}`;
+
+    const m = genAI.getGenerativeModel({
+      model: resolveModel(modelForUser(users[email], email)),
+      generationConfig: {
+        maxOutputTokens: 2048,
+        temperature: 0.6,
+        responseMimeType: 'application/json',
+      },
+    });
+    const result = await m.generateContent([
+      { text: designPrompt },
+      { inlineData: { mimeType: 'image/png', data: base64 } },
+    ]);
+    const text = result?.response?.text?.() || '';
+    const parsed = parseAIJson(text);
+    if (!parsed) return res.status(500).json({ error: 'Could not parse critique' });
+
+    // Apply adjustments.
+    const validColor = (c) => typeof c === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : null;
+    if (validColor(parsed.background)) slide.background = parsed.background;
+    if (Array.isArray(parsed.adjustments)) {
+      for (const adj of parsed.adjustments) {
+        const i = Number(adj?.index);
+        if (!Number.isFinite(i) || i < 0 || i >= (slide.elements || []).length) continue;
+        const el = slide.elements[i];
+        const p = adj.patch || {};
+        if (Number.isFinite(Number(p.x))) el.x = clamp(Number(p.x), 0, 100);
+        if (Number.isFinite(Number(p.y))) el.y = clamp(Number(p.y), 0, 100);
+        if (Number.isFinite(Number(p.w))) el.w = clamp(Number(p.w), 5, 100);
+        if (Number.isFinite(Number(p.h))) el.h = clamp(Number(p.h), 3, 100);
+        if (Number.isFinite(Number(p.fontSize))) el.fontSize = clamp(Number(p.fontSize), 8, 160);
+        if (['400','500','600','700','800'].includes(String(p.fontWeight))) el.fontWeight = String(p.fontWeight);
+        if (['left','center','right'].includes(p.align)) el.align = p.align;
+        if (validColor(p.color)) el.color = p.color;
+      }
+    }
+    // One more pass of the mechanical safety net.
+    deck.slides[idx] = autoFixSlide(slide);
+    saveUsers(users);
+
+    res.json({
+      slideshow: deck,
+      slideIndex: idx,
+      rating: Number(parsed.rating) || null,
+      feedback: String(parsed.feedback || '').slice(0, 400),
+    });
+  } catch (e) {
+    console.error('Vision review error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Update a slideshow (manual edits: rename, tweak slide content, reorder).
+// Body: { title?, subtitle?, slides? } — slides is the full replacement array.
+app.put('/api/slideshows/:id', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const deck = (users[email].data.slideshows || []).find(s => s.id === req.params.id);
+    if (!deck) return res.status(404).json({ error: 'Not found' });
+
+    const { title, subtitle, slides } = req.body || {};
+    if (title !== undefined) deck.title = String(title).slice(0, 200);
+    if (subtitle !== undefined) deck.subtitle = String(subtitle).slice(0, 300);
+    if (Array.isArray(slides)) {
+      const VALID = ['title','content','summary','twoCol','imageLeft','imageRight','imageFull','quote','freeform'];
+      const validColor = (c) => typeof c === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : null;
+      deck.slides = slides.slice(0, 40).map((s, i) => ({
+        id: s.id || `${deck.id}-${i}`,
+        layout: VALID.includes(s.layout) ? s.layout : 'content',
+        title: String(s.title || '').slice(0, 200),
+        subtitle: String(s.subtitle || '').slice(0, 300),
+        bullets: Array.isArray(s.bullets) ? s.bullets.slice(0, 10).map(b => String(b).slice(0, 300)) : [],
+        notes: String(s.notes || '').slice(0, 2000),
+        image: s.image ? String(s.image).slice(0, 600) : '',
+        imageCaption: s.imageCaption ? String(s.imageCaption).slice(0, 200) : '',
+        // Null-able: empty/missing means "follow the client theme".
+        background: validColor(s.background) || null,
+        // Once true, the client will NEVER re-synthesize legacy title/bullets
+        // into freeform elements — an empty elements array stays empty.
+        freeform: !!s.freeform,
+        // Freeform elements: user-positioned text/image blocks. Coords are
+        // percentages of the slide canvas so scaling stays consistent.
+        elements: Array.isArray(s.elements) ? s.elements.slice(0, 40).map((el, j) => {
+          const validKind = ['text','image','icon','shape','svg'].includes(el.kind) ? el.kind : 'text';
+          const validColor = (c) => typeof c === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : null;
+          return {
+            id: el.id || `${s.id || deck.id + '-' + i}-el${j}`,
+            kind: validKind,
+            x: clamp(Number(el.x) || 0, 0, 100),
+            y: clamp(Number(el.y) || 0, 0, 100),
+            w: clamp(Number(el.w) || 40, 5, 100),
+            h: clamp(Number(el.h) || 10, 3, 100),
+            text: validKind === 'text' ? String(el.text || '').slice(0, 1000) : '',
+            src: validKind === 'image' ? String(el.src || '').slice(0, 2_000_000) : '',
+            // SVG markup — scripts/event handlers stripped.
+            svg: validKind === 'svg' ? sanitizeSvg(String(el.svg || '')) : '',
+            // Lucide icon name (e.g. "Lightbulb", "Rocket", "Leaf").
+            iconName: validKind === 'icon' ? String(el.iconName || '').slice(0, 60) : '',
+            // Decorative shape: rect | circle | pill.
+            shape: validKind === 'shape' ? (['rect','circle','pill'].includes(el.shape) ? el.shape : 'rect') : '',
+            fontSize: clamp(Number(el.fontSize) || 20, 8, 120),
+            fontWeight: ['400','500','600','700','800'].includes(String(el.fontWeight)) ? String(el.fontWeight) : '400',
+            italic: !!el.italic,
+            underline: !!el.underline,
+            align: ['left','center','right'].includes(el.align) ? el.align : 'left',
+            color: validColor(el.color) || '#111827',
+            // Secondary color used by shapes (outline / fill gradient) and icons.
+            accent: validColor(el.accent) || null,
+          };
+        }) : [],
+      }));
+    }
+    saveUsers(users);
+    res.json({ slideshow: deck });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/slideshows/generate', authMiddleware, async (req, res) => {
+  try {
+    const { topic, slideCount, difficulty, style } = req.body || {};
+    if (!topic?.trim()) return res.status(400).json({ error: 'Topic is required' });
+
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+
+    const { system, user } = buildSlideshowPrompt({ topic: topic.trim(), slideCount, difficulty, style });
+    const model = modelForUser(users[email], email);
+    // jsonMode forces native JSON output — kills the parse-failure rate
+    // that the previous "stricter retry prompt" was trying to compensate
+    // for. Higher temperature gives the model room to vary archetypes
+    // across the deck. 6k tokens covers up to 20 slides with notes.
+    let result = await callGemini(system, [{ role: 'user', content: user }], model, 6000, { jsonMode: true, temperature: 0.6 });
+    if (!result.success) return res.status(500).json({ error: result.error });
+
+    let parsed = parseAIJson(result.data.content?.[0]?.text || '');
+    if (!parsed?.slides?.length) {
+      const retry = await callGemini(system, [{ role: 'user', content: user }], model, 6000, { jsonMode: true, temperature: 0.4 });
+      if (retry.success) parsed = parseAIJson(retry.data.content?.[0]?.text || '');
+    }
+    if (!parsed?.slides?.length) {
+      return res.status(500).json({ error: 'AI response was malformed. Try again.' });
+    }
+
+    const VALID_LAYOUTS = ['title','content','summary','quote','stat','twoCol','freeform'];
+    const deckId = crypto.randomUUID();
+    const deck = {
+      id: deckId,
+      title: parsed.title || topic,
+      subtitle: parsed.subtitle || '',
+      topic: topic.trim(),
+      slides: parsed.slides.map((s, i) => ({
+        id: `${deckId}-${i}`,
+        layout: VALID_LAYOUTS.includes(s.layout)
+          ? s.layout
+          : (i === 0 ? 'title' : i === parsed.slides.length - 1 ? 'summary' : 'content'),
+        title: String(s.title || '').slice(0, 200),
+        subtitle: String(s.subtitle || '').slice(0, 300),
+        bullets: Array.isArray(s.bullets) ? s.bullets.slice(0, 6).map(b => String(b).slice(0, 300)) : [],
+        notes: String(s.notes || '').slice(0, 1000),
+      })),
+      settings: { difficulty: difficulty || 'intermediate', style: style || 'educational' },
+      createdAt: new Date().toISOString(),
+    };
+
+    users[email].data.slideshows.unshift(deck);
+    saveUsers(users);
+
+    res.json({ slideshow: deck });
+  } catch (e) {
+    console.error('Slideshow generate error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // ===== PROFILE =====
 
@@ -3794,10 +4991,20 @@ app.get('/api/admin/check', authMiddleware, (req, res) => {
 });
 
 // List all users
+// Match any auto-created demo user — landing-page mini-OS spins up a
+// throwaway user per tab, and the legacy `dev@covalent.test` fixture.
+// We filter them out of the admin list so the panel isn't flooded.
+function isDemoOrDevEmail(email) {
+  const e = String(email || '').toLowerCase();
+  return e.startsWith('demo-landing-') || e.endsWith('@covalent.test') || e === 'dev@covalent.test';
+}
+
 app.get('/api/admin/users', authMiddleware, adminMiddleware, (req, res) => {
   const users = loadUsers();
   const social = loadSocial();
-  const list = Object.entries(users).map(([email, u]) => {
+  const list = Object.entries(users)
+    .filter(([email]) => !isDemoOrDevEmail(email))
+    .map(([email, u]) => {
     const plan = getPlan(u, email);
     const totalStudyMsgs = (u.data?.studySessions || []).reduce((n, s) => n + (s.messages?.length || 0), 0);
     const totalLessonMsgs = (u.data?.lessons || []).reduce((n, l) => n + (l.chatHistory?.length || 0), 0);
@@ -3839,8 +5046,10 @@ app.get('/api/admin/users', authMiddleware, adminMiddleware, (req, res) => {
 app.get('/api/admin/users/:uid', authMiddleware, adminMiddleware, (req, res) => {
   const users = loadUsers();
   const social = loadSocial();
-  const entry = Object.entries(users).find(([_, u]) => u.id === req.params.uid);
+  const entry = Object.entries(users).find(([, u]) => u.id === req.params.uid);
   if (!entry) return res.status(404).json({ error: 'User not found' });
+  // Refuse to surface demo / dev throwaway accounts. Matches the filter on /api/admin/users.
+  if (isDemoOrDevEmail(entry[0])) return res.status(404).json({ error: 'User not found' });
   const [email, u] = entry;
   u.data = migrateUserData(u.data);
   const plan = getPlan(u, email);
@@ -3964,6 +5173,7 @@ app.post('/api/admin/users/:uid/ban', authMiddleware, adminMiddleware, (req, res
   const users = loadUsers();
   const email = Object.keys(users).find(e => users[e].id === req.params.uid);
   if (!email) return res.status(404).json({ error: 'User not found' });
+  if (isDemoOrDevEmail(email)) return res.status(403).json({ error: 'Demo / dev accounts are protected. They\u2019re hidden from the panel and cannot be banned.' });
   users[email].banned = !users[email].banned;
   // If banning, kill their sessions
   if (users[email].banned) {
@@ -3981,6 +5191,10 @@ app.delete('/api/admin/users/:uid', authMiddleware, adminMiddleware, (req, res) 
   const users = loadUsers();
   const email = Object.keys(users).find(e => users[e].id === req.params.uid);
   if (!email) return res.status(404).json({ error: 'User not found' });
+  // Demo / dev accounts are hidden from the panel and cannot be deleted —
+  // wiping them mid-session would break the landing-page mini OS for
+  // everyone currently using it.
+  if (isDemoOrDevEmail(email)) return res.status(403).json({ error: 'Demo / dev accounts are protected. They\u2019re hidden from the panel and cannot be deleted.' });
   delete users[email];
   // Kill sessions
   for (const [token, sess] of Object.entries(sessions)) {

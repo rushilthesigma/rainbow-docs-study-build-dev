@@ -34,7 +34,6 @@ const DOCK = [
   { id: 'lessons',   label: 'Lessons',    icon: Lightbulb,      color: 'text-amber-500 bg-amber-50 dark:bg-amber-900/30' },
   { id: 'study',     label: 'Study',      icon: MessageSquare,  color: 'text-sky-500 bg-sky-50 dark:bg-sky-900/30' },
   { id: 'mathtutor', label: 'Math Tutor', icon: Calculator,     color: 'text-indigo-500 bg-indigo-50 dark:bg-indigo-900/30' },
-  { id: 'settings',  label: 'Settings',   icon: SettingsIcon,   color: 'text-gray-500 bg-gray-100 dark:bg-gray-800' },
 ];
 
 // ============================================================
