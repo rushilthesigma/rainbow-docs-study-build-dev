@@ -1484,13 +1484,23 @@ async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOv
   const enableWebSearch = !!opts.enableWebSearch;
   if (!res.headersSent) {
     res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
+    // Critical for Render / nginx — without this they buffer SSE chunks and the
+    // client sees nothing until the stream ends, which feels like the AI stopped.
+    res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
   }
+  // Helper: write SSE event AND flush so Node's internal buffer doesn't hold it.
+  const sse = (obj) => {
+    try {
+      res.write(`data: ${JSON.stringify(obj)}\n\n`);
+      res.flush?.();
+    } catch {}
+  };
 
   if (!genAI) {
-    res.write(`data: ${JSON.stringify({ error: 'GEMINI_API_KEY not configured' })}\n\n`);
+    sse({ error: 'GEMINI_API_KEY not configured' });
     res.end();
     return;
   }
@@ -1506,7 +1516,18 @@ You have Google Search. Use it on every response to ground your answer in real w
     : systemPrompt;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 180000);
+  // 5-minute hard cap. Long lessons with quiz blocks + grounded source mode
+  // can take a while; 180s was clipping legitimate streams.
+  const timeout = setTimeout(() => controller.abort(), 300000);
+
+  // Heartbeat — without periodic bytes, intermediate proxies (Cloudflare,
+  // nginx) close idle SSE connections after ~30s, which the user perceives
+  // as the AI "stopping". Comment lines are valid SSE noops the browser
+  // ignores, so they keep the pipe warm without polluting events.
+  const heartbeat = setInterval(() => {
+    try { res.write(`: keepalive ${Date.now()}\n\n`); res.flush?.(); }
+    catch {}
+  }, 15000);
 
   try {
     const resolved = resolveModel(requestedModel);
@@ -1515,11 +1536,14 @@ You have Google Search. Use it on every response to ground your answer in real w
       model: resolved,
       systemInstruction: { role: 'system', parts: [{ text: finalSystem }] },
       tools,
-      generationConfig: { maxOutputTokens: 8192, temperature: 0.7 },
+      // 32k output cap. The previous 8k limit silently truncated long lessons
+      // (intro phase + 6 sections + quiz block routinely hit 9-10k). Gemini
+      // 2.5 / 3.x both support 32k+ output.
+      generationConfig: { maxOutputTokens: 32768, temperature: 0.7 },
     });
 
     if (enableWebSearch) {
-      res.write(`data: ${JSON.stringify({ status: 'searching' })}\n\n`);
+      sse({ status: 'searching' });
     }
 
     const result = await model.generateContentStream(
@@ -1538,12 +1562,28 @@ You have Google Search. Use it on every response to ground your answer in real w
       const text = chunk?.text?.() || '';
       if (text) {
         buffered += text;
-        res.write(`data: ${JSON.stringify({ content: text })}\n\n`);
+        sse({ content: text });
       }
     }
 
     try { finalResponse = await result.response; } catch {}
     clearTimeout(timeout);
+    clearInterval(heartbeat);
+
+    // Surface non-STOP finish reasons so the client can show "the model hit
+    // its output limit / was cut off by safety filters" instead of letting
+    // the message just end mid-sentence with no explanation.
+    const finishReason = finalResponse?.candidates?.[0]?.finishReason;
+    if (finishReason && finishReason !== 'STOP' && finishReason !== 'FINISH_REASON_UNSPECIFIED') {
+      const userMsg = ({
+        MAX_TOKENS: '\n\n_[response cut off — hit length limit; ask the AI to continue]_',
+        SAFETY: '\n\n_[response was blocked by safety filters]_',
+        RECITATION: '\n\n_[response was cut off due to recitation policy]_',
+        OTHER: '\n\n_[response ended unexpectedly]_',
+      })[finishReason] || `\n\n_[response ended: ${finishReason}]_`;
+      sse({ content: userMsg });
+      buffered += userMsg;
+    }
 
     // --- Citation handling (source mode only) ---
     const sources = [];
@@ -1588,7 +1628,7 @@ You have Google Search. Use it on every response to ground your answer in real w
       }
 
       for (const s of sources) {
-        res.write(`data: ${JSON.stringify({ source: s })}\n\n`);
+        sse({ source: s });
       }
 
       if (sources.length > 0) {
@@ -1598,9 +1638,9 @@ You have Google Search. Use it on every response to ground your answer in real w
         // fully-clickable bibliography.
         const markerText = ' ' + sources.map((_, i) => `[${i + 1}]`).join('');
         appendedMarkers = markerText;
-        res.write(`data: ${JSON.stringify({ content: markerText })}\n\n`);
+        sse({ content: markerText });
       } else {
-        res.write(`data: ${JSON.stringify({ status: 'no_sources' })}\n\n`);
+        sse({ status: 'no_sources' });
       }
     }
 
@@ -1611,13 +1651,14 @@ You have Google Search. Use it on every response to ground your answer in real w
       try { await onComplete(finalContent, sources); }
       catch (bookkeepErr) { console.error('streamAIResponse onComplete threw:', bookkeepErr); }
     }
-    res.write(`data: ${JSON.stringify({ done: true, sources })}\n\n`);
+    sse({ done: true, sources });
     res.end();
   } catch (e) {
     clearTimeout(timeout);
+    clearInterval(heartbeat);
     console.error('Gemini stream error:', e);
     if (!res.writableEnded) {
-      res.write(`data: ${JSON.stringify({ error: e?.message || String(e) })}\n\n`);
+      sse({ error: e?.message || String(e) });
       res.end();
     }
   }

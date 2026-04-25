@@ -50,6 +50,7 @@ export function sendLessonMessage(id, message, images, { onChunk, onDone, onErro
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let finished = false;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -60,8 +61,8 @@ export function sendLessonMessage(id, message, images, { onChunk, onDone, onErro
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
-              if (data.done) onDone?.(data);
-              else if (data.error) onError?.(data.error);
+              if (data.done) { if (!finished) { finished = true; onDone?.(data); } return; }
+              else if (data.error) { if (!finished) { finished = true; onError?.(data.error); } return; }
               else if (data.content) onChunk?.(data.content);
               else if (data.source) onSource?.(data.source);
               else if (data.status) onStatus?.(data.status);
@@ -69,6 +70,10 @@ export function sendLessonMessage(id, message, images, { onChunk, onDone, onErro
           }
         }
       }
+      // Stream closed without a `done` or `error` event — connection dropped
+      // mid-response (proxy timeout, network blip). Surface as a soft error
+      // so the bubble closes instead of spinning forever.
+      if (!finished) onError?.('Connection ended unexpectedly. Try sending the message again.');
     })
     .catch((err) => {
       if (err.name !== 'AbortError') onError?.(err.message);
