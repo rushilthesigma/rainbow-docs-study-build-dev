@@ -1133,18 +1133,32 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
     const { settings } = req.body;
     if (!settings?.topic) return res.status(400).json({ error: 'Topic is required' });
 
-    // Free plan: 1 curriculum generation per week. Pro: unlimited.
     const usersC = loadUsers();
     const emailC = findEmailById(usersC, req.userId);
     if (!emailC) return res.status(404).json({ error: 'User not found' });
     usersC[emailC].data = migrateUserData(usersC[emailC].data);
-    const quota = consumeCurriculumGeneration(usersC, emailC);
-    if (!quota.allowed) {
-      return res.status(402).json({
-        error: 'curriculum_limit_reached',
-        message: `You've already generated ${quota.limit} curriculum this week on the free plan. Upgrade to Pro for unlimited.`,
-        limit: quota.limit, remaining: 0,
-      });
+
+    // Demo users (auto-created throwaway accounts spun up by the landing
+    // page mini-OS) are capped at 1 curriculum total. Real users hit the
+    // weekly Pro/Free quota instead.
+    if (isDemoOrDevEmail(emailC)) {
+      const existing = (usersC[emailC].data.curricula || []).length;
+      if (existing >= 1) {
+        return res.status(402).json({
+          error: 'demo_curriculum_limit',
+          message: 'Demo accounts are limited to 1 curriculum. Sign in with Google to create more.',
+        });
+      }
+    } else {
+      // Free plan: 1 curriculum generation per week. Pro: unlimited.
+      const quota = consumeCurriculumGeneration(usersC, emailC);
+      if (!quota.allowed) {
+        return res.status(402).json({
+          error: 'curriculum_limit_reached',
+          message: `You've already generated ${quota.limit} curriculum this week on the free plan. Upgrade to Pro for unlimited.`,
+          limit: quota.limit, remaining: 0,
+        });
+      }
     }
     saveUsers(usersC);
 
@@ -1401,6 +1415,19 @@ app.post('/api/pausd/enroll', authMiddleware, (req, res) => {
     // making a duplicate.
     const existing = (users[email].data.curricula || []).find(c => c.pausdSlug === slug);
     if (existing) return res.json({ curriculum: existing, alreadyEnrolled: true });
+
+    // Demo accounts are capped at 1 curriculum total. Already-enrolled
+    // case above slips through (re-opens the existing one); only NEW
+    // enrollments check the cap.
+    if (isDemoOrDevEmail(email)) {
+      const totalCurricula = (users[email].data.curricula || []).length;
+      if (totalCurricula >= 1) {
+        return res.status(402).json({
+          error: 'demo_curriculum_limit',
+          message: 'Demo accounts are limited to 1 curriculum. Sign in with Google to enroll in more.',
+        });
+      }
+    }
 
     const curriculumId = crypto.randomUUID();
     const isMathCurriculum = tpl.subject === 'math';
