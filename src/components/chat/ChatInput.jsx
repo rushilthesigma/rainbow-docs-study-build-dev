@@ -146,7 +146,7 @@ export default function ChatInput({
               }`}
             >
               <Globe size={12} />
-              {sourceMode ? 'Web · 2×' : 'Web'}
+              {sourceMode ? 'Source mode · 2×' : 'Source mode'}
             </button>
           )}
           <span className="flex-1" />
