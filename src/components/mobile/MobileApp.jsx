@@ -14,7 +14,6 @@ import GoalsPage from '../../pages/GoalsPage';
 import AssessmentsPage from '../../pages/AssessmentsPage';
 import MathPracticePage from '../../pages/MathPracticePage';
 import SettingsPage from '../../pages/SettingsPage';
-import DebateApp from '../desktop/apps/DebateApp';
 import SocialApp from '../desktop/apps/SocialApp';
 import TextbookApp from '../desktop/apps/TextbookApp';
 import Button from '../shared/Button';
@@ -355,7 +354,6 @@ function MobileMore({ onNavigate }) {
     { id: 'goals', label: 'Goals', icon: Target, color: 'text-amber-500', bg: 'bg-amber-50 dark:bg-amber-900/20' },
     { id: 'assessments', label: 'Assessments', icon: ClipboardCheck, color: 'text-rose-500', bg: 'bg-rose-50 dark:bg-rose-900/20' },
     { id: 'math', label: 'Math Canvas', icon: PenTool, color: 'text-indigo-500', bg: 'bg-indigo-50 dark:bg-indigo-900/20' },
-    { id: 'debate', label: 'Debate', icon: Swords, color: 'text-blue-500', bg: 'bg-blue-50 dark:bg-blue-900/20' },
     { id: 'social', label: 'Social', icon: Users, color: 'text-cyan-500', bg: 'bg-cyan-50 dark:bg-cyan-900/20' },
     { id: 'textbook', label: 'Textbooks', icon: GraduationCap, color: 'text-violet-500', bg: 'bg-violet-50 dark:bg-violet-900/20' },
     { id: 'settings', label: 'Settings', icon: Settings, color: 'text-gray-500', bg: 'bg-gray-50 dark:bg-gray-800/30' },

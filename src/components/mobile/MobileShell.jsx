@@ -5,13 +5,10 @@ import MoreSheet from './MoreSheet';
 
 // Reuse desktop app components
 import CurriculaApp from '../desktop/apps/CurriculaApp';
-import FlashcardsApp from '../desktop/apps/FlashcardsApp';
 import NotesApp from '../desktop/apps/NotesApp';
-import DebateApp from '../desktop/apps/DebateApp';
 import SocialApp from '../desktop/apps/SocialApp';
 import TextbookApp from '../desktop/apps/TextbookApp';
 import StudyPage from '../../pages/StudyPage';
-import GoalsPage from '../../pages/GoalsPage';
 import AssessmentsPage from '../../pages/AssessmentsPage';
 import MathPracticePage from '../../pages/MathPracticePage';
 import SettingsPage from '../../pages/SettingsPage';
@@ -19,12 +16,9 @@ import SettingsPage from '../../pages/SettingsPage';
 const PAGE_MAP = {
   study: { title: 'Study Mode', component: StudyPage, flex: true },
   curricula: { title: 'Curricula', component: CurriculaApp },
-  flashcards: { title: 'Flashcards', component: FlashcardsApp },
   notes: { title: 'Notes', component: NotesApp, flex: true },
-  goals: { title: 'Goals', component: GoalsPage },
   assessments: { title: 'Assessments', component: AssessmentsPage },
   math: { title: 'Math Canvas', component: MathPracticePage, flex: true },
-  debate: { title: 'Debate', component: DebateApp, flex: true },
   social: { title: 'Social', component: SocialApp, flex: true },
   textbook: { title: 'Textbooks', component: TextbookApp },
   settings: { title: 'Settings', component: SettingsPage },

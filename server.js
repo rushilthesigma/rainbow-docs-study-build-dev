@@ -6137,6 +6137,366 @@ app.post('/api/quizbowl/match/:code/leave', authMiddleware, (req, res) => {
   res.json({ ok: true });
 });
 
+// =========================================================
+// DEBATE — head-to-head multiplayer with AI-graded turns + dual-end voting.
+//
+// Flow:
+//   1. Host POSTs /api/debate/match → returns { code }. Match is in
+//      'waiting' state with one player.
+//   2. Opponent POSTs /api/debate/match/:code/join → match state stays
+//      'waiting' until host configures.
+//   3. Host POSTs /api/debate/match/:code/start with { topic, hostSide }.
+//      Match flips to 'playing'. Each player has a side; turns alternate
+//      starting with the FOR side.
+//   4. Active player POSTs /api/debate/match/:code/move { argument }.
+//      Server calls Gemini in JSON mode to score the argument on three
+//      axes (argumentation, evidence, rhetoric, 1-10 each) + a 1-2
+//      sentence feedback. Score added to match.turns + scoreboard.
+//      Turn passes to opponent.
+//   5. Either player POSTs /api/debate/match/:code/vote-end. When BOTH
+//      players have voted, server asks Gemini for a final verdict and
+//      flips match to 'finished'.
+//   6. SSE stream pushes state updates ('turn_added', 'end_voted',
+//      'finished') to both players.
+// =========================================================
+
+const debateMatches = new Map();
+
+function newDebateCode() {
+  // 5-char alphanumeric, avoiding ambiguous chars (0/O, 1/I/L).
+  const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  for (let attempt = 0; attempt < 12; attempt++) {
+    let c = '';
+    for (let i = 0; i < 5; i++) c += alphabet[Math.floor(Math.random() * alphabet.length)];
+    if (!debateMatches.has(c)) return c;
+  }
+  return 'D' + Date.now().toString(36).toUpperCase().slice(-4);
+}
+
+function publicDebateState(match) {
+  return {
+    code: match.code,
+    state: match.state,
+    topic: match.topic || null,
+    players: match.players.map(p => ({ userId: p.userId, name: p.name, side: p.side || null })),
+    hostId: match.hostId,
+    turns: match.turns.map(t => ({
+      userId: t.userId, side: t.side, content: t.content,
+      score: t.score, feedback: t.feedback, at: t.at,
+    })),
+    turnOf: match.turnOf,
+    scores: match.scores,
+    endVotes: Array.from(match.endVotes),
+    verdict: match.verdict || null,
+    createdAt: match.createdAt,
+  };
+}
+
+function pushDebateEvent(match, type, payload) {
+  match.lastActivity = Date.now();
+  for (const p of match.players) {
+    const stream = p.stream;
+    if (!stream || stream.writableEnded) continue;
+    try { stream.write(`data: ${JSON.stringify({ type, ...payload })}\n\n`); stream.flush?.(); }
+    catch {}
+  }
+}
+
+// POST /api/debate/match — create empty match.
+app.post('/api/debate/match', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const code = newDebateCode();
+    const match = {
+      code,
+      state: 'waiting', // waiting | playing | finished
+      topic: null,
+      hostId: req.userId,
+      players: [{ userId: req.userId, name: users[email].name || email.split('@')[0], side: null, stream: null }],
+      turns: [],
+      turnOf: null, // userId of player whose turn it is
+      scores: { [req.userId]: 0 },
+      endVotes: new Set(),
+      verdict: null,
+      createdAt: Date.now(),
+      lastActivity: Date.now(),
+    };
+    debateMatches.set(code, match);
+    res.json({ code, match: publicDebateState(match) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/debate/match/:code/join — second player joins.
+app.post('/api/debate/match/:code/join', authMiddleware, (req, res) => {
+  const match = debateMatches.get(req.params.code);
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+  if (match.players.some(p => p.userId === req.userId)) {
+    match.lastActivity = Date.now();
+    return res.json({ match: publicDebateState(match) });
+  }
+  if (match.players.length >= 2) return res.status(409).json({ error: 'Match is full' });
+  if (match.state !== 'waiting') return res.status(409).json({ error: 'Match already started' });
+  const users = loadUsers();
+  const email = findEmailById(users, req.userId);
+  match.players.push({
+    userId: req.userId,
+    name: (email && users[email].name) || (email && email.split('@')[0]) || 'Opponent',
+    side: null,
+    stream: null,
+  });
+  match.scores[req.userId] = 0;
+  match.lastActivity = Date.now();
+  pushDebateEvent(match, 'player_joined', { match: publicDebateState(match) });
+  res.json({ match: publicDebateState(match) });
+});
+
+// GET /api/debate/match/:code/stream — SSE for state pushes.
+app.get('/api/debate/match/:code/stream', authMiddleware, (req, res) => {
+  const match = debateMatches.get(req.params.code);
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+  const player = match.players.find(p => p.userId === req.userId);
+  if (!player) return res.status(403).json({ error: 'Not a player in this match' });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+  player.stream = res;
+  res.write(`data: ${JSON.stringify({ type: 'snapshot', match: publicDebateState(match) })}\n\n`);
+  res.flush?.();
+
+  const heartbeat = setInterval(() => {
+    try { res.write(`: keepalive ${Date.now()}\n\n`); res.flush?.(); } catch {}
+  }, 15000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    if (player.stream === res) player.stream = null;
+  });
+});
+
+// POST /api/debate/match/:code/start — host configures topic + sides.
+app.post('/api/debate/match/:code/start', authMiddleware, (req, res) => {
+  const match = debateMatches.get(req.params.code);
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+  if (match.hostId !== req.userId) return res.status(403).json({ error: 'Only host can start' });
+  if (match.players.length < 2) return res.status(409).json({ error: 'Waiting for opponent' });
+  if (match.state !== 'waiting') return res.status(409).json({ error: 'Already started' });
+
+  const topic = String(req.body?.topic || '').trim();
+  const hostSide = req.body?.hostSide === 'against' ? 'against' : 'for';
+  if (!topic) return res.status(400).json({ error: 'Topic required' });
+
+  match.topic = topic;
+  match.players[0].side = hostSide;
+  match.players[1].side = hostSide === 'for' ? 'against' : 'for';
+  match.state = 'playing';
+  // FOR side opens.
+  match.turnOf = match.players.find(p => p.side === 'for').userId;
+  match.lastActivity = Date.now();
+  pushDebateEvent(match, 'started', { match: publicDebateState(match) });
+  res.json({ match: publicDebateState(match) });
+});
+
+// POST /api/debate/match/:code/move — submit an argument; AI grades it.
+app.post('/api/debate/match/:code/move', authMiddleware, async (req, res) => {
+  const match = debateMatches.get(req.params.code);
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+  if (match.state !== 'playing') return res.status(409).json({ error: 'Not in playing state' });
+  if (match.turnOf !== req.userId) return res.status(403).json({ error: 'Not your turn' });
+
+  const argument = String(req.body?.argument || '').trim();
+  if (argument.length < 20) return res.status(400).json({ error: 'Argument must be at least 20 characters' });
+
+  const player = match.players.find(p => p.userId === req.userId);
+  const opponent = match.players.find(p => p.userId !== req.userId);
+
+  // AI grading. Three 1-10 axes + 1-2 sentence feedback. JSON mode forced.
+  const prevTurns = match.turns.slice(-6).map(t =>
+    `${t.side.toUpperCase()} (${t.userId === req.userId ? 'this player' : 'opponent'}): ${t.content.slice(0, 600)}`
+  ).join('\n\n');
+  const sys = `You are a debate judge. Grade the argument on three axes (1-10 integer each):
+- argumentation (logical structure, claim → reasoning → conclusion)
+- evidence (specific facts, examples, data — penalize hand-waving)
+- rhetoric (clarity, persuasiveness, addressing the opponent's strongest point)
+Output STRICT JSON only.`;
+  const usr = `Topic: "${match.topic}"
+This player is arguing ${player.side.toUpperCase()}.
+
+Previous turns (most recent last):
+${prevTurns || '(none — opening statement)'}
+
+NEW ARGUMENT from this player:
+"""
+${argument.slice(0, 8000)}
+"""
+
+Return JSON exactly:
+{
+  "argumentation": N,
+  "evidence": N,
+  "rhetoric": N,
+  "feedback": "1-2 sentences naming the strongest move + the biggest weakness"
+}`;
+  try {
+    const aiResp = await callGemini(sys, [{ role: 'user', content: usr }], MODEL_FLASH_LITE, 600, { jsonMode: true, temperature: 0.4 });
+    let score = { argumentation: 5, evidence: 5, rhetoric: 5, total: 15 };
+    let feedback = '';
+    if (aiResp.success) {
+      const parsed = parseAIJson(aiResp.data.content?.[0]?.text || '');
+      if (parsed) {
+        score = {
+          argumentation: Math.max(1, Math.min(10, Number(parsed.argumentation) || 5)),
+          evidence:      Math.max(1, Math.min(10, Number(parsed.evidence)      || 5)),
+          rhetoric:      Math.max(1, Math.min(10, Number(parsed.rhetoric)      || 5)),
+        };
+        score.total = score.argumentation + score.evidence + score.rhetoric;
+        feedback = String(parsed.feedback || '').slice(0, 400);
+      }
+    }
+    const turn = {
+      userId: req.userId, side: player.side, content: argument,
+      score, feedback, at: Date.now(),
+    };
+    match.turns.push(turn);
+    match.scores[req.userId] = (match.scores[req.userId] || 0) + score.total;
+    // Turn passes to opponent.
+    match.turnOf = opponent.userId;
+    match.lastActivity = Date.now();
+    pushDebateEvent(match, 'turn_added', { turn, scores: match.scores, turnOf: match.turnOf });
+    res.json({ turn, match: publicDebateState(match) });
+  } catch (e) {
+    console.error('Debate move grading failed:', e);
+    res.status(500).json({ error: e.message || 'Grading failed' });
+  }
+});
+
+// POST /api/debate/match/:code/vote-end — vote to end. When both vote,
+// AI generates final verdict and the match flips to 'finished'.
+app.post('/api/debate/match/:code/vote-end', authMiddleware, async (req, res) => {
+  const match = debateMatches.get(req.params.code);
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+  if (match.state !== 'playing') return res.status(409).json({ error: 'Match not in playing state' });
+  if (!match.players.some(p => p.userId === req.userId)) return res.status(403).json({ error: 'Not a player' });
+
+  match.endVotes.add(req.userId);
+  const allVoted = match.players.every(p => match.endVotes.has(p.userId));
+  match.lastActivity = Date.now();
+
+  if (!allVoted) {
+    pushDebateEvent(match, 'end_voted', {
+      userId: req.userId,
+      endVotes: Array.from(match.endVotes),
+    });
+    return res.json({ match: publicDebateState(match), finished: false });
+  }
+
+  // Both voted → AI generates final verdict.
+  const transcript = match.turns.map((t, i) =>
+    `Turn ${i + 1} — ${t.side.toUpperCase()} (score ${t.score.total}/30): ${t.content.slice(0, 800)}`
+  ).join('\n\n') || '(no turns played)';
+
+  const forPlayer = match.players.find(p => p.side === 'for');
+  const againstPlayer = match.players.find(p => p.side === 'against');
+
+  const sys = `You are a debate judge. Read the full transcript + per-turn scores and declare a winner with a SHORT, decisive verdict. Output STRICT JSON only.`;
+  const usr = `Topic: "${match.topic}"
+
+FOR side total: ${match.scores[forPlayer.userId] || 0}
+AGAINST side total: ${match.scores[againstPlayer.userId] || 0}
+
+Transcript:
+${transcript}
+
+Return JSON exactly:
+{
+  "winner": "for" | "against" | "tie",
+  "summary": "3-5 sentences. Name the strongest argument from each side, then explain why your winner won.",
+  "forStrongest": "1 sentence — strongest moment from the FOR side",
+  "againstStrongest": "1 sentence — strongest moment from the AGAINST side"
+}`;
+  try {
+    const aiResp = await callGemini(sys, [{ role: 'user', content: usr }], DEFAULT_MODEL, 1500, { jsonMode: true, temperature: 0.3 });
+    let verdict = {
+      winner: (match.scores[forPlayer.userId] || 0) >= (match.scores[againstPlayer.userId] || 0) ? 'for' : 'against',
+      summary: 'Both sides argued. Verdict generation failed; using raw scores as the tiebreak.',
+      forStrongest: '', againstStrongest: '',
+    };
+    if (aiResp.success) {
+      const parsed = parseAIJson(aiResp.data.content?.[0]?.text || '');
+      if (parsed && ['for', 'against', 'tie'].includes(parsed.winner)) {
+        verdict = {
+          winner: parsed.winner,
+          summary: String(parsed.summary || '').slice(0, 1200),
+          forStrongest: String(parsed.forStrongest || '').slice(0, 400),
+          againstStrongest: String(parsed.againstStrongest || '').slice(0, 400),
+        };
+      }
+    }
+    match.verdict = verdict;
+    match.state = 'finished';
+    pushDebateEvent(match, 'finished', { match: publicDebateState(match) });
+    res.json({ match: publicDebateState(match), finished: true });
+  } catch (e) {
+    console.error('Debate verdict generation failed:', e);
+    res.status(500).json({ error: e.message || 'Verdict failed' });
+  }
+});
+
+// POST /api/debate/match/:code/leave — graceful exit (clears stream).
+app.post('/api/debate/match/:code/leave', authMiddleware, (req, res) => {
+  const match = debateMatches.get(req.params.code);
+  if (!match) return res.json({ ok: true });
+  const p = match.players.find(x => x.userId === req.userId);
+  if (p && p.stream) { try { p.stream.end(); } catch {} p.stream = null; }
+  res.json({ ok: true });
+});
+
+// =========================================================
+// SINGLEPLAYER DEBATE — final verdict (called from /move when no
+// multiplayer match exists). Splits the singleplayer flow's "End Debate"
+// button so the AI gives a winner verdict instead of just a wrap-up.
+// =========================================================
+app.post('/api/debate/singleplayer/verdict', authMiddleware, async (req, res) => {
+  try {
+    const { topic, userSide, transcript } = req.body || {};
+    if (!topic || !userSide || !Array.isArray(transcript)) {
+      return res.status(400).json({ error: 'topic, userSide, transcript[] required' });
+    }
+    const sys = `You are a debate judge. Read the full transcript and declare a winner. Output STRICT JSON only.`;
+    const lines = transcript.map((m, i) =>
+      `Turn ${i + 1} — ${m.role === 'user' ? `STUDENT (${userSide.toUpperCase()})` : `AI (${userSide === 'for' ? 'AGAINST' : 'FOR'})`}: ${(m.content || '').slice(0, 1500)}`
+    ).join('\n\n');
+    const usr = `Topic: "${topic}"
+Student argued ${userSide.toUpperCase()}; AI argued the opposite.
+
+Transcript:
+${lines}
+
+Return JSON:
+{
+  "winner": "student" | "ai" | "tie",
+  "studentScore": N,           // 0-100
+  "aiScore": N,                // 0-100
+  "summary": "3-5 sentences explaining who won and why.",
+  "studentStrongest": "1 sentence — strongest moment from the student",
+  "studentWeakest": "1 sentence — weakest moment from the student",
+  "improve": "1-2 sentences — what the student should drill next"
+}`;
+    const aiResp = await callGemini(sys, [{ role: 'user', content: usr }], DEFAULT_MODEL, 1500, { jsonMode: true, temperature: 0.3 });
+    if (!aiResp.success) return res.status(500).json({ error: aiResp.error });
+    const parsed = parseAIJson(aiResp.data.content?.[0]?.text || '');
+    if (!parsed) return res.status(500).json({ error: 'Failed to parse verdict' });
+    res.json({ verdict: parsed });
+  } catch (e) {
+    console.error('Singleplayer verdict failed:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // SPA fallback (Express 5 syntax)
 app.get('/{*path}', (req, res) => {
   if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });

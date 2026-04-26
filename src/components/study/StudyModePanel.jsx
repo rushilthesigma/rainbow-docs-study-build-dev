@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { History, Trash2, Plus, ChevronLeft, Compass, Lightbulb, Calculator, Beaker, Sparkles } from 'lucide-react';
+import { History, Trash2, Plus, ChevronLeft, Compass, Lightbulb, Calculator, Beaker, Sparkles, Swords } from 'lucide-react';
 import { sendStudyMessage, listStudySessions, getStudySession, deleteStudySession } from '../../api/curriculum';
 import ChatContainer from '../chat/ChatContainer';
+import DebatePanel from './DebatePanel';
 import { errorChatMessage } from '../../utils/aiErrors';
 
 // Quick-start prompts shown in the empty state. Replaces the bland
@@ -23,6 +24,8 @@ export default function StudyModePanel({ className = '', initialMessage }) {
   const [sourceMode, setSourceMode] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [sessionId, setSessionId] = useState(null);
+  // Debate sub-view — replaces the chat with the DebatePanel when true.
+  const [debateOpen, setDebateOpen] = useState(false);
   const abortRef = useRef(null);
   const streamContentRef = useRef('');
   const streamSourcesRef = useRef([]);
@@ -213,6 +216,13 @@ export default function StudyModePanel({ className = '', initialMessage }) {
           </p>
         </div>
         <button
+          onClick={() => setDebateOpen(true)}
+          className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:bg-white dark:hover:bg-[#1e1e2e] transition-colors"
+          title="Debate (solo vs AI or head-to-head)"
+        >
+          <Swords size={12} /> Debate
+        </button>
+        <button
           onClick={() => { loadHistory(); setShowHistory(true); }}
           className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-[#1e1e2e] transition-colors"
           title="Past sessions"
@@ -230,6 +240,15 @@ export default function StudyModePanel({ className = '', initialMessage }) {
       </div>
     </div>
   );
+
+  // Debate sub-view replaces the entire chat surface while open.
+  if (debateOpen) {
+    return (
+      <div className={`flex flex-col ${className}`}>
+        <DebatePanel onBack={() => setDebateOpen(false)} />
+      </div>
+    );
+  }
 
   function handleUserEdit(idx, newContent) {
     if (streaming) return;
