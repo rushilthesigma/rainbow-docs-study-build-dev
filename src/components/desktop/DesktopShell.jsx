@@ -12,6 +12,7 @@ import ChromeOSShell from './ChromeOSShell';
 import LinuxShell from './LinuxShell';
 import MobileApp from '../mobile/MobileApp';
 import GuidedTour from './GuidedTour';
+import ShortcutsHelp from './ShortcutsHelp';
 
 function MacOSContent() {
   const { state } = useWindowManager();
@@ -58,6 +59,8 @@ function MacOSContent() {
 
 function ShellContent() {
   const style = localStorage.getItem('cov-desktop-style') || 'macos';
+  const { state, closeWindow, minimizeWindow, focusWindow, restoreWindow } = useWindowManager();
+  const [helpOpen, setHelpOpen] = useState(false);
 
   // Tag <html> with os-<style> so per-OS CSS tweaks can target app UI without
   // every component needing to read the preference. Cleans up on unmount.
@@ -68,6 +71,60 @@ function ShellContent() {
     root.classList.add(`os-${style}`);
     return () => root.classList.remove(`os-${style}`);
   }, [style]);
+
+  // Global keyboard shortcuts. Active across every shell (mac/windows/
+  // chromeos/linux). Per-app shortcuts are in their own components.
+  useEffect(() => {
+    function handler(e) {
+      const cmdish = e.metaKey || e.ctrlKey;
+      if (!cmdish) return;
+      const t = e.target;
+      // Skip when the user is typing in a field (except for shortcuts that
+      // explicitly need to override that — / is allowed everywhere).
+      const inField = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+
+      // Cmd+/ → shortcuts help (works everywhere, even in inputs)
+      if (e.key === '/' || e.key === '?') {
+        e.preventDefault();
+        setHelpOpen(prev => !prev);
+        return;
+      }
+
+      if (inField) return;
+
+      // Cmd+W → close active window
+      if (e.key === 'w' || e.key === 'W') {
+        if (state.activeWindowId) {
+          e.preventDefault();
+          closeWindow(state.activeWindowId);
+        }
+        return;
+      }
+
+      // Cmd+M → minimize active window
+      if (e.key === 'm' || e.key === 'M') {
+        if (state.activeWindowId) {
+          e.preventDefault();
+          minimizeWindow(state.activeWindowId);
+        }
+        return;
+      }
+
+      // Cmd+1-9 → focus the Nth visible window in dock order
+      const digit = parseInt(e.key, 10);
+      if (Number.isInteger(digit) && digit >= 1 && digit <= 9) {
+        const wins = Object.values(state.windows).filter(w => !w.isClosing);
+        const target = wins[digit - 1];
+        if (target) {
+          e.preventDefault();
+          if (target.isMinimized) restoreWindow(target.id);
+          else focusWindow(target.id);
+        }
+      }
+    }
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [state.activeWindowId, state.windows, closeWindow, minimizeWindow, focusWindow, restoreWindow]);
 
   function shellByStyle() {
     switch (style) {
@@ -83,6 +140,7 @@ function ShellContent() {
     <>
       {shellByStyle()}
       <GuidedTour />
+      <ShortcutsHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
     </>
   );
 }
