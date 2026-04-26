@@ -32,11 +32,11 @@ export default function DebatePanel({ onBack }) {
 
   // Top-level chrome.
   const header = (
-    <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-200 dark:border-[#2A2A40] bg-gradient-to-r from-amber-50 via-white to-rose-50 dark:from-amber-950/20 dark:via-[#161622] dark:to-rose-950/20">
+    <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-200 dark:border-[#2A2A40] bg-gradient-to-r from-amber-50 via-white to-orange-50 dark:from-amber-950/20 dark:via-[#161622] dark:to-orange-950/20">
       <button onClick={onBack} className="p-1 rounded text-gray-500 hover:text-gray-800 dark:hover:text-gray-200">
         <ArrowLeft size={14} />
       </button>
-      <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-amber-500 to-rose-600 flex items-center justify-center text-white shadow-sm">
+      <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white shadow-sm">
         <Swords size={13} />
       </div>
       <span className="text-[13px] font-bold text-gray-900 dark:text-white">Debate</span>
@@ -106,10 +106,10 @@ function ModeMenu({ onSelect }) {
 
         <button
           onClick={() => onSelect('mp-menu')}
-          className="text-left p-4 rounded-xl border-2 border-gray-200 dark:border-[#2A2A40] hover:border-rose-400 dark:hover:border-rose-700 bg-white dark:bg-[#161622] transition-colors group"
+          className="text-left p-4 rounded-xl border-2 border-gray-200 dark:border-[#2A2A40] hover:border-amber-400 dark:hover:border-amber-700 bg-white dark:bg-[#161622] transition-colors group"
         >
           <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-lg bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 flex items-center justify-center flex-shrink-0">
+            <div className="w-10 h-10 rounded-lg bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 flex items-center justify-center flex-shrink-0">
               <Users size={18} />
             </div>
             <div className="flex-1 min-w-0">
@@ -306,7 +306,7 @@ function Singleplayer({ mode, setMode, onExit }) {
       <button
         onClick={handleEndDebate}
         disabled={streaming || verdictLoading || messages.length < 2}
-        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-[11px] font-semibold transition-colors"
+        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-[11px] font-semibold transition-colors"
       >
         {verdictLoading ? <><Loader2 size={11} className="animate-spin" /> Judging…</> : <><Swords size={11} /> End debate</>}
       </button>
@@ -472,7 +472,7 @@ function Multiplayer({ mode, setMode, onExit }) {
         <button
           onClick={handleCreate}
           disabled={busy}
-          className="w-full py-3 mb-4 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-sm font-semibold flex items-center justify-center gap-2"
+          className="w-full py-3 mb-4 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-semibold flex items-center justify-center gap-2"
         >
           {busy ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
           Create match
@@ -489,7 +489,7 @@ function Multiplayer({ mode, setMode, onExit }) {
             onChange={e => setJoinInput(e.target.value.toUpperCase().slice(0, 5))}
             onKeyDown={e => { if (e.key === 'Enter') handleJoin(); }}
             placeholder="Code"
-            className="flex-1 px-3 py-2.5 rounded-xl border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622] text-sm font-mono uppercase tracking-widest outline-none focus:ring-2 focus:ring-rose-500/40"
+            className="flex-1 px-3 py-2.5 rounded-xl border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622] text-sm font-mono uppercase tracking-widest outline-none focus:ring-2 focus:ring-amber-500/40"
           />
           <button
             onClick={handleJoin}
@@ -514,7 +514,7 @@ function Multiplayer({ mode, setMode, onExit }) {
         <p className="text-[11px] uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400 mb-1.5">Match code</p>
         <button
           onClick={copyCode}
-          className="w-full font-mono text-3xl font-black tabular-nums tracking-[0.2em] text-gray-900 dark:text-white bg-white dark:bg-[#161622] border-2 border-rose-300 dark:border-rose-800 rounded-xl py-4 mb-3 hover:bg-rose-50 dark:hover:bg-rose-900/15 transition-colors inline-flex items-center justify-center gap-3"
+          className="w-full font-mono text-3xl font-black tabular-nums tracking-[0.2em] text-gray-900 dark:text-white bg-white dark:bg-[#161622] border-2 border-amber-300 dark:border-amber-800 rounded-xl py-4 mb-3 hover:bg-amber-50 dark:hover:bg-amber-900/15 transition-colors inline-flex items-center justify-center gap-3"
         >
           {match.code}
           {copied ? <Check size={18} className="text-emerald-500" /> : <Copy size={16} className="text-gray-400" />}
@@ -526,7 +526,7 @@ function Multiplayer({ mode, setMode, onExit }) {
           <div className="space-y-1.5">
             {match.players.map(p => (
               <div key={p.userId} className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-full bg-rose-200 dark:bg-rose-900/40 text-rose-600 dark:text-rose-300 flex items-center justify-center text-[10px] font-bold">
+                <div className="w-6 h-6 rounded-full bg-amber-200 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 flex items-center justify-center text-[10px] font-bold">
                   {p.name.charAt(0).toUpperCase()}
                 </div>
                 <span className="text-sm text-gray-800 dark:text-gray-200">{p.name}</span>
@@ -551,11 +551,11 @@ function Multiplayer({ mode, setMode, onExit }) {
               value={topicInput}
               onChange={e => setTopicInput(e.target.value)}
               placeholder="What are we debating?"
-              className="w-full px-3 py-2 mb-2 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622] text-sm outline-none focus:ring-2 focus:ring-rose-500/40"
+              className="w-full px-3 py-2 mb-2 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622] text-sm outline-none focus:ring-2 focus:ring-amber-500/40"
             />
             <div className="flex flex-wrap gap-1 mb-3">
               {QUICK_TOPICS.slice(0, 4).map(t => (
-                <button key={t} onClick={() => setTopicInput(t)} className="px-2 py-0.5 rounded text-[10px] font-medium text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-[#161622] border border-gray-200 dark:border-[#2A2A40] hover:border-rose-300">
+                <button key={t} onClick={() => setTopicInput(t)} className="px-2 py-0.5 rounded text-[10px] font-medium text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-[#161622] border border-gray-200 dark:border-[#2A2A40] hover:border-amber-300">
                   {t}
                 </button>
               ))}
@@ -572,7 +572,7 @@ function Multiplayer({ mode, setMode, onExit }) {
             <button
               onClick={handleStart}
               disabled={busy || !topicInput.trim() || !opponentJoined}
-              className="w-full py-3 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-sm font-semibold flex items-center justify-center gap-2"
+              className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-semibold flex items-center justify-center gap-2"
             >
               {busy ? <Loader2 size={14} className="animate-spin" /> : <Swords size={14} />}
               {opponentJoined ? 'Start the debate' : 'Waiting for opponent…'}
@@ -600,7 +600,7 @@ function Multiplayer({ mode, setMode, onExit }) {
     return (
       <div className="h-full flex flex-col">
         {/* Topic + scoreboard */}
-        <div className="px-4 py-2 border-b border-gray-200 dark:border-[#2A2A40] bg-gradient-to-r from-amber-50 to-rose-50 dark:from-amber-950/15 dark:to-rose-950/15">
+        <div className="px-4 py-2 border-b border-gray-200 dark:border-[#2A2A40] bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/15 dark:to-orange-950/15">
           <p className="text-xs text-gray-700 dark:text-gray-200 font-medium truncate">{match.topic}</p>
           <div className="flex items-center gap-3 mt-1">
             <ScorePill name={me?.name || 'You'} side={me?.side} score={myScore} active={myTurn} self />
@@ -615,8 +615,8 @@ function Multiplayer({ mode, setMode, onExit }) {
                 iVoted
                   ? 'bg-amber-200 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300'
                   : oppVoted
-                    ? 'bg-rose-600 hover:bg-rose-700 text-white animate-pulse'
-                    : 'bg-rose-600 hover:bg-rose-700 text-white'
+                    ? 'bg-amber-500 hover:bg-amber-600 text-white animate-pulse'
+                    : 'bg-amber-500 hover:bg-amber-600 text-white'
               }`}
             >
               {voting ? <Loader2 size={11} className="animate-spin" /> : iVoted ? 'Waiting…' : oppVoted ? 'Confirm end' : 'Vote to end'}
@@ -670,7 +670,7 @@ function Multiplayer({ mode, setMode, onExit }) {
                 placeholder={`Make your argument as ${me?.side?.toUpperCase()}. Specifics, evidence, attack the opponent's last claim.`}
                 rows={4}
                 disabled={submittingMove}
-                className="w-full p-3 rounded-xl border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-sm outline-none focus:ring-2 focus:ring-rose-500/40 resize-y"
+                className="w-full p-3 rounded-xl border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-sm outline-none focus:ring-2 focus:ring-amber-500/40 resize-y"
               />
               <div className="flex items-center justify-between mt-2">
                 <p className="text-[10px] text-gray-400 tabular-nums">
@@ -679,7 +679,7 @@ function Multiplayer({ mode, setMode, onExit }) {
                 <button
                   onClick={handleSubmitMove}
                   disabled={submittingMove || argument.trim().length < 20}
-                  className="px-4 py-1.5 rounded-md bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-semibold inline-flex items-center gap-1"
+                  className="px-4 py-1.5 rounded-md bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-xs font-semibold inline-flex items-center gap-1"
                 >
                   {submittingMove ? <><Loader2 size={11} className="animate-spin" /> Grading…</> : <>Send turn</>}
                 </button>

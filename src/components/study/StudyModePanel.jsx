@@ -217,7 +217,7 @@ export default function StudyModePanel({ className = '', initialMessage }) {
         </div>
         <button
           onClick={() => setDebateOpen(true)}
-          className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:bg-white dark:hover:bg-[#1e1e2e] transition-colors"
+          className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:bg-white dark:hover:bg-[#1e1e2e] transition-colors"
           title="Debate (solo vs AI or head-to-head)"
         >
           <Swords size={12} /> Debate
