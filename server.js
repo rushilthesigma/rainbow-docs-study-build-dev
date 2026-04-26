@@ -32,13 +32,16 @@ const PORT = process.env.PORT || 3002;
 // ===== Google Gemini =====
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 // As of 2026-04 the 3.x family is exposed as `-preview` variants.
-// Three tiers, all 1M-token input context:
-//   Pro        — gemini-3.1-pro-preview         (deepest reasoning, slowest)
-//   Flash      — gemini-3-flash-preview         (balanced; default for free)
-//   Flash Lite — gemini-3-flash-lite-preview    (fastest + cheapest, slightly lower quality)
+// Three tiers, all 1M-token input context. Pro/Flash use the Gemini 3
+// preview line; Flash Lite uses the GA 2.5-flash-lite (no Gemini-3 lite
+// SKU exists yet, so falling back to the most-current GA Lite model
+// avoids 404s on model resolution).
+//   Pro        — gemini-3.1-pro-preview     (deepest reasoning, slowest)
+//   Flash      — gemini-3-flash-preview     (balanced)
+//   Flash Lite — gemini-2.5-flash-lite      (fastest + cheapest, GA)
 const GEMINI_PRO        = 'gemini-3.1-pro-preview';
 const GEMINI_FLASH      = 'gemini-3-flash-preview';
-const GEMINI_FLASH_LITE = 'gemini-3-flash-lite-preview';
+const GEMINI_FLASH_LITE = 'gemini-2.5-flash-lite';
 const DEFAULT_MODEL = GEMINI_PRO;
 const FALLBACK_MODEL = GEMINI_FLASH;
 const resolveModel = (name) => name || DEFAULT_MODEL;
@@ -831,12 +834,30 @@ async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096,
       };
     } catch (err) {
       lastError = err?.message || String(err);
-      // 404/invalid model on a 3.x id → downgrade this process, retry same attempt
-      // No model downgrade — stay on 3.x. Surface the error if 3 is unavailable.
+      // Detect "model not found / invalid model" errors so we can cascade.
+      // Gemini 3.x preview ids periodically vanish or get renamed; without
+      // this fallback every call would hard-fail until we redeployed.
+      const errStr = String(lastError).toLowerCase();
+      const isModelMissing =
+        err?.status === 404 ||
+        err?.status === 400 ||
+        errStr.includes('not found') ||
+        errStr.includes('invalid model') ||
+        errStr.includes('does not exist') ||
+        errStr.includes('not supported');
+
       if (isRateLimitError(err)) {
         if (attempt === 1) currentModel = fallbackFor(currentModel);
         if (attempt < 2) await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
         continue;
+      }
+      if (isModelMissing) {
+        const next = fallbackFor(currentModel);
+        if (next && next !== currentModel && attempt < 2) {
+          console.warn(`Model "${currentModel}" unavailable (${err?.status || 'no status'}). Falling back to "${next}".`);
+          currentModel = next;
+          continue;
+        }
       }
       // Non-retryable
       return { success: false, error: lastError, status: err?.status || 500 };
