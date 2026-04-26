@@ -74,9 +74,29 @@ function InterfaceSection() {
   );
 }
 
+// localStorage mirror of the user's preferences. Survives logout / new
+// demo session / browser refresh in cases where the server-side user
+// record is fresh (e.g. demo accounts spun up per landing-page visit).
+// On initial settings load, anything in the mirror that the server
+// doesn't have gets reapplied AND synced back so the server truth
+// catches up.
+const PREFS_LS_KEY = 'cov-prefs';
+function loadPrefsMirror() {
+  try { return JSON.parse(localStorage.getItem(PREFS_LS_KEY) || '{}') || {}; }
+  catch { return {}; }
+}
+function savePrefsMirror(prefs) {
+  try { localStorage.setItem(PREFS_LS_KEY, JSON.stringify(prefs || {})); } catch {}
+}
+
 export default function SettingsPage() {
   const { user, fetchUser } = useAuth();
-  const [prefs, setPrefs] = useState(user?.data?.preferences || {});
+  // Initial state: server preferences merged with anything in the local
+  // mirror so a freshly-spun-up account remembers your last picks.
+  const [prefs, setPrefs] = useState(() => ({
+    ...loadPrefsMirror(),
+    ...(user?.data?.preferences || {}),
+  }));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   // Track keys the user has touched locally. Server-side refreshes (fetchUser)
@@ -87,17 +107,38 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (!user?.data?.preferences) return;
+    const fromServer = user.data.preferences;
+    const mirror = loadPrefsMirror();
     setPrefs(prev => {
-      const fromServer = user.data.preferences;
-      // Merge: start with server truth, but preserve any key the user has
-      // modified locally (and hasn't saved away yet).
-      const next = { ...fromServer };
+      // Server is the truth, but preserve in-flight local edits AND
+      // any mirror values for keys the server doesn't have yet (i.e.
+      // the user picked something on a prior session that didn't make
+      // it to the server before logout / demo-user reset).
+      const next = { ...mirror, ...fromServer };
       for (const k of dirtyKeys.current) {
         if (prev[k] !== undefined) next[k] = prev[k];
       }
       return next;
     });
+
+    // Backfill: if the mirror has a key the server is missing, sync
+    // it back so future loads see it from the server too. Fire-and-
+    // forget; failure just means the mirror keeps doing the work.
+    const missingFromServer = {};
+    for (const k of Object.keys(mirror)) {
+      if (fromServer[k] === undefined && mirror[k] !== undefined) {
+        missingFromServer[k] = mirror[k];
+      }
+    }
+    if (Object.keys(missingFromServer).length) {
+      const merged = { ...fromServer, ...missingFromServer };
+      syncData({ preferences: merged }).catch(() => {});
+    }
   }, [user]);
+
+  // Mirror prefs to localStorage on every change so logout / refresh
+  // never erases the user's picks.
+  useEffect(() => { savePrefsMirror(prefs); }, [prefs]);
 
   function update(key, value) {
     dirtyKeys.current.add(key);
