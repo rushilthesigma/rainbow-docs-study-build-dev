@@ -32,13 +32,23 @@ const PORT = process.env.PORT || 3002;
 // ===== Google Gemini =====
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 // As of 2026-04 the 3.x family is exposed as `-preview` variants.
-// Pro users get 3.1 Pro (latest), Free users get 3 Flash.
-const GEMINI_PRO = 'gemini-3.1-pro-preview';
-const GEMINI_FLASH = 'gemini-3-flash-preview';
+// Three tiers, all 1M-token input context:
+//   Pro        — gemini-3.1-pro-preview         (deepest reasoning, slowest)
+//   Flash      — gemini-3-flash-preview         (balanced; default for free)
+//   Flash Lite — gemini-3-flash-lite-preview    (fastest + cheapest, slightly lower quality)
+const GEMINI_PRO        = 'gemini-3.1-pro-preview';
+const GEMINI_FLASH      = 'gemini-3-flash-preview';
+const GEMINI_FLASH_LITE = 'gemini-3-flash-lite-preview';
 const DEFAULT_MODEL = GEMINI_PRO;
 const FALLBACK_MODEL = GEMINI_FLASH;
 const resolveModel = (name) => name || DEFAULT_MODEL;
-const fallbackFor = (name) => (name === GEMINI_PRO ? GEMINI_FLASH : GEMINI_FLASH);
+// Cascade: Pro → Flash → Flash Lite (each fallback step trades quality for
+// availability + cost). Flash Lite has no further fallback.
+const fallbackFor = (name) => {
+  if (name === GEMINI_PRO) return GEMINI_FLASH;
+  if (name === GEMINI_FLASH) return GEMINI_FLASH_LITE;
+  return GEMINI_FLASH_LITE;
+};
 const genAI = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
 if (!GEMINI_API_KEY) console.warn('GEMINI_API_KEY is not set — AI calls will fail');
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
@@ -143,8 +153,9 @@ const FREE_DAILY_MESSAGE_LIMIT = 20;
 const FREE_DAILY_QUIZBOWL_GAMES = 2;
 const FREE_WEEKLY_CURRICULA = 1;
 const FREE_WEEKLY_DEBATES = 1;
-const MODEL_PRO  = GEMINI_PRO;
-const MODEL_FREE = GEMINI_FLASH;
+const MODEL_PRO       = GEMINI_PRO;
+const MODEL_FREE      = GEMINI_FLASH;
+const MODEL_FLASH_LITE = GEMINI_FLASH_LITE;
 
 function todayKey() { return new Date().toISOString().slice(0, 10); }
 // ISO year-week (Mon-start) for weekly buckets, e.g. "2026-W16"
@@ -164,12 +175,17 @@ function weekKey(d = new Date()) {
 // admin surfaces) and are unaffected.
 function getPlan(/* user, email */) { return 'pro'; }
 function isPro(/* user, email */) { return true; }
-// Pro users can opt into the smaller/faster model via preferences.modelTier.
+// Three tiers selectable via preferences.modelTier:
+//   'pro'        → gemini-3.1-pro-preview         (default — deepest reasoning)
+//   'flash'      → gemini-3-flash-preview         (balanced — faster, lower cost)
+//   'flash-lite' → gemini-3-flash-lite-preview    (fastest + cheapest)
 // Free users always get FREE (Flash) regardless of preference.
 function modelForUser(user, email) {
   if (!isPro(user, email)) return MODEL_FREE;
   const tier = user?.data?.preferences?.modelTier;
-  return tier === 'flash' ? MODEL_FREE : MODEL_PRO;
+  if (tier === 'flash-lite') return MODEL_FLASH_LITE;
+  if (tier === 'flash')      return MODEL_FREE;
+  return MODEL_PRO;
 }
 
 // Reset daily counters when the day rolls over, weekly counters on ISO week change

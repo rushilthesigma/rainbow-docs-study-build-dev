@@ -162,13 +162,15 @@ export default function SettingsPage() {
               <div>
                 <PillGroup
                   options={[
-                    { value: 'pro', label: 'Pro', description: 'Gemini 3.1 Pro · smartest' },
-                    { value: 'flash', label: 'Flash', description: 'Gemini 3 Flash · faster' },
+                    { value: 'pro',        label: 'Pro',        description: 'Gemini 3.1 Pro · smartest' },
+                    { value: 'flash',      label: 'Flash',      description: 'Gemini 3 Flash · faster' },
+                    { value: 'flash-lite', label: 'Flash Lite', description: 'Gemini 3 Flash Lite · fastest + cheapest' },
                   ]}
                   value={effectiveValue}
                   onChange={setTier}
                 />
               </div>
+              <p className="text-[10px] text-gray-400 mt-2">All three tiers share the same 1M-token input context. Pro is best for proofs and edge-case reasoning; Flash is the balanced default; Flash Lite is fastest for short Q&amp;A.</p>
             </div>
           );
         })()}
