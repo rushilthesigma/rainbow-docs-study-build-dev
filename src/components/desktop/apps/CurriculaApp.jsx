@@ -786,7 +786,7 @@ function PausdCatalogView({ catalog, loading, enrollingSlug, onBack, onEnroll })
   }, {});
 
   // Sort math courses by an explicit ladder; science by grade.
-  const mathOrder = ['math-6', 'math-7', 'math-7a', 'math-8', 'algebra-1', 'algebra-1-honors', 'geometry', 'geometry-honors'];
+  const mathOrder = ['math-6', 'math-7', 'math-7a', 'math-8', 'algebra-1', 'geometry'];
   if (grouped.math) grouped.math.sort((a, b) => mathOrder.indexOf(a.slug) - mathOrder.indexOf(b.slug));
   if (grouped.science) grouped.science.sort((a, b) => String(a.grade).localeCompare(String(b.grade)));
 
@@ -853,26 +853,17 @@ function PausdCatalogView({ catalog, loading, enrollingSlug, onBack, onEnroll })
 }
 
 function PausdCourseCard({ course, enrolling, onEnroll }) {
-  const isHonors = /honors/i.test(course.title);
-  const isAccelerated = /accelerated/i.test(course.title);
-  const accent = isHonors
-    ? 'border-purple-300 dark:border-purple-700 hover:border-purple-500'
-    : isAccelerated
-      ? 'border-amber-300 dark:border-amber-700 hover:border-amber-500'
-      : 'border-gray-200 dark:border-[#2A2A40] hover:border-blue-400';
+  // Uniform card style — every PAUSD course is honors-tier so no special
+  // accent is needed. Subtle gray border with a blue hover state.
   return (
     <button
       onClick={onEnroll}
       disabled={enrolling}
-      className={`text-left p-4 rounded-xl border-2 ${accent} bg-white dark:bg-[#1e1e2e] transition-colors disabled:opacity-60`}
+      className="text-left flex flex-col h-full p-4 rounded-xl border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#1e1e2e] hover:border-blue-400 dark:hover:border-blue-600 transition-colors disabled:opacity-60"
     >
-      <div className="flex items-start justify-between gap-2 mb-2">
-        <h4 className="text-sm font-bold text-gray-900 dark:text-white leading-snug">{course.title}</h4>
-        {isHonors && <span className="flex-shrink-0 text-[9px] font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 px-1.5 py-0.5 rounded">Honors</span>}
-        {isAccelerated && <span className="flex-shrink-0 text-[9px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 px-1.5 py-0.5 rounded">Accel</span>}
-      </div>
-      <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-snug line-clamp-3 mb-3">{course.description}</p>
-      <div className="flex items-center justify-between">
+      <h4 className="text-sm font-bold text-gray-900 dark:text-white leading-snug mb-1.5">{course.title}</h4>
+      <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-snug line-clamp-3 mb-3 flex-1">{course.description}</p>
+      <div className="flex items-center justify-between mt-auto">
         <p className="text-[10px] text-gray-400 tabular-nums">
           Grade {course.grade} · {course.unitCount}u · {course.lessonCount} lessons
         </p>

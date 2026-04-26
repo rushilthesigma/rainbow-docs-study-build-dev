@@ -17,12 +17,15 @@
 
 export const PAUSD_CATALOG = [
   // =====================================================================
-  // MATH — Math 6 → Geometry Honors
+  // MATH — PAUSD's actual ladder: Math 6 → 7 → 7A → 8 → Algebra 1 →
+  // Geometry. Course NAMES are the regular district names (no "Honors"
+  // suffix), but the underlying content depth and lesson rigor in every
+  // course is honors-tier — that's how PAUSD teaches the motivated track.
   // =====================================================================
   {
     slug: 'math-6',
     title: 'PAUSD Math 6',
-    description: 'Common Core 6 + PAUSD-rigor: ratios, rational numbers, equations, geometry, statistics. Above-grade-level expectations from day one.',
+    description: 'PAUSD Math 6: ratios, rational numbers, equations, geometry, statistics. Above-grade-level from day one — honors-tier content under the regular course name.',
     subject: 'math',
     grade: '6',
     difficulty: 'advanced',
@@ -96,7 +99,7 @@ export const PAUSD_CATALOG = [
   {
     slug: 'math-7',
     title: 'PAUSD Math 7',
-    description: 'Common Core 7 with PAUSD rigor: rational operations, proportional relationships, multi-step equations, geometry, statistics, and probability.',
+    description: 'PAUSD Math 7: rational operations, proportional relationships, multi-step equations, geometry, probability — taught at honors-tier depth.',
     subject: 'math',
     grade: '7',
     difficulty: 'advanced',
@@ -186,8 +189,8 @@ export const PAUSD_CATALOG = [
 
   {
     slug: 'math-7a',
-    title: 'PAUSD Math 7A (Accelerated)',
-    description: 'Compacted Math 7 + first half of Math 8 in one year. PAUSD-accelerated track for advanced students. Pace is fast and rigor is honors-level.',
+    title: 'PAUSD Math 7A',
+    description: 'PAUSD Math 7A: Math 7 + first half of Math 8 compacted into one year. Honors-tier content at an accelerated pace.',
     subject: 'math',
     grade: '7',
     difficulty: 'advanced',
@@ -271,7 +274,7 @@ export const PAUSD_CATALOG = [
   {
     slug: 'math-8',
     title: 'PAUSD Math 8',
-    description: 'Common Core 8 at PAUSD rigor: real numbers, linear functions, systems, Pythagorean theorem, transformations, and bivariate data.',
+    description: 'PAUSD Math 8: real numbers, linear functions, systems, Pythagorean theorem, transformations, bivariate data — honors-tier at every step.',
     subject: 'math',
     grade: '8',
     difficulty: 'advanced',
@@ -364,113 +367,7 @@ export const PAUSD_CATALOG = [
   {
     slug: 'algebra-1',
     title: 'PAUSD Algebra 1',
-    description: 'Full first-year algebra at PAUSD rigor: linear and quadratic functions, polynomials, factoring, exponential growth, and bivariate statistics.',
-    subject: 'math',
-    grade: '8-9',
-    difficulty: 'advanced',
-    units: [
-      {
-        title: 'Foundations of Functions',
-        description: 'Sets, function notation, domain, range, and the function machine.',
-        lessons: [
-          { title: 'Functions as input/output rules and function notation', description: 'Define functions formally; evaluate f(a) and solve f(x) = b.' },
-          { title: 'Domain and range from graphs and equations', description: 'Find domain and range; reason about restrictions imposed by context.' },
-          { title: 'Vertical line test and function vs relation', description: 'Distinguish functions from relations; apply the vertical line test.' },
-          { title: 'Piecewise-defined functions: evaluation and graphing', description: 'Evaluate piecewise functions; graph by piece and check continuity at break points.' },
-          { title: 'Composition of functions: f(g(x))', description: 'Compose two functions; evaluate compositions and write composition expressions.' },
-        ],
-      },
-      {
-        title: 'Linear Equations and Inequalities',
-        description: 'Solving, graphing, and writing linear equations and inequalities.',
-        lessons: [
-          { title: 'Solving multi-step linear equations', description: 'Solve equations with distribution, combining like terms, and variables on both sides.' },
-          { title: 'Literal equations: solving for a specified variable', description: 'Manipulate formulas to isolate a chosen variable.' },
-          { title: 'Slope and rate of change in context', description: 'Compute and interpret slope in real units; reason about positive, negative, zero, and undefined slope.' },
-          { title: 'Writing linear equations from contexts and graphs', description: 'Build linear equations from descriptions, two points, slope-and-point, or a graph.' },
-          { title: 'Parallel and perpendicular lines', description: 'Use slope relationships to write equations of parallel and perpendicular lines.' },
-          { title: 'Linear inequalities in one variable', description: 'Solve and graph; reason about flipping the inequality when multiplying by a negative.' },
-          { title: 'Compound and absolute-value inequalities', description: 'Solve "and" and "or" inequalities; solve absolute-value inequalities.' },
-          { title: 'Linear inequalities in two variables and half-planes', description: 'Graph linear inequalities in two variables; shade the correct half-plane.' },
-        ],
-      },
-      {
-        title: 'Systems of Equations and Inequalities',
-        description: 'Solving 2x2 systems by all three methods, plus systems of inequalities.',
-        lessons: [
-          { title: 'Systems by graphing and three solution cases', description: 'Solve by graphing; classify systems as consistent independent, inconsistent, or dependent.' },
-          { title: 'Systems by substitution', description: 'Solve by substitution; choose the cleanest variable to isolate.' },
-          { title: 'Systems by elimination including scaling both equations', description: 'Solve by elimination; scale to align coefficients.' },
-          { title: 'Systems word problems: mixture, work, distance, age', description: 'Translate word problems into systems; solve and interpret with units.' },
-          { title: 'Systems of linear inequalities and feasible regions', description: 'Graph systems of inequalities; identify the feasible region and its vertices.' },
-        ],
-      },
-      {
-        title: 'Exponents and Polynomials',
-        description: 'Exponent rules, polynomial operations, and special products.',
-        lessons: [
-          { title: 'Exponent rules: product, quotient, power-of-a-power', description: 'Apply rules to simplify expressions; reason about why each rule works.' },
-          { title: 'Negative and zero exponents', description: 'Derive a⁰ = 1 and a⁻ⁿ = 1/aⁿ; apply to algebraic expressions.' },
-          { title: 'Polynomial vocabulary, classification, and standard form', description: 'Classify polynomials by degree and number of terms; write in standard form.' },
-          { title: 'Adding and subtracting polynomials', description: 'Combine polynomials; collect like terms across multi-variable polynomials.' },
-          { title: 'Multiplying polynomials and the FOIL/area model', description: 'Multiply polynomials by distribution and area model; verify with FOIL where applicable.' },
-          { title: 'Special products: difference of squares and perfect-square trinomials', description: 'Recognize and expand (a+b)², (a−b)², and (a+b)(a−b).' },
-        ],
-      },
-      {
-        title: 'Factoring',
-        description: 'Factoring techniques from GCF through grouping and the AC method.',
-        lessons: [
-          { title: 'Factoring out the greatest common factor', description: 'Find the GCF of a polynomial and factor it out cleanly.' },
-          { title: 'Factoring trinomials of the form x² + bx + c', description: 'Factor monic trinomials by finding the right pair of integers.' },
-          { title: 'Factoring trinomials of the form ax² + bx + c (AC method)', description: 'Factor non-monic trinomials using the AC method or grouping.' },
-          { title: 'Difference of squares and perfect-square trinomials in reverse', description: 'Recognize and factor a² − b² and a² ± 2ab + b².' },
-          { title: 'Factoring by grouping (four-term polynomials)', description: 'Factor four-term polynomials by grouping; recognize when grouping is the right approach.' },
-        ],
-      },
-      {
-        title: 'Quadratic Functions and Equations',
-        description: 'Graphing parabolas, solving by all methods, and modeling with quadratics.',
-        lessons: [
-          { title: 'Graphing y = ax² and y = a(x − h)² + k (vertex form)', description: 'Graph parabolas in vertex form; identify vertex, axis of symmetry, and direction of opening.' },
-          { title: 'Graphing y = ax² + bx + c (standard form) and finding the vertex', description: 'Find the vertex using x = −b/(2a); graph from standard form.' },
-          { title: 'Solving quadratics by factoring', description: 'Solve ax² + bx + c = 0 by factoring; apply the zero-product property.' },
-          { title: 'Solving quadratics by taking square roots', description: 'Solve quadratics of the form (x − h)² = k; reason about when there are 0, 1, or 2 solutions.' },
-          { title: 'Completing the square', description: 'Solve quadratics by completing the square; convert standard form to vertex form.' },
-          { title: 'The quadratic formula and the discriminant', description: 'Derive and apply the quadratic formula; use the discriminant to predict solution count.' },
-          { title: 'Choosing the best method to solve a quadratic', description: 'Match the method (factor, square root, complete the square, formula) to the equation.' },
-          { title: 'Modeling with quadratic functions: projectile and area problems', description: 'Build quadratic models; interpret vertex, intercepts, and zeros in context.' },
-        ],
-      },
-      {
-        title: 'Exponential Functions',
-        description: 'Exponential growth, decay, and comparing linear vs exponential models.',
-        lessons: [
-          { title: 'Exponential functions: y = a·bˣ', description: 'Graph exponential functions; identify a (initial value) and b (growth/decay factor).' },
-          { title: 'Exponential growth and decay in context', description: 'Build models of the form y = a(1 + r)ᵗ and y = a(1 − r)ᵗ; interpret r in context.' },
-          { title: 'Comparing linear vs exponential growth', description: 'Reason about why exponential growth eventually outpaces any linear function.' },
-          { title: 'Exponential equations solvable by inspection', description: 'Solve a·bˣ = c when c is a clean power of b; reason about when logs would be needed.' },
-          { title: 'Compound interest and percent growth', description: 'Apply A = P(1 + r/n)ⁿᵗ to compound-interest problems; compare compounding frequencies.' },
-        ],
-      },
-      {
-        title: 'Statistics and Bivariate Data',
-        description: 'Univariate and bivariate statistics with linear regression.',
-        lessons: [
-          { title: 'Center, spread, and shape of distributions', description: 'Compute and interpret mean, median, range, IQR, standard deviation; describe shape.' },
-          { title: 'Scatter plots, correlation, and causation', description: 'Construct scatter plots; assess strength and direction; distinguish correlation from causation.' },
-          { title: 'Lines of best fit and least-squares regression', description: 'Compute or use technology to find the regression line; interpret slope and intercept.' },
-          { title: 'Residuals and assessing fit', description: 'Compute residuals; build residual plots; reason about whether a linear model is appropriate.' },
-          { title: 'Two-way tables and conditional relative frequency', description: 'Build two-way tables; compute conditional relative frequencies and assess association.' },
-        ],
-      },
-    ],
-  },
-
-  {
-    slug: 'algebra-1-honors',
-    title: 'PAUSD Algebra 1 Honors',
-    description: 'Honors-pace Algebra 1: deeper proofs, more complex modeling, sequences, radical and rational expressions, and a logarithm preview.',
+    description: 'PAUSD Algebra 1 at honors-tier depth: functions, linear and quadratic equations, systems, polynomials, factoring, radicals, exponential growth, sequences, and bivariate statistics.',
     subject: 'math',
     grade: '8-9',
     difficulty: 'advanced',
@@ -590,135 +487,7 @@ export const PAUSD_CATALOG = [
   {
     slug: 'geometry',
     title: 'PAUSD Geometry',
-    description: 'Euclidean geometry at PAUSD rigor: logic, proof, congruence, similarity, circles, coordinate geometry, transformations, and trigonometry foundations.',
-    subject: 'math',
-    grade: '9',
-    difficulty: 'advanced',
-    units: [
-      {
-        title: 'Geometric Foundations and Logic',
-        description: 'Points, lines, planes, and the language of geometric proof.',
-        lessons: [
-          { title: 'Undefined terms, definitions, postulates, and theorems', description: 'Distinguish each; understand why some terms must be undefined and how proofs build on postulates.' },
-          { title: 'Points, lines, planes, segments, rays, and angles', description: 'Use proper geometric notation; identify and name geometric objects.' },
-          { title: 'Distance and midpoint formulas on the coordinate plane', description: 'Apply the distance and midpoint formulas; reason about why each works.' },
-          { title: 'Angle measure, classification, and angle pairs', description: 'Classify angles; identify complementary, supplementary, vertical, and adjacent pairs.' },
-          { title: 'Constructions: bisectors and perpendiculars', description: 'Construct angle bisectors, perpendicular bisectors, and perpendiculars from a point.' },
-        ],
-      },
-      {
-        title: 'Reasoning and Proof',
-        description: 'Inductive and deductive reasoning, conditionals, and the structure of proof.',
-        lessons: [
-          { title: 'Inductive vs deductive reasoning', description: 'Distinguish the two; recognize the limits of inductive reasoning.' },
-          { title: 'Conditional statements: converse, inverse, contrapositive, biconditional', description: 'Write each form; reason about logical equivalence between conditional and contrapositive.' },
-          { title: 'Two-column proofs: structure and example', description: 'Read and write two-column proofs; cite reasons for every step.' },
-          { title: 'Algebraic proofs and the properties of equality', description: 'Prove algebraic statements with two-column proofs; cite properties of equality at each step.' },
-          { title: 'Proofs about angle pairs and segment relationships', description: 'Prove vertical angles congruent, supplementary angles theorem, etc.' },
-          { title: 'Indirect proof (proof by contradiction)', description: 'Set up an indirect proof; recognize when contradiction is the cleanest approach.' },
-        ],
-      },
-      {
-        title: 'Parallel and Perpendicular Lines',
-        description: 'Properties of parallel lines, transversals, and proofs involving them.',
-        lessons: [
-          { title: 'Parallel lines and angle pairs formed by a transversal', description: 'Identify all eight angles; apply alternate interior, alternate exterior, corresponding, co-interior relationships.' },
-          { title: 'Proving lines parallel from angle pair information', description: 'Use converses of angle-pair theorems to prove lines parallel.' },
-          { title: 'Perpendicular lines: definition, postulates, and proofs', description: 'Define perpendicularity; prove related theorems.' },
-          { title: 'Slopes of parallel and perpendicular lines on the coordinate plane', description: 'Use slope to verify parallelism and perpendicularity.' },
-          { title: 'Constructions: parallel and perpendicular lines', description: 'Construct a line parallel to a given line through a point; construct a perpendicular through a point.' },
-        ],
-      },
-      {
-        title: 'Triangles and Congruence',
-        description: 'Triangle classification, congruence postulates, and triangle proofs.',
-        lessons: [
-          { title: 'Triangle classification by side and angle', description: 'Classify triangles; reason about which classifications can coexist.' },
-          { title: 'Triangle angle-sum and exterior-angle theorems', description: 'Prove and apply both theorems; solve algebraic problems about triangle angles.' },
-          { title: 'Congruence postulates: SSS, SAS, ASA, AAS, HL', description: 'Identify which postulates apply; reason about why SSA does not.' },
-          { title: 'Two-column congruence proofs', description: 'Prove triangles congruent using all five postulates; cite reasons cleanly.' },
-          { title: 'CPCTC and proofs that go beyond congruence', description: 'Use CPCTC after proving triangles congruent to derive corresponding parts.' },
-          { title: 'Isosceles and equilateral triangle theorems', description: 'Prove and apply the isosceles triangle theorem and its converse.' },
-          { title: 'Triangle inequality and hinge theorem', description: 'Apply the triangle inequality and hinge theorem to compare sides and angles.' },
-        ],
-      },
-      {
-        title: 'Similarity',
-        description: 'Similar triangles, similarity postulates, and proportions in geometry.',
-        lessons: [
-          { title: 'Ratios, proportions, and the cross-product property', description: 'Set up and solve proportions; use cross products and reciprocal proportions.' },
-          { title: 'AA, SAS, SSS similarity postulates', description: 'Apply similarity postulates; distinguish from congruence postulates.' },
-          { title: 'Triangle proportionality theorem and its converse', description: 'Apply the side-splitter theorem and its converse to find unknown lengths.' },
-          { title: 'Similar triangles in problem solving and indirect measurement', description: 'Solve problems using similar triangles, including height-of-tree and shadow problems.' },
-          { title: 'Proportional perimeters, areas, and volumes', description: 'Apply scale factor k for length, k² for area, k³ for volume in similar figures.' },
-          { title: 'Geometric mean and altitude-on-hypotenuse', description: 'Apply the geometric mean theorems for right triangles.' },
-        ],
-      },
-      {
-        title: 'Right Triangles and Trigonometry Basics',
-        description: 'Pythagorean theorem applications and the basic trigonometric ratios.',
-        lessons: [
-          { title: 'Pythagorean theorem and its converse', description: 'Apply Pythagoras and its converse; classify triangles as acute, right, or obtuse using sides.' },
-          { title: 'Special right triangles: 45-45-90 and 30-60-90', description: 'Derive and apply the special-triangle ratios; rationalize results.' },
-          { title: 'Trigonometric ratios: sine, cosine, tangent', description: 'Define ratios in a right triangle; compute exact values for special angles.' },
-          { title: 'Solving right triangles for missing sides and angles', description: 'Use sin, cos, tan to find missing parts; apply inverse trig functions for angles.' },
-          { title: 'Angles of elevation and depression', description: 'Solve real-world problems involving angles of elevation and depression.' },
-          { title: 'Trigonometric problems with multiple right triangles', description: 'Solve problems requiring two or more right-triangle setups.' },
-        ],
-      },
-      {
-        title: 'Quadrilaterals and Polygons',
-        description: 'Properties of quadrilaterals and polygon angle sums.',
-        lessons: [
-          { title: 'Polygon angle sums: interior and exterior', description: 'Derive and apply the polygon angle-sum formulas for both interior and exterior angles.' },
-          { title: 'Parallelograms: properties and proofs', description: 'Prove and apply parallelogram properties; classify quadrilaterals using these properties.' },
-          { title: 'Special parallelograms: rectangle, rhombus, square', description: 'Distinguish and apply properties of each special parallelogram.' },
-          { title: 'Trapezoids and kites', description: 'Apply properties of trapezoids and kites; use the midsegment theorem.' },
-          { title: 'Coordinate geometry of quadrilaterals', description: 'Classify a quadrilateral on the coordinate plane using slopes and distances.' },
-        ],
-      },
-      {
-        title: 'Circles',
-        description: 'Circle theorems, central and inscribed angles, and tangent properties.',
-        lessons: [
-          { title: 'Parts of a circle and basic vocabulary', description: 'Identify radius, diameter, chord, secant, tangent, arc, sector.' },
-          { title: 'Central angles, inscribed angles, and arc measures', description: 'Apply theorems relating central, inscribed, and intercepted-arc measures.' },
-          { title: 'Tangent lines and tangent-chord angles', description: 'Apply tangent properties; tangent ⟂ radius at point of tangency.' },
-          { title: 'Chord-chord, secant-secant, and tangent-secant angle theorems', description: 'Apply each theorem for angles formed by chords, secants, and tangents.' },
-          { title: 'Power of a point: chord-chord, tangent-secant, secant-secant', description: 'Apply the power of a point in all three configurations.' },
-          { title: 'Equation of a circle in the coordinate plane', description: 'Write and graph circle equations; complete the square to find center and radius.' },
-        ],
-      },
-      {
-        title: 'Coordinate Geometry and Transformations',
-        description: 'Coordinate proofs and rigid + non-rigid transformations.',
-        lessons: [
-          { title: 'Coordinate proofs of geometric theorems', description: 'Set up and complete coordinate proofs; choose helpful coordinates.' },
-          { title: 'Translations, reflections, rotations', description: 'Apply rigid motions; verify congruence by sequence of motions.' },
-          { title: 'Compositions of rigid motions and isometries', description: 'Compose two or three rigid motions; reason about the resulting type of motion.' },
-          { title: 'Dilations and similarity transformations', description: 'Apply dilations centered at any point; build similarity transformations.' },
-          { title: 'Symmetry: line and rotational symmetry of figures', description: 'Identify all symmetries of polygons and other figures.' },
-        ],
-      },
-      {
-        title: 'Area, Surface Area, and Volume',
-        description: 'Area and volume of plane figures and three-dimensional solids.',
-        lessons: [
-          { title: 'Areas of triangles, parallelograms, trapezoids, regular polygons', description: 'Apply area formulas; derive the regular-polygon area formula using apothem.' },
-          { title: 'Areas of circles, sectors, and segments', description: 'Compute areas of circles, sectors, and segments using radian or degree measures.' },
-          { title: 'Surface area of prisms, cylinders, pyramids, cones', description: 'Compute surface area of each solid; reason about why each formula works.' },
-          { title: 'Volume of prisms and cylinders', description: 'Apply V = Bh for prisms and cylinders; solve composite-figure volume problems.' },
-          { title: 'Volume of pyramids, cones, and spheres', description: 'Apply V = (1/3)Bh and V = (4/3)πr³; reason about the (1/3) factor.' },
-          { title: 'Cross-sections, similarity in 3D, and Cavalieri\'s principle', description: 'Identify cross-sections; apply scaling for similar solids; use Cavalieri\'s principle for unusual shapes.' },
-        ],
-      },
-    ],
-  },
-
-  {
-    slug: 'geometry-honors',
-    title: 'PAUSD Geometry Honors',
-    description: 'Honors Euclidean geometry: rigorous proofs, constructions, advanced circle theorems, vectors, loci, 3D geometry, and geometric probability.',
+    description: 'PAUSD Geometry at honors-tier depth: rigorous proofs, congruence, similarity, advanced circle theorems, vectors, loci, 3D geometry, and geometric probability.',
     subject: 'math',
     grade: '9',
     difficulty: 'advanced',
