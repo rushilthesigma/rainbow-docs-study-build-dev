@@ -3,6 +3,7 @@ import {
   Swords, RotateCcw, ArrowLeft, Trophy, Users, User, Copy, Check, Loader2, X, Zap, FileText, AlertCircle,
 } from 'lucide-react';
 import { apiFetch, getToken } from '../../api/client';
+import { useAuth } from '../../context/AuthContext';
 import ChatContainer from '../chat/ChatContainer';
 import { errorChatMessage } from '../../utils/aiErrors';
 
@@ -333,6 +334,8 @@ function Singleplayer({ mode, setMode, onExit }) {
 // MULTIPLAYER
 // =========================================================
 function Multiplayer({ mode, setMode, onExit }) {
+  const { user } = useAuth();
+  const myId = user?.id || null;
   const [code, setCode] = useState('');
   const [match, setMatch] = useState(null);
   const [joinInput, setJoinInput] = useState('');
@@ -345,17 +348,6 @@ function Multiplayer({ mode, setMode, onExit }) {
   const [voting, setVoting] = useState(false);
   const [copied, setCopied] = useState(false);
   const streamRef = useRef(null);
-  const myIdRef = useRef(null);
-
-  // Resolve own userId from JWT (best-effort) — used to know "is it my turn".
-  useEffect(() => {
-    try {
-      const tok = getToken();
-      if (!tok) return;
-      const payload = JSON.parse(atob(tok.split('.')[1]));
-      myIdRef.current = payload?.id || payload?.sub || null;
-    } catch {}
-  }, []);
 
   // Wire SSE stream when we have a code + are in a multiplayer view.
   useEffect(() => {
@@ -506,8 +498,8 @@ function Multiplayer({ mode, setMode, onExit }) {
 
   // ===== LOBBY =====
   if (mode === 'mp-lobby' && match) {
-    const isHost = match.hostId === myIdRef.current;
-    const opponent = match.players.find(p => p.userId !== myIdRef.current);
+    const isHost = match.hostId === myId;
+    const opponent = match.players.find(p => p.userId !== myId);
     const opponentJoined = match.players.length >= 2;
     return (
       <div className="p-6 max-w-md mx-auto">
@@ -531,7 +523,7 @@ function Multiplayer({ mode, setMode, onExit }) {
                 </div>
                 <span className="text-sm text-gray-800 dark:text-gray-200">{p.name}</span>
                 {p.userId === match.hostId && <span className="text-[9px] uppercase tracking-wider text-gray-400">Host</span>}
-                {p.userId === myIdRef.current && <span className="text-[9px] uppercase tracking-wider text-blue-500">You</span>}
+                {p.userId === myId && <span className="text-[9px] uppercase tracking-wider text-blue-500">You</span>}
               </div>
             ))}
             {!opponentJoined && (
@@ -589,12 +581,12 @@ function Multiplayer({ mode, setMode, onExit }) {
 
   // ===== GAME =====
   if (mode === 'mp-game' && match) {
-    const me = match.players.find(p => p.userId === myIdRef.current);
-    const opp = match.players.find(p => p.userId !== myIdRef.current);
-    const myTurn = match.turnOf === myIdRef.current;
-    const myScore = match.scores[myIdRef.current] || 0;
+    const me = match.players.find(p => p.userId === myId);
+    const opp = match.players.find(p => p.userId !== myId);
+    const myTurn = match.turnOf === myId;
+    const myScore = match.scores[myId] || 0;
     const oppScore = (opp && match.scores[opp.userId]) || 0;
-    const iVoted = match.endVotes.includes(myIdRef.current);
+    const iVoted = match.endVotes.includes(myId);
     const oppVoted = opp && match.endVotes.includes(opp.userId);
 
     return (
@@ -632,7 +624,7 @@ function Multiplayer({ mode, setMode, onExit }) {
             </p>
           )}
           {match.turns.map((t, i) => {
-            const isMine = t.userId === myIdRef.current;
+            const isMine = t.userId === myId;
             return (
               <div key={i} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
                 <div className={`max-w-[85%] rounded-2xl p-3.5 shadow-sm ${isMine ? 'bg-blue-600 text-white rounded-tr-md' : 'bg-gray-200 dark:bg-[#2A2A40] text-gray-900 dark:text-gray-100 rounded-tl-md'}`}>
@@ -696,7 +688,7 @@ function Multiplayer({ mode, setMode, onExit }) {
   // ===== VERDICT =====
   if (mode === 'mp-verdict' && match?.verdict) {
     const v = match.verdict;
-    const me = match.players.find(p => p.userId === myIdRef.current);
+    const me = match.players.find(p => p.userId === myId);
     const won = v.winner === me?.side;
     const tie = v.winner === 'tie';
     return (
