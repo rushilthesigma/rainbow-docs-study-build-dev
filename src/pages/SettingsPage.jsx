@@ -74,10 +74,20 @@ function InterfaceSection() {
   );
 }
 
-// localStorage mirror of the user's preferences. Survives logout / new
-// demo session / browser refresh in cases where the server-side user
-// record is fresh (e.g. demo accounts spun up per landing-page visit).
-// On initial settings load, anything in the mirror that the server
+// Demo accounts (landing-page mini-OS throwaways with emails like
+// demo-landing-XXX@covalent.test) are intentionally ephemeral — every
+// visit gets a fresh user. We do NOT persist their prefs locally, so
+// each demo session starts genuinely clean. The localStorage mirror
+// below is gated on real signed-in accounts only.
+function isDemoEmail(email) {
+  const e = String(email || '').toLowerCase();
+  return e.startsWith('demo-landing-') || e.endsWith('@covalent.test');
+}
+
+// localStorage mirror of a real user's preferences. Survives any
+// transient state where /api/auth/me hasn't finished hydrating yet,
+// and acts as a backup if the server save round-trip fails. On
+// initial settings load, anything in the mirror that the server
 // doesn't have gets reapplied AND synced back so the server truth
 // catches up.
 const PREFS_LS_KEY = 'cov-prefs';
@@ -91,10 +101,22 @@ function savePrefsMirror(prefs) {
 
 export default function SettingsPage() {
   const { user, fetchUser } = useAuth();
-  // Initial state: server preferences merged with anything in the local
-  // mirror so a freshly-spun-up account remembers your last picks.
+  const isDemo = isDemoEmail(user?.email);
+
+  // If the current session is a demo account, wipe any stray mirror
+  // that was written by a previous (real-user OR pre-fix demo) session.
+  // Demo accounts must never read or write the mirror.
+  useEffect(() => {
+    if (isDemo) {
+      try { localStorage.removeItem(PREFS_LS_KEY); } catch {}
+    }
+  }, [isDemo]);
+
+  // Initial state: server preferences. For real users, also merge in
+  // anything in the local mirror as a backup. Demo users skip the
+  // mirror entirely so they truly start fresh each visit.
   const [prefs, setPrefs] = useState(() => ({
-    ...loadPrefsMirror(),
+    ...(isDemo ? {} : loadPrefsMirror()),
     ...(user?.data?.preferences || {}),
   }));
   const [saving, setSaving] = useState(false);
@@ -108,12 +130,11 @@ export default function SettingsPage() {
   useEffect(() => {
     if (!user?.data?.preferences) return;
     const fromServer = user.data.preferences;
-    const mirror = loadPrefsMirror();
+    const mirror = isDemo ? {} : loadPrefsMirror();
     setPrefs(prev => {
       // Server is the truth, but preserve in-flight local edits AND
-      // any mirror values for keys the server doesn't have yet (i.e.
-      // the user picked something on a prior session that didn't make
-      // it to the server before logout / demo-user reset).
+      // (for real users only) any mirror values for keys the server
+      // doesn't have yet.
       const next = { ...mirror, ...fromServer };
       for (const k of dirtyKeys.current) {
         if (prev[k] !== undefined) next[k] = prev[k];
@@ -121,24 +142,29 @@ export default function SettingsPage() {
       return next;
     });
 
-    // Backfill: if the mirror has a key the server is missing, sync
-    // it back so future loads see it from the server too. Fire-and-
-    // forget; failure just means the mirror keeps doing the work.
-    const missingFromServer = {};
-    for (const k of Object.keys(mirror)) {
-      if (fromServer[k] === undefined && mirror[k] !== undefined) {
-        missingFromServer[k] = mirror[k];
+    // Backfill: only for real users. If the mirror has a key the
+    // server is missing, sync it back so future loads see it from
+    // the server too. Demo users skip this entirely.
+    if (!isDemo) {
+      const missingFromServer = {};
+      for (const k of Object.keys(mirror)) {
+        if (fromServer[k] === undefined && mirror[k] !== undefined) {
+          missingFromServer[k] = mirror[k];
+        }
+      }
+      if (Object.keys(missingFromServer).length) {
+        const merged = { ...fromServer, ...missingFromServer };
+        syncData({ preferences: merged }).catch(() => {});
       }
     }
-    if (Object.keys(missingFromServer).length) {
-      const merged = { ...fromServer, ...missingFromServer };
-      syncData({ preferences: merged }).catch(() => {});
-    }
-  }, [user]);
+  }, [user, isDemo]);
 
-  // Mirror prefs to localStorage on every change so logout / refresh
-  // never erases the user's picks.
-  useEffect(() => { savePrefsMirror(prefs); }, [prefs]);
+  // Mirror prefs to localStorage on every change — REAL users only.
+  // Demo accounts deliberately don't persist anything locally.
+  useEffect(() => {
+    if (isDemo) return;
+    savePrefsMirror(prefs);
+  }, [prefs, isDemo]);
 
   function update(key, value) {
     dirtyKeys.current.add(key);
