@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, Plus, Sparkles, Loader2, BookOpen, ChevronDown, ChevronRight, CheckCircle2, Circle, Lock, ClipboardCheck, PenTool, FileText, Check, X, Trophy, Wand2, Paperclip, Upload, Calculator } from 'lucide-react';
+import { ArrowLeft, Plus, Sparkles, Loader2, BookOpen, ChevronDown, ChevronRight, CheckCircle2, Circle, Lock, ClipboardCheck, PenTool, FileText, Check, X, Trophy, Wand2, Paperclip, Upload, Calculator, GraduationCap, Atom, Sigma } from 'lucide-react';
 import { listCurricula, generateCurriculum, getCurriculum, sendLessonMessage, getLessonHistory, editCurriculumWithAI } from '../../../api/curriculum';
 import { apiFetch } from '../../../api/client';
 import { useWindowManager } from '../../../context/WindowManagerContext';
@@ -61,9 +61,49 @@ export default function CurriculaApp() {
   // Edit curriculum modal
   const [editOpen, setEditOpen] = useState(false);
 
+  // PAUSD catalog browser state
+  const [pausdCatalog, setPausdCatalog] = useState([]);
+  const [pausdLoading, setPausdLoading] = useState(false);
+  const [enrollingSlug, setEnrollingSlug] = useState(null);
+
   useEffect(() => {
     listCurricula().then(d => { setCurricula(d.curricula || []); setLoading(false); }).catch(() => setLoading(false));
   }, []);
+
+  // Lazy-load the PAUSD catalog the first time the user opens that view.
+  async function loadPausdCatalog() {
+    if (pausdCatalog.length || pausdLoading) return;
+    setPausdLoading(true);
+    try {
+      const data = await apiFetch('/api/pausd/catalog');
+      setPausdCatalog(data.catalog || []);
+    } catch (e) { console.error('Failed to load PAUSD catalog:', e); }
+    setPausdLoading(false);
+  }
+
+  async function enrollPausd(slug) {
+    if (enrollingSlug) return;
+    setEnrollingSlug(slug);
+    try {
+      const data = await apiFetch('/api/pausd/enroll', {
+        method: 'POST',
+        body: JSON.stringify({ slug }),
+      });
+      // If they're already enrolled, show the existing one. Otherwise
+      // prepend the new one.
+      if (data.alreadyEnrolled) {
+        setSelectedCurriculum(data.curriculum);
+      } else {
+        setCurricula(prev => [data.curriculum, ...prev.filter(c => c.id !== data.curriculum.id)]);
+        setSelectedCurriculum(data.curriculum);
+      }
+      setView('detail');
+    } catch (e) {
+      console.error('Enroll failed:', e);
+      alert('Failed to enroll: ' + (e?.message || 'unknown error'));
+    }
+    setEnrollingSlug(null);
+  }
 
   async function handleGenerate() {
     if (!settings.topic.trim() || generating) return;
@@ -341,6 +381,19 @@ export default function CurriculaApp() {
     );
   }
 
+  // PAUSD catalog view — browse and enroll in pre-built courses
+  if (view === 'pausd') {
+    return (
+      <PausdCatalogView
+        catalog={pausdCatalog}
+        loading={pausdLoading}
+        enrollingSlug={enrollingSlug}
+        onBack={() => setView('list')}
+        onEnroll={enrollPausd}
+      />
+    );
+  }
+
   // List view
   if (loading) return <div className="flex items-center justify-center h-48"><LoadingSpinner size={24} /></div>;
 
@@ -360,8 +413,32 @@ export default function CurriculaApp() {
     <div>
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-bold text-gray-900 dark:text-white">My Curricula</h2>
-        <Button size="sm" onClick={() => setView('new')}><Plus size={14} /> New</Button>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => { loadPausdCatalog(); setView('pausd'); }}
+          >
+            <GraduationCap size={14} /> PAUSD Catalog
+          </Button>
+          <Button size="sm" onClick={() => setView('new')}><Plus size={14} /> New</Button>
+        </div>
       </div>
+
+      {/* PAUSD promo strip — encourages discovering the pre-built rigor track */}
+      <button
+        onClick={() => { loadPausdCatalog(); setView('pausd'); }}
+        className="w-full mb-4 flex items-center gap-3 p-3 rounded-xl border border-purple-200 dark:border-purple-800 bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20 hover:border-purple-400 dark:hover:border-purple-700 transition-colors text-left"
+      >
+        <div className="w-10 h-10 rounded-lg bg-purple-500 text-white flex items-center justify-center flex-shrink-0">
+          <GraduationCap size={18} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-gray-900 dark:text-white">PAUSD Common Core Catalog</p>
+          <p className="text-[11px] text-gray-600 dark:text-gray-300">Pre-built middle + high-school courses at PAUSD rigor: Math 6 → Geometry Honors and full middle-school science. Tap to browse.</p>
+        </div>
+        <ChevronRight size={16} className="text-gray-400 flex-shrink-0" />
+      </button>
 
       <TopicSuggestions
         title="Suggested curricula"
@@ -374,7 +451,12 @@ export default function CurriculaApp() {
         <div className="text-center py-12">
           <BookOpen size={32} className="text-blue-400 mx-auto mb-3" />
           <p className="text-sm text-gray-500 mb-4">No curricula yet</p>
-          <Button onClick={() => setView('new')}><Plus size={16} /> Create Curriculum</Button>
+          <div className="flex items-center justify-center gap-2">
+            <Button onClick={() => setView('new')}><Plus size={16} /> Create Curriculum</Button>
+            <Button variant="secondary" onClick={() => { loadPausdCatalog(); setView('pausd'); }}>
+              <GraduationCap size={16} /> Browse PAUSD
+            </Button>
+          </div>
         </div>
       ) : (
         <div className="space-y-2">
@@ -687,5 +769,121 @@ function EditCurriculumModal({ curriculum, onClose, onUpdated }) {
         </div>
       </div>
     </div>
+  );
+}
+
+// =============================================================
+// PAUSD Catalog browser — grid of pre-built courses, grouped by
+// subject. Tap a course → enroll → opens the cloned curriculum
+// in detail view (handled by parent).
+// =============================================================
+function PausdCatalogView({ catalog, loading, enrollingSlug, onBack, onEnroll }) {
+  const grouped = catalog.reduce((acc, c) => {
+    const key = c.subject || 'other';
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(c);
+    return acc;
+  }, {});
+
+  // Sort math courses by an explicit ladder; science by grade.
+  const mathOrder = ['math-6', 'math-7', 'math-7a', 'math-8', 'algebra-1', 'algebra-1-honors', 'geometry', 'geometry-honors'];
+  if (grouped.math) grouped.math.sort((a, b) => mathOrder.indexOf(a.slug) - mathOrder.indexOf(b.slug));
+  if (grouped.science) grouped.science.sort((a, b) => String(a.grade).localeCompare(String(b.grade)));
+
+  const SUBJECT_META = {
+    math: { label: 'Mathematics', icon: Sigma, color: 'text-blue-500', bg: 'bg-blue-50 dark:bg-blue-900/20' },
+    science: { label: 'Science', icon: Atom, color: 'text-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-900/20' },
+  };
+
+  return (
+    <div>
+      <button onClick={onBack} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 mb-4">
+        <ArrowLeft size={16} /> Back to my curricula
+      </button>
+
+      <div className="mb-5">
+        <div className="flex items-center gap-2 mb-1">
+          <GraduationCap size={20} className="text-purple-500" />
+          <h2 className="text-lg font-bold text-gray-900 dark:text-white">PAUSD Common Core Catalog</h2>
+        </div>
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          Pre-built courses tuned to PAUSD rigor — significantly above the standard Common Core label.
+          Lessons are taught one-on-one by the AI tutor with built-in quizzes, progress tracking, and per-unit assessments.
+          Tap a course to enroll.
+        </p>
+      </div>
+
+      {loading && catalog.length === 0 ? (
+        <div className="flex items-center justify-center py-16">
+          <LoadingSpinner size={24} />
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {['math', 'science'].map(key => {
+            const courses = grouped[key];
+            if (!courses?.length) return null;
+            const meta = SUBJECT_META[key] || { label: key, icon: BookOpen, color: 'text-gray-500', bg: 'bg-gray-50' };
+            const SubjectIcon = meta.icon;
+            return (
+              <section key={key}>
+                <div className="flex items-center gap-2 mb-2.5">
+                  <div className={`w-7 h-7 rounded-md ${meta.bg} flex items-center justify-center`}>
+                    <SubjectIcon size={14} className={meta.color} />
+                  </div>
+                  <h3 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider">{meta.label}</h3>
+                  <span className="text-[10px] text-gray-400">· {courses.length} course{courses.length === 1 ? '' : 's'}</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {courses.map(c => (
+                    <PausdCourseCard
+                      key={c.slug}
+                      course={c}
+                      enrolling={enrollingSlug === c.slug}
+                      onEnroll={() => onEnroll(c.slug)}
+                    />
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PausdCourseCard({ course, enrolling, onEnroll }) {
+  const isHonors = /honors/i.test(course.title);
+  const isAccelerated = /accelerated/i.test(course.title);
+  const accent = isHonors
+    ? 'border-purple-300 dark:border-purple-700 hover:border-purple-500'
+    : isAccelerated
+      ? 'border-amber-300 dark:border-amber-700 hover:border-amber-500'
+      : 'border-gray-200 dark:border-[#2A2A40] hover:border-blue-400';
+  return (
+    <button
+      onClick={onEnroll}
+      disabled={enrolling}
+      className={`text-left p-4 rounded-xl border-2 ${accent} bg-white dark:bg-[#1e1e2e] transition-colors disabled:opacity-60`}
+    >
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <h4 className="text-sm font-bold text-gray-900 dark:text-white leading-snug">{course.title}</h4>
+        {isHonors && <span className="flex-shrink-0 text-[9px] font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 px-1.5 py-0.5 rounded">Honors</span>}
+        {isAccelerated && <span className="flex-shrink-0 text-[9px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 px-1.5 py-0.5 rounded">Accel</span>}
+      </div>
+      <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-snug line-clamp-3 mb-3">{course.description}</p>
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] text-gray-400 tabular-nums">
+          Grade {course.grade} · {course.unitCount}u · {course.lessonCount} lessons
+        </p>
+        {enrolling ? (
+          <Loader2 size={12} className="animate-spin text-blue-500" />
+        ) : (
+          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 dark:text-blue-400">
+            Enroll <ChevronRight size={12} />
+          </span>
+        )}
+      </div>
+    </button>
   );
 }

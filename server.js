@@ -19,6 +19,7 @@ import {
   buildFlashcardPrompt, buildCueGenerationPrompt, buildSummaryPrompt,
   buildTopicSuggestionsPrompt, buildSlideshowPrompt,
 } from './prompts.js';
+import { PAUSD_CATALOG, getPausdTemplate, listPausdCatalog } from './data/pausdCurricula.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -1283,6 +1284,166 @@ app.delete('/api/curriculum/:id', authMiddleware, (req, res) => {
     saveUsers(users);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// =================================================================
+// PAUSD CATALOG — pre-built Khan-Academy-style courses at PAUSD rigor.
+// Browse the catalog, then enroll → clones the template into the user's
+// curricula list with full IDs and per-unit math-tutor / practice / unit-
+// test lessons (math) or essay (non-math), exactly like AI-generated
+// curricula from /api/curriculum/generate.
+// =================================================================
+
+app.get('/api/pausd/catalog', authMiddleware, (req, res) => {
+  try {
+    res.json({ catalog: listPausdCatalog() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/pausd/catalog/:slug', authMiddleware, (req, res) => {
+  try {
+    const tpl = getPausdTemplate(req.params.slug);
+    if (!tpl) return res.status(404).json({ error: 'Course not found' });
+    res.json({ course: tpl });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Enroll: clone a template into the user's curricula.
+//
+// Mirrors the post-AI-generation enrichment from /api/curriculum/generate
+// so existing lesson-chat / math-tutor / assessment endpoints all light up
+// unchanged. Each enrolled course gets:
+//   - fresh curriculum + unit + lesson IDs
+//   - for math curricula: a Math Tutor + Practice Problems lesson per unit
+//   - for non-math curricula: a Graded Essay per unit
+//   - always: a Unit Assessment at the end of every unit
+app.post('/api/pausd/enroll', authMiddleware, (req, res) => {
+  try {
+    const { slug } = req.body || {};
+    const tpl = getPausdTemplate(slug);
+    if (!tpl) return res.status(404).json({ error: 'Course not found' });
+
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    if (!users[email].data) users[email].data = createDefaultData();
+    users[email].data = migrateUserData(users[email].data);
+
+    // Bail if already enrolled — show them the existing one rather than
+    // making a duplicate.
+    const existing = (users[email].data.curricula || []).find(c => c.pausdSlug === slug);
+    if (existing) return res.json({ curriculum: existing, alreadyEnrolled: true });
+
+    const curriculumId = crypto.randomUUID();
+    const isMathCurriculum = tpl.subject === 'math';
+
+    const curriculum = {
+      id: curriculumId,
+      title: tpl.title,
+      description: tpl.description,
+      createdAt: new Date().toISOString(),
+      pausdSlug: tpl.slug,
+      source: 'pausd',
+      settings: {
+        topic: tpl.title,
+        difficulty: tpl.difficulty || 'advanced',
+        audience: 'PAUSD middle / high school student',
+        learningStyle: 'conceptual',
+        includeExamples: true,
+        includeExercises: true,
+      },
+      linkedGoalIds: [],
+      units: (tpl.units || []).map((unit, ui) => {
+        const lessons = (unit.lessons || []).map((lesson, li) => ({
+          id: `${curriculumId}-u${ui}-l${li}`,
+          title: lesson.title,
+          description: lesson.description,
+          type: 'lesson',
+          chatHistory: [],
+          phase: null,
+          phaseData: {},
+          content: null,
+          isCompleted: false,
+          score: null,
+        }));
+
+        if (isMathCurriculum && lessons.length >= 2) {
+          const mathTutorLesson = {
+            id: `${curriculumId}-u${ui}-mathtutor`,
+            title: `${unit.title} — Math Tutor`,
+            description: `Walk through worked problems for ${unit.title} with step-by-step feedback on a handwriting canvas.`,
+            type: 'math_tutor',
+            tool: 'math_tutor',
+            practiceTopic: unit.title,
+            chatHistory: [],
+            phase: null,
+            phaseData: {},
+            content: null,
+            isCompleted: false,
+            score: null,
+          };
+          const practiceLesson = {
+            id: `${curriculumId}-u${ui}-practice`,
+            title: `${unit.title} — Practice Problems`,
+            description: `Solve practice problems for ${unit.title} using the math canvas.`,
+            type: 'practice',
+            tool: 'math_canvas',
+            practiceTopic: unit.title,
+            chatHistory: [],
+            phase: null,
+            phaseData: {},
+            content: null,
+            isCompleted: false,
+            score: null,
+          };
+          lessons.splice(lessons.length - 1, 0, mathTutorLesson);
+          lessons.push(practiceLesson);
+        } else if (lessons.length >= 2) {
+          lessons.push({
+            id: `${curriculumId}-u${ui}-essay`,
+            title: `${unit.title} — Graded Essay`,
+            description: `Write a graded short essay on ${unit.title}. Feedback is scored against a rubric.`,
+            type: 'essay',
+            chatHistory: [],
+            phase: null,
+            phaseData: {},
+            content: null,
+            isCompleted: false,
+            score: null,
+          });
+        }
+
+        // Unit assessment last.
+        lessons.push({
+          id: `${curriculumId}-u${ui}-test`,
+          title: `${unit.title} — Assessment`,
+          description: `Test your knowledge of ${unit.title}`,
+          type: 'unit_test',
+          chatHistory: [],
+          phase: null,
+          phaseData: {},
+          content: null,
+          isCompleted: false,
+          score: null,
+        });
+
+        return {
+          id: `${curriculumId}-u${ui}`,
+          title: unit.title,
+          description: unit.description,
+          locked: false,
+          lessons,
+        };
+      }),
+    };
+
+    users[email].data.curricula.unshift(curriculum);
+    saveUsers(users);
+    res.json({ curriculum });
+  } catch (e) {
+    console.error('PAUSD enroll error:', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Generate lesson content (SSE streaming)
