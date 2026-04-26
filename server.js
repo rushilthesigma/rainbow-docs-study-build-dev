@@ -405,12 +405,21 @@ function checkGoalMilestones(data) {
   }
 }
 
-// Robust JSON parser with multiple fallback strategies. The slideshow AI
-// flow was failing ~half the time on "outer-brace extract" because slides
-// have nested objects (elements) and the first/last brace heuristic could
-// slurp prose from around the JSON. This version walks the string finding
-// the first balanced JSON object/array and also strips common Gemini
-// preamble like `json\n{ ... }`.
+// Robust JSON parser with multiple fallback strategies.
+//
+// Gemini failure modes this handles:
+//   1. Strict JSON (responseMimeType=application/json) — direct parse.
+//   2. Markdown-fenced JSON: ```json\n{...}\n```
+//   3. Leading `json` label without fences.
+//   4. Prose preamble before the JSON body.
+//   5. Trailing commas before } / ].
+//   6. Smart / curly quotes (" " ' ') instead of ASCII " '.
+//   7. JS-style line comments (// ...) inside the JSON.
+//   8. JS-style block comments (/* ... */).
+//   9. Unicode minus / hyphen variants in numbers (− vs -).
+//
+// Walks the string to find the first BALANCED brace pair so prose around
+// the JSON body doesn't break extraction.
 function parseAIJson(text) {
   if (!text || typeof text !== 'string') return null;
   const trimmed = text.trim();
@@ -426,9 +435,28 @@ function parseAIJson(text) {
     .trim();
   try { return JSON.parse(defenced); } catch {}
 
+  // Repair helpers that we can layer onto a candidate.
+  function repair(s) {
+    return s
+      // Strip line comments outside of strings (rough — relies on being a
+      // single statement; sufficient for AI output that doesn't have
+      // intentional `//` inside strings).
+      .replace(/(^|\s)\/\/[^\n]*/g, '$1')
+      // Strip block comments.
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      // Smart quotes → ASCII.
+      .replace(/[“”]/g, '"')
+      .replace(/[‘’]/g, "'")
+      // Trailing commas before } or ].
+      .replace(/,(\s*[}\]])/g, '$1')
+      // Unicode minus → ASCII hyphen-minus.
+      .replace(/−/g, '-');
+  }
+
+  try { return JSON.parse(repair(defenced)); } catch {}
+
   // Strategy 3: find the first balanced JSON object or array by walking
-  // characters, tracking string state + brace depth. Much more reliable
-  // than first-{-to-last-} when the model includes prose.
+  // characters, tracking string state + brace depth.
   for (const opener of ['{', '[']) {
     const closer = opener === '{' ? '}' : ']';
     const start = defenced.indexOf(opener);
@@ -446,11 +474,8 @@ function parseAIJson(text) {
         if (depth === 0) {
           const candidate = defenced.slice(start, i + 1);
           try { return JSON.parse(candidate); } catch {}
-          // Try a small repair pass — strip trailing commas which Gemini
-          // sometimes emits despite JSON rules.
-          try {
-            return JSON.parse(candidate.replace(/,(\s*[}\]])/g, '$1'));
-          } catch {}
+          // Apply the repair pass and try again.
+          try { return JSON.parse(repair(candidate)); } catch {}
           break;
         }
       }
@@ -1087,21 +1112,27 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
     saveUsers(usersC);
 
     const { system, user } = buildCurriculumPrompt(settings);
-    const result = await callAnthropic(system, [{ role: 'user', content: user }], DEFAULT_MODEL, 4096);
+    // jsonMode → strict JSON output. Without this Gemini wraps the curriculum
+    // in ```json fences ~30% of the time on long generations, which then
+    // trips the parser even after de-fencing because of trailing commentary.
+    const result = await callGemini(system, [{ role: 'user', content: user }], DEFAULT_MODEL, 8192, { jsonMode: true, temperature: 0.7 });
 
     if (!result.success) return res.status(500).json({ error: result.error });
 
     const text = result.data.content?.[0]?.text || '';
     let curriculum = parseAIJson(text);
     if (!curriculum || !curriculum.units) {
-      // Retry once with stronger JSON enforcement
-      const retryResult = await callAnthropic(
+      console.warn('Curriculum first attempt parse failed. First 400 chars:', text.slice(0, 400));
+      // Retry once with stronger JSON enforcement and even lower temperature.
+      const retryResult = await callGemini(
         'You MUST output ONLY a valid JSON object. No markdown, no explanation, no text before or after. Just raw JSON.',
         [{ role: 'user', content: `${user}\n\nIMPORTANT: Output ONLY the JSON object, nothing else.` }],
-        DEFAULT_MODEL, 4096
+        DEFAULT_MODEL, 8192, { jsonMode: true, temperature: 0.3 }
       );
       if (retryResult.success) {
-        curriculum = parseAIJson(retryResult.data.content?.[0]?.text || '');
+        const retryText = retryResult.data.content?.[0]?.text || '';
+        curriculum = parseAIJson(retryText);
+        if (!curriculum) console.error('Curriculum retry parse failed. First 400 chars:', retryText.slice(0, 400));
       }
       if (!curriculum || !curriculum.units) {
         return res.status(500).json({ error: 'Failed to parse curriculum. Please try again.' });
@@ -1354,51 +1385,76 @@ app.post('/api/pausd/enroll', authMiddleware, (req, res) => {
       },
       linkedGoalIds: [],
       units: (tpl.units || []).map((unit, ui) => {
-        const lessons = (unit.lessons || []).map((lesson, li) => ({
-          id: `${curriculumId}-u${ui}-l${li}`,
-          title: lesson.title,
-          description: lesson.description,
-          type: 'lesson',
-          chatHistory: [],
-          phase: null,
-          phaseData: {},
-          content: null,
-          isCompleted: false,
-          score: null,
-        }));
+        // Honor explicit `type` from the catalog template — math_tutor and
+        // practice (canvas) lessons can be authored INLINE inside a unit's
+        // lessons array, interspersed between section lessons. Otherwise
+        // default to type 'lesson' (chat-based).
+        const lessons = (unit.lessons || []).map((lesson, li) => {
+          const t = lesson.type || 'lesson';
+          const base = {
+            id: `${curriculumId}-u${ui}-l${li}`,
+            title: lesson.title,
+            description: lesson.description,
+            type: t,
+            chatHistory: [],
+            phase: null,
+            phaseData: {},
+            content: null,
+            isCompleted: false,
+            score: null,
+          };
+          if (t === 'math_tutor') {
+            base.tool = 'math_tutor';
+            base.practiceTopic = lesson.practiceTopic || unit.title;
+          } else if (t === 'practice') {
+            base.tool = 'math_canvas';
+            base.practiceTopic = lesson.practiceTopic || unit.title;
+          }
+          return base;
+        });
+
+        // Whether the template already provides interactive math lessons.
+        const hasInlineMathTutor = lessons.some(l => l.type === 'math_tutor');
+        const hasInlinePractice  = lessons.some(l => l.type === 'practice');
 
         if (isMathCurriculum && lessons.length >= 2) {
-          const mathTutorLesson = {
-            id: `${curriculumId}-u${ui}-mathtutor`,
-            title: `${unit.title} — Math Tutor`,
-            description: `Walk through worked problems for ${unit.title} with step-by-step feedback on a handwriting canvas.`,
-            type: 'math_tutor',
-            tool: 'math_tutor',
-            practiceTopic: unit.title,
-            chatHistory: [],
-            phase: null,
-            phaseData: {},
-            content: null,
-            isCompleted: false,
-            score: null,
-          };
-          const practiceLesson = {
-            id: `${curriculumId}-u${ui}-practice`,
-            title: `${unit.title} — Practice Problems`,
-            description: `Solve practice problems for ${unit.title} using the math canvas.`,
-            type: 'practice',
-            tool: 'math_canvas',
-            practiceTopic: unit.title,
-            chatHistory: [],
-            phase: null,
-            phaseData: {},
-            content: null,
-            isCompleted: false,
-            score: null,
-          };
-          lessons.splice(lessons.length - 1, 0, mathTutorLesson);
-          lessons.push(practiceLesson);
-        } else if (lessons.length >= 2) {
+          // Auto-append a Math Tutor + Practice ONLY when the template
+          // didn't bake them in explicitly. PAUSD math units increasingly
+          // include them inline (drilled between sections), in which case
+          // we leave the template's structure untouched.
+          if (!hasInlineMathTutor) {
+            lessons.splice(lessons.length - 1, 0, {
+              id: `${curriculumId}-u${ui}-mathtutor`,
+              title: `${unit.title} — Math Tutor`,
+              description: `Walk through worked problems for ${unit.title} with step-by-step feedback on a handwriting canvas.`,
+              type: 'math_tutor',
+              tool: 'math_tutor',
+              practiceTopic: unit.title,
+              chatHistory: [],
+              phase: null,
+              phaseData: {},
+              content: null,
+              isCompleted: false,
+              score: null,
+            });
+          }
+          if (!hasInlinePractice) {
+            lessons.push({
+              id: `${curriculumId}-u${ui}-practice`,
+              title: `${unit.title} — Practice Problems`,
+              description: `Solve practice problems for ${unit.title} using the math canvas.`,
+              type: 'practice',
+              tool: 'math_canvas',
+              practiceTopic: unit.title,
+              chatHistory: [],
+              phase: null,
+              phaseData: {},
+              content: null,
+              isCompleted: false,
+              score: null,
+            });
+          }
+        } else if (!isMathCurriculum && lessons.length >= 2) {
           lessons.push({
             id: `${curriculumId}-u${ui}-essay`,
             title: `${unit.title} — Graded Essay`,
@@ -1431,6 +1487,7 @@ app.post('/api/pausd/enroll', authMiddleware, (req, res) => {
           id: `${curriculumId}-u${ui}`,
           title: unit.title,
           description: unit.description,
+          textbookContext: unit.textbookContext || null,
           locked: false,
           lessons,
         };
@@ -1841,6 +1898,11 @@ app.post('/api/curriculum/:id/lesson/:lessonId/chat', authMiddleware, requireMes
     const curriculum = (users[email].data.curricula || []).find(c => c.id === req.params.id);
     if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
 
+    // PAUSD courses are textbook-only. Force web search OFF — the AI must
+    // teach inside the chapter scope of the assigned textbook (Big Ideas
+    // Math, NGSS), not pull random sources from the wider internet.
+    if (curriculum.source === 'pausd') req.sourced = false;
+
     let lesson = null, unit = null;
     for (const u of curriculum.units || []) {
       const l = (u.lessons || []).find(l => l.id === req.params.lessonId);
@@ -2109,7 +2171,7 @@ app.post('/api/goals', authMiddleware, async (req, res) => {
 
     // AI generates milestones
     const { system, user } = buildGoalMilestonesPrompt(title, description, users[email].data.curricula);
-    const result = await callAnthropic(system, [{ role: 'user', content: user }], DEFAULT_MODEL, 2048);
+    const result = await callGemini(system, [{ role: 'user', content: user }], DEFAULT_MODEL, 2048, { jsonMode: true, temperature: 0.5 });
 
     let milestones = [];
     if (result.success) {
@@ -2210,7 +2272,7 @@ app.post('/api/flashcards', authMiddleware, async (req, res) => {
     let cards = [];
     if (topic) {
       const { system, user } = buildFlashcardPrompt(topic, count || 10, difficulty || 'beginner');
-      const result = await callAnthropic(system, [{ role: 'user', content: user }], DEFAULT_MODEL, 4096);
+      const result = await callGemini(system, [{ role: 'user', content: user }], DEFAULT_MODEL, 4096, { jsonMode: true, temperature: 0.6 });
       if (result.success) {
         const parsed = parseAIJson(result.data.content?.[0]?.text || '');
         if (parsed?.cards) {
@@ -2277,7 +2339,7 @@ app.post('/api/flashcards/:deckId/cards', authMiddleware, async (req, res) => {
     let newCards = [];
     if (topic) {
       const { system, user } = buildFlashcardPrompt(topic, count || 10, difficulty || 'beginner');
-      const result = await callAnthropic(system, [{ role: 'user', content: user }], DEFAULT_MODEL, 4096);
+      const result = await callGemini(system, [{ role: 'user', content: user }], DEFAULT_MODEL, 4096, { jsonMode: true, temperature: 0.6 });
       if (result.success) {
         const parsed = parseAIJson(result.data.content?.[0]?.text || '');
         if (parsed?.cards) {
@@ -2440,7 +2502,7 @@ app.post('/api/notes/:nid/generate-cues', authMiddleware, async (req, res) => {
     if (!note.mainNotes) return res.status(400).json({ error: 'No notes to generate cues from' });
 
     const { system, user } = buildCueGenerationPrompt(note.mainNotes);
-    const result = await callAnthropic(system, [{ role: 'user', content: user }], DEFAULT_MODEL, 1024);
+    const result = await callGemini(system, [{ role: 'user', content: user }], DEFAULT_MODEL, 1024, { jsonMode: true, temperature: 0.4 });
     if (result.success) {
       const parsed = parseAIJson(result.data.content?.[0]?.text || '');
       if (parsed?.cues) {
@@ -2464,7 +2526,7 @@ app.post('/api/notes/:nid/generate-summary', authMiddleware, async (req, res) =>
     if (!note.mainNotes) return res.status(400).json({ error: 'No notes to summarize' });
 
     const { system, user } = buildSummaryPrompt(note.cues, note.mainNotes);
-    const result = await callAnthropic(system, [{ role: 'user', content: user }], DEFAULT_MODEL, 1024);
+    const result = await callGemini(system, [{ role: 'user', content: user }], DEFAULT_MODEL, 1024, { jsonMode: true, temperature: 0.4 });
     if (result.success) {
       const parsed = parseAIJson(result.data.content?.[0]?.text || '');
       if (parsed?.summary) {
@@ -2486,18 +2548,28 @@ app.post('/api/assessment/generate', authMiddleware, async (req, res) => {
     if (!topic) return res.status(400).json({ error: 'Topic required' });
 
     const { system, user } = buildAssessmentPrompt(topic, type || 'quiz', questionCount || 5, difficulty || 'beginner');
-    const result = await callAnthropic(system, [{ role: 'user', content: user }], DEFAULT_MODEL, 4096);
+    // jsonMode forces Gemini to emit strict JSON — eliminates the "Failed
+    // to parse assessment" failures that came from the model wrapping
+    // output in markdown fences or adding a preamble.
+    const result = await callGemini(system, [{ role: 'user', content: user }], DEFAULT_MODEL, 4096, { jsonMode: true, temperature: 0.5 });
     if (!result.success) return res.status(500).json({ error: result.error });
 
-    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
-    if (!parsed) return res.status(500).json({ error: 'Failed to parse assessment' });
+    const rawText = result.data.content?.[0]?.text || '';
+    const parsed = parseAIJson(rawText);
+    if (!parsed) {
+      console.error('Assessment parse failed. First 400 chars:', rawText.slice(0, 400));
+      return res.status(500).json({ error: 'Failed to parse assessment. Try again.' });
+    }
 
     const assessment = { id: crypto.randomUUID(), ...parsed, createdAt: new Date().toISOString() };
     res.json({ assessment });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) {
+    console.error('Assessment generate error:', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
-app.post('/api/assessment/grade', authMiddleware, (req, res) => {
+app.post('/api/assessment/grade', authMiddleware, async (req, res) => {
   try {
     const { assessment, answers } = req.body;
     if (!assessment || !answers) return res.status(400).json({ error: 'Assessment and answers required' });
@@ -2507,6 +2579,90 @@ app.post('/api/assessment/grade', authMiddleware, (req, res) => {
     if (!email) return res.status(404).json({ error: 'User not found' });
     users[email].data = migrateUserData(users[email].data);
 
+    // ===== ESSAY PATH — AI grades against rubric =====
+    if (assessment.type === 'essay') {
+      const essayText = String(answers.essay || '').trim();
+      if (!essayText) return res.status(400).json({ error: 'Essay text required' });
+      if (essayText.length < 30) return res.status(400).json({ error: 'Essay must be at least 30 characters' });
+
+      const rubric = Array.isArray(assessment.rubric) ? assessment.rubric : [];
+      const rubricLines = rubric.map((r, i) =>
+        `${i + 1}. ${r.criterion} (max ${r.maxScore || 5} pts) — ${r.description || ''}`
+      ).join('\n') || '(no rubric provided — grade holistically out of 5 for organization, evidence, and analysis)';
+
+      const sys = `You are a strict but fair essay grader. Grade the student's essay against the rubric. Output ONLY valid JSON — no markdown, no preamble.`;
+      const usr = `ESSAY PROMPT:
+${assessment.prompt || assessment.title || ''}
+
+RUBRIC:
+${rubricLines}
+
+STUDENT'S ESSAY:
+"""
+${essayText.slice(0, 12000)}
+"""
+
+Return JSON exactly in this shape (one rubricScores entry per rubric criterion above, in the same order):
+{
+  "rubricScores": [{"criterion": "...", "score": N, "maxScore": N, "feedback": "1-2 sentences explaining the score and what would have earned full marks"}],
+  "overallFeedback": "2-3 sentences summarizing the essay's strengths and weaknesses",
+  "strengths": ["specific thing the essay did well", "another specific thing"],
+  "improvements": ["specific concrete revision", "another specific revision"]
+}`;
+
+      const tierModel = modelForUser(users[email], email);
+      const aiResp = await callGemini(sys, [{ role: 'user', content: usr }], tierModel, 2000, { jsonMode: true, temperature: 0.4 });
+      if (!aiResp.success) return res.status(500).json({ error: aiResp.error || 'Grading failed' });
+      const parsed = parseAIJson(aiResp.data.content?.[0]?.text || '');
+      if (!parsed || !Array.isArray(parsed.rubricScores)) {
+        return res.status(500).json({ error: 'Failed to parse grading response' });
+      }
+
+      const score = parsed.rubricScores.reduce((s, r) => s + (Number(r.score) || 0), 0);
+      const total = parsed.rubricScores.reduce((s, r) => s + (Number(r.maxScore) || 0), 0)
+        || rubric.reduce((s, r) => s + (Number(r.maxScore) || 5), 0)
+        || 5;
+
+      const result = {
+        id: crypto.randomUUID(),
+        type: 'essay',
+        topic: assessment.title || '',
+        score, total,
+        percentage: total > 0 ? Math.round((score / total) * 100) : 0,
+        rubricScores: parsed.rubricScores,
+        overallFeedback: String(parsed.overallFeedback || '').slice(0, 1000),
+        strengths: Array.isArray(parsed.strengths) ? parsed.strengths.slice(0, 6) : [],
+        improvements: Array.isArray(parsed.improvements) ? parsed.improvements.slice(0, 6) : [],
+        essay: essayText.slice(0, 3000),
+        prompt: assessment.prompt || '',
+        createdAt: new Date().toISOString(),
+      };
+
+      users[email].data.assessmentHistory.unshift(result);
+      if (users[email].data.assessmentHistory.length > 100) {
+        users[email].data.assessmentHistory = users[email].data.assessmentHistory.slice(0, 100);
+      }
+
+      // Update topic scores from the essay percentage (same as quiz path)
+      const topicKey = (assessment.title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      if (topicKey && users[email].data.profile) {
+        const existing = users[email].data.profile.topicScores[topicKey] || { score: 0, attempts: 0 };
+        existing.attempts++;
+        existing.score = Math.round((existing.score * (existing.attempts - 1) + result.percentage) / existing.attempts);
+        existing.lastAttempt = new Date().toISOString();
+        users[email].data.profile.topicScores[topicKey] = existing;
+
+        const scores = Object.entries(users[email].data.profile.topicScores);
+        users[email].data.profile.strengths = scores.filter(([, v]) => v.score >= 80).map(([k]) => k).slice(0, 5);
+        users[email].data.profile.weaknesses = scores.filter(([, v]) => v.score < 60).map(([k]) => k).slice(0, 5);
+      }
+
+      try { checkGoalMilestones(users[email].data); } catch (e) { console.warn('checkGoalMilestones failed:', e.message); }
+      saveUsers(users);
+      return res.json({ result });
+    }
+
+    // ===== QUIZ PATH (multiple-choice) =====
     let score = 0;
     const details = (assessment.questions || []).map((q, i) => {
       const userAnswer = answers[i] || answers[q.id];
@@ -4307,18 +4463,20 @@ Return JSON with this exact shape:
     }
     userParts.push(`\nINSTRUCTION FROM USER:\n${instruction.trim()}`);
 
-    const result = await callAnthropic(
+    const result = await callGemini(
       system,
       [{ role: 'user', content: userParts.join('\n\n') }],
       modelForUser(users[email], email),
-      8192
+      8192,
+      { jsonMode: true, temperature: 0.5 }
     );
     if (!result.success) return res.status(500).json({ error: result.error || 'Edit failed' });
 
     const text = result.data.content?.[0]?.text || '';
     const updated = parseAIJson(text);
     if (!updated || !Array.isArray(updated.units)) {
-      return res.status(500).json({ error: 'Model returned invalid JSON' });
+      console.error('Curriculum-edit parse failed. First 400 chars:', text.slice(0, 400));
+      return res.status(500).json({ error: 'Model returned invalid JSON. Try again.' });
     }
 
     // Merge: for each unit/lesson, if the updated one has an id that matches
@@ -4458,15 +4616,12 @@ Return this exact JSON structure:
   ]
 }`;
 
-    const result = await callAnthropic(system, [{ role: 'user', content: user }], DEFAULT_MODEL, 4096);
+    const result = await callGemini(system, [{ role: 'user', content: user }], DEFAULT_MODEL, 4096, { jsonMode: true, temperature: 0.5 });
     if (!result.success) return res.status(500).json({ error: result.error });
 
     const text = result.data.content?.[0]?.text || '';
-    let parsed;
-    try { parsed = JSON.parse(text); } catch {
-      const match = text.match(/\{[\s\S]*\}/);
-      if (match) parsed = JSON.parse(match[0]);
-    }
+    const parsed = parseAIJson(text);
+    if (!parsed) console.error('Curriculum-restructure parse failed. First 400 chars:', text.slice(0, 400));
 
     if (!parsed?.units) return res.status(500).json({ error: 'Failed to parse curriculum' });
 
@@ -5780,21 +5935,76 @@ app.post('/api/quizbowl/match/:code/answer', authMiddleware, (req, res) => {
 
   const answer = String(req.body?.answer || '').trim();
   const correctAnswer = match.questions[match.currentIdx].answer;
-  // Fuzzy compare: normalize + Levenshtein.
-  function norm(s) { return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s]/g, '').trim(); }
+  // Fuzzy compare: normalize + Levenshtein. Tightened from a previous version
+  // that accepted any substring (so "a" matched "Albert Einstein") and had a
+  // 25%-of-length Levenshtein bound (which also blew up on short answers).
+  // Goal: forgive real typos and casing, REJECT one-letter scribbles and
+  // arbitrary substrings.
+  function norm(s) {
+    return s
+      .toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // strip diacritics
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\b(the|a|an)\b/g, '')                   // strip leading articles
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+  // Damerau-Levenshtein: like standard Levenshtein but counts an adjacent
+  // transposition as 1 edit (not 2). This is what makes "einstien" vs
+  // "einstein" forgivable with cap=1 instead of needing cap=2.
   function lev(a, b) {
     const m = a.length, n = b.length;
     if (!m) return n; if (!n) return m;
-    const d = Array.from({ length: m + 1 }, (_, i) => [i]);
-    for (let j = 1; j <= n; j++) d[0][j] = j;
-    for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++)
-      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] !== b[j - 1] ? 1 : 0));
+    const d = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+    for (let i = 0; i <= m; i++) d[i][0] = i;
+    for (let j = 0; j <= n; j++) d[0][j] = j;
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+        if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+          d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+        }
+      }
+    }
     return d[m][n];
   }
-  const a = norm(answer); const c = norm(correctAnswer);
-  const thresh = Math.max(1, Math.floor(c.length * 0.25));
-  const correct = !!a && (a === c || c.includes(a) || a.includes(c) || lev(a, c) <= thresh
-    || c.split(/[\s,]+/).some(w => w.length > 2 && (a.includes(w) || lev(a, w) <= 1)));
+
+  const a = norm(answer);
+  const c = norm(correctAnswer);
+
+  // Quiz-bowl convention: the LAST whitespace-separated token of the answer
+  // is the "key word" (last name, surname, key noun). E.g., "Albert Einstein"
+  // \u2192 "einstein". Accepting just the key word is standard.
+  const cTokens = c.split(/\s+/).filter(t => t.length >= 3);
+  const keyWord = cTokens.length ? cTokens[cTokens.length - 1] : c;
+
+  // Length-aware Levenshtein bound. Floor of: 1 typo for short, ~15% for long.
+  // A bound of `floor(len/6)`, capped at 2 for the full answer and 1 for the
+  // key word, accepts a single transposition / typo without bleeding into
+  // semantic mismatches.
+  function within(input, target, maxBound) {
+    if (!input || !target) return false;
+    const cap = Math.min(maxBound, Math.max(0, Math.floor(target.length / 6)));
+    return lev(input, target) <= cap;
+  }
+
+  // Correct if any of:
+  //   1. exact match after normalization
+  //   2. typo of full answer (\u2264 floor(len/6), capped at 2)
+  //   3. exact key word    ("einstein" for "albert einstein")
+  //   4. typo of key word  (\u2264 floor(len/6), capped at 1) \u2014 at least 4 chars
+  //
+  // Deliberately NOT used (these were previous false-positive sources):
+  //   - c.includes(a) / a.includes(c)  \u2192 matches one-letter answers
+  //   - per-word `a.includes(w)`        \u2192 "the" inside "the einstein" matched
+  //   - 25%-of-length Levenshtein       \u2192 too generous for short answers
+  const correct = !!a && (
+    a === c
+    || within(a, c, 2)
+    || (keyWord && keyWord.length >= 3 && a === keyWord)
+    || (keyWord && keyWord.length >= 4 && within(a, keyWord, 1))
+  );
 
   if (correct) {
     // Correct: question ends. Score awarded. Auto-advance in 5s.

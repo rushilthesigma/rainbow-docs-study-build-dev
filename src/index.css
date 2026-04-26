@@ -194,8 +194,12 @@ input[data-spotlight-input]:hover,
 .os-chromeos .rounded-xl  { border-radius: 1.125rem !important; }
 .os-chromeos .rounded-lg  { border-radius: 0.875rem !important; }
 
-/* Pill buttons almost everywhere (skip chat bubble corners) */
-.os-chromeos button:not([class*="rounded-full"]):not([class*="rounded-br-md"]):not([class*="rounded-bl-md"]) {
+/* Pill small/icon buttons on ChromeOS. Excludes:
+   - rounded-full (already a circle)
+   - rounded-bl-md / br-md (chat bubble corners)
+   - rounded-lg / xl / 2xl / 3xl (card-shaped buttons; respect their declared radius)
+   - rounded-none (intentionally squared) */
+.os-chromeos button:not([class*="rounded-full"]):not([class*="rounded-br-md"]):not([class*="rounded-bl-md"]):not([class*="rounded-lg"]):not([class*="rounded-xl"]):not([class*="rounded-2xl"]):not([class*="rounded-3xl"]):not([class*="rounded-none"]) {
   border-radius: 9999px !important;
 }
 .os-chromeos .rounded-md { border-radius: 9999px !important; }

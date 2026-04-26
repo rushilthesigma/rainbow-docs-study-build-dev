@@ -1,6 +1,5 @@
 import CurriculaApp from './apps/CurriculaApp';
 import LessonsApp from './apps/LessonsApp';
-import FlashcardsApp from './apps/FlashcardsApp';
 import DebateApp from './apps/DebateApp';
 import NotesApp from './apps/NotesApp';
 import TextbookApp from './apps/TextbookApp';
@@ -9,7 +8,6 @@ import AdminApp from './apps/AdminApp';
 import QuizBowlApp from './apps/QuizBowlApp';
 import MathTutorApp from './apps/MathTutorApp';
 import StudyPage from '../../pages/StudyPage';
-import GoalsPage from '../../pages/GoalsPage';
 import AssessmentsPage from '../../pages/AssessmentsPage';
 import MathPracticePage from '../../pages/MathPracticePage';
 import SettingsPage from '../../pages/SettingsPage';
@@ -18,9 +16,7 @@ const APP_COMPONENTS = {
   curricula: CurriculaApp,
   lessons: LessonsApp,
   study: StudyPage,
-  flashcards: FlashcardsApp,
   notes: NotesApp,
-  goals: GoalsPage,
   assessments: AssessmentsPage,
   math: MathPracticePage,
   mathtutor: MathTutorApp,

@@ -1,8 +1,19 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { MessageSquare, History, Trash2, Plus, ChevronLeft } from 'lucide-react';
+import { History, Trash2, Plus, ChevronLeft, Compass, Lightbulb, Calculator, Beaker, Sparkles } from 'lucide-react';
 import { sendStudyMessage, listStudySessions, getStudySession, deleteStudySession } from '../../api/curriculum';
 import ChatContainer from '../chat/ChatContainer';
 import { errorChatMessage } from '../../utils/aiErrors';
+
+// Quick-start prompts shown in the empty state. Replaces the bland
+// "Start the conversation..." default with concrete suggestions tied to
+// what the AI is good at, so the study mode does NOT feel like ChatGPT's
+// blank greeting.
+const QUICK_PROMPTS = [
+  { icon: Calculator, label: 'Quiz me on the quadratic formula', prompt: 'Quiz me on the quadratic formula. 5 multiple-choice questions, escalating difficulty.' },
+  { icon: Beaker,     label: 'Explain photosynthesis at honors level', prompt: 'Explain photosynthesis at honors-tier depth. Don\'t skip the Calvin cycle.' },
+  { icon: Lightbulb,  label: 'Help me understand limits in calculus', prompt: 'Walk me through limits in calculus, starting with intuition before the formal definition.' },
+  { icon: Compass,    label: 'What\'s a good thing to study right now?', prompt: 'What should I work on right now?' },
+];
 
 export default function StudyModePanel({ className = '', initialMessage }) {
   const [messages, setMessages] = useState([]);
@@ -185,26 +196,38 @@ export default function StudyModePanel({ className = '', initialMessage }) {
     );
   }
 
+  // Distinctive header — gradient strip, mode badge, action buttons.
+  // NOT the simple "icon + title bar" pattern.
+  const messageCount = messages.length;
   const header = (
-    <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622]">
-      <MessageSquare size={16} className="text-blue-500" />
-      <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">Study Mode</span>
-      <div className="flex-1" />
-      <button
-        onClick={() => { loadHistory(); setShowHistory(true); }}
-        className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#1e1e2e]"
-        title="Chat history"
-      >
-        <History size={14} />
-      </button>
-      {sessionId && (
+    <div className="relative px-4 py-2.5 border-b border-gray-200 dark:border-[#2A2A40] bg-gradient-to-r from-blue-50 via-white to-indigo-50 dark:from-blue-950/30 dark:via-[#161622] dark:to-indigo-950/30">
+      <div className="flex items-center gap-2.5">
+        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-sm">
+          <Sparkles size={14} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[13px] font-bold text-gray-900 dark:text-white leading-tight">Study Session</p>
+          <p className="text-[10px] text-gray-500 dark:text-gray-400 tabular-nums">
+            {messageCount === 0 ? 'New session — ready when you are' : `${messageCount} message${messageCount === 1 ? '' : 's'}`}
+            {sourceMode && <span className="ml-2 inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold uppercase tracking-wider"><span className="w-1 h-1 rounded-full bg-amber-500" /> Web · 2×</span>}
+          </p>
+        </div>
         <button
-          onClick={newChat}
-          className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+          onClick={() => { loadHistory(); setShowHistory(true); }}
+          className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-[#1e1e2e] transition-colors"
+          title="Past sessions"
         >
-          New Chat
+          <History size={12} /> History
         </button>
-      )}
+        {sessionId && (
+          <button
+            onClick={newChat}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:bg-white dark:hover:bg-[#1e1e2e] transition-colors"
+          >
+            <Plus size={11} /> New
+          </button>
+        )}
+      </div>
     </div>
   );
 
@@ -229,6 +252,40 @@ export default function StudyModePanel({ className = '', initialMessage }) {
     setTimeout(() => doSend(hidden, { hideUserInDisplay: true }), 30);
   }
 
+  // Rich empty state — quick-prompt cards, NOT ChatGPT's blank greeting.
+  const emptyState = (
+    <div className="h-full flex flex-col items-center justify-center px-4 py-6">
+      <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/20 mb-4">
+        <Sparkles size={22} />
+      </div>
+      <h2 className="text-base font-bold text-gray-900 dark:text-white mb-1">What do you want to work on?</h2>
+      <p className="text-[12px] text-gray-500 dark:text-gray-400 max-w-sm text-center mb-5">
+        Ask anything, request a quiz, walk through a concept, or just say "what should I study?"
+      </p>
+      <div className="grid sm:grid-cols-2 gap-2 w-full max-w-md">
+        {QUICK_PROMPTS.map((p, i) => {
+          const Icon = p.icon;
+          return (
+            <button
+              key={i}
+              onClick={() => doSend(p.prompt)}
+              disabled={streaming}
+              className="group text-left flex items-start gap-2.5 p-3 rounded-xl border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622] hover:border-blue-400 dark:hover:border-blue-600 hover:bg-blue-50/40 dark:hover:bg-blue-900/10 transition-colors disabled:opacity-50"
+            >
+              <div className="w-7 h-7 rounded-md bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 flex-shrink-0">
+                <Icon size={13} />
+              </div>
+              <p className="text-[12px] font-medium text-gray-800 dark:text-gray-200 leading-snug pt-0.5">{p.label}</p>
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-5">
+        Tap a prompt or just type below.
+      </p>
+    </div>
+  );
+
   return (
     <ChatContainer
       messages={messages}
@@ -244,6 +301,7 @@ export default function StudyModePanel({ className = '', initialMessage }) {
       onToggleSource={setSourceMode}
       onUserEditMessage={handleUserEdit}
       onAiInstruct={handleAiInstruct}
+      emptyState={emptyState}
     />
   );
 }

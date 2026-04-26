@@ -6,7 +6,7 @@ import PillGroup from '../components/shared/PillGroup';
 import Toggle from '../components/shared/Toggle';
 import { Textarea } from '../components/shared/Input';
 import Button from '../components/shared/Button';
-import { Settings, Save, User } from 'lucide-react';
+import { Settings, Save, User, GraduationCap } from 'lucide-react';
 import { useUIPreference } from '../context/UIPreferenceContext';
 
 import { WALLPAPER_LIST } from '../components/desktop/DesktopBackground';
@@ -237,6 +237,30 @@ export default function SettingsPage() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Onboarding / Tutorial */}
+      <div className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-6 space-y-3">
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wide">Tutorial</h3>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Restart onboarding</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              Replay the 8-step welcome tutorial — pedagogy, PAUSD catalog, lesson flow, progress.
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              if (!confirm('Replay the welcome tutorial now?')) return;
+              localStorage.removeItem('covalent-onboarded');
+              localStorage.removeItem('cov-launch-app');
+              window.location.reload();
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors flex-shrink-0"
+          >
+            <GraduationCap size={14} /> Restart
+          </button>
+        </div>
       </div>
     </div>
   );

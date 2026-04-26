@@ -263,10 +263,32 @@ export function buildLessonChatPrompt(phase, lesson, unit, settings, profile, pr
   const profileCtx = buildProfileContext(profile, assessmentHistory);
   const courseCtx = buildCourseMemoryContext(curriculum, unit, lesson);
 
+  // PAUSD courses are pinned to a specific textbook. The teacher MUST stay
+  // inside that textbook's content — same chapter scope, same notation,
+  // same pedagogical sequencing. No web, no random examples scraped from
+  // the internet, no problems out of the textbook's defined difficulty
+  // range. This is what keeps the experience aligned with what a PAUSD
+  // student would see in their actual classroom.
+  const isPausd = curriculum?.source === 'pausd';
+  const unitBookCtx = unit?.textbookContext ? `\n\nThis unit's textbook scope:\n${unit.textbookContext}` : '';
+  const textbookCtx = isPausd && curriculum?.textbook ? `
+═══ TEXTBOOK CONSTRAINT (PAUSD course) ═══
+Source of truth: ${curriculum.textbook}${unitBookCtx}
+HARD RULES:
+- This lesson is part of a PAUSD-aligned curriculum. The ONLY source of curriculum content is the textbook above. Do NOT pull problems, definitions, or worked examples from outside it.
+- Use the textbook's NOTATION and VOCABULARY exactly. If the textbook calls a method by a specific name (e.g., "the AC method", "completing the square"), use that name — not a synonym.
+- Match the textbook's CHAPTER SCOPE for this lesson. If the lesson title corresponds to section "X.Y" of the book, teach what section X.Y teaches — no more, no less. Don't preview material from later chapters.
+- Examples and quiz questions should LOOK LIKE Big Ideas Math problems (concrete numbers, clean answers, the kind of question you'd find in the textbook's section exercises) — but be HARDER than the book's worked examples. PAUSD students are at the upper end of the band. Pick problems from the back-half of the section's exercise set, plus one stretch problem each phase.
+- Do NOT search the web. Do NOT cite external sources. Do NOT recommend YouTube videos or other study resources.
+- If the student asks something outside the textbook's scope ("can you teach me calculus?"), answer briefly that this lesson stays within ${curriculum.textbook}, and offer to help inside that scope.
+═══════════════════════════════════════════
+` : '';
+
   const header = `You are the teacher for this lesson on "${lesson.title}" in unit "${unit.title}". You run the session by default — pick what to teach next, set the pace, decide when to drill, decide when to move on. Don't ask "shall we continue?" — just continue. Don't ask "what would you like to focus on?" — pick what they need.
 ${prefsCtx}
 ${profileCtx}
 ${courseCtx}
+${textbookCtx}
 Difficulty: ${settings?.difficulty || 'intermediate'} — but YOU push harder than the label by default. The student picked their level; your job is to stretch them inside that level, not to underdeliver. When in doubt, ask the harder question.
 
 CONTINUITY ACROSS LESSONS (read this — it is the single most important pedagogy rule for this curriculum):

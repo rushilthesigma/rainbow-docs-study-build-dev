@@ -198,18 +198,33 @@ function TutorCanvas({ onCaptureReady, dark }) {
 }
 
 // ============== MAIN APP ==============
-export default function MathTutorApp() {
+//
+// Props:
+//   seedTopic — when set (e.g. when embedded inline from a curriculum
+//               math_tutor lesson), bypass the setup view and start the
+//               tutor immediately on the given topic.
+//   onBack    — when set, replaces the setup-view back-button behavior so
+//               an embedding parent can return to its own view.
+export default function MathTutorApp({ seedTopic = null, onBack = null } = {}) {
   const persisted = loadState();
-  const [view, setView] = useState(persisted?.view || 'setup'); // 'setup' | 'tutor'
-  useBrowserBack(view === 'tutor', () => setView('setup'));
-  const [topic, setTopic] = useState(persisted?.topic || '');
+  // When seeded, start in 'tutor' view directly. Otherwise restore from
+  // localStorage like normal.
+  const [view, setView] = useState(seedTopic ? 'tutor' : (persisted?.view || 'setup'));
+  // When embedded (onBack supplied by parent), DO NOT register our own
+  // browser-back handler — the parent (e.g. CurriculaApp) owns history
+  // management for the embed. Nested useBrowserBack hooks fight each other
+  // in React 18 dev (the inner cleanup calls history.back, which fires
+  // popstate, which the outer hook handles by bailing the embedded view).
+  useBrowserBack(!onBack && view === 'tutor', () => setView('setup'));
+  const [topic, setTopic] = useState(seedTopic || persisted?.topic || '');
   const [customInstructions, setCustomInstructions] = useState(persisted?.customInstructions || '');
-  const [messages, setMessages] = useState(persisted?.messages || []);
+  const [messages, setMessages] = useState(seedTopic ? [] : (persisted?.messages || []));
   const [streaming, setStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
   const [error, setError] = useState(null);
   const [input, setInput] = useState('');
   const [showSettings, setShowSettings] = useState(false);
+  const seedKickedOff = useRef(false);
 
   const streamRef = useRef('');
   const abortRef = useRef(null);
@@ -217,13 +232,15 @@ export default function MathTutorApp() {
   const dark = typeof window !== 'undefined' && document.documentElement.classList.contains('dark');
 
   // Persist across window close. Cap at ~50 msgs of 3k chars each so we don't
-  // blow up localStorage on long sessions.
+  // blow up localStorage on long sessions. Don't persist seeded sessions —
+  // they're tied to a specific curriculum lesson, not a free session.
   useEffect(() => {
+    if (seedTopic) return;
     const trimmed = messages.slice(-50).map(m => ({
       role: m.role, content: (m.content || '').slice(0, 3000), _edited: m._edited, _error: m._error,
     }));
     saveState({ view, topic, customInstructions, messages: trimmed });
-  }, [view, topic, customInstructions, messages]);
+  }, [view, topic, customInstructions, messages, seedTopic]);
 
   // Clean up an aborted stream if the component unmounts mid-turn.
   useEffect(() => () => abortRef.current?.(), []);
@@ -236,6 +253,18 @@ export default function MathTutorApp() {
     // Kick off the opening lesson automatically.
     setTimeout(() => doSend({ text: `Teach me about "${topic.trim()}". Give me a real lesson — definition, why it matters, worked examples in KaTeX, then one problem to try on the canvas.`, phase: 'lesson', hidden: true }), 50);
   }
+
+  // Auto-start when embedded with a seed topic — runs once on mount.
+  useEffect(() => {
+    if (!seedTopic || seedKickedOff.current) return;
+    seedKickedOff.current = true;
+    setTimeout(() => doSend({
+      text: `Teach me about "${seedTopic}". Give me a real lesson — definition, why it matters, worked examples in KaTeX, then one problem to try on the canvas.`,
+      phase: 'lesson',
+      hidden: true,
+    }), 60);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seedTopic]);
 
   function doSend({ text, phase = 'lesson', imageDataUrl = null, hidden = false }) {
     if (streaming) return;

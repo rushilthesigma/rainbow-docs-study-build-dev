@@ -177,146 +177,174 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
 
   const isError = !!message._error;
 
-  return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-3`}>
-      <div className={`max-w-[92%] rounded-2xl px-4 py-3 text-sm ${
-        isUser
-          ? 'bg-blue-600 text-white rounded-br-md'
-          : isError
-            ? 'bg-rose-50 dark:bg-rose-900/15 border border-rose-200 dark:border-rose-800/60 text-rose-700 dark:text-rose-300 rounded-bl-md'
-            : 'bg-white dark:bg-[#1e1e2e] border border-gray-200 dark:border-[#2A2A40] text-gray-800 dark:text-gray-200 rounded-bl-md'
-      }`}>
-        {isUser ? (
-          editing ? (
-            <div>
+  // Layout philosophy — NOT ChatGPT.
+  // ChatGPT's pattern is full-width alternating gray/white panels with
+  // tiny avatar+name. We deliberately do iMessage-style:
+  //
+  //   AI on the LEFT in a soft-rounded card with a sharp inner left
+  //   accent stripe — feels like a teacher's note in the margin.
+  //   USER on the RIGHT as a tight blue bubble with a sharp tail
+  //   corner pointing at "you" (rounded-tr-sm).
+  //
+  // No avatars, no per-message header, no full-width gray panels.
+  // The directional alignment alone signals who's talking.
+
+  if (isUser) {
+    if (editing) {
+      return (
+        <div className="flex justify-end mb-3">
+          <div className="max-w-[78%] w-full sm:w-auto">
+            <div className="rounded-2xl rounded-tr-md bg-blue-600 p-3 shadow-sm">
               <textarea
                 value={editText}
                 onChange={e => setEditText(e.target.value)}
                 rows={Math.min(12, Math.max(3, editText.split('\n').length))}
-                className="w-full min-w-[280px] p-2 rounded-lg bg-blue-500/30 text-white placeholder-blue-200 text-sm outline-none border border-white/20 focus:border-white/60"
+                className="w-full min-w-[260px] p-2 rounded-lg bg-blue-500/40 text-white placeholder-blue-100 text-sm outline-none border border-white/20 focus:border-white/60"
                 autoFocus
               />
-              <p className="text-[10px] text-white/70 mt-1">Saving will restart the conversation from this point.</p>
+              <p className="text-[10px] text-white/75 mt-1.5">Saving will restart the conversation from here.</p>
               <div className="flex gap-1.5 mt-2 justify-end">
-                <button onClick={() => { setEditing(false); setEditText(raw); }} className="px-3 py-1 rounded-lg text-[11px] text-white/80 hover:bg-white/10">Cancel</button>
-                <button onClick={saveUserEdit} className="px-3 py-1 rounded-lg text-[11px] bg-white text-blue-700 font-medium hover:bg-blue-50">Save &amp; Restart</button>
+                <button onClick={() => { setEditing(false); setEditText(raw); }} className="px-3 py-1 rounded-md text-[11px] text-white/85 hover:bg-white/10">Cancel</button>
+                <button onClick={saveUserEdit} className="px-3 py-1 rounded-md text-[11px] bg-white text-blue-700 font-semibold hover:bg-blue-50">Save &amp; Restart</button>
               </div>
             </div>
-          ) : (
-            <div className="group relative">
-              {Array.isArray(message.images) && message.images.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mb-2">
-                  {message.images.map((img, i) => (
-                    <img
-                      key={i}
-                      src={img.dataUrl || img.url}
-                      alt={img.name || `attachment-${i}`}
-                      className="max-w-[160px] max-h-[160px] rounded-lg object-cover border border-white/10"
-                    />
-                  ))}
-                </div>
-              )}
-              {displayContent && <p className="whitespace-pre-wrap">{displayContent}</p>}
-              {!isStreaming && canEdit && (
-                <div className="mt-2 pt-1.5 flex items-center gap-1 opacity-40 group-hover:opacity-100 transition-opacity justify-end">
-                  <button
-                    onClick={handleCopy}
-                    title="Copy as text"
-                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-white/80 hover:text-white hover:bg-white/10"
-                  >
-                    {copied ? <><Check size={10} /> Copied</> : <><Copy size={10} /> Copy</>}
-                  </button>
-                  <button
-                    onClick={() => { setEditing(true); setEditText(raw); }}
-                    title="Edit this message"
-                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-white/80 hover:text-white hover:bg-white/10"
-                  >
-                    <Pencil size={10} /> Edit
-                  </button>
-                  {message._edited && <span className="text-[9px] text-white/60 italic ml-auto">edited</span>}
-                </div>
-              )}
-            </div>
-          )
-        ) : (
-          <>
-            {displayContent && (
-              <div ref={markdownRef} className="prose prose-sm dark:prose-invert max-w-none prose-p:my-1.5 prose-headings:my-2 prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-code:bg-gray-100 dark:prose-code:bg-[#161622] prose-code:px-1 prose-code:rounded prose-pre:bg-gray-900 dark:prose-pre:bg-[#0D0D14] prose-pre:rounded-lg">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm, remarkMath]}
-                  rehypePlugins={[rehypeKatex]}
-                  components={{
-                    p: ({ children, ...props }) => <p {...props}>{styleCitations(injectCursor(children), message.sources)}</p>,
-                    li: ({ children, ...props }) => <li {...props}>{styleCitations(injectCursor(children), message.sources)}</li>,
-                    h1: ({ children, ...props }) => <h1 {...props}>{injectCursor(children)}</h1>,
-                    h2: ({ children, ...props }) => <h2 {...props}>{injectCursor(children)}</h2>,
-                    h3: ({ children, ...props }) => <h3 {...props}>{injectCursor(children)}</h3>,
-                    strong: ({ children, ...props }) => <strong {...props}>{styleCitations(children, message.sources)}</strong>,
-                    em: ({ children, ...props }) => <em {...props}>{styleCitations(children, message.sources)}</em>,
-                  }}
-                >
-                  {contentWithCursor}
-                </ReactMarkdown>
-              </div>
-            )}
-            {quizStreaming && !quizJson && (
-              <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
-                <span className="inline-block w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />
-                <span className="text-xs text-blue-700 dark:text-blue-400 font-medium">Generating quiz…</span>
-              </div>
-            )}
-            {quizJson && <InlineQuiz quizJson={quizJson} />}
-            {Array.isArray(message.sources) && message.sources.length > 0 && (
-              <Sources sources={message.sources} />
-            )}
-            {!isStreaming && !isError && displayContent && editing && typeof onAiInstruct === 'function' && (
-              <div className="mt-3 pt-3 border-t border-gray-200 dark:border-[#2A2A40]">
-                <label className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider block mb-1.5">
-                  What should the AI change?
-                </label>
-                <div className="flex gap-1.5 items-start">
-                  <input
-                    autoFocus
-                    value={instructText}
-                    onChange={e => setInstructText(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter' && instructText.trim()) submitInstruct(); }}
-                    placeholder="e.g. shorter, more examples, include the formula…"
-                    className="flex-1 px-2.5 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-blue-500/40"
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="group flex justify-end mb-3">
+        <div className="max-w-[78%]">
+          {/* User bubble — solid blue, sharp top-right tail (rounded-tr-md), soft elsewhere. */}
+          <div className="rounded-2xl rounded-tr-md bg-blue-600 px-4 py-2.5 shadow-sm">
+            {Array.isArray(message.images) && message.images.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {message.images.map((img, i) => (
+                  <img
+                    key={i}
+                    src={img.dataUrl || img.url}
+                    alt={img.name || `attachment-${i}`}
+                    className="max-w-[160px] max-h-[160px] rounded-lg object-cover border border-white/20"
                   />
-                  <button
-                    onClick={() => { setEditing(false); setInstructText(''); }}
-                    className="px-2 py-1 rounded text-[10px] text-gray-500 hover:bg-gray-100 dark:hover:bg-[#2A2A40]"
-                  >Cancel</button>
-                  <button
-                    onClick={submitInstruct}
-                    disabled={!instructText.trim()}
-                    className="px-3 py-1 rounded-lg text-[10px] bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-40"
-                  >Redo</button>
-                </div>
+                ))}
               </div>
             )}
-            {!isStreaming && !isError && displayContent && !editing && (
-              <div className="mt-2 pt-2 flex items-center gap-1 opacity-40 hover:opacity-100 transition-opacity">
-                <button
-                  onClick={handleCopy}
-                  title="Copy as Markdown"
-                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-[#2A2A40]"
-                >
-                  {copied ? <><Check size={10} /> Copied</> : <><Copy size={10} /> Copy</>}
-                </button>
-                {canEdit && typeof onAiInstruct === 'function' && (
-                  <button
-                    onClick={() => { setEditing(true); setInstructText(''); }}
-                    title="Tell the AI what to change about this response"
-                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-[#2A2A40]"
-                  >
-                    <Pencil size={10} /> Edit
-                  </button>
-                )}
-              </div>
+            {displayContent && (
+              <p className="whitespace-pre-wrap text-[13.5px] text-white leading-relaxed">{displayContent}</p>
             )}
-          </>
+          </div>
+          {!isStreaming && canEdit && (
+            <div className="mt-1 mr-1 flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+              {message._edited && <span className="text-[9px] text-gray-400 italic mr-1">edited</span>}
+              <button
+                onClick={handleCopy}
+                title="Copy as text"
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#1e1e2e]"
+              >
+                {copied ? <><Check size={10} /> Copied</> : <><Copy size={10} /> Copy</>}
+              </button>
+              <button
+                onClick={() => { setEditing(true); setEditText(raw); }}
+                title="Edit this message"
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#1e1e2e]"
+              >
+                <Pencil size={10} /> Edit
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Assistant turn — same bubble SHAPE as the user (rounded-2xl with one
+  // sharp tail corner pointing back at the speaker), just a different
+  // color. iMessage style: user = blue, AI = gray. Symmetric, no extra
+  // chrome (no accent stripes, no header labels).
+  return (
+    <div className="flex justify-start mb-3">
+      <div className={`max-w-[88%] rounded-2xl rounded-tl-md px-4 py-2.5 shadow-sm ${
+        isError
+          ? 'bg-rose-100 dark:bg-rose-900/30'
+          : 'bg-gray-200 dark:bg-[#2A2A40]'
+      }`}>
+        <div className={isError ? 'text-rose-700 dark:text-rose-200 text-sm' : 'text-gray-900 dark:text-gray-100'}>
+        {displayContent && (
+          <div ref={markdownRef} className="prose prose-sm dark:prose-invert max-w-none prose-p:my-2 prose-headings:my-3 prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-code:bg-gray-100 dark:prose-code:bg-[#161622] prose-code:px-1 prose-code:rounded prose-pre:bg-gray-900 dark:prose-pre:bg-[#0D0D14] prose-pre:rounded-lg">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm, remarkMath]}
+              rehypePlugins={[rehypeKatex]}
+              components={{
+                p: ({ children, ...props }) => <p {...props}>{styleCitations(injectCursor(children), message.sources)}</p>,
+                li: ({ children, ...props }) => <li {...props}>{styleCitations(injectCursor(children), message.sources)}</li>,
+                h1: ({ children, ...props }) => <h1 {...props}>{injectCursor(children)}</h1>,
+                h2: ({ children, ...props }) => <h2 {...props}>{injectCursor(children)}</h2>,
+                h3: ({ children, ...props }) => <h3 {...props}>{injectCursor(children)}</h3>,
+                strong: ({ children, ...props }) => <strong {...props}>{styleCitations(children, message.sources)}</strong>,
+                em: ({ children, ...props }) => <em {...props}>{styleCitations(children, message.sources)}</em>,
+              }}
+            >
+              {contentWithCursor}
+            </ReactMarkdown>
+          </div>
         )}
+        {quizStreaming && !quizJson && (
+          <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+            <span className="inline-block w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />
+            <span className="text-xs text-blue-700 dark:text-blue-400 font-medium">Generating quiz…</span>
+          </div>
+        )}
+        {quizJson && <InlineQuiz quizJson={quizJson} />}
+        {Array.isArray(message.sources) && message.sources.length > 0 && (
+          <Sources sources={message.sources} />
+        )}
+        {!isStreaming && !isError && displayContent && editing && typeof onAiInstruct === 'function' && (
+          <div className="mt-3 pt-3 border-t border-gray-200 dark:border-[#2A2A40]">
+            <label className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider block mb-1.5">
+              What should the AI change?
+            </label>
+            <div className="flex gap-1.5 items-start">
+              <input
+                autoFocus
+                value={instructText}
+                onChange={e => setInstructText(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && instructText.trim()) submitInstruct(); }}
+                placeholder="e.g. shorter, more examples, include the formula…"
+                className="flex-1 px-2.5 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-blue-500/40"
+              />
+              <button
+                onClick={() => { setEditing(false); setInstructText(''); }}
+                className="px-2 py-1 rounded text-[10px] text-gray-500 hover:bg-gray-100 dark:hover:bg-[#2A2A40]"
+              >Cancel</button>
+              <button
+                onClick={submitInstruct}
+                disabled={!instructText.trim()}
+                className="px-3 py-1 rounded-lg text-[10px] bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-40"
+              >Redo</button>
+            </div>
+          </div>
+        )}
+        {!isStreaming && !isError && displayContent && !editing && (
+          <div className="mt-2 flex items-center gap-1 opacity-40 hover:opacity-100 transition-opacity">
+            <button
+              onClick={handleCopy}
+              title="Copy as Markdown"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-[#2A2A40]"
+            >
+              {copied ? <><Check size={10} /> Copied</> : <><Copy size={10} /> Copy</>}
+            </button>
+            {canEdit && typeof onAiInstruct === 'function' && (
+              <button
+                onClick={() => { setEditing(true); setInstructText(''); }}
+                title="Tell the AI what to change about this response"
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-[#2A2A40]"
+              >
+                <Pencil size={10} /> Edit
+              </button>
+            )}
+          </div>
+        )}
+        </div>
       </div>
     </div>
   );

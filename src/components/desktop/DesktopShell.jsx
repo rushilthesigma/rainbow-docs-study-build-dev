@@ -11,6 +11,7 @@ import WindowsShell from './WindowsShell';
 import ChromeOSShell from './ChromeOSShell';
 import LinuxShell from './LinuxShell';
 import MobileApp from '../mobile/MobileApp';
+import GuidedTour from './GuidedTour';
 
 function MacOSContent() {
   const { state } = useWindowManager();
@@ -68,13 +69,22 @@ function ShellContent() {
     return () => root.classList.remove(`os-${style}`);
   }, [style]);
 
-  switch (style) {
-    case 'windows': return <WindowsShell />;
-    case 'chromeos': return <ChromeOSShell />;
-    case 'linux': return <LinuxShell />;
-    case 'mobile': return <MobileApp />;
-    default: return <MacOSContent />;
+  function shellByStyle() {
+    switch (style) {
+      case 'windows': return <WindowsShell />;
+      case 'chromeos': return <ChromeOSShell />;
+      case 'linux': return <LinuxShell />;
+      case 'mobile': return <MobileApp />;
+      default: return <MacOSContent />;
+    }
   }
+
+  return (
+    <>
+      {shellByStyle()}
+      <GuidedTour />
+    </>
+  );
 }
 
 export default function DesktopShell() {

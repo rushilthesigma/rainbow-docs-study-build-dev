@@ -33,6 +33,7 @@ function DockIcon({ app, mouseX, iconRef, isOpen, onClick, size, iconStyle }) {
         onClick={onClick}
         onMouseEnter={() => setTooltipVisible(true)}
         onMouseLeave={() => setTooltipVisible(false)}
+        data-tour={app.id === 'curricula' ? 'curricula-icon' : undefined}
         className="dock-icon flex items-center justify-center rounded-[13px] shadow-lg transition-transform duration-150 ease-out"
         style={{
           width: size, height: size,

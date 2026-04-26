@@ -13,7 +13,7 @@ import LoadingSpinner from '../../shared/LoadingSpinner';
 import ProgressBar from '../../curriculum/ProgressBar';
 import ChatContainer from '../../chat/ChatContainer';
 import MathText from '../../shared/MathText';
-import TopicSuggestions from '../../shared/TopicSuggestions';
+import MathTutorApp from './MathTutorApp';
 import { errorChatMessage } from '../../../utils/aiErrors';
 import useBrowserBack from '../../../hooks/useBrowserBack';
 
@@ -33,10 +33,11 @@ export default function CurriculaApp() {
   const isDemo = useDemoMode();
 
   // Browser Back navigates up one level inside the curriculum stack instead
-  // of leaving the SPA. lesson → detail → list.
+  // of leaving the SPA. lesson / math_tutor / assessment → detail → list.
   useBrowserBack(view !== 'list', () => {
     if (view === 'lesson') setView('detail');
     else if (view === 'assessment') setView('detail');
+    else if (view === 'math_tutor') setView('detail');
     else setView('list');
   });
 
@@ -130,17 +131,17 @@ export default function CurriculaApp() {
       setView('assessment');
       return;
     }
-    // Math Tutor lessons pop open the Math Tutor app in its own window so
-    // the full handwriting-canvas + step-feedback experience is available.
-    if (lesson.type === 'math_tutor' && wm?.openApp) {
-      try {
-        window.dispatchEvent(new CustomEvent('cov-math-tutor-seed', {
-          detail: { topic: lesson.practiceTopic || lesson.title },
-        }));
-      } catch {}
-      wm.openApp('mathtutor', 'Math Tutor');
-      // Stay on the curriculum detail so progress is visible when they come back.
-      setView('detail');
+    // Math Tutor lessons embed the tutor INLINE inside the curriculum view
+    // (don't pop a separate window). The MathTutorApp accepts a seedTopic
+    // prop and auto-starts on the lesson's topic.
+    if (lesson.type === 'math_tutor') {
+      setView('math_tutor');
+      return;
+    }
+    // Practice lessons (math canvas) — also embed inline for now via the
+    // same math-tutor flow seeded with a "give me practice problems" prompt.
+    if (lesson.type === 'practice') {
+      setView('math_tutor');
       return;
     }
     setView('lesson');
@@ -212,6 +213,35 @@ export default function CurriculaApp() {
         curriculum={selectedCurriculum}
         onBack={() => setView('detail')}
       />
+    );
+  }
+
+  // ===== Math Tutor — embedded inline. The MathTutorApp component is
+  // re-used here with a seedTopic prop so it auto-starts on this lesson's
+  // topic without going through its own setup view. Both 'math_tutor' and
+  // 'practice' lesson types route here; the seed prompt is slightly
+  // different so practice sessions lead with problems instead of theory.
+  if (view === 'math_tutor' && currentLesson) {
+    const isPractice = currentLesson.type === 'practice';
+    const seed = currentLesson.practiceTopic || currentLesson.title;
+    return (
+      <div className="h-full flex flex-col min-h-0">
+        <div className="flex items-center gap-2 mb-3 flex-shrink-0">
+          <button onClick={() => setView('detail')} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-200">
+            <ArrowLeft size={16} /> Back to curriculum
+          </button>
+          <span className="text-xs text-gray-400">·</span>
+          <span className="text-xs font-semibold text-indigo-500 uppercase tracking-wider">{isPractice ? 'Practice · Math Canvas' : 'Math Tutor'}</span>
+          <span className="text-xs text-gray-400">·</span>
+          <span className="text-xs text-gray-700 dark:text-gray-300 truncate">{currentLesson.title}</span>
+        </div>
+        <div className="flex-1 min-h-0">
+          <MathTutorApp
+            seedTopic={isPractice ? `Practice problems on ${seed}. Give me one problem at a time on the canvas — start at moderate difficulty and escalate.` : seed}
+            onBack={() => setView('detail')}
+          />
+        </div>
+      </div>
     );
   }
 
@@ -324,8 +354,12 @@ export default function CurriculaApp() {
           <span className="text-xs text-gray-500 tabular-nums flex-shrink-0">{completedLessons}/{totalLessons}</span>
         </div>
         <div className="space-y-3">
-          {(c.units || []).map(unit => (
-            <UnitSection key={unit.id} unit={unit} onOpenLesson={(l) => openLesson(l, c.id)} />
+          {(c.units || []).map((unit, i) => (
+            <UnitSection
+              key={unit.id}
+              unit={i === 0 ? { ...unit, tourAnchorFirst: true } : unit}
+              onOpenLesson={(l) => openLesson(l, c.id)}
+            />
           ))}
         </div>
 
@@ -367,14 +401,14 @@ export default function CurriculaApp() {
         ) : (
           <div className="space-y-4">
             {genError && <div className="px-4 py-2 rounded-xl bg-rose-50 dark:bg-rose-900/15 border border-rose-200 dark:border-rose-800 text-xs text-rose-600">{genError}</div>}
-            <Input label="Topic" placeholder="e.g., Calculus, US History..." value={settings.topic} onChange={e => setSettings(p => ({ ...p, topic: e.target.value }))} />
+            <Input label="Topic" placeholder="e.g., Calculus, US History..." value={settings.topic} onChange={e => setSettings(p => ({ ...p, topic: e.target.value }))} data-tour="curriculum-topic-input" />
             <PillGroup label="Difficulty" options={DIFFICULTY_OPTIONS} value={settings.difficulty} onChange={v => setSettings(p => ({ ...p, difficulty: v }))} />
             <PillGroup label="Learning Style" options={LEARNING_STYLE_OPTIONS} value={settings.learningStyle} onChange={v => setSettings(p => ({ ...p, learningStyle: v }))} />
             <div className="flex gap-4">
               <Toggle label="Examples" checked={settings.includeExamples} onChange={v => setSettings(p => ({ ...p, includeExamples: v }))} />
               <Toggle label="Exercises" checked={settings.includeExercises} onChange={v => setSettings(p => ({ ...p, includeExercises: v }))} />
             </div>
-            <Button onClick={handleGenerate} disabled={!settings.topic.trim()}><Sparkles size={16} /> Generate Curriculum</Button>
+            <Button onClick={handleGenerate} disabled={!settings.topic.trim()} data-tour="curriculum-generate-button"><Sparkles size={16} /> Generate Curriculum</Button>
           </div>
         )}
       </div>
@@ -397,18 +431,6 @@ export default function CurriculaApp() {
   // List view
   if (loading) return <div className="flex items-center justify-center h-48"><LoadingSpinner size={24} /></div>;
 
-  // Clicking an AI suggestion jumps straight into the new-curriculum form
-  // with the topic pre-filled and difficulty inferred from the suggestion.
-  function handleSuggestionPick(s) {
-    setSettings(p => ({
-      ...p,
-      topic: s.topic || '',
-      difficulty: s.difficulty || p.difficulty,
-    }));
-    setGenError(null);
-    setView('new');
-  }
-
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
@@ -421,13 +443,14 @@ export default function CurriculaApp() {
           >
             <GraduationCap size={14} /> PAUSD Catalog
           </Button>
-          <Button size="sm" onClick={() => setView('new')}><Plus size={14} /> New</Button>
+          <Button size="sm" data-tour="new-curriculum-button" onClick={() => setView('new')}><Plus size={14} /> New</Button>
         </div>
       </div>
 
       {/* PAUSD promo strip — encourages discovering the pre-built rigor track */}
       <button
         onClick={() => { loadPausdCatalog(); setView('pausd'); }}
+        data-tour="pausd-catalog-button"
         className="w-full mb-4 flex items-center gap-3 p-3 rounded-xl border border-purple-200 dark:border-purple-800 bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20 hover:border-purple-400 dark:hover:border-purple-700 transition-colors text-left"
       >
         <div className="w-10 h-10 rounded-lg bg-purple-500 text-white flex items-center justify-center flex-shrink-0">
@@ -439,13 +462,6 @@ export default function CurriculaApp() {
         </div>
         <ChevronRight size={16} className="text-gray-400 flex-shrink-0" />
       </button>
-
-      <TopicSuggestions
-        title="Suggested curricula"
-        pickLabel="Generate"
-        onPick={handleSuggestionPick}
-        className="mb-4"
-      />
 
       {curricula.length === 0 ? (
         <div className="text-center py-12">
@@ -505,11 +521,19 @@ function UnitSection({ unit, onOpenLesson }) {
       </button>
       {open && !unit.locked && (
         <div className="border-t border-gray-100 dark:border-[#2A2A40] p-1.5">
-          {(unit.lessons || []).map(lesson => {
+          {(unit.lessons || []).map((lesson, i) => {
             const TypeIcon = TYPE_ICONS[lesson.type] || BookOpen;
             const typeColor = TYPE_COLORS[lesson.type] || 'text-gray-400';
+            // Anchor the FIRST lesson of the FIRST unit so the guided tour
+            // can highlight it after enrollment.
+            const tourAnchor = unit.tourAnchorFirst && i === 0 && lesson.type === 'lesson';
             return (
-              <button key={lesson.id} onClick={() => onOpenLesson(lesson)} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left hover:bg-gray-50 dark:hover:bg-[#161622] transition-colors group">
+              <button
+                key={lesson.id}
+                onClick={() => onOpenLesson(lesson)}
+                data-tour={tourAnchor ? 'first-lesson' : undefined}
+                className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left hover:bg-gray-50 dark:hover:bg-[#161622] transition-colors group"
+              >
                 {lesson.isCompleted ? <CheckCircle2 size={14} className="text-emerald-500 flex-shrink-0" /> : lesson.chatHistory?.length > 0 ? <Circle size={14} className="text-blue-400 flex-shrink-0" /> : <TypeIcon size={14} className={`${typeColor} flex-shrink-0`} />}
                 <span className={`text-sm flex-1 truncate ${lesson.isCompleted ? 'text-gray-400 line-through' : 'text-gray-700 dark:text-gray-200 group-hover:text-blue-500'}`}>{lesson.title}</span>
               </button>
@@ -521,21 +545,23 @@ function UnitSection({ unit, onOpenLesson }) {
   );
 }
 
-// ============= Real assessment quiz UI (unit_test / essay) =============
+// ============= Real assessment UI — handles both quiz and essay =============
 function AssessmentView({ lesson, curriculum, onBack }) {
   const [assessment, setAssessment] = useState(null);
   const [answers, setAnswers] = useState({});
+  const [essayText, setEssayText] = useState('');
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(true);
   const [grading, setGrading] = useState(false);
   const [error, setError] = useState(null);
+
+  const isEssay = lesson.type === 'essay';
 
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
         const topic = `${lesson.title}${curriculum?.title ? ` (from ${curriculum.title})` : ''}`;
-        const isEssay = lesson.type === 'essay';
         const data = await apiFetch('/api/assessment/generate', {
           method: 'POST',
           body: JSON.stringify({
@@ -553,15 +579,19 @@ function AssessmentView({ lesson, curriculum, onBack }) {
       if (alive) setLoading(false);
     })();
     return () => { alive = false; };
-  }, [lesson.id]);
+  }, [lesson.id, isEssay]);
 
   async function handleSubmit() {
     if (!assessment) return;
     setGrading(true);
+    setError(null);
     try {
+      const body = isEssay
+        ? { assessment, answers: { essay: essayText } }
+        : { assessment, answers };
       const r = await apiFetch('/api/assessment/grade', {
         method: 'POST',
-        body: JSON.stringify({ assessment, answers }),
+        body: JSON.stringify(body),
       });
       setResult(r.result);
     } catch (e) { setError(e.message); }
@@ -570,6 +600,8 @@ function AssessmentView({ lesson, curriculum, onBack }) {
 
   const answered = assessment?.questions?.filter((q, i) => answers[i] !== undefined).length || 0;
   const total = assessment?.questions?.length || 0;
+  const wordCount = essayText.split(/\s+/).filter(Boolean).length;
+  const canSubmitEssay = essayText.trim().length >= 30;
 
   return (
     <div className="h-full overflow-y-auto">
@@ -579,20 +611,70 @@ function AssessmentView({ lesson, curriculum, onBack }) {
         </button>
 
         <div className="flex items-center gap-2 mb-4">
-          <ClipboardCheck size={18} className="text-rose-500" />
+          {isEssay ? <FileText size={18} className="text-amber-500" /> : <ClipboardCheck size={18} className="text-rose-500" />}
           <h2 className="text-lg font-bold text-gray-900 dark:text-white">{lesson.title}</h2>
+          <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 ml-1">{isEssay ? 'Graded essay' : 'Assessment'}</span>
         </div>
 
         {loading && (
           <div className="flex items-center gap-2 py-12 justify-center">
             <Loader2 size={16} className="animate-spin text-gray-400" />
-            <span className="text-sm text-gray-500">Generating quiz…</span>
+            <span className="text-sm text-gray-500">{isEssay ? 'Building your essay prompt…' : 'Generating quiz…'}</span>
           </div>
         )}
 
-        {error && <p className="text-sm text-rose-500 bg-rose-50 dark:bg-rose-900/20 rounded-lg p-3">{error}</p>}
+        {error && <p className="text-sm text-rose-500 bg-rose-50 dark:bg-rose-900/20 rounded-lg p-3 mb-3">{error}</p>}
 
-        {!loading && !error && assessment && !result && (
+        {/* ===== ESSAY FORM ===== */}
+        {!loading && !error && assessment && !result && isEssay && (
+          <>
+            <div className="bg-white dark:bg-[#161622] border border-gray-200 dark:border-[#2A2A40] rounded-xl p-4 mb-3">
+              <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-amber-600 dark:text-amber-400 mb-2">Prompt</p>
+              <MathText as="p" className="text-sm text-gray-800 dark:text-gray-100 leading-relaxed">{assessment.prompt || ''}</MathText>
+            </div>
+
+            {Array.isArray(assessment.rubric) && assessment.rubric.length > 0 && (
+              <div className="bg-gray-50 dark:bg-[#0D0D14] border border-gray-200 dark:border-[#2A2A40] rounded-xl p-4 mb-3">
+                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-gray-500 dark:text-gray-400 mb-2">You&rsquo;ll be graded on</p>
+                <ul className="space-y-1.5">
+                  {assessment.rubric.map((r, i) => (
+                    <li key={i} className="text-xs text-gray-600 dark:text-gray-300 leading-snug">
+                      <span className="font-semibold text-gray-800 dark:text-gray-100">{r.criterion}</span>
+                      <span className="text-gray-400 dark:text-gray-500 ml-1">({r.maxScore || 5} pts)</span>
+                      {r.description && <span className="block text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">{r.description}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <textarea
+              value={essayText}
+              onChange={e => setEssayText(e.target.value)}
+              placeholder="Write your essay here. Make a clear claim, support it with evidence, and address each rubric criterion explicitly."
+              rows={14}
+              className="w-full p-3 rounded-xl border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-blue-500 resize-y leading-relaxed"
+            />
+            <div className="flex items-center justify-between mt-1.5 mb-3">
+              <p className="text-[10px] text-gray-400 tabular-nums">
+                {wordCount} word{wordCount === 1 ? '' : 's'} · {essayText.length} char{essayText.length === 1 ? '' : 's'}
+              </p>
+              {!canSubmitEssay && essayText.length > 0 && (
+                <p className="text-[10px] text-amber-600 dark:text-amber-400">Need at least 30 characters</p>
+              )}
+            </div>
+            <button
+              onClick={handleSubmit}
+              disabled={grading || !canSubmitEssay}
+              className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {grading ? <><Loader2 size={14} className="animate-spin" /> Grading your essay…</> : 'Submit for grading'}
+            </button>
+          </>
+        )}
+
+        {/* ===== QUIZ FORM ===== */}
+        {!loading && !error && assessment && !result && !isEssay && (
           <>
             <p className="text-xs text-gray-500 mb-4">{total} questions · Answered {answered}/{total}</p>
             <div className="space-y-3">
@@ -631,7 +713,83 @@ function AssessmentView({ lesson, curriculum, onBack }) {
           </>
         )}
 
-        {result && (
+        {/* ===== RESULT — ESSAY ===== */}
+        {result && isEssay && (
+          <>
+            <div className="bg-white dark:bg-[#161622] border border-gray-200 dark:border-[#2A2A40] rounded-xl p-5 text-center mb-4">
+              <Trophy size={28} className="text-amber-500 mx-auto mb-2" />
+              <p className="text-3xl font-bold text-gray-900 dark:text-white">{result.score}/{result.total}</p>
+              <p className="text-sm text-gray-500 mt-1">{result.percentage}%</p>
+            </div>
+            {result.overallFeedback && (
+              <div className="bg-blue-50 dark:bg-blue-900/15 border border-blue-200 dark:border-blue-800 rounded-xl p-4 mb-4">
+                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-600 dark:text-blue-400 mb-1.5">Overall feedback</p>
+                <MathText as="p" className="text-sm text-gray-800 dark:text-gray-100 leading-relaxed">{result.overallFeedback}</MathText>
+              </div>
+            )}
+            {Array.isArray(result.rubricScores) && result.rubricScores.length > 0 && (
+              <div className="space-y-2 mb-4">
+                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-gray-500 dark:text-gray-400 mb-1">Rubric breakdown</p>
+                {result.rubricScores.map((r, i) => {
+                  const pct = r.maxScore > 0 ? Math.round((r.score / r.maxScore) * 100) : 0;
+                  const tone = pct >= 80 ? 'emerald' : pct >= 60 ? 'amber' : 'rose';
+                  const toneClasses = {
+                    emerald: 'bg-emerald-50 dark:bg-emerald-900/10 border-emerald-200 dark:border-emerald-800',
+                    amber:   'bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800',
+                    rose:    'bg-rose-50 dark:bg-rose-900/10 border-rose-200 dark:border-rose-800',
+                  }[tone];
+                  return (
+                    <div key={i} className={`rounded-xl p-3 border ${toneClasses}`}>
+                      <div className="flex items-start justify-between mb-1 gap-3">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white">{r.criterion}</p>
+                        <p className="text-sm font-bold tabular-nums text-gray-700 dark:text-gray-200 flex-shrink-0">
+                          {r.score}/{r.maxScore}
+                        </p>
+                      </div>
+                      {r.feedback && <MathText as="p" className="text-xs text-gray-600 dark:text-gray-300 leading-snug">{r.feedback}</MathText>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {Array.isArray(result.strengths) && result.strengths.length > 0 && (
+              <div className="bg-white dark:bg-[#161622] border border-gray-200 dark:border-[#2A2A40] rounded-xl p-4 mb-3">
+                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-emerald-600 dark:text-emerald-400 mb-1.5">Strengths</p>
+                <ul className="space-y-1">
+                  {result.strengths.map((s, i) => (
+                    <li key={i} className="text-xs text-gray-700 dark:text-gray-200 flex gap-2">
+                      <Check size={12} className="text-emerald-500 flex-shrink-0 mt-0.5" />
+                      <span>{s}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {Array.isArray(result.improvements) && result.improvements.length > 0 && (
+              <div className="bg-white dark:bg-[#161622] border border-gray-200 dark:border-[#2A2A40] rounded-xl p-4 mb-3">
+                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-amber-600 dark:text-amber-400 mb-1.5">To improve</p>
+                <ul className="space-y-1">
+                  {result.improvements.map((s, i) => (
+                    <li key={i} className="text-xs text-gray-700 dark:text-gray-200 flex gap-2">
+                      <span className="text-amber-500 flex-shrink-0 mt-0.5">→</span>
+                      <span>{s}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <button
+              onClick={() => { setResult(null); setEssayText(result.essay || essayText); }}
+              className="w-full py-2 rounded-xl border border-gray-200 dark:border-[#2A2A40] text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[#1e1e2e] mb-2"
+            >
+              Revise &amp; resubmit
+            </button>
+            <button onClick={onBack} className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold">Back to curriculum</button>
+          </>
+        )}
+
+        {/* ===== RESULT — QUIZ ===== */}
+        {result && !isEssay && (
           <>
             <div className="bg-white dark:bg-[#161622] border border-gray-200 dark:border-[#2A2A40] rounded-xl p-5 text-center mb-4">
               <Trophy size={28} className="text-amber-500 mx-auto mb-2" />
@@ -786,7 +944,7 @@ function PausdCatalogView({ catalog, loading, enrollingSlug, onBack, onEnroll })
   }, {});
 
   // Sort math courses by an explicit ladder; science by grade.
-  const mathOrder = ['math-6', 'math-7', 'math-7a', 'math-8', 'algebra-1', 'geometry'];
+  const mathOrder = ['foundations-in-math', 'concepts-in-math', 'algebra-1', 'geometry-h'];
   if (grouped.math) grouped.math.sort((a, b) => mathOrder.indexOf(a.slug) - mathOrder.indexOf(b.slug));
   if (grouped.science) grouped.science.sort((a, b) => String(a.grade).localeCompare(String(b.grade)));
 
@@ -834,12 +992,13 @@ function PausdCatalogView({ catalog, loading, enrollingSlug, onBack, onEnroll })
                   <span className="text-[10px] text-gray-400">· {courses.length} course{courses.length === 1 ? '' : 's'}</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {courses.map(c => (
+                  {courses.map((c, i) => (
                     <PausdCourseCard
                       key={c.slug}
                       course={c}
                       enrolling={enrollingSlug === c.slug}
                       onEnroll={() => onEnroll(c.slug)}
+                      tourAnchor={key === 'math' && i === 0}
                     />
                   ))}
                 </div>
@@ -852,17 +1011,23 @@ function PausdCatalogView({ catalog, loading, enrollingSlug, onBack, onEnroll })
   );
 }
 
-function PausdCourseCard({ course, enrolling, onEnroll }) {
+function PausdCourseCard({ course, enrolling, onEnroll, tourAnchor }) {
   // Uniform card style — every PAUSD course is honors-tier so no special
   // accent is needed. Subtle gray border with a blue hover state.
   return (
     <button
       onClick={onEnroll}
       disabled={enrolling}
+      data-tour={tourAnchor ? 'pausd-course-card' : undefined}
       className="text-left flex flex-col h-full p-4 rounded-xl border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#1e1e2e] hover:border-blue-400 dark:hover:border-blue-600 transition-colors disabled:opacity-60"
     >
       <h4 className="text-sm font-bold text-gray-900 dark:text-white leading-snug mb-1.5">{course.title}</h4>
-      <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-snug line-clamp-3 mb-3 flex-1">{course.description}</p>
+      <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-snug line-clamp-3 mb-2 flex-1">{course.description}</p>
+      {course.textbook && (
+        <p className="text-[10px] text-gray-400 dark:text-gray-500 italic leading-snug line-clamp-1 mb-2">
+          📖 {course.textbook}
+        </p>
+      )}
       <div className="flex items-center justify-between mt-auto">
         <p className="text-[10px] text-gray-400 tabular-nums">
           Grade {course.grade} · {course.unitCount}u · {course.lessonCount} lessons

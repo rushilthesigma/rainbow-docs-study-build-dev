@@ -13,6 +13,8 @@ export default function ChatContainer({
   onEditMessage = null,
   onUserEditMessage = null,   // called when user edits their own message (restart semantics)
   onAiInstruct = null,        // called with (index, instruction) for an AI redo request
+  // Optional: custom empty-state element shown when there are no messages.
+  emptyState = null,
 }) {
   const scrollRef = useRef(null);
   // Track whether the user has intentionally scrolled up. If so, we stop
@@ -60,9 +62,11 @@ export default function ChatContainer({
         className="flex-1 overflow-y-auto p-4 space-y-1"
       >
         {displayMessages.length === 0 && (
-          <div className="flex items-center justify-center h-full text-sm text-gray-400 dark:text-gray-500">
-            Start the conversation...
-          </div>
+          emptyState || (
+            <div className="flex items-center justify-center h-full text-sm text-gray-400 dark:text-gray-500">
+              Start the conversation...
+            </div>
+          )
         )}
         {displayMessages.map((msg, i) => {
           const isEditable = !msg._streaming && (
