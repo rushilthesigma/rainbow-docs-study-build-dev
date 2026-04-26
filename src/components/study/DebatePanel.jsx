@@ -335,7 +335,12 @@ function Singleplayer({ mode, setMode, onExit }) {
 // =========================================================
 function Multiplayer({ mode, setMode, onExit }) {
   const { user } = useAuth();
+  // Identify "me" from the AuthContext. Falls back to null while the
+  // user is still hydrating — but we ALSO track `iAmHost` directly from
+  // the action that put us in the lobby, so the host UI doesn't depend
+  // on user.id matching match.hostId at render time.
   const myId = user?.id || null;
+  const [iAmHost, setIAmHost] = useState(false);
   const [code, setCode] = useState('');
   const [match, setMatch] = useState(null);
   const [joinInput, setJoinInput] = useState('');
@@ -391,7 +396,7 @@ function Multiplayer({ mode, setMode, onExit }) {
     setBusy(true); setError(null);
     try {
       const r = await apiFetch('/api/debate/match', { method: 'POST' });
-      setCode(r.code); setMatch(r.match); setMode('mp-lobby');
+      setCode(r.code); setMatch(r.match); setIAmHost(true); setMode('mp-lobby');
     } catch (e) { setError(e.message); }
     setBusy(false);
   }
@@ -402,7 +407,7 @@ function Multiplayer({ mode, setMode, onExit }) {
     setBusy(true); setError(null);
     try {
       const r = await apiFetch(`/api/debate/match/${c}/join`, { method: 'POST' });
-      setCode(c); setMatch(r.match); setMode('mp-lobby');
+      setCode(c); setMatch(r.match); setIAmHost(false); setMode('mp-lobby');
     } catch (e) { setError(e.message); }
     setBusy(false);
   }
@@ -498,8 +503,11 @@ function Multiplayer({ mode, setMode, onExit }) {
 
   // ===== LOBBY =====
   if (mode === 'mp-lobby' && match) {
-    const isHost = match.hostId === myId;
-    const opponent = match.players.find(p => p.userId !== myId);
+    // Trust the action that put us here, with the server's hostId as a
+    // backup. This way the host UI shows even if AuthContext hasn't
+    // fully hydrated user.id yet.
+    const isHost = iAmHost || (myId && match.hostId === myId);
+    const opponent = match.players.find(p => (myId ? p.userId !== myId : p.userId !== match.hostId));
     const opponentJoined = match.players.length >= 2;
     return (
       <div className="p-6 max-w-md mx-auto">
