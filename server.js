@@ -4441,6 +4441,45 @@ function loadTextbooks() { try { return JSON.parse(readFileSync(TEXTBOOKS_FILE, 
 function saveTextbooks(data) { writeFileSync(TEXTBOOKS_FILE, JSON.stringify(data, null, 2)); }
 
 // =========================================================
+// FILE EXTRACT — generic endpoint the chat composer hits when the user
+// drops a PDF / text file. Returns the extracted plain text so the
+// client can prepend it to the outgoing message. Images are NOT
+// extracted here — they go through the existing inline_data path
+// (base64 in the message body) so Gemini sees the actual pixels.
+// =========================================================
+app.post('/api/files/extract', authMiddleware, upload.array('files', 5), async (req, res) => {
+  try {
+    const files = req.files || [];
+    if (!files.length) return res.status(400).json({ error: 'No files uploaded' });
+    const out = [];
+    for (const file of files) {
+      try {
+        const name = file.originalname || 'attachment';
+        const isPdf = file.mimetype === 'application/pdf' || name.toLowerCase().endsWith('.pdf');
+        let text = '';
+        if (isPdf) {
+          const parsed = await pdfParse(file.buffer);
+          text = parsed.text || '';
+        } else if (file.mimetype?.startsWith('text/') || /\.(txt|md|csv|json|tex)$/i.test(name)) {
+          text = file.buffer.toString('utf-8');
+        } else {
+          // Unsupported type for text-extract path. Caller should send
+          // images via inline_data instead.
+          out.push({ name, size: file.size, error: 'unsupported' });
+          continue;
+        }
+        // Cap per-file text at 25k chars to protect the context window.
+        text = text.slice(0, 25000).trim();
+        out.push({ name, size: file.size, kind: isPdf ? 'pdf' : 'text', text });
+      } catch (e) {
+        out.push({ name: file.originalname || 'attachment', size: file.size, error: e.message || 'extract_failed' });
+      }
+    }
+    res.json({ files: out });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// =========================================================
 // CURRICULUM EDIT — text instruction + optional PDF/text attachments
 // =========================================================
 app.post('/api/curriculum/:id/edit', authMiddleware, upload.array('files', 10), async (req, res) => {

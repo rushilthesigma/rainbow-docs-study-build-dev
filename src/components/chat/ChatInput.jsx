@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Globe, Paperclip, X } from 'lucide-react';
+import { Send, Globe, Paperclip, X, FileText, Loader2, Upload } from 'lucide-react';
+import { getToken } from '../../api/client';
 
 // Read a File into a base64 data URL string.
 function fileToDataUrl(file) {
@@ -9,6 +10,18 @@ function fileToDataUrl(file) {
     r.onerror = () => reject(r.error);
     r.readAsDataURL(file);
   });
+}
+
+function isImageFile(f) { return f && f.type && f.type.startsWith('image/'); }
+function isPdfFile(f) {
+  if (!f) return false;
+  if (f.type === 'application/pdf') return true;
+  return /\.pdf$/i.test(f.name || '');
+}
+function isTextFile(f) {
+  if (!f) return false;
+  if (f.type && f.type.startsWith('text/')) return true;
+  return /\.(txt|md|csv|json|tex)$/i.test(f.name || '');
 }
 
 // When `sourceMode` + `onToggleSource` are passed, a small "Source mode"
@@ -24,8 +37,14 @@ export default function ChatInput({
   const [text, setText] = useState('');
   // images: [{ dataUrl, mimeType, name }]
   const [images, setImages] = useState([]);
+  // docs: [{ name, kind: 'pdf' | 'text', text, size, status: 'extracting'|'ready'|'error' }]
+  // PDFs + text files get extracted server-side and prepended to the
+  // outgoing message as a fenced quote block.
+  const [docs, setDocs] = useState([]);
+  const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef(null);
   const fileRef = useRef(null);
+  const dragDepth = useRef(0);
 
   useEffect(() => {
     if (!disabled) inputRef.current?.focus();
@@ -51,16 +70,61 @@ export default function ChatInput({
   }, [onToggleSource, sourceMode]);
 
   async function handleFiles(files) {
-    const list = Array.from(files || []).filter(f => f.type.startsWith('image/'));
+    const list = Array.from(files || []);
     if (!list.length) return;
-    const added = [];
-    for (const f of list.slice(0, 4 - images.length)) {
-      // Cap at 5MB per image to keep request size sane.
-      if (f.size > 5 * 1024 * 1024) continue;
-      const dataUrl = await fileToDataUrl(f);
-      added.push({ dataUrl, mimeType: f.type, name: f.name });
+
+    // Split files by kind. Images go through the existing base64
+    // inline_data path; PDFs + text files get sent to /api/files/extract
+    // for server-side text extraction.
+    const newImages = [];
+    const pdfsAndText = [];
+    for (const f of list) {
+      if (isImageFile(f)) {
+        if (images.length + newImages.length >= 4) continue;
+        if (f.size > 5 * 1024 * 1024) continue; // 5MB image cap
+        const dataUrl = await fileToDataUrl(f);
+        newImages.push({ dataUrl, mimeType: f.type, name: f.name });
+      } else if (isPdfFile(f) || isTextFile(f)) {
+        if (f.size > 25 * 1024 * 1024) continue; // 25MB doc cap
+        pdfsAndText.push(f);
+      }
     }
-    if (added.length) setImages(prev => [...prev, ...added]);
+    if (newImages.length) setImages(prev => [...prev, ...newImages]);
+
+    // Show pending chips immediately so the user knows the upload started.
+    if (pdfsAndText.length) {
+      const pending = pdfsAndText.map(f => ({
+        name: f.name, kind: isPdfFile(f) ? 'pdf' : 'text', text: '', size: f.size, status: 'extracting',
+      }));
+      setDocs(prev => [...prev, ...pending]);
+      try {
+        const form = new FormData();
+        for (const f of pdfsAndText) form.append('files', f, f.name);
+        const tok = getToken();
+        const res = await fetch('/api/files/extract', {
+          method: 'POST',
+          headers: tok ? { Authorization: `Bearer ${tok}` } : {},
+          body: form,
+        });
+        const json = await res.json();
+        const extracted = Array.isArray(json.files) ? json.files : [];
+        setDocs(prev => {
+          // Replace each pending entry (matched by name) with the extracted version.
+          const next = [...prev];
+          for (const e of extracted) {
+            const idx = next.findIndex(d => d.status === 'extracting' && d.name === e.name);
+            if (idx >= 0) {
+              next[idx] = e.error
+                ? { ...next[idx], status: 'error', error: e.error }
+                : { name: e.name, kind: e.kind, text: e.text || '', size: e.size, status: 'ready' };
+            }
+          }
+          return next;
+        });
+      } catch (err) {
+        setDocs(prev => prev.map(d => d.status === 'extracting' ? { ...d, status: 'error', error: err.message } : d));
+      }
+    }
   }
 
   async function handlePaste(e) {
@@ -70,19 +134,62 @@ export default function ChatInput({
     for (const it of items) {
       if (it.kind === 'file') {
         const f = it.getAsFile();
-        if (f && f.type.startsWith('image/')) files.push(f);
+        if (f && (isImageFile(f) || isPdfFile(f) || isTextFile(f))) files.push(f);
       }
     }
     if (files.length) { e.preventDefault(); await handleFiles(files); }
   }
 
+  // Drag-and-drop handlers attached to the composer card. dragDepth
+  // counter handles the dragenter/leave bubbling correctly so the
+  // overlay doesn't flicker on child elements.
+  function handleDragEnter(e) {
+    e.preventDefault();
+    if (!e.dataTransfer?.types?.includes('Files')) return;
+    dragDepth.current++;
+    setDragOver(true);
+  }
+  function handleDragOver(e) {
+    if (e.dataTransfer?.types?.includes('Files')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  }
+  function handleDragLeave(e) {
+    e.preventDefault();
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragOver(false);
+  }
+  async function handleDrop(e) {
+    e.preventDefault();
+    dragDepth.current = 0;
+    setDragOver(false);
+    const files = e.dataTransfer?.files;
+    if (files?.length) await handleFiles(files);
+  }
+
   function handleSubmit(e) {
     e.preventDefault();
     const trimmed = text.trim();
-    if ((!trimmed && !images.length) || disabled) return;
-    onSend(trimmed, images);
+    // Block submit while any doc is still extracting — otherwise we'd
+    // send the message with empty doc text.
+    const stillExtracting = docs.some(d => d.status === 'extracting');
+    if (stillExtracting) return;
+    if ((!trimmed && !images.length && !docs.some(d => d.status === 'ready')) || disabled) return;
+
+    // Prepend each ready doc's extracted text to the message as a fenced
+    // quote so the model sees the full context.
+    const readyDocs = docs.filter(d => d.status === 'ready' && d.text);
+    let composed = trimmed;
+    if (readyDocs.length) {
+      const blocks = readyDocs.map(d => `--- FILE: ${d.name} ---\n${d.text}`).join('\n\n');
+      composed = `${blocks}\n\n${trimmed || '(see attached file)'}`.trim();
+    }
+
+    onSend(composed, images);
     setText('');
     setImages([]);
+    setDocs([]);
   }
 
   function handleKeyDown(e) {
@@ -92,7 +199,9 @@ export default function ChatInput({
     }
   }
 
-  const canSend = !disabled && (text.trim().length > 0 || images.length > 0);
+  const stillExtracting = docs.some(d => d.status === 'extracting');
+  const readyDocs = docs.filter(d => d.status === 'ready');
+  const canSend = !disabled && !stillExtracting && (text.trim().length > 0 || images.length > 0 || readyDocs.length > 0);
 
   // Composer redesign — DELIBERATELY not the ChatGPT rounded-pill input.
   // Layout: a card-style composer with a top "intent" rail (paperclip,
@@ -103,16 +212,31 @@ export default function ChatInput({
   return (
     <form
       onSubmit={handleSubmit}
-      className="px-3 pt-2 pb-3 border-t border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622]"
+      className="px-3 pt-2 pb-3 border-t border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622] relative"
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
     >
       <input
         ref={fileRef}
         type="file"
-        accept="image/*"
+        accept="image/*,application/pdf,.pdf,.txt,.md,.csv,.json,.tex,text/*"
         multiple
         className="hidden"
         onChange={e => { handleFiles(e.target.files); e.target.value = ''; }}
       />
+
+      {/* Drag overlay — full-card highlight while user drags a file in. */}
+      {dragOver && (
+        <div className="absolute inset-x-3 top-2 bottom-3 z-20 rounded-xl border-2 border-dashed border-blue-500 bg-blue-50/90 dark:bg-blue-950/70 flex items-center justify-center pointer-events-none">
+          <div className="text-center">
+            <Upload size={22} className="text-blue-500 mx-auto mb-1.5" />
+            <p className="text-sm font-bold text-blue-700 dark:text-blue-300">Drop to attach</p>
+            <p className="text-[11px] text-blue-600/80 dark:text-blue-400/80 mt-0.5">Images, PDFs, or text files</p>
+          </div>
+        </div>
+      )}
 
       {/* Composer card */}
       <div
@@ -128,8 +252,8 @@ export default function ChatInput({
           <button
             type="button"
             onClick={() => fileRef.current?.click()}
-            disabled={disabled || images.length >= 4}
-            title="Attach screenshot or image"
+            disabled={disabled}
+            title="Attach an image, PDF, or text file (you can also drag-and-drop or paste)"
             className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] text-gray-500 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-40 transition-colors"
           >
             <Paperclip size={12} /> Attach
@@ -176,6 +300,43 @@ export default function ChatInput({
           </div>
         )}
 
+        {/* DOC STRIP — PDFs + text files. Each chip shows a status (extracting / ready / error). */}
+        {docs.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">
+            {docs.map((d, i) => {
+              const tone = d.status === 'error'
+                ? 'border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-900/15 text-rose-600 dark:text-rose-400'
+                : d.status === 'extracting'
+                  ? 'border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/15 text-blue-600 dark:text-blue-400'
+                  : 'border-gray-200 dark:border-[#2A2A40] bg-gray-50 dark:bg-[#0D0D14] text-gray-700 dark:text-gray-200';
+              return (
+                <div key={i} className={`inline-flex items-center gap-1.5 max-w-[260px] px-2 py-1 rounded-md border ${tone}`}>
+                  {d.status === 'extracting'
+                    ? <Loader2 size={12} className="animate-spin flex-shrink-0" />
+                    : <FileText size={12} className="flex-shrink-0" />}
+                  <span className="text-[11px] font-medium truncate">{d.name}</span>
+                  {d.status === 'ready' && d.text && (
+                    <span className="text-[9px] tabular-nums opacity-70 flex-shrink-0">
+                      {d.text.split(/\s+/).filter(Boolean).length}w
+                    </span>
+                  )}
+                  {d.status === 'error' && (
+                    <span className="text-[9px] flex-shrink-0">failed</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setDocs(prev => prev.filter((_, idx) => idx !== i))}
+                    className="flex-shrink-0 hover:opacity-100 opacity-60 -mr-0.5"
+                    aria-label="Remove file"
+                  >
+                    <X size={11} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {/* TEXTAREA + SEND */}
         <div className="flex items-end">
           <textarea
@@ -210,7 +371,7 @@ export default function ChatInput({
       {/* Hint row beneath the composer — replaces the inline keyboard hint pattern */}
       <div className="flex items-center justify-between mt-1.5 px-1">
         <p className="text-[10px] text-gray-400 dark:text-gray-500">
-          Enter to send · Shift+Enter for new line
+          Enter to send · Shift+Enter for new line · drag &amp; drop PDFs / images
         </p>
         {sourceMode && (
           <span className="text-[10px] font-medium text-amber-600 dark:text-amber-400">AI will search and cite</span>
