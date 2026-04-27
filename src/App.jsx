@@ -25,10 +25,40 @@ import MobileApp from './components/mobile/MobileApp';
 import Onboarding from './components/desktop/Onboarding';
 import LoadingSpinner from './components/shared/LoadingSpinner';
 
+// Demo / throwaway accounts (landing-page mini-OS spawns them with emails
+// like demo-landing-XXX@covalent.test). They MUST not appear in the real
+// dashboard — if a demo session leaks into the protected app shell
+// (token contamination, restored from a stale localStorage, etc.), force
+// a logout + bounce to the landing page so the user signs in fresh.
+function isDemoEmail(email) {
+  const e = String(email || '').toLowerCase();
+  return e.startsWith('demo-landing-') || e.endsWith('@covalent.test') || e === 'dev@covalent.test';
+}
+
 function ProtectedRoute({ children }) {
-  const { user, loading } = useAuth();
+  const { user, loading, logout } = useAuth();
+  const [bounced, setBounced] = useState(false);
+  // Trust the server flag first (it knows the canonical demo-email rules);
+  // fall back to client-side regex if the server response is older.
+  const isDemoSession = !!user && (user.isDemo === true || isDemoEmail(user.email));
+
+  useEffect(() => {
+    if (loading || !user || bounced) return;
+    if (isDemoSession) {
+      setBounced(true);
+      // Fire-and-forget logout — clears the demo token + sets user=null,
+      // which flips the route guard below and redirects to "/".
+      logout().catch(() => {});
+    }
+  }, [loading, user, isDemoSession, bounced, logout]);
+
   if (loading) return <LoadingSpinner fullScreen />;
   if (!user) return <Navigate to="/" replace />;
+  if (isDemoSession) {
+    // Show the spinner while the logout effect resolves — never render
+    // the protected children with a demo identity.
+    return <LoadingSpinner fullScreen />;
+  }
   return children;
 }
 

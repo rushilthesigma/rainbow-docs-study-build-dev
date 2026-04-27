@@ -654,6 +654,10 @@ app.get('/api/auth/me', authMiddleware, (req, res) => {
       id: user.id,
       email: user.email || email,
       name: user.name,
+      // Surface isDemo so the client can hard-refuse to render the
+      // signed-in dashboard with a demo session — see ProtectedRoute
+      // in src/App.jsx, which force-logs-out + redirects.
+      isDemo: isDemoOrDevEmail(email),
       data: {
         ...user.data,
         effectivePlan,
