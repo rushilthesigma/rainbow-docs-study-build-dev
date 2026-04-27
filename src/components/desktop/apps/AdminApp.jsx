@@ -30,6 +30,10 @@ export default function AdminApp() {
   const [query, setQuery] = useState('');
   const [planFilter, setPlanFilter] = useState('all'); // all | free | pro
   const [sort, setSort] = useState('recent'); // recent | messages | created
+  // Demo / dev throwaway users are filtered server-side by default.
+  // Toggle on to surface them — useful for finding the demo session a
+  // specific landing-page visitor is using.
+  const [includeDemo, setIncludeDemo] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -37,22 +41,25 @@ export default function AdminApp() {
         const a = await checkAdmin();
         setIsAdmin(a.isAdmin);
         if (a.isAdmin) {
-          const d = await listUsers();
+          const d = await listUsers({ includeDemo });
           setUsers(d.users || []);
         }
       } catch {}
       setLoading(false);
     })();
-  }, []);
+    // Refetch when the demo toggle flips, so the list reflects the new
+    // server filter without a manual refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [includeDemo]);
 
   async function refreshList() {
-    const d = await listUsers();
+    const d = await listUsers({ includeDemo });
     setUsers(d.users || []);
   }
 
   async function openUser(uid) {
     try {
-      const d = await getUser(uid);
+      const d = await getUser(uid, { includeDemo });
       setSelectedUser(d.user);
       setView('detail');
     } catch {}
@@ -73,7 +80,7 @@ export default function AdminApp() {
     await ownerGrantPro(email);
     await refreshList();
     if (selectedUser?.email === email) {
-      const d = await getUser(selectedUser.id);
+      const d = await getUser(selectedUser.id, { includeDemo });
       setSelectedUser(d.user);
     }
   }
@@ -81,7 +88,7 @@ export default function AdminApp() {
     await ownerRevokePro(email);
     await refreshList();
     if (selectedUser?.email === email) {
-      const d = await getUser(selectedUser.id);
+      const d = await getUser(selectedUser.id, { includeDemo });
       setSelectedUser(d.user);
     }
   }
@@ -162,6 +169,7 @@ export default function AdminApp() {
       query={query} setQuery={setQuery}
       planFilter={planFilter} setPlanFilter={setPlanFilter}
       sort={sort} setSort={setSort}
+      includeDemo={includeDemo} setIncludeDemo={setIncludeDemo}
       onOpen={openUser}
       onRefresh={refreshList}
     />
@@ -171,7 +179,7 @@ export default function AdminApp() {
 function sumMsgs(u) { return (u.chatMessages?.study || 0) + (u.chatMessages?.lessons || 0) + (u.chatMessages?.curriculum || 0); }
 
 /* ====================== USER LIST ====================== */
-function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, sort, setSort, onOpen, onRefresh }) {
+function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, sort, setSort, includeDemo, setIncludeDemo, onOpen, onRefresh }) {
   return (
     <div>
       <div className="flex items-center gap-2 mb-4">
@@ -204,6 +212,18 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
           value={sort}
           onChange={setSort}
         />
+        <button
+          onClick={() => setIncludeDemo(!includeDemo)}
+          title="Show throwaway demo accounts (demo-landing-* / *@covalent.test)"
+          className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
+            includeDemo
+              ? 'bg-amber-100 dark:bg-amber-900/30 border-amber-400 dark:border-amber-700 text-amber-700 dark:text-amber-300'
+              : 'bg-white dark:bg-[#0D0D14] border-gray-200 dark:border-[#2A2A40] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+          }`}
+        >
+          <span className={`w-3 h-3 rounded-full ${includeDemo ? 'bg-amber-500' : 'bg-gray-300 dark:bg-gray-600'}`} />
+          Demo {includeDemo ? 'shown' : 'hidden'}
+        </button>
       </div>
 
       <div className="space-y-1.5">
@@ -222,6 +242,7 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
                 <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{u.name || u.email}</p>
                 {isAdvisorEmail(u.email) ? <AdvisorBadge /> : (u.plan === 'pro' && <ProPill />)}
                 {u.banned && <span className="px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-900/30 text-rose-500 text-[10px] font-medium">Banned</span>}
+                {u.isDemo && <span className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 text-[10px] font-bold uppercase tracking-wider">Demo</span>}
               </div>
               <p className="text-[10px] text-gray-400 truncate">
                 {u.handle ? `@${u.handle} · ` : ''}{u.email} · L{u.level} · {u.visitCount || 0} visits · {sumMsgs(u)} msgs · {u.curriculaCount} curr · {u.studySessionCount} study · {u.lessonCount} lessons

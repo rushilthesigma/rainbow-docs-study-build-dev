@@ -5423,8 +5423,12 @@ function isDemoOrDevEmail(email) {
 app.get('/api/admin/users', authMiddleware, adminMiddleware, (req, res) => {
   const users = loadUsers();
   const social = loadSocial();
+  // ?includeDemo=1 — admin panel toggle to show/hide demo-landing-*
+  // and *@covalent.test throwaway accounts. Default OFF so the panel
+  // isn't flooded under normal use.
+  const includeDemo = req.query.includeDemo === '1' || req.query.includeDemo === 'true';
   const list = Object.entries(users)
-    .filter(([email]) => !isDemoOrDevEmail(email))
+    .filter(([email]) => includeDemo || !isDemoOrDevEmail(email))
     .map(([email, u]) => {
     const plan = getPlan(u, email);
     const totalStudyMsgs = (u.data?.studySessions || []).reduce((n, s) => n + (s.messages?.length || 0), 0);
@@ -5441,6 +5445,7 @@ app.get('/api/admin/users', authMiddleware, adminMiddleware, (req, res) => {
       id: u.id, email, name: u.name,
       handle: social.profiles[u.id]?.handle || null,
       banned: !!u.banned,
+      isDemo: isDemoOrDevEmail(email),
       plan,
       proUntil: u.data?.proUntil || null,
       proGrantedBy: u.data?.proGrantedBy || null,
@@ -5469,8 +5474,10 @@ app.get('/api/admin/users/:uid', authMiddleware, adminMiddleware, (req, res) => 
   const social = loadSocial();
   const entry = Object.entries(users).find(([, u]) => u.id === req.params.uid);
   if (!entry) return res.status(404).json({ error: 'User not found' });
-  // Refuse to surface demo / dev throwaway accounts. Matches the filter on /api/admin/users.
-  if (isDemoOrDevEmail(entry[0])) return res.status(404).json({ error: 'User not found' });
+  // Demo / dev throwaway accounts are returnable when explicitly requested
+  // via ?includeDemo=1 (admin panel toggle). Otherwise hidden.
+  const includeDemo = req.query.includeDemo === '1' || req.query.includeDemo === 'true';
+  if (!includeDemo && isDemoOrDevEmail(entry[0])) return res.status(404).json({ error: 'User not found' });
   const [email, u] = entry;
   u.data = migrateUserData(u.data);
   const plan = getPlan(u, email);

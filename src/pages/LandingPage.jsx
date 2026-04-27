@@ -117,19 +117,9 @@ export default function LandingPage() {
             <h1 className="text-[34px] md:text-[54px] leading-[1.02] font-semibold tracking-[-0.02em] text-gray-900 dark:text-white mb-3">
               The AI tutor that <span className="bg-gradient-to-r from-blue-500 to-indigo-500 bg-clip-text text-transparent">actually teaches you</span>.
             </h1>
-            <p className="text-[15px] md:text-[17px] leading-relaxed text-gray-600 dark:text-gray-300 max-w-2xl mx-auto mb-2">
+            <p className="text-[15px] md:text-[17px] leading-relaxed text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
               Built for students. Type any topic — Algebra 1, AP Bio, the French Revolution — and get a full curriculum in one click. Then sit down with an AI tutor that drives the lesson, drills you with built-in quizzes, and grades your essays.
             </p>
-            <p className="text-[13px] text-gray-500 dark:text-gray-400 max-w-xl mx-auto">
-              Or pick a pre-built PAUSD-rigor course (Math 6 → Geometry H, NGSS Science) and start mastering it now.
-            </p>
-            <div className="flex flex-wrap items-center justify-center gap-2 mt-4 mb-1 text-[11px]">
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/25 text-blue-700 dark:text-blue-300 font-medium">📚 1-click curriculum</span>
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-900/25 text-emerald-700 dark:text-emerald-300 font-medium">🎯 Built-in quizzes</span>
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-900/25 text-amber-700 dark:text-amber-300 font-medium">📝 Graded essays</span>
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-50 dark:bg-purple-900/25 text-purple-700 dark:text-purple-300 font-medium">⚔️ Live multiplayer debate</span>
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-50 dark:bg-rose-900/25 text-rose-700 dark:text-rose-300 font-medium">✏️ Math tutor with handwriting</span>
-            </div>
             <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-3 italic">
               No sign-in needed for the demo below.
             </p>
