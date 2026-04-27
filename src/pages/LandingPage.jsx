@@ -111,14 +111,27 @@ export default function LandingPage() {
       <section id="demo" className="px-6 pt-2 pb-14">
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-6">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white dark:bg-[#1a1a28] border border-gray-200 dark:border-[#2A2A40] text-[10px] font-semibold uppercase tracking-widest text-gray-700 dark:text-gray-200 mb-4">
-              <Sparkles size={10} className="text-blue-500" /> Live preview — no sign in required
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white dark:bg-[#1a1a28] border border-gray-200 dark:border-[#2A2A40] text-[10px] font-semibold uppercase tracking-widest text-blue-600 dark:text-blue-400 mb-4">
+              <Sparkles size={10} /> AI for students · 1-click curricula · master your classes
             </span>
-            <h1 className="text-[32px] md:text-[48px] leading-[1.05] font-semibold tracking-[-0.02em] text-gray-900 dark:text-white mb-3">
-              This is the actual product.
+            <h1 className="text-[34px] md:text-[54px] leading-[1.02] font-semibold tracking-[-0.02em] text-gray-900 dark:text-white mb-3">
+              The AI tutor that <span className="bg-gradient-to-r from-blue-500 to-indigo-500 bg-clip-text text-transparent">actually teaches you</span>.
             </h1>
-            <p className="text-[14px] md:text-[16px] leading-relaxed text-gray-600 dark:text-gray-400 max-w-xl mx-auto">
-              Generate a real curriculum, drill into any lesson, watch the AI tutor stream in. All live — same endpoints, same model. No canned data.
+            <p className="text-[15px] md:text-[17px] leading-relaxed text-gray-600 dark:text-gray-300 max-w-2xl mx-auto mb-2">
+              Built for students. Type any topic — Algebra 1, AP Bio, the French Revolution — and get a full curriculum in one click. Then sit down with an AI tutor that drives the lesson, drills you with built-in quizzes, and grades your essays.
+            </p>
+            <p className="text-[13px] text-gray-500 dark:text-gray-400 max-w-xl mx-auto">
+              Or pick a pre-built PAUSD-rigor course (Math 6 → Geometry H, NGSS Science) and start mastering it now.
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-2 mt-4 mb-1 text-[11px]">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/25 text-blue-700 dark:text-blue-300 font-medium">📚 1-click curriculum</span>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-900/25 text-emerald-700 dark:text-emerald-300 font-medium">🎯 Built-in quizzes</span>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-900/25 text-amber-700 dark:text-amber-300 font-medium">📝 Graded essays</span>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-50 dark:bg-purple-900/25 text-purple-700 dark:text-purple-300 font-medium">⚔️ Live multiplayer debate</span>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-50 dark:bg-rose-900/25 text-rose-700 dark:text-rose-300 font-medium">✏️ Math tutor with handwriting</span>
+            </div>
+            <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-3 italic">
+              No sign-in needed for the demo below.
             </p>
           </div>
           <MiniOS />
