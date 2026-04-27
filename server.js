@@ -6221,10 +6221,17 @@ function publicDebateState(match) {
 
 function pushDebateEvent(match, type, payload) {
   match.lastActivity = Date.now();
+  // Always include the full public match snapshot in every event so the
+  // client's setMatch(ev.match) path picks up turn additions, score
+  // updates, and end-vote changes — not just the join / started /
+  // finished events that historically carried the snapshot. Without
+  // this, "turn_added" events were missing match and the opponent's UI
+  // stayed frozen on the previous turn.
+  const body = { type, match: publicDebateState(match), ...payload };
   for (const p of match.players) {
     const stream = p.stream;
     if (!stream || stream.writableEnded) continue;
-    try { stream.write(`data: ${JSON.stringify({ type, ...payload })}\n\n`); stream.flush?.(); }
+    try { stream.write(`data: ${JSON.stringify(body)}\n\n`); stream.flush?.(); }
     catch {}
   }
 }
