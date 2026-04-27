@@ -6259,6 +6259,7 @@ function publicDebateState(match) {
     hostId: match.hostId,
     turns: match.turns.map(t => ({
       userId: t.userId, side: t.side, content: t.content,
+      images: Array.isArray(t.images) ? t.images : [],
       score: t.score, feedback: t.feedback, at: t.at,
     })),
     turnOf: match.turnOf,
@@ -6393,7 +6394,17 @@ app.post('/api/debate/match/:code/move', authMiddleware, async (req, res) => {
   if (match.turnOf !== req.userId) return res.status(403).json({ error: 'Not your turn' });
 
   const argument = String(req.body?.argument || '').trim();
-  if (argument.length < 20) return res.status(400).json({ error: 'Argument must be at least 20 characters' });
+  // Sanitize incoming images. Each one must have a base64 data URL +
+  // mime type; cap at 4 per turn.
+  const incomingImages = Array.isArray(req.body?.images) ? req.body.images.slice(0, 4) : [];
+  const images = incomingImages
+    .filter(im => im && typeof im.dataUrl === 'string' && im.dataUrl.startsWith('data:'))
+    .map(im => ({ dataUrl: im.dataUrl, mimeType: im.mimeType || 'image/png' }));
+
+  // Allow image-only turns (≥1 image), otherwise require ≥20 chars text.
+  if (argument.length < 20 && images.length === 0) {
+    return res.status(400).json({ error: 'Argument must be at least 20 characters (or attach an image)' });
+  }
 
   const player = match.players.find(p => p.userId === req.userId);
   const opponent = match.players.find(p => p.userId !== req.userId);
@@ -6406,6 +6417,7 @@ app.post('/api/debate/match/:code/move', authMiddleware, async (req, res) => {
 - argumentation (logical structure, claim → reasoning → conclusion)
 - evidence (specific facts, examples, data — penalize hand-waving)
 - rhetoric (clarity, persuasiveness, addressing the opponent's strongest point)
+The argument may include attached images (charts, screenshots, photographs of evidence). Treat them as part of the argument — if the image carries the claim's evidence, weight it under "evidence"; if the user uses it rhetorically, weight it under "rhetoric".
 Output STRICT JSON only.`;
   const usr = `Topic: "${match.topic}"
 This player is arguing ${player.side.toUpperCase()}.
@@ -6415,8 +6427,9 @@ ${prevTurns || '(none — opening statement)'}
 
 NEW ARGUMENT from this player:
 """
-${argument.slice(0, 8000)}
+${argument.slice(0, 8000) || '(no text — see attached image(s))'}
 """
+${images.length ? `\n[The player attached ${images.length} image${images.length === 1 ? '' : 's'} — see the image(s) below.]` : ''}
 
 Return JSON exactly:
 {
@@ -6426,7 +6439,9 @@ Return JSON exactly:
   "feedback": "1-2 sentences naming the strongest move + the biggest weakness"
 }`;
   try {
-    const aiResp = await callGemini(sys, [{ role: 'user', content: usr }], MODEL_FLASH_LITE, 600, { jsonMode: true, temperature: 0.4 });
+    const userMsg = { role: 'user', content: usr };
+    if (images.length) userMsg.images = images;
+    const aiResp = await callGemini(sys, [userMsg], MODEL_FLASH_LITE, 600, { jsonMode: true, temperature: 0.4 });
     let score = { argumentation: 5, evidence: 5, rhetoric: 5, total: 15 };
     let feedback = '';
     if (aiResp.success) {
@@ -6443,6 +6458,9 @@ Return JSON exactly:
     }
     const turn = {
       userId: req.userId, side: player.side, content: argument,
+      // Persist image data URLs so the opponent can render them. Capped
+      // by the slice above (≤4 per turn).
+      images: images.map(im => ({ dataUrl: im.dataUrl, mimeType: im.mimeType })),
       score, feedback, at: Date.now(),
     };
     match.turns.push(turn);

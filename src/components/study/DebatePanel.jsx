@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Swords, RotateCcw, ArrowLeft, Trophy, Users, User, Copy, Check, Loader2, X, Zap, FileText, AlertCircle,
+  Swords, RotateCcw, ArrowLeft, Trophy, Users, User, Copy, Check, Loader2, X, Zap, FileText, AlertCircle, Paperclip,
 } from 'lucide-react';
 import { apiFetch, getToken } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
@@ -349,10 +349,37 @@ function Multiplayer({ mode, setMode, onExit }) {
   const [topicInput, setTopicInput] = useState('');
   const [hostSide, setHostSide] = useState('for');
   const [argument, setArgument] = useState('');
+  // Images attached to the in-flight turn — pasted, dropped, or chosen
+  // via the file picker. Each entry: { dataUrl, mimeType, name }.
+  const [argImages, setArgImages] = useState([]);
+  const [argDragOver, setArgDragOver] = useState(false);
+  const argFileRef = useRef(null);
+  const argDragDepth = useRef(0);
   const [submittingMove, setSubmittingMove] = useState(false);
   const [voting, setVoting] = useState(false);
   const [copied, setCopied] = useState(false);
   const streamRef = useRef(null);
+
+  // Helper: read a File into a base64 data URL.
+  function fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(file);
+    });
+  }
+  async function addImageFiles(files) {
+    const list = Array.from(files || []).filter(f => f.type?.startsWith('image/'));
+    if (!list.length) return;
+    const added = [];
+    for (const f of list.slice(0, 4 - argImages.length)) {
+      if (f.size > 5 * 1024 * 1024) continue; // 5MB cap
+      const dataUrl = await fileToDataUrl(f);
+      added.push({ dataUrl, mimeType: f.type, name: f.name });
+    }
+    if (added.length) setArgImages(prev => [...prev, ...added]);
+  }
 
   // Wire SSE stream when we have a code + are in a multiplayer view.
   useEffect(() => {
@@ -428,14 +455,22 @@ function Multiplayer({ mode, setMode, onExit }) {
 
   async function handleSubmitMove() {
     const a = argument.trim();
-    if (a.length < 20) { setError('Argument must be at least 20 characters'); return; }
+    if (a.length < 20 && argImages.length === 0) {
+      setError('Argument must be at least 20 characters (or attach an image)');
+      return;
+    }
     setSubmittingMove(true); setError(null);
     try {
       const r = await apiFetch(`/api/debate/match/${code}/move`, {
         method: 'POST',
-        body: JSON.stringify({ argument: a }),
+        body: JSON.stringify({
+          argument: a,
+          images: argImages.map(im => ({ dataUrl: im.dataUrl, mimeType: im.mimeType })),
+        }),
       });
-      setMatch(r.match); setArgument('');
+      setMatch(r.match);
+      setArgument('');
+      setArgImages([]);
     } catch (e) { setError(e.message); }
     setSubmittingMove(false);
   }
@@ -641,7 +676,20 @@ function Multiplayer({ mode, setMode, onExit }) {
                       {t.side === 'for' ? 'FOR' : 'AGAINST'} · {isMine ? 'you' : opp?.name}
                     </span>
                   </div>
-                  <p className="text-sm leading-relaxed whitespace-pre-wrap">{t.content}</p>
+                  {Array.isArray(t.images) && t.images.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {t.images.map((img, ii) => (
+                        <a key={ii} href={img.dataUrl} target="_blank" rel="noopener noreferrer" className="block">
+                          <img
+                            src={img.dataUrl}
+                            alt={`evidence ${ii + 1}`}
+                            className="max-w-[180px] max-h-[180px] rounded-lg object-cover border border-white/20 dark:border-white/10"
+                          />
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                  {t.content && <p className="text-sm leading-relaxed whitespace-pre-wrap">{t.content}</p>}
                   <div className={`mt-2 pt-2 border-t flex items-center gap-2 text-[10px] ${isMine ? 'border-white/20 text-blue-100' : 'border-gray-300 dark:border-[#3a3a52] text-gray-500 dark:text-gray-400'}`}>
                     <span className="font-bold tabular-nums">{t.score.total}/30</span>
                     <span>· arg {t.score.argumentation} · ev {t.score.evidence} · rh {t.score.rhetoric}</span>
@@ -656,7 +704,42 @@ function Multiplayer({ mode, setMode, onExit }) {
         </div>
 
         {/* Composer */}
-        <div className="border-t border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622] px-3 pt-2 pb-3">
+        <div
+          className="relative border-t border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622] px-3 pt-2 pb-3"
+          onDragEnter={e => {
+            if (!myTurn) return;
+            if (!e.dataTransfer?.types?.includes('Files')) return;
+            e.preventDefault();
+            argDragDepth.current++;
+            setArgDragOver(true);
+          }}
+          onDragOver={e => {
+            if (!myTurn) return;
+            if (e.dataTransfer?.types?.includes('Files')) {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'copy';
+            }
+          }}
+          onDragLeave={e => {
+            e.preventDefault();
+            argDragDepth.current = Math.max(0, argDragDepth.current - 1);
+            if (argDragDepth.current === 0) setArgDragOver(false);
+          }}
+          onDrop={async (e) => {
+            if (!myTurn) return;
+            e.preventDefault();
+            argDragDepth.current = 0;
+            setArgDragOver(false);
+            await addImageFiles(e.dataTransfer?.files);
+          }}
+        >
+          {/* Drag overlay */}
+          {argDragOver && myTurn && (
+            <div className="absolute inset-x-3 top-2 bottom-3 z-20 rounded-xl border-2 border-dashed border-amber-500 bg-amber-50/90 dark:bg-amber-950/70 flex items-center justify-center pointer-events-none">
+              <p className="text-sm font-bold text-amber-700 dark:text-amber-300">Drop image to attach</p>
+            </div>
+          )}
+
           {!myTurn ? (
             <p className="text-xs text-gray-500 dark:text-gray-400 text-center py-2.5">
               <Loader2 size={11} className="inline animate-spin mr-1" />
@@ -664,21 +747,74 @@ function Multiplayer({ mode, setMode, onExit }) {
             </p>
           ) : (
             <>
+              <input
+                ref={argFileRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={e => { addImageFiles(e.target.files); e.target.value = ''; }}
+              />
+
+              {/* Image thumbnails */}
+              {argImages.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {argImages.map((img, i) => (
+                    <div key={i} className="relative w-14 h-14 rounded-md overflow-hidden border border-gray-200 dark:border-[#2A2A40] bg-gray-100 dark:bg-[#0D0D14]">
+                      <img src={img.dataUrl} alt={img.name} className="w-full h-full object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => setArgImages(prev => prev.filter((_, idx) => idx !== i))}
+                        className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 text-white flex items-center justify-center hover:bg-black"
+                        aria-label="Remove image"
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <textarea
                 value={argument}
                 onChange={e => setArgument(e.target.value)}
-                placeholder={`Make your argument as ${me?.side?.toUpperCase()}. Specifics, evidence, attack the opponent's last claim.`}
+                onPaste={async (e) => {
+                  const items = e.clipboardData?.items;
+                  if (!items) return;
+                  const files = [];
+                  for (const it of items) {
+                    if (it.kind === 'file') {
+                      const f = it.getAsFile();
+                      if (f && f.type?.startsWith('image/')) files.push(f);
+                    }
+                  }
+                  if (files.length) {
+                    e.preventDefault();
+                    await addImageFiles(files);
+                  }
+                }}
+                placeholder={`Make your argument as ${me?.side?.toUpperCase()}. Drop or paste images for evidence — specifics, attack the opponent's last claim.`}
                 rows={4}
                 disabled={submittingMove}
                 className="w-full p-3 rounded-xl border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-sm outline-none focus:ring-2 focus:ring-amber-500/40 resize-y"
               />
-              <div className="flex items-center justify-between mt-2">
-                <p className="text-[10px] text-gray-400 tabular-nums">
+              <div className="flex items-center justify-between mt-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => argFileRef.current?.click()}
+                  disabled={submittingMove || argImages.length >= 4}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] text-gray-500 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 disabled:opacity-40 transition-colors"
+                  title="Attach image (you can also paste or drag-and-drop)"
+                >
+                  <Paperclip size={11} /> Image
+                </button>
+                <p className="text-[10px] text-gray-400 tabular-nums flex-1">
                   {argument.split(/\s+/).filter(Boolean).length} words · {argument.length} chars
+                  {argImages.length > 0 && <span className="ml-2">· {argImages.length} image{argImages.length === 1 ? '' : 's'}</span>}
                 </p>
                 <button
                   onClick={handleSubmitMove}
-                  disabled={submittingMove || argument.trim().length < 20}
+                  disabled={submittingMove || (argument.trim().length < 20 && argImages.length === 0)}
                   className="px-4 py-1.5 rounded-md bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-xs font-semibold inline-flex items-center gap-1"
                 >
                   {submittingMove ? <><Loader2 size={11} className="animate-spin" /> Grading…</> : <>Send turn</>}
