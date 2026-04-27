@@ -190,6 +190,12 @@ export default function ChatInput({
     setText('');
     setImages([]);
     setDocs([]);
+    // Reset the textarea's auto-grown height back to its default — the
+    // onInput auto-grow only fires on USER input, so without this the
+    // textarea would stay at the size it grew to during a long paste.
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+    }
   }
 
   function handleKeyDown(e) {

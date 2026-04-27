@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, Plus, Sparkles, Loader2, BookOpen, ChevronDown, ChevronRight, CheckCircle2, Circle, Lock, ClipboardCheck, PenTool, FileText, Check, X, Trophy, Wand2, Paperclip, Upload, Calculator, GraduationCap, Atom, Sigma } from 'lucide-react';
+import { ArrowLeft, Plus, Sparkles, Loader2, BookOpen, ChevronDown, ChevronRight, CheckCircle2, Circle, Lock, ClipboardCheck, PenTool, FileText, Check, X, Trophy, Wand2, Paperclip, Upload, Calculator, GraduationCap, Atom, Sigma, Map as MapIcon, List } from 'lucide-react';
 import { listCurricula, generateCurriculum, getCurriculum, sendLessonMessage, getLessonHistory, editCurriculumWithAI } from '../../../api/curriculum';
 import { apiFetch } from '../../../api/client';
 import { useWindowManager } from '../../../context/WindowManagerContext';
@@ -14,6 +14,8 @@ import ProgressBar from '../../curriculum/ProgressBar';
 import ChatContainer from '../../chat/ChatContainer';
 import MathText from '../../shared/MathText';
 import MathTutorApp from './MathTutorApp';
+import TrailView from '../../curriculum/TrailView';
+import { useAuth } from '../../../context/AuthContext';
 import { errorChatMessage } from '../../../utils/aiErrors';
 import useBrowserBack from '../../../hooks/useBrowserBack';
 
@@ -21,6 +23,21 @@ const TYPE_ICONS = { lesson: BookOpen, math_tutor: Calculator, practice: PenTool
 const TYPE_COLORS = { lesson: 'text-blue-400', math_tutor: 'text-indigo-400', practice: 'text-purple-400', essay: 'text-amber-400', unit_test: 'text-rose-400' };
 
 export default function CurriculaApp() {
+  const { user } = useAuth();
+  const isBeta = !!user?.data?.isBeta;
+  // Trail view (BETA) — gamifies the curriculum into a Duolingo-style
+  // zigzag path. Persists per-curriculum in localStorage so toggling
+  // back to list view is a one-click thing.
+  const [trailMode, setTrailMode] = useState(() => {
+    try { return localStorage.getItem('cov-curr-trail') === '1'; } catch { return false; }
+  });
+  function toggleTrail() {
+    setTrailMode(prev => {
+      const next = !prev;
+      try { localStorage.setItem('cov-curr-trail', next ? '1' : '0'); } catch {}
+      return next;
+    });
+  }
   const [view, setView] = useState('list');
   const [curricula, setCurricula] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -339,29 +356,54 @@ export default function CurriculaApp() {
           <button onClick={() => { setView('list'); setSelectedCurriculum(null); }} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-200">
             <ArrowLeft size={16} /> All Curricula
           </button>
-          <button
-            onClick={() => setEditOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-[#2A2A40] text-xs font-medium text-gray-700 dark:text-gray-300 hover:border-blue-400 hover:text-blue-600"
-            title="Edit with AI"
-          >
-            <Wand2 size={12} /> Edit with AI
-          </button>
+          <div className="flex items-center gap-2">
+            {isBeta && (
+              <button
+                onClick={toggleTrail}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
+                  trailMode
+                    ? 'border-emerald-400 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300'
+                    : 'border-gray-200 dark:border-[#2A2A40] text-gray-700 dark:text-gray-300 hover:border-emerald-400 hover:text-emerald-600 dark:hover:text-emerald-400'
+                }`}
+                title="Trail view (BETA) — gamified curriculum path"
+              >
+                {trailMode ? <List size={12} /> : <MapIcon size={12} />}
+                {trailMode ? 'List view' : 'Trail'}
+                <span className="text-[9px] font-bold uppercase tracking-wider opacity-70">BETA</span>
+              </button>
+            )}
+            <button
+              onClick={() => setEditOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-[#2A2A40] text-xs font-medium text-gray-700 dark:text-gray-300 hover:border-blue-400 hover:text-blue-600"
+              title="Edit with AI"
+            >
+              <Wand2 size={12} /> Edit with AI
+            </button>
+          </div>
         </div>
-        <h1 className="text-xl font-bold text-gray-900 dark:text-white mb-1">{c.title}</h1>
-        {c.description && <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">{c.description}</p>}
-        <div className="flex items-center gap-3 mb-4">
-          <ProgressBar value={completedLessons} max={totalLessons} className="flex-1" />
-          <span className="text-xs text-gray-500 tabular-nums flex-shrink-0">{completedLessons}/{totalLessons}</span>
-        </div>
-        <div className="space-y-3">
-          {(c.units || []).map((unit, i) => (
-            <UnitSection
-              key={unit.id}
-              unit={i === 0 ? { ...unit, tourAnchorFirst: true } : unit}
-              onOpenLesson={(l) => openLesson(l, c.id)}
-            />
-          ))}
-        </div>
+        {!trailMode && (
+          <>
+            <h1 className="text-xl font-bold text-gray-900 dark:text-white mb-1">{c.title}</h1>
+            {c.description && <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">{c.description}</p>}
+            <div className="flex items-center gap-3 mb-4">
+              <ProgressBar value={completedLessons} max={totalLessons} className="flex-1" />
+              <span className="text-xs text-gray-500 tabular-nums flex-shrink-0">{completedLessons}/{totalLessons}</span>
+            </div>
+          </>
+        )}
+        {trailMode && isBeta ? (
+          <TrailView curriculum={c} onOpenLesson={(l) => openLesson(l, c.id)} />
+        ) : (
+          <div className="space-y-3">
+            {(c.units || []).map((unit, i) => (
+              <UnitSection
+                key={unit.id}
+                unit={i === 0 ? { ...unit, tourAnchorFirst: true } : unit}
+                onOpenLesson={(l) => openLesson(l, c.id)}
+              />
+            ))}
+          </div>
+        )}
 
         {editOpen && (
           <EditCurriculumModal
