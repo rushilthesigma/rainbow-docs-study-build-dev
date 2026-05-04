@@ -82,8 +82,6 @@ function ClassicRoutes() {
       <Route path="/notes" element={<AppRoute><NotesPage /></AppRoute>} />
       <Route path="/notes/:id" element={<AppRoute><NoteEditorPage /></AppRoute>} />
       <Route path="/assessments" element={<AppRoute><AssessmentsPage /></AppRoute>} />
-      {/* /math now redirects into the dashboard — math is reachable via the dock or curriculum */}
-      <Route path="/math" element={<Navigate to="/dashboard" replace />} />
       <Route path="/social" element={<AppRoute><SocialPage /></AppRoute>} />
       <Route path="/settings" element={<AppRoute><SettingsPage /></AppRoute>} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

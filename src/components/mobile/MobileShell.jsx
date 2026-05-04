@@ -9,7 +9,6 @@ import NotesApp from '../desktop/apps/NotesApp';
 import SocialApp from '../desktop/apps/SocialApp';
 import StudyPage from '../../pages/StudyPage';
 import AssessmentsPage from '../../pages/AssessmentsPage';
-import MathPracticePage from '../../pages/MathPracticePage';
 import SettingsPage from '../../pages/SettingsPage';
 
 const PAGE_MAP = {
@@ -17,7 +16,6 @@ const PAGE_MAP = {
   curricula: { title: 'Curricula', component: CurriculaApp },
   notes: { title: 'Notes', component: NotesApp, flex: true },
   assessments: { title: 'Assessments', component: AssessmentsPage },
-  math: { title: 'Math Canvas', component: MathPracticePage, flex: true },
   social: { title: 'Social', component: SocialApp, flex: true },
   settings: { title: 'Settings', component: SettingsPage },
 };

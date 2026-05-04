@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { MessageSquare, BookOpen, Layers, FileText, MoreHorizontal, Target, ClipboardCheck, PenTool, Swords, Users, GraduationCap, Settings, ArrowLeft, Moon, Sun, Send, Plus, ChevronRight, Trash2, RotateCcw, Check, X, History, Search, LogOut, Loader2 } from 'lucide-react';
+import { MessageSquare, BookOpen, Layers, FileText, MoreHorizontal, Target, ClipboardCheck, Swords, Users, GraduationCap, Settings, ArrowLeft, Moon, Sun, Send, Plus, ChevronRight, Trash2, RotateCcw, Check, X, History, Search, LogOut, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useAuth } from '../../context/AuthContext';
@@ -12,7 +12,6 @@ import { generateAssessment, gradeAssessment, getAssessmentHistory } from '../..
 import { DEFAULT_SETTINGS, DIFFICULTY_OPTIONS, LEARNING_STYLE_OPTIONS } from '../../utils/constants';
 import GoalsPage from '../../pages/GoalsPage';
 import AssessmentsPage from '../../pages/AssessmentsPage';
-import MathPracticePage from '../../pages/MathPracticePage';
 import SettingsPage from '../../pages/SettingsPage';
 import SocialApp from '../desktop/apps/SocialApp';
 import Button from '../shared/Button';
@@ -352,7 +351,6 @@ function MobileMore({ onNavigate }) {
   const items = [
     { id: 'goals', label: 'Goals', icon: Target, color: 'text-amber-500', bg: 'bg-amber-50 dark:bg-amber-900/20' },
     { id: 'assessments', label: 'Assessments', icon: ClipboardCheck, color: 'text-rose-500', bg: 'bg-rose-50 dark:bg-rose-900/20' },
-    { id: 'math', label: 'Math Canvas', icon: PenTool, color: 'text-indigo-500', bg: 'bg-indigo-50 dark:bg-indigo-900/20' },
     { id: 'social', label: 'Social', icon: Users, color: 'text-cyan-500', bg: 'bg-cyan-50 dark:bg-cyan-900/20' },
     { id: 'settings', label: 'Settings', icon: Settings, color: 'text-gray-500', bg: 'bg-gray-50 dark:bg-gray-800/30' },
   ];

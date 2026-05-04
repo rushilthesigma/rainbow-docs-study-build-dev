@@ -309,7 +309,7 @@ export default function CurriculaApp() {
             <ArrowLeft size={16} /> Back to curriculum
           </button>
           <span className="text-xs text-gray-400">·</span>
-          <span className="text-xs font-semibold text-indigo-500 uppercase tracking-wider">{isPractice ? 'Practice · Math Canvas' : 'Math Tutor'}</span>
+          <span className="text-xs font-semibold text-indigo-500 uppercase tracking-wider">{isPractice ? 'Practice' : 'Math Tutor'}</span>
           <span className="text-xs text-gray-400">·</span>
           <span className="text-xs text-gray-700 dark:text-gray-300 truncate">{currentLesson.title}</span>
         </div>

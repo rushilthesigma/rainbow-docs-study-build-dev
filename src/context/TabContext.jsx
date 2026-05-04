@@ -11,7 +11,6 @@ const ROUTE_META = {
   '/flashcards': { label: 'Flashcards', color: '#a855f7' },
   '/notes': { label: 'Notes', color: '#10b981' },
   '/assessments': { label: 'Assessments', color: '#ef4444' },
-  '/math': { label: 'Math Canvas', color: '#6366f1' },
   '/settings': { label: 'Settings', color: '#6b7280' },
 };
 

@@ -9,16 +9,15 @@ import StudyPage from '../../pages/StudyPage';
 import AssessmentsPage from '../../pages/AssessmentsPage';
 import SettingsPage from '../../pages/SettingsPage';
 
-// "math" and "mathtutor" both resolve to MathTutorApp — the canvas +
-// AI tutor are the same app now (TutorCanvas inside MathTutorApp). The
-// standalone MathPracticePage was deleted.
+// Math Canvas + Math Tutor were unified into MathTutorApp
+// (TutorCanvas inside MathTutorApp handles both modes). The legacy
+// "math" app id was retired — only "mathtutor" remains.
 const APP_COMPONENTS = {
   curricula: CurriculaApp,
   lessons: LessonsApp,
   study: StudyPage,
   notes: NotesApp,
   assessments: AssessmentsPage,
-  math: MathTutorApp,
   mathtutor: MathTutorApp,
   social: SocialApp,
   quizbowl: QuizBowlApp,
@@ -27,7 +26,7 @@ const APP_COMPONENTS = {
 };
 
 // Apps that need flex container without scroll (they manage their own scrolling)
-const FLEX_APPS = new Set(['notes', 'study', 'debate', 'math', 'mathtutor', 'social']);
+const FLEX_APPS = new Set(['notes', 'study', 'debate', 'mathtutor', 'social']);
 
 export default function AppWindow({ appId }) {
   const Component = APP_COMPONENTS[appId];
