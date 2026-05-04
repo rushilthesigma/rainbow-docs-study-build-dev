@@ -6,6 +6,7 @@ import { apiFetch, getToken } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import ChatContainer from '../chat/ChatContainer';
 import { errorChatMessage } from '../../utils/aiErrors';
+import { InlineProgress } from '../shared/ProgressBar';
 
 // =========================================================
 // DEBATE PANEL — embedded inside Study Mode (no longer a top-level app).
@@ -309,7 +310,7 @@ function Singleplayer({ mode, setMode, onExit }) {
         disabled={streaming || verdictLoading || messages.length < 2}
         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-[11px] font-semibold transition-colors"
       >
-        {verdictLoading ? <><Loader2 size={11} className="animate-spin" /> Judging…</> : <><Swords size={11} /> End debate</>}
+        {verdictLoading ? <><InlineProgress active /> Judging…</> : <><Swords size={11} /> End debate</>}
       </button>
     </div>
   );
@@ -506,7 +507,7 @@ function Multiplayer({ mode, setMode, onExit }) {
           disabled={busy}
           className="w-full py-3 mb-4 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-semibold flex items-center justify-center gap-2"
         >
-          {busy ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+          {busy ? <InlineProgress active /> : <Zap size={14} />}
           Create match
         </button>
 
@@ -573,7 +574,7 @@ function Multiplayer({ mode, setMode, onExit }) {
               <div className="flex items-center gap-2 opacity-60">
                 <div className="w-6 h-6 rounded-full bg-gray-200 dark:bg-[#0D0D14] flex items-center justify-center text-[10px] font-bold text-gray-400">?</div>
                 <span className="text-sm text-gray-500 italic">Waiting for opponent…</span>
-                <Loader2 size={12} className="animate-spin text-gray-400" />
+                <InlineProgress active />
               </div>
             )}
           </div>
@@ -609,7 +610,7 @@ function Multiplayer({ mode, setMode, onExit }) {
               disabled={busy || !topicInput.trim() || !opponentJoined}
               className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-semibold flex items-center justify-center gap-2"
             >
-              {busy ? <Loader2 size={14} className="animate-spin" /> : <Swords size={14} />}
+              {busy ? <InlineProgress active /> : <Swords size={14} />}
               {opponentJoined ? 'Start the debate' : 'Waiting for opponent…'}
             </button>
           </>
@@ -654,7 +655,7 @@ function Multiplayer({ mode, setMode, onExit }) {
                     : 'bg-amber-500 hover:bg-amber-600 text-white'
               }`}
             >
-              {voting ? <Loader2 size={11} className="animate-spin" /> : iVoted ? 'Waiting…' : oppVoted ? 'Confirm end' : 'Vote to end'}
+              {voting ? <InlineProgress active /> : iVoted ? 'Waiting…' : oppVoted ? 'Confirm end' : 'Vote to end'}
             </button>
           </div>
         </div>
@@ -742,7 +743,7 @@ function Multiplayer({ mode, setMode, onExit }) {
 
           {!myTurn ? (
             <p className="text-xs text-gray-500 dark:text-gray-400 text-center py-2.5">
-              <Loader2 size={11} className="inline animate-spin mr-1" />
+              <InlineProgress active />
               Waiting for {opp?.name || 'opponent'} to make their argument…
             </p>
           ) : (
@@ -817,7 +818,7 @@ function Multiplayer({ mode, setMode, onExit }) {
                   disabled={submittingMove || (argument.trim().length < 20 && argImages.length === 0)}
                   className="px-4 py-1.5 rounded-md bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-xs font-semibold inline-flex items-center gap-1"
                 >
-                  {submittingMove ? <><Loader2 size={11} className="animate-spin" /> Grading…</> : <>Send turn</>}
+                  {submittingMove ? <><InlineProgress active /> Grading…</> : <>Send turn</>}
                 </button>
               </div>
             </>

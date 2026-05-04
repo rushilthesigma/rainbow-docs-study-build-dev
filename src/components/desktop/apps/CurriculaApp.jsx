@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { ArrowLeft, Plus, Sparkles, Loader2, BookOpen, ChevronDown, ChevronRight, CheckCircle2, Circle, Lock, ClipboardCheck, PenTool, FileText, Check, X, Trophy, Wand2, Paperclip, Upload, Calculator, GraduationCap, Atom, Sigma, Map as MapIcon, List } from 'lucide-react';
-import { listCurricula, generateCurriculum, getCurriculum, sendLessonMessage, getLessonHistory, editCurriculumWithAI } from '../../../api/curriculum';
+import { listCurricula, generateCurriculum, getCurriculum, sendLessonMessage, getLessonHistory, editCurriculumWithAI, extractSourceUrl, extractFiles } from '../../../api/curriculum';
 import { apiFetch } from '../../../api/client';
 import { useWindowManager } from '../../../context/WindowManagerContext';
 import { useDemoMode } from '../../../context/DemoModeContext';
@@ -10,14 +10,19 @@ import Input from '../../shared/Input';
 import PillGroup from '../../shared/PillGroup';
 import Toggle from '../../shared/Toggle';
 import LoadingSpinner from '../../shared/LoadingSpinner';
+import LoadingProgress from '../../shared/ProgressBar';
+import { SkeletonProse } from '../../shared/Skeleton';
 import ProgressBar from '../../curriculum/ProgressBar';
 import ChatContainer from '../../chat/ChatContainer';
 import MathText from '../../shared/MathText';
 import MathTutorApp from './MathTutorApp';
 import TrailView from '../../curriculum/TrailView';
+import BlockLessonView from '../../lesson/BlockLessonView';
+import ExamBlock from '../../lesson/ExamBlock';
 import { useAuth } from '../../../context/AuthContext';
 import { errorChatMessage } from '../../../utils/aiErrors';
 import useBrowserBack from '../../../hooks/useBrowserBack';
+import { InlineProgress } from '../../shared/ProgressBar';
 
 const TYPE_ICONS = { lesson: BookOpen, math_tutor: Calculator, practice: PenTool, essay: FileText, unit_test: ClipboardCheck };
 const TYPE_COLORS = { lesson: 'text-blue-400', math_tutor: 'text-indigo-400', practice: 'text-purple-400', essay: 'text-amber-400', unit_test: 'text-rose-400' };
@@ -75,6 +80,14 @@ export default function CurriculaApp() {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState(null);
+  // Source material attached to a new curriculum: textbooks (PDF / text)
+  // and websites (URL → server-fetched + HTML-stripped). Each entry:
+  //   { id, title, kind: 'pdf' | 'text' | 'url', content, url?, chars }
+  const [sources, setSources] = useState([]);
+  const [sourceUrlInput, setSourceUrlInput] = useState('');
+  const [sourceBusy, setSourceBusy] = useState(false);
+  const [sourceError, setSourceError] = useState('');
+  const sourceFileRef = useRef(null);
 
   // Edit curriculum modal
   const [editOpen, setEditOpen] = useState(false);
@@ -127,13 +140,61 @@ export default function CurriculaApp() {
     if (!settings.topic.trim() || generating) return;
     setGenerating(true); setGenError(null);
     try {
-      const data = await generateCurriculum(settings);
+      // Strip the local id (used only for React keys + remove-button) before
+      // sending — server doesn't care about it.
+      const cleanSources = sources.map(({ id, ...rest }) => rest); // eslint-disable-line no-unused-vars
+      const data = await generateCurriculum(settings, cleanSources);
       setCurricula(prev => [data.curriculum, ...prev]);
       setSelectedCurriculum(data.curriculum);
       setView('detail');
       setSettings(DEFAULT_SETTINGS);
+      setSources([]);
     } catch (err) { setGenError(err.message || 'Failed'); }
     setGenerating(false);
+  }
+
+  async function handleAddSourceUrl(e) {
+    e?.preventDefault?.();
+    const url = sourceUrlInput.trim();
+    if (!url || sourceBusy) return;
+    setSourceBusy(true); setSourceError('');
+    try {
+      const s = await extractSourceUrl(url);
+      setSources(prev => [...prev, { id: crypto.randomUUID?.() || String(Date.now()), ...s }]);
+      setSourceUrlInput('');
+    } catch (err) {
+      setSourceError(err.message || 'Failed to fetch URL');
+    } finally { setSourceBusy(false); }
+  }
+
+  async function handleAddSourceFiles(filesList) {
+    const files = Array.from(filesList || []);
+    if (!files.length || sourceBusy) return;
+    setSourceBusy(true); setSourceError('');
+    try {
+      const { files: extracted } = await extractFiles(files);
+      const ok = (extracted || []).filter(f => !f.error && f.text);
+      const failed = (extracted || []).filter(f => f.error);
+      if (ok.length) {
+        setSources(prev => [
+          ...prev,
+          ...ok.map(f => ({
+            id: crypto.randomUUID?.() || String(Date.now() + Math.random()),
+            title: f.name, kind: f.kind || 'text', content: f.text, chars: (f.text || '').length,
+          })),
+        ]);
+      }
+      if (failed.length) setSourceError(`${failed.length} file(s) couldn't be extracted: ${failed.map(f => f.name).join(', ')}`);
+    } catch (err) {
+      setSourceError(err.message || 'Failed to extract files');
+    } finally {
+      setSourceBusy(false);
+      if (sourceFileRef.current) sourceFileRef.current.value = '';
+    }
+  }
+
+  function removeSource(id) {
+    setSources(prev => prev.filter(s => s.id !== id));
   }
 
   async function openCurriculum(id) {
@@ -264,6 +325,17 @@ export default function CurriculaApp() {
 
   // Lesson view
   if (view === 'lesson' && currentLesson) {
+    // Plain "lesson" type uses the new Claudius-style 4R/4Q block view
+    // with SRS. Math / essay / unit_test still go through their own flows.
+    if (currentLesson.type === 'lesson' || !currentLesson.type) {
+      return (
+        <BlockLessonView
+          curriculumId={selectedCurriculum?.id}
+          lesson={currentLesson}
+          onBack={() => setView('detail')}
+        />
+      );
+    }
     const header = (
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622]">
         <button onClick={() => setView('detail')} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"><ArrowLeft size={16} /></button>
@@ -402,6 +474,11 @@ export default function CurriculaApp() {
                 onOpenLesson={(l) => openLesson(l, c.id)}
               />
             ))}
+
+            {/* Course-level midterm + final, with spaced repetition */}
+            <div className="pt-4">
+              <ExamBlock curriculumId={c.id} />
+            </div>
           </div>
         )}
 
@@ -428,11 +505,18 @@ export default function CurriculaApp() {
         <button onClick={() => setView('list')} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 mb-4"><ArrowLeft size={16} /> Back</button>
         <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-4">New Curriculum</h2>
         {generating ? (
-          <div className="flex flex-col items-center justify-center py-16 px-4">
-            <Loader2 size={32} className="animate-spin text-blue-500 mb-4" />
-            <p className="text-sm text-gray-500 mb-5">Generating <span className="font-medium text-gray-700 dark:text-gray-300">{settings.topic}</span>...</p>
+          <div className="py-10 px-2 max-w-xl mx-auto w-full">
+            <LoadingProgress
+              active
+              label={`Generating ${settings.topic || 'curriculum'}…`}
+              hint="Building units + lesson outlines. 20-40 seconds."
+              duration={30000}
+            />
+            <div className="mt-6">
+              <SkeletonProse lines={5} />
+            </div>
             {isDemo && (
-              <div className="max-w-sm text-center rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-4 py-3">
+              <div className="mt-6 max-w-sm mx-auto text-center rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-4 py-3">
                 <p className="text-[12px] font-semibold text-amber-800 dark:text-amber-300 mb-0.5">Please don&apos;t leave the app.</p>
                 <p className="text-[11px] text-amber-700 dark:text-amber-400">
                   Full curriculum generation takes 20–40 seconds. Switching tabs or closing this window will cancel the request.
@@ -450,6 +534,91 @@ export default function CurriculaApp() {
               <Toggle label="Examples" checked={settings.includeExamples} onChange={v => setSettings(p => ({ ...p, includeExamples: v }))} />
               <Toggle label="Exercises" checked={settings.includeExercises} onChange={v => setSettings(p => ({ ...p, includeExercises: v }))} />
             </div>
+
+            {/* ===== Source material (textbooks + websites) ===== */}
+            <div className="rounded-xl border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622] p-4">
+              <div className="flex items-baseline justify-between mb-1">
+                <p className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-200">Source material <span className="font-normal opacity-60">(optional)</span></p>
+                {sources.length > 0 && (
+                  <span className="text-[10px] text-gray-400 tabular-nums">{sources.length}/8</span>
+                )}
+              </div>
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3">
+                Drop in a textbook PDF or paste a URL — the AI will align the curriculum to your sources instead of generating from scratch.
+              </p>
+
+              {/* URL input */}
+              <form onSubmit={handleAddSourceUrl} className="flex items-center gap-2 mb-2">
+                <input
+                  type="url"
+                  value={sourceUrlInput}
+                  onChange={e => setSourceUrlInput(e.target.value)}
+                  placeholder="https://example.com/article"
+                  disabled={sourceBusy || sources.length >= 8}
+                  className="flex-1 px-3 py-2 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/40 disabled:opacity-50"
+                />
+                <button
+                  type="submit"
+                  disabled={sourceBusy || !sourceUrlInput.trim() || sources.length >= 8}
+                  className="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold disabled:opacity-40 inline-flex items-center gap-1.5"
+                >
+                  {sourceBusy ? <InlineProgress active /> : <><Plus size={12} /> Add URL</>}
+                </button>
+              </form>
+
+              {/* File picker */}
+              <input
+                ref={sourceFileRef}
+                type="file"
+                multiple
+                accept=".pdf,.txt,.md,.csv,.json,.tex"
+                className="hidden"
+                onChange={e => handleAddSourceFiles(e.target.files)}
+              />
+              <button
+                onClick={() => sourceFileRef.current?.click()}
+                disabled={sourceBusy || sources.length >= 8}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border-2 border-dashed border-gray-300 dark:border-[#2A2A40] text-gray-500 dark:text-gray-400 text-xs hover:border-blue-400 dark:hover:border-blue-600 hover:text-blue-600 dark:hover:text-blue-400 transition-colors disabled:opacity-50"
+              >
+                {sourceBusy ? <InlineProgress active /> : <Paperclip size={13} />}
+                Attach textbook PDFs or text files
+              </button>
+
+              {sourceError && (
+                <div className="mt-2 px-2.5 py-1.5 rounded-md text-[11px] text-rose-600 dark:text-rose-300 bg-rose-50 dark:bg-rose-900/15 border border-rose-200 dark:border-rose-800/40 flex items-center justify-between gap-2">
+                  <span>{sourceError}</span>
+                  <button onClick={() => setSourceError('')} className="opacity-70 hover:opacity-100"><X size={11} /></button>
+                </div>
+              )}
+
+              {/* Source list */}
+              {sources.length > 0 && (
+                <div className="mt-3 space-y-1.5">
+                  {sources.map(s => {
+                    const Icon = s.kind === 'url' ? Sparkles : FileText;
+                    return (
+                      <div key={s.id} className="group flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-gray-50 dark:bg-[#0D0D14] border border-gray-200 dark:border-[#2A2A40]">
+                        <div className={`w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 ${s.kind === 'url' ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-500 dark:text-blue-400' : 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'}`}>
+                          <Icon size={11} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[12px] font-medium text-gray-900 dark:text-gray-100 truncate">{s.title}</p>
+                          <p className="text-[10px] text-gray-400 truncate">{s.url || s.kind} · {Math.round((s.chars || s.content?.length || 0) / 100) / 10}k chars</p>
+                        </div>
+                        <button
+                          onClick={() => removeSource(s.id)}
+                          className="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-300 hover:text-rose-500 transition-all flex-shrink-0"
+                          title="Remove"
+                        >
+                          <X size={11} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
             <Button onClick={handleGenerate} disabled={!settings.topic.trim()} data-tour="curriculum-generate-button"><Sparkles size={16} /> Generate Curriculum</Button>
           </div>
         )}
@@ -660,7 +829,7 @@ function AssessmentView({ lesson, curriculum, onBack }) {
 
         {loading && (
           <div className="flex items-center gap-2 py-12 justify-center">
-            <Loader2 size={16} className="animate-spin text-gray-400" />
+            <InlineProgress active />
             <span className="text-sm text-gray-500">{isEssay ? 'Building your essay prompt…' : 'Generating quiz…'}</span>
           </div>
         )}
@@ -710,7 +879,7 @@ function AssessmentView({ lesson, curriculum, onBack }) {
               disabled={grading || !canSubmitEssay}
               className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
-              {grading ? <><Loader2 size={14} className="animate-spin" /> Grading your essay…</> : 'Submit for grading'}
+              {grading ? <><InlineProgress active /> Grading your essay…</> : 'Submit for grading'}
             </button>
           </>
         )}
@@ -750,7 +919,7 @@ function AssessmentView({ lesson, curriculum, onBack }) {
               disabled={grading || answered < total}
               className="mt-4 w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
-              {grading ? <><Loader2 size={14} className="animate-spin" /> Grading…</> : `Submit${answered < total ? ` (${total - answered} left)` : ''}`}
+              {grading ? <><InlineProgress active /> Grading…</> : `Submit${answered < total ? ` (${total - answered} left)` : ''}`}
             </button>
           </>
         )}
@@ -964,7 +1133,7 @@ function EditCurriculumModal({ curriculum, onClose, onUpdated }) {
             disabled={!instruction.trim() || submitting}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {submitting ? <><Loader2 size={12} className="animate-spin" /> Applying…</> : <><Sparkles size={12} /> Apply edit</>}
+            {submitting ? <><InlineProgress active /> Applying…</> : <><Sparkles size={12} /> Apply edit</>}
           </button>
         </div>
       </div>
@@ -1075,7 +1244,7 @@ function PausdCourseCard({ course, enrolling, onEnroll, tourAnchor }) {
           Grade {course.grade} · {course.unitCount}u · {course.lessonCount} lessons
         </p>
         {enrolling ? (
-          <Loader2 size={12} className="animate-spin text-blue-500" />
+          <InlineProgress active />
         ) : (
           <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 dark:text-blue-400">
             Enroll <ChevronRight size={12} />

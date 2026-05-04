@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Send, Globe, Paperclip, X, FileText, Loader2, Upload } from 'lucide-react';
 import { getToken } from '../../api/client';
+import { InlineProgress } from '../shared/ProgressBar';
 
 // Read a File into a base64 data URL string.
 function fileToDataUrl(file) {
@@ -318,7 +319,7 @@ export default function ChatInput({
               return (
                 <div key={i} className={`inline-flex items-center gap-1.5 max-w-[260px] px-2 py-1 rounded-md border ${tone}`}>
                   {d.status === 'extracting'
-                    ? <Loader2 size={12} className="animate-spin flex-shrink-0" />
+                    ? <InlineProgress active />
                     : <FileText size={12} className="flex-shrink-0" />}
                   <span className="text-[11px] font-medium truncate">{d.name}</span>
                   {d.status === 'ready' && d.text && (

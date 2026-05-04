@@ -2,18 +2,24 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 import { X, Minus, Maximize2, Square } from 'lucide-react';
 import { useWindowManager } from '../../context/WindowManagerContext';
 
-const STYLE = localStorage.getItem('cov-desktop-style') || 'macos';
+// macOS is the only shell now; all the per-OS branching below collapses
+// to the macOS branch via this constant. Kept as a const so the existing
+// `STYLE === 'macos'` checks throughout the file still resolve normally.
+const STYLE = 'macos';
 
-// macOS traffic lights
+// macOS traffic lights. Green button = in-app "zoom" (full window inside
+// the macOS shell — covers the dock area but stays inside the browser
+// window). For TRUE OS-level fullscreen (taking over the whole monitor),
+// use ⌘⇧P — that calls the browser Fullscreen API.
 function MacTitleBar({ windowId, isMaximized, isActive, title, onDragStart, onDoubleClick }) {
   const { closeWindow, minimizeWindow, maximizeWindow } = useWindowManager();
   const [hovered, setHovered] = useState(false);
   return (
     <div className={`h-8 flex items-center flex-shrink-0 ${isActive ? 'bg-[#e8e8ea] dark:bg-[#2c2c2e]' : 'bg-[#f0f0f0] dark:bg-[#383838]'}`} onPointerDown={onDragStart} onDoubleClick={onDoubleClick} data-titlebar={windowId}>
       <div className="flex items-center gap-[7px] px-3" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
-        <button onClick={e => { e.stopPropagation(); closeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FF5F57] hover:brightness-90 flex items-center justify-center"><X size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#4a0002]" /></button>
-        <button onClick={e => { e.stopPropagation(); minimizeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FEBC2E] hover:brightness-90 flex items-center justify-center"><Minus size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#5a3e00]" /></button>
-        <button onClick={e => { e.stopPropagation(); maximizeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#28C840] hover:brightness-90 flex items-center justify-center"><Maximize2 size={hovered ? 7 : 0} strokeWidth={2.5} className="text-[#005200]" /></button>
+        <button onClick={e => { e.stopPropagation(); closeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FF5F57] hover:brightness-90 flex items-center justify-center" title="Close"><X size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#4a0002]" /></button>
+        <button onClick={e => { e.stopPropagation(); minimizeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FEBC2E] hover:brightness-90 flex items-center justify-center" title="Minimize"><Minus size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#5a3e00]" /></button>
+        <button onClick={e => { e.stopPropagation(); maximizeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#28C840] hover:brightness-90 flex items-center justify-center" title={isMaximized ? 'Restore' : 'Zoom — fills the desktop. ⌘⇧P for true fullscreen.'}><Maximize2 size={hovered ? 7 : 0} strokeWidth={2.5} className="text-[#005200]" /></button>
       </div>
       <div className="flex-1 text-center text-xs font-medium text-gray-600 dark:text-gray-300 truncate pr-12 pointer-events-none">{title}</div>
     </div>
@@ -126,6 +132,40 @@ export default function Window({ win, isActive, children }) {
   const minimized = win.isMinimized;
   const maxed = win.isMaximized;
 
+  // ===== Real fullscreen (browser-level, OS-level) =====
+  // The green traffic-light button calls this. ESC exits — that's
+  // browser-native behavior of the Fullscreen API; we don't need a
+  // separate keydown listener. We DO listen for `fullscreenchange` so
+  // a tracked `isFullscreen` flag stays in sync (used to hide our
+  // resize handles + adjust styling while in real fullscreen).
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  useEffect(() => {
+    function onChange() {
+      const el = windowRef.current;
+      const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+      setIsFullscreen(!!el && fsEl === el);
+    }
+    document.addEventListener('fullscreenchange', onChange);
+    document.addEventListener('webkitfullscreenchange', onChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange);
+      document.removeEventListener('webkitfullscreenchange', onChange);
+    };
+  }, []);
+  const toggleFullscreen = useCallback(() => {
+    const el = windowRef.current;
+    if (!el) return;
+    const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+    if (fsEl === el) {
+      (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
+    } else {
+      // focus this window first so it sits on top while entering fullscreen
+      focusWindow(win.id);
+      const req = el.requestFullscreen || el.webkitRequestFullscreen;
+      req?.call(el).catch(() => { /* user-activation lost or already fs */ });
+    }
+  }, [focusWindow, win.id]);
+
   // Fullscreen dimensions per OS style
   let maxStyle;
   if (STYLE === 'windows') {
@@ -138,8 +178,11 @@ export default function Window({ win, isActive, children }) {
     // Linux GNOME: below top panel (28px), full width, above dash (left 48px ignored — full width is fine)
     maxStyle = { left: 0, top: 28, width: '100vw', height: 'calc(100vh - 28px)' };
   } else {
-    // macOS: below menu bar, above dock
-    maxStyle = { left: 0, top: 28, width: '100vw', height: 'calc(100vh - 28px - 72px)' };
+    // macOS: in-app zoom covers the ENTIRE viewport — menu bar AND dock
+    // hide (handled by MacOSContent reading window-manager state). The
+    // window goes edge-to-edge (0,0 → 100vw × 100vh). For true OS-level
+    // fullscreen across multiple monitors / browser chrome, use ⌘⇧P.
+    maxStyle = { left: 0, top: 0, width: '100vw', height: '100vh' };
   }
 
   const style = maxed
@@ -185,13 +228,13 @@ export default function Window({ win, isActive, children }) {
       aria-hidden={minimized}
       onPointerDown={() => focusWindow(win.id)}
     >
-      <TitleBar windowId={win.id} isMaximized={maxed} isActive={isActive} title={win.title} onDragStart={handleDragStart} onDoubleClick={() => maximizeWindow(win.id)} />
+      <TitleBar windowId={win.id} isMaximized={maxed} isActive={isActive} title={win.title} onDragStart={handleDragStart} onDoubleClick={() => maximizeWindow(win.id)} onFullscreen={toggleFullscreen} />
 
       <div className="flex-1 overflow-hidden bg-white dark:bg-[#0D0D14]">
         {children}
       </div>
 
-      {!maxed && <>
+      {!maxed && !isFullscreen && <>
         <div className="absolute top-0 left-0 right-0 h-1 cursor-n-resize" onPointerDown={e => handleResizeStart(e, 'n')} />
         <div className="absolute bottom-0 left-0 right-0 h-1 cursor-s-resize" onPointerDown={e => handleResizeStart(e, 's')} />
         <div className="absolute top-0 left-0 bottom-0 w-1 cursor-w-resize" onPointerDown={e => handleResizeStart(e, 'w')} />

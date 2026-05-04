@@ -13,3 +13,7 @@ parties.json
 
 # Stashed Figma-style workspace revamp (restorable if we ever want it back)
 .figma-revamp/
+
+# JimmyQRG games mirror — pulled by scripts/fetch-jimmyqrg.sh, ~450MB.
+# Do NOT commit; rerun the script to restore locally.
+games/

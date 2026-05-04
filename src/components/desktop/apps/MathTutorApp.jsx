@@ -7,6 +7,7 @@ import { sendMathTutorMessage } from '../../../api/mathTutor';
 import ChatContainer from '../../chat/ChatContainer';
 import { errorChatMessage } from '../../../utils/aiErrors';
 import useBrowserBack from '../../../hooks/useBrowserBack';
+import { InlineProgress } from '../../shared/ProgressBar';
 
 // Persist the in-progress tutor session across window closes.
 const STORAGE_KEY = 'covalent-math-tutor-state-v1';
@@ -205,11 +206,20 @@ function TutorCanvas({ onCaptureReady, dark }) {
 //               tutor immediately on the given topic.
 //   onBack    — when set, replaces the setup-view back-button behavior so
 //               an embedding parent can return to its own view.
-export default function MathTutorApp({ seedTopic = null, onBack = null } = {}) {
+export default function MathTutorApp({ seedTopic = null, onBack = null, defaultMode = 'both' } = {}) {
   const persisted = loadState();
   // When seeded, start in 'tutor' view directly. Otherwise restore from
   // localStorage like normal.
   const [view, setView] = useState(seedTopic ? 'tutor' : (persisted?.view || 'setup'));
+  // Tutor-view mode: 'both' (default) shows chat + canvas side-by-side,
+  // 'tutor' hides the canvas (chat full width), 'canvas' hides the chat
+  // (canvas full width). Persisted across sessions.
+  const [mode, setMode] = useState(() => {
+    const valid = ['both', 'tutor', 'canvas'];
+    if (defaultMode && valid.includes(defaultMode)) return defaultMode;
+    if (persisted?.mode && valid.includes(persisted.mode)) return persisted.mode;
+    return 'both';
+  });
   // When embedded (onBack supplied by parent), DO NOT register our own
   // browser-back handler — the parent (e.g. CurriculaApp) owns history
   // management for the embed. Nested useBrowserBack hooks fight each other
@@ -239,8 +249,8 @@ export default function MathTutorApp({ seedTopic = null, onBack = null } = {}) {
     const trimmed = messages.slice(-50).map(m => ({
       role: m.role, content: (m.content || '').slice(0, 3000), _edited: m._edited, _error: m._error,
     }));
-    saveState({ view, topic, customInstructions, messages: trimmed });
-  }, [view, topic, customInstructions, messages, seedTopic]);
+    saveState({ view, mode, topic, customInstructions, messages: trimmed });
+  }, [view, mode, topic, customInstructions, messages, seedTopic]);
 
   // Clean up an aborted stream if the component unmounts mid-turn.
   useEffect(() => () => abortRef.current?.(), []);
@@ -390,6 +400,32 @@ export default function MathTutorApp({ seedTopic = null, onBack = null } = {}) {
             />
           </div>
 
+          {/* Mode picker — Both / Tutor / Canvas. Same toggle is also
+              available in the tutor-view header so you can flip mid-session. */}
+          <div>
+            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">Mode</label>
+            <div className="grid grid-cols-3 gap-1.5">
+              {[
+                { id: 'both',   label: 'Both',   sub: 'Tutor + canvas' },
+                { id: 'tutor',  label: 'Tutor',  sub: 'Chat only' },
+                { id: 'canvas', label: 'Canvas', sub: 'Drawing only' },
+              ].map(o => (
+                <button
+                  key={o.id}
+                  onClick={() => setMode(o.id)}
+                  className={`px-2.5 py-2 rounded-lg border text-left transition-all ${
+                    mode === o.id
+                      ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-200 shadow-sm'
+                      : 'border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-gray-700 dark:text-gray-300 hover:border-indigo-400'
+                  }`}
+                >
+                  <p className="text-[12px] font-bold">{o.label}</p>
+                  <p className="text-[10px] opacity-70">{o.sub}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div>
             <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">Custom instructions (optional)</label>
             <textarea
@@ -495,6 +531,7 @@ export default function MathTutorApp({ seedTopic = null, onBack = null } = {}) {
         <Calculator size={16} className="text-indigo-500" />
         <span className="text-sm font-semibold text-gray-900 dark:text-white truncate">{topic}</span>
         <div className="flex-1" />
+        <ModeToggle mode={mode} onChange={setMode} />
         <button onClick={() => setShowSettings(s => !s)} className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-[#1e1e2e]" title="Custom instructions">
           <Settings size={15} />
         </button>
@@ -516,10 +553,14 @@ export default function MathTutorApp({ seedTopic = null, onBack = null } = {}) {
         </div>
       )}
 
-      {/* Split: chat on left, canvas on right */}
-      <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-2 gap-2 p-2 bg-gray-50 dark:bg-[#0D0D14]">
-        {/* Chat column */}
-        <div className="flex flex-col min-h-0 border border-gray-200 dark:border-[#2A2A40] rounded-xl overflow-hidden bg-white dark:bg-[#161622]">
+      {/* Split: chat on left, canvas on right. Columns hide based on `mode`. */}
+      <div className={`flex-1 min-h-0 grid gap-2 p-2 bg-gray-50 dark:bg-[#0D0D14] ${
+        mode === 'both' ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'
+      }`}>
+        {/* Chat column — hidden in canvas-only mode */}
+        <div className={`flex flex-col min-h-0 border border-gray-200 dark:border-[#2A2A40] rounded-xl overflow-hidden bg-white dark:bg-[#161622] ${
+          mode === 'canvas' ? 'hidden' : ''
+        }`}>
           <div className="flex-1 min-h-0 overflow-hidden">
             <ChatContainer
               messages={visibleMessages}
@@ -543,7 +584,7 @@ export default function MathTutorApp({ seedTopic = null, onBack = null } = {}) {
               />
               {streaming ? (
                 <button onClick={handleStop} className="px-3 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-medium flex items-center gap-1">
-                  <Loader2 size={12} className="animate-spin" /> Stop
+                  <InlineProgress active /> Stop
                 </button>
               ) : (
                 <button onClick={() => handleSend(input)} disabled={!input.trim()} className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium disabled:opacity-40 flex items-center gap-1">
@@ -563,11 +604,38 @@ export default function MathTutorApp({ seedTopic = null, onBack = null } = {}) {
           </div>
         </div>
 
-        {/* Canvas column */}
-        <div className="min-h-[280px]">
+        {/* Canvas column — hidden in tutor-only mode */}
+        <div className={`min-h-[280px] ${mode === 'tutor' ? 'hidden' : ''}`}>
           <TutorCanvas onCaptureReady={(api) => { captureRef.current = api; }} dark={dark} />
         </div>
       </div>
+    </div>
+  );
+}
+
+// Tutor-view mode toggle: Both | Tutor | Canvas. Segmented control.
+function ModeToggle({ mode, onChange }) {
+  const options = [
+    { id: 'both',   label: 'Both' },
+    { id: 'tutor',  label: 'Tutor' },
+    { id: 'canvas', label: 'Canvas' },
+  ];
+  return (
+    <div className="inline-flex items-center gap-0 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-gray-50 dark:bg-[#0D0D14] p-0.5">
+      {options.map(o => (
+        <button
+          key={o.id}
+          onClick={() => onChange(o.id)}
+          className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
+            mode === o.id
+              ? 'bg-indigo-600 text-white shadow-sm'
+              : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+          }`}
+          title={`${o.label} mode`}
+        >
+          {o.label}
+        </button>
+      ))}
     </div>
   );
 }

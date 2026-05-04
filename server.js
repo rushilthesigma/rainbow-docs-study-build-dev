@@ -1134,8 +1134,28 @@ app.post('/api/demo/lesson/stream', async (req, res) => {
 // Generate a new curriculum
 app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
   try {
-    const { settings } = req.body;
+    const { settings, sources: rawSources } = req.body;
     if (!settings?.topic) return res.status(400).json({ error: 'Topic is required' });
+
+    // Sources: optional array of { title, kind: 'pdf'|'text'|'url', content, url? }.
+    // Already-extracted text — files come from /api/files/extract and URLs
+    // from /api/sources/extract-url. We sanitize + cap to stay inside the
+    // model's input window.
+    const SOURCE_TOTAL_CAP = 60000;
+    const SOURCE_PER_ITEM_CAP = 25000;
+    let sources = Array.isArray(rawSources) ? rawSources.filter(Boolean).slice(0, 8) : [];
+    sources = sources.map(s => ({
+      title: String(s.title || s.url || 'Source').slice(0, 200),
+      kind: ['pdf', 'text', 'url'].includes(s.kind) ? s.kind : 'text',
+      url: s.url ? String(s.url).slice(0, 500) : undefined,
+      content: String(s.content || '').slice(0, SOURCE_PER_ITEM_CAP),
+    })).filter(s => s.content.length >= 30);
+    // Trim to fit total cap proportionally if combined size is too big.
+    const totalChars = sources.reduce((n, s) => n + s.content.length, 0);
+    if (totalChars > SOURCE_TOTAL_CAP) {
+      const ratio = SOURCE_TOTAL_CAP / totalChars;
+      sources = sources.map(s => ({ ...s, content: s.content.slice(0, Math.floor(s.content.length * ratio)) }));
+    }
 
     const usersC = loadUsers();
     const emailC = findEmailById(usersC, req.userId);
@@ -1166,11 +1186,12 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
     }
     saveUsers(usersC);
 
-    const { system, user } = buildCurriculumPrompt(settings);
-    // jsonMode → strict JSON output. Without this Gemini wraps the curriculum
-    // in ```json fences ~30% of the time on long generations, which then
-    // trips the parser even after de-fencing because of trailing commentary.
-    const result = await callGemini(system, [{ role: 'user', content: user }], DEFAULT_MODEL, 8192, { jsonMode: true, temperature: 0.7 });
+    const { system, user } = buildCurriculumPrompt(settings, sources);
+    // Flash for curriculum generation — the Pro model was aborting on
+    // long generations (`gemini-3.1-pro-preview` hits 60s timeouts even
+    // on simple structured-JSON outputs). Flash is ~3× faster and the
+    // schema is strict enough that quality is the same.
+    const result = await callGemini(system, [{ role: 'user', content: user }], GEMINI_FLASH, 8192, { jsonMode: true, temperature: 0.7 });
 
     if (!result.success) return res.status(500).json({ error: result.error });
 
@@ -1200,6 +1221,13 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
     curriculum.createdAt = new Date().toISOString();
     curriculum.settings = { ...settings };
     curriculum.linkedGoalIds = [];
+    // Persist the source materials the user attached — minus their full
+    // content (kept only metadata, since the content is already baked
+    // into every generated lesson via the prompt). Frontend uses this
+    // to render the "Sources used" badge on the curriculum card.
+    curriculum.sources = sources.map(s => ({
+      title: s.title, kind: s.kind, url: s.url || null, chars: s.content.length,
+    }));
 
     // Detect if this is a math-related curriculum
     const mathKeywords = ['math', 'algebra', 'calculus', 'geometry', 'trigonometry', 'statistics', 'arithmetic', 'equation', 'fraction', 'polynomial', 'linear', 'quadratic', 'integral', 'derivative', 'probability', 'number theory'];
@@ -2097,11 +2125,463 @@ app.post('/api/curriculum/:id/lesson/:lessonId/reset', authMiddleware, (req, res
     if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
     for (const u of curriculum.units || []) {
       const l = (u.lessons || []).find(l => l.id === req.params.lessonId);
-      if (l) { l.chatHistory = []; l.phase = null; l.phaseData = {}; l.isCompleted = false; l.score = null; break; }
+      if (l) {
+        l.chatHistory = []; l.phase = null; l.phaseData = {};
+        l.isCompleted = false; l.score = null;
+        l.blocks = [];
+        break;
+      }
     }
     saveUsers(users);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// =========================================================
+// STRUCTURED LESSON BLOCKS  (Claudius-style: R1 → Q1 → R2 → Q2 →
+//   R3 (SRS based on Q1+Q2 misses) → Q3 → R4 → FINAL QUIZ)
+//
+// First 7 blocks generated up-front via /blocks/generate. The final
+// quiz is generated lazily via /blocks/final-quiz/generate AFTER Q3
+// is graded — that endpoint reads which questions the student got
+// wrong in Q1-Q3 and folds those concepts back in. Spaced repetition
+// for real, not just a label.
+// =========================================================
+
+function findUserCurriculum(users, email, cid) {
+  return (users[email]?.data?.curricula || []).find(c => c.id === cid);
+}
+function findLessonInCurriculum(curriculum, lessonId) {
+  for (const unit of curriculum.units || []) {
+    for (const l of unit.lessons || []) {
+      if (l.id === lessonId) return { unit, lesson: l };
+    }
+  }
+  return null;
+}
+function stampBlock(lessonId, b, i, opts = {}) {
+  const blockId = `${lessonId}-b${i}`;
+  const base = {
+    id: blockId,
+    type: b.type,
+    title: b.title || (b.type === 'quiz' ? `Quiz ${Math.floor(i / 2) + 1}` : `Reading ${Math.floor(i / 2) + 1}`),
+    completedAt: null,
+    ...(opts.srs ? { srs: true } : {}),
+    ...(opts.isFinal ? { isFinal: true } : {}),
+  };
+  if (b.type === 'reading') return { ...base, content: String(b.content || '') };
+  const questions = (Array.isArray(b.questions) ? b.questions : []).map((q, qi) => ({
+    id: `${blockId}-q${qi}`,
+    prompt: String(q.prompt || ''),
+    choices: Array.isArray(q.choices) ? q.choices.map(String) : [],
+    answer: String(q.answer || ''),
+    explanation: String(q.explanation || ''),
+  }));
+  return { ...base, questions, score: null, responses: null };
+}
+
+// Returns the missed-question summaries from any quiz blocks already
+// graded on this lesson — used to feed SRS context into R3 / final quiz
+// generation.
+function collectMissedFromLesson(lesson) {
+  const missed = [];
+  for (const b of lesson.blocks || []) {
+    if (b.type !== 'quiz' || !Array.isArray(b.responses)) continue;
+    for (const r of b.responses) {
+      if (r.correct) continue;
+      const q = (b.questions || []).find(qq => qq.id === r.qid);
+      if (!q) continue;
+      missed.push({
+        prompt: q.prompt,
+        userPicked: r.given || '(no answer)',
+        correctAnswer: q.answer,
+        explanation: q.explanation || '',
+      });
+    }
+  }
+  return missed;
+}
+
+app.post('/api/curriculum/:id/lesson/:lessonId/blocks/generate', authMiddleware, async (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const curriculum = findUserCurriculum(users, email, req.params.id);
+    if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
+    const found = findLessonInCurriculum(curriculum, req.params.lessonId);
+    if (!found) return res.status(404).json({ error: 'Lesson not found' });
+    const { unit, lesson } = found;
+
+    // Idempotent: if 7 blocks already cached, return them as-is.
+    if (Array.isArray(lesson.blocks) && lesson.blocks.length >= 7) {
+      return res.json({ blocks: lesson.blocks });
+    }
+
+    const sys = `You generate one complete lesson as 7 blocks: 4 readings interleaved with 3 mid-quizzes. Output ONLY valid JSON — no markdown, no fences, no commentary.`;
+    const prompt = `Build the lesson "${lesson.title}" from the unit "${unit.title}" of the course "${curriculum.title}".
+${lesson.description ? `Lesson goal: ${lesson.description}\n` : ''}${curriculum.description ? `Course context: ${curriculum.description}\n` : ''}
+Difficulty: ${curriculum.difficulty || 'intermediate'}.
+
+EXACTLY 7 blocks in this order:
+  1. reading_1 — Core definition + framing of the topic. The simplest correct mental model.
+  2. quiz_1   — 3 multiple-choice questions on reading 1.
+  3. reading_2 — Mechanics. How it works, with a worked numeric / concrete example.
+  4. quiz_2   — 3 multiple-choice questions on reading 2.
+  5. reading_3 — SPACED-REPETITION review of readings 1 + 2. The student has now seen R1 and R2 — return to the trickiest concepts from BOTH readings, re-frame from a different angle, hit the most common misconceptions head-on, and add ONE bridging idea that ties them together. This is NOT a new sub-concept — it is intentional review designed to make R1 + R2 stick. 350-450 words.
+  6. quiz_3   — 3 multiple-choice questions that mix R1, R2, and R3 (i.e. drag Q1/Q2-style content back in alongside the R3 framing).
+  7. reading_4 — Synthesis + edge cases. Tie the lesson to the surrounding course; surface 1-2 lingering subtleties.
+
+Each reading: 350-500 words of markdown (## sub-heading + body, with **bold**, lists, fenced code where useful, math via $...$ or $$...$$ if it fits).
+Each quiz question: a "prompt" (string), 4 "choices" (strings, no A) B) prefixes — UI adds them), an "answer" (the EXACT text of the correct choice), and an "explanation" (1-2 sentences naming the misconception each wrong option encodes).
+Distractors must be plausible — each wrong option encodes a real misconception.
+
+Return JSON exactly in this shape:
+{
+  "blocks": [
+    {"type":"reading","title":"Reading 1 — <name>","content":"<markdown>"},
+    {"type":"quiz","title":"Quiz 1","questions":[{"prompt":"...","choices":["...","...","...","..."],"answer":"...","explanation":"..."},...3 total...]},
+    ...
+    {"type":"reading","title":"Reading 4 — <name>","content":"<markdown>"}
+  ]
+}`;
+
+    // Speed: Flash (not Pro) is plenty for structured-JSON lesson generation
+    // and runs ~2-3x faster. Reading + quiz quality is identical because
+    // the prompt does the heavy lifting. Pro is reserved for free-form
+    // tutoring where reasoning depth matters.
+    const result = await callGemini(sys, [{ role: 'user', content: prompt }], GEMINI_FLASH, 8192, { jsonMode: true, temperature: 0.6 });
+    if (!result.success) return res.status(500).json({ error: result.error || 'Lesson generation failed' });
+    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
+    if (!parsed || !Array.isArray(parsed.blocks) || parsed.blocks.length !== 7) {
+      console.error('Block parse failed. Got', parsed?.blocks?.length, 'blocks');
+      return res.status(500).json({ error: 'Lesson did not return 7 blocks. Try again.' });
+    }
+
+    const blocks = parsed.blocks.map((b, i) => {
+      // Block #5 (index 4) is the SRS reading — flag it.
+      const opts = i === 4 ? { srs: true } : {};
+      return stampBlock(lesson.id, b, i, opts);
+    });
+
+    lesson.blocks = blocks;
+    saveUsers(users);
+    res.json({ blocks });
+  } catch (e) {
+    console.error('blocks/generate failed:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Generate the final quiz lazily, after Q3 is graded. Pulls in the
+// concepts the student missed in Q1-Q3 so the final quiz is real
+// spaced repetition rather than a generic re-test.
+app.post('/api/curriculum/:id/lesson/:lessonId/blocks/final-quiz/generate', authMiddleware, async (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const curriculum = findUserCurriculum(users, email, req.params.id);
+    if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
+    const found = findLessonInCurriculum(curriculum, req.params.lessonId);
+    if (!found) return res.status(404).json({ error: 'Lesson not found' });
+    const { unit, lesson } = found;
+    if (!Array.isArray(lesson.blocks) || lesson.blocks.length < 7) {
+      return res.status(400).json({ error: 'Run blocks/generate first' });
+    }
+    if (lesson.blocks.length === 8) {
+      // already generated
+      return res.json({ block: lesson.blocks[7] });
+    }
+
+    const missed = collectMissedFromLesson(lesson);
+    const missedBlock = missed.length
+      ? `MISSED QUESTIONS FROM Q1-Q3 (use these as the spine of the final quiz — re-test the same concepts from a different angle, do NOT repeat the questions verbatim):\n${missed.map((m, i) => `  ${i + 1}. Prompt: ${m.prompt}\n     Student picked: ${m.userPicked}\n     Correct: ${m.correctAnswer}\n     Why it tripped them: ${m.explanation}`).join('\n')}`
+      : `(The student got every Q1-Q3 question right. Push harder: 5 application / synthesis questions that integrate readings 1-4.)`;
+
+    const sys = `You write the FINAL QUIZ for a lesson — a 5-question multiple-choice quiz that integrates the whole lesson. Output ONLY valid JSON.`;
+    const prompt = `Lesson: "${lesson.title}" (unit: "${unit.title}", course: "${curriculum.title}").
+Difficulty: ${curriculum.difficulty || 'intermediate'}.
+
+${missedBlock}
+
+Write 5 multiple-choice questions:
+- 3 of them must directly re-test the missed-concept areas from above (different angle, harder than the original question).
+- 2 of them must test synthesis — pulling ideas from at least 2 different readings together.
+
+Each question: a "prompt", 4 "choices" (no A) B) prefixes), an "answer" (the EXACT text of the correct choice), and an "explanation" (1-2 sentences naming the misconception each wrong option encodes).
+Distractors must be plausible — each wrong option encodes a real misconception.
+
+Return JSON exactly:
+{ "questions": [ ...5 total... ] }`;
+
+    // Flash for speed — same reasoning as the bulk block generator.
+    const result = await callGemini(sys, [{ role: 'user', content: prompt }], GEMINI_FLASH, 4096, { jsonMode: true, temperature: 0.6 });
+    if (!result.success) return res.status(500).json({ error: result.error || 'Final quiz generation failed' });
+    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
+    if (!parsed || !Array.isArray(parsed.questions) || parsed.questions.length === 0) {
+      return res.status(500).json({ error: 'Final quiz returned no questions. Try again.' });
+    }
+
+    const block = stampBlock(lesson.id, { type: 'quiz', title: 'Final Quiz', questions: parsed.questions }, 7, { isFinal: true });
+    lesson.blocks.push(block);
+    saveUsers(users);
+    res.json({ block });
+  } catch (e) {
+    console.error('blocks/final-quiz/generate failed:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/curriculum/:id/lesson/:lessonId/blocks/:bid/grade', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const curriculum = findUserCurriculum(users, email, req.params.id);
+    if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
+    const found = findLessonInCurriculum(curriculum, req.params.lessonId);
+    if (!found) return res.status(404).json({ error: 'Lesson not found' });
+    const block = (found.lesson.blocks || []).find(b => b.id === req.params.bid);
+    if (!block || block.type !== 'quiz') return res.status(404).json({ error: 'Quiz block not found' });
+
+    const responses = Array.isArray(req.body?.responses) ? req.body.responses : [];
+    const results = block.questions.map(q => {
+      const r = responses.find(x => x.qid === q.id);
+      const given = r?.given || '';
+      const correct = !!given && given.trim().toLowerCase() === String(q.answer || '').trim().toLowerCase();
+      return { qid: q.id, given, correct };
+    });
+    const correctCount = results.filter(r => r.correct).length;
+    const score = block.questions.length > 0 ? Math.round((correctCount / block.questions.length) * 100) : 0;
+
+    block.score = score;
+    block.responses = results;
+    block.completedAt = new Date().toISOString();
+    saveUsers(users);
+
+    res.json({ score, results });
+  } catch (e) {
+    console.error('blocks/grade failed:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/curriculum/:id/lesson/:lessonId/blocks/:bid/complete', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const curriculum = findUserCurriculum(users, email, req.params.id);
+    if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
+    const found = findLessonInCurriculum(curriculum, req.params.lessonId);
+    if (!found) return res.status(404).json({ error: 'Lesson not found' });
+    const block = (found.lesson.blocks || []).find(b => b.id === req.params.bid);
+    if (!block) return res.status(404).json({ error: 'Block not found' });
+
+    if (!block.completedAt) block.completedAt = new Date().toISOString();
+
+    const allDone = (found.lesson.blocks || []).length === 8 &&
+                    (found.lesson.blocks || []).every(b => b.completedAt);
+    if (allDone && !found.lesson.isCompleted) {
+      found.lesson.isCompleted = true;
+      const quizScores = (found.lesson.blocks || [])
+        .filter(b => b.type === 'quiz' && typeof b.score === 'number').map(b => b.score);
+      found.lesson.score = quizScores.length ? Math.round(quizScores.reduce((s, n) => s + n, 0) / quizScores.length) : null;
+    }
+    saveUsers(users);
+    res.json({ block, lesson: { isCompleted: !!found.lesson.isCompleted, score: found.lesson.score ?? null } });
+  } catch (e) {
+    console.error('blocks/complete failed:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// =========================================================
+// MIDTERMS / FINALS — course-level SRS exams
+//
+// `midterm`: built once half the lessons in the course are complete.
+// `final`:   built once all (or 90%+) lessons in the course are complete.
+//
+// Both pull the missed-question pool from EVERY graded quiz across
+// EVERY lesson and use it as the basis for the exam. Stored on the
+// curriculum at `curriculum.exams = { midterm: {...}, final: {...} }`.
+// =========================================================
+
+function collectMissedAcrossCurriculum(curriculum) {
+  const missed = [];
+  for (const unit of curriculum.units || []) {
+    for (const l of unit.lessons || []) {
+      for (const b of l.blocks || []) {
+        if (b.type !== 'quiz' || !Array.isArray(b.responses)) continue;
+        for (const r of b.responses) {
+          if (r.correct) continue;
+          const q = (b.questions || []).find(qq => qq.id === r.qid);
+          if (!q) continue;
+          missed.push({
+            unit: unit.title,
+            lesson: l.title,
+            prompt: q.prompt,
+            userPicked: r.given || '(no answer)',
+            correctAnswer: q.answer,
+            explanation: q.explanation || '',
+          });
+        }
+      }
+    }
+  }
+  return missed;
+}
+
+function curriculumLessonProgress(curriculum) {
+  let total = 0, done = 0;
+  for (const unit of curriculum.units || []) {
+    for (const l of unit.lessons || []) {
+      total++;
+      if (l.isCompleted) done++;
+    }
+  }
+  return { total, done, fraction: total > 0 ? done / total : 0 };
+}
+
+app.get('/api/curriculum/:id/exams', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const curriculum = findUserCurriculum(users, email, req.params.id);
+    if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
+    const exams = curriculum.exams || {};
+    const progress = curriculumLessonProgress(curriculum);
+    res.json({
+      progress,
+      midterm: exams.midterm || null,
+      final: exams.final || null,
+      midtermAvailable: progress.fraction >= 0.5,
+      finalAvailable: progress.fraction >= 0.9,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/curriculum/:id/exams/:kind/generate', authMiddleware, async (req, res) => {
+  try {
+    const kind = req.params.kind === 'final' ? 'final' : 'midterm';
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const curriculum = findUserCurriculum(users, email, req.params.id);
+    if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
+
+    if (!curriculum.exams) curriculum.exams = {};
+    if (curriculum.exams[kind]) {
+      // already generated; return as-is
+      return res.json({ exam: curriculum.exams[kind] });
+    }
+
+    const progress = curriculumLessonProgress(curriculum);
+    const minFraction = kind === 'final' ? 0.9 : 0.5;
+    if (progress.fraction < minFraction) {
+      return res.status(400).json({ error: `Need ${Math.ceil(minFraction * 100)}% of lessons complete to unlock the ${kind} (you're at ${Math.round(progress.fraction * 100)}%).` });
+    }
+
+    const missed = collectMissedAcrossCurriculum(curriculum);
+    const questionCount = kind === 'final' ? 20 : 12;
+
+    const missedBlock = missed.length
+      ? `MISSED QUESTION POOL (every wrong answer the student gave across the course — use these as the spine):\n${missed.slice(0, 30).map((m, i) => `  ${i + 1}. [${m.unit} / ${m.lesson}] Q: ${m.prompt}\n     Picked: ${m.userPicked}  Correct: ${m.correctAnswer}\n     Why: ${m.explanation}`).join('\n')}`
+      : `(The student got every quiz right so far. Push harder: write ${questionCount} application/synthesis questions integrating the whole course.)`;
+
+    const sys = `You write a ${kind === 'final' ? 'final exam' : 'midterm'} for a course. ${questionCount} multiple-choice questions, integrating concepts across the whole course. Output ONLY valid JSON — no markdown, no fences.`;
+    const prompt = `Course: "${curriculum.title}".
+${curriculum.description ? `Course description: ${curriculum.description}\n` : ''}Difficulty: ${curriculum.difficulty || 'intermediate'}.
+Units covered:
+${(curriculum.units || []).map((u, i) => `  ${i + 1}. ${u.title}${u.description ? ` — ${u.description}` : ''}`).join('\n')}
+
+${missedBlock}
+
+Write ${questionCount} multiple-choice questions for the ${kind}.
+- ${kind === 'final' ? '~70%' : '~60%'} should re-test the missed-concept areas above (DIFFERENT angle, harder than the original — never repeat verbatim).
+- The rest must test synthesis — pulling concepts from MULTIPLE units together.
+- ${kind === 'final' ? 'The final has 2-3 cumulative "boss" questions that demand application across 3+ units.' : 'The midterm leans on the FIRST half of the course material.'}
+
+Each question: a "prompt", 4 "choices" (no A) B) prefixes), an "answer" (EXACT text of the correct choice), and an "explanation" (1-2 sentences naming the misconception each wrong option encodes).
+
+Return JSON exactly:
+{ "questions": [ ...${questionCount} total... ] }`;
+
+    // Flash for speed — exams are 12-20 multiple-choice questions, no
+    // reasoning depth required beyond the prompt's instructions.
+    const result = await callGemini(sys, [{ role: 'user', content: prompt }], GEMINI_FLASH, 8192, { jsonMode: true, temperature: 0.6 });
+    if (!result.success) return res.status(500).json({ error: result.error || 'Exam generation failed' });
+    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
+    if (!parsed || !Array.isArray(parsed.questions) || parsed.questions.length === 0) {
+      return res.status(500).json({ error: 'Exam returned no questions. Try again.' });
+    }
+
+    const examId = `${curriculum.id}-${kind}`;
+    const exam = {
+      id: examId,
+      kind,
+      title: kind === 'final' ? 'Final Exam' : 'Midterm',
+      questions: parsed.questions.map((q, qi) => ({
+        id: `${examId}-q${qi}`,
+        prompt: String(q.prompt || ''),
+        choices: Array.isArray(q.choices) ? q.choices.map(String) : [],
+        answer: String(q.answer || ''),
+        explanation: String(q.explanation || ''),
+      })),
+      missedSourceCount: missed.length,
+      generatedAt: new Date().toISOString(),
+      score: null,
+      responses: null,
+      completedAt: null,
+    };
+    curriculum.exams[kind] = exam;
+    saveUsers(users);
+    res.json({ exam });
+  } catch (e) {
+    console.error('exams/generate failed:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/curriculum/:id/exams/:examId/grade', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const curriculum = findUserCurriculum(users, email, req.params.id);
+    if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
+
+    // examId might be `<cid>-midterm` or `<cid>-final` — locate accordingly.
+    const exams = curriculum.exams || {};
+    let exam = null, kind = null;
+    for (const k of ['midterm', 'final']) {
+      if (exams[k] && exams[k].id === req.params.examId) { exam = exams[k]; kind = k; break; }
+    }
+    if (!exam) return res.status(404).json({ error: 'Exam not found' });
+
+    const responses = Array.isArray(req.body?.responses) ? req.body.responses : [];
+    const results = exam.questions.map(q => {
+      const r = responses.find(x => x.qid === q.id);
+      const given = r?.given || '';
+      const correct = !!given && given.trim().toLowerCase() === String(q.answer || '').trim().toLowerCase();
+      return { qid: q.id, given, correct };
+    });
+    const correctCount = results.filter(r => r.correct).length;
+    const score = exam.questions.length > 0 ? Math.round((correctCount / exam.questions.length) * 100) : 0;
+    exam.score = score;
+    exam.responses = results;
+    exam.completedAt = new Date().toISOString();
+    saveUsers(users);
+    res.json({ score, results, kind });
+  } catch (e) {
+    console.error('exams/grade failed:', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ===== STUDY MODE =====
@@ -4436,9 +4916,6 @@ app.post('/api/social/groups/:id/send', authMiddleware, (req, res) => {
 const UPLOADS_DIR = join(DATA_DIR, 'uploads');
 if (!existsSync(UPLOADS_DIR)) mkdirSync(UPLOADS_DIR, { recursive: true });
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
-const TEXTBOOKS_FILE = join(DATA_DIR, 'textbooks.json');
-function loadTextbooks() { try { return JSON.parse(readFileSync(TEXTBOOKS_FILE, 'utf-8')); } catch { return {}; } }
-function saveTextbooks(data) { writeFileSync(TEXTBOOKS_FILE, JSON.stringify(data, null, 2)); }
 
 // =========================================================
 // FILE EXTRACT — generic endpoint the chat composer hits when the user
@@ -4477,6 +4954,82 @@ app.post('/api/files/extract', authMiddleware, upload.array('files', 5), async (
     }
     res.json({ files: out });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// =========================================================
+// SOURCE-MATERIAL URL EXTRACTOR
+//
+// Stateless companion to /api/files/extract — fetches a single URL,
+// strips HTML to plain text, returns it. Used by the New-Curriculum
+// "Add sources" panel so the user can drop in textbook PDFs AND web
+// pages alongside the topic, and the curriculum-generation prompt
+// gets to see all of them.
+// =========================================================
+function htmlToPlainText(html) {
+  if (!html) return '';
+  return html
+    // Drop entire <script> and <style> blocks (with content)
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<(noscript|template|svg)[\s\S]*?<\/\1>/gi, ' ')
+    // Convert block-ish tags to newlines BEFORE the tag-strip
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|h[1-6]|li|tr|section|article|header|footer)>/gi, '\n')
+    // Strip remaining tags
+    .replace(/<[^>]+>/g, ' ')
+    // Decode common HTML entities
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&[a-z0-9#]+;/gi, ' ')
+    // Normalize whitespace
+    .replace(/[ \t\f\v]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+app.post('/api/sources/extract-url', authMiddleware, async (req, res) => {
+  try {
+    const url = String(req.body?.url || '').trim();
+    if (!url) return res.status(400).json({ error: 'URL required' });
+    let parsed;
+    try { parsed = new URL(url); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
+    if (!/^https?:$/.test(parsed.protocol)) return res.status(400).json({ error: 'Only http/https URLs are supported' });
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    let html;
+    try {
+      const r = await fetch(parsed.href, {
+        signal: controller.signal,
+        redirect: 'follow',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; CovalentSources/1.0; +https://covalent.app)',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+      });
+      clearTimeout(timeout);
+      if (!r.ok) return res.status(400).json({ error: `Fetch failed (${r.status} ${r.statusText})` });
+      const ctype = r.headers.get('content-type') || '';
+      if (!/text\/(html|plain)|application\/(xhtml\+xml|xml)/i.test(ctype)) {
+        return res.status(400).json({ error: `Unsupported content type: ${ctype || 'unknown'}` });
+      }
+      html = await r.text();
+    } catch (e) {
+      clearTimeout(timeout);
+      return res.status(400).json({ error: `Could not fetch URL: ${e.message || 'unknown error'}` });
+    }
+
+    const titleMatch = html.match(/<title[^>]*>([^<]{1,200})<\/title>/i);
+    const title = (titleMatch?.[1] || parsed.hostname).trim().slice(0, 200);
+    const text = htmlToPlainText(html).slice(0, 25000);
+    if (!text || text.length < 50) {
+      return res.status(400).json({ error: 'Page had no readable text content' });
+    }
+    res.json({ url: parsed.href, title, kind: 'url', content: text, chars: text.length });
+  } catch (e) {
+    console.error('source extract-url failed:', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // =========================================================
@@ -4637,190 +5190,9 @@ Return JSON with this exact shape:
   }
 });
 
-// Upload + parse PDF
-app.post('/api/textbooks/upload', authMiddleware, upload.single('file'), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    const parsed = await pdfParse(req.file.buffer);
-    const text = parsed.text || '';
-    const pageCount = parsed.numpages || 0;
-    if (!text.trim()) return res.status(400).json({ error: 'Could not extract text from PDF' });
-
-    const id = crypto.randomUUID();
-    const textbooks = loadTextbooks();
-    if (!textbooks[req.userId]) textbooks[req.userId] = [];
-
-    // Store textbook (keep text for Q&A, truncate for storage if huge)
-    const maxChars = 200000;
-    const storedText = text.length > maxChars ? text.slice(0, maxChars) : text;
-
-    textbooks[req.userId].unshift({
-      id,
-      title: req.file.originalname.replace(/\.pdf$/i, ''),
-      fileName: req.file.originalname,
-      pageCount,
-      textLength: text.length,
-      text: storedText,
-      curriculum: null,
-      chatHistory: [],
-      uploadedAt: new Date().toISOString(),
-    });
-
-    // Keep only 20 textbooks per user
-    if (textbooks[req.userId].length > 20) textbooks[req.userId] = textbooks[req.userId].slice(0, 20);
-    saveTextbooks(textbooks);
-
-    res.json({ textbook: { id, title: req.file.originalname.replace(/\.pdf$/i, ''), pageCount, textLength: text.length } });
-  } catch (e) { console.error('Upload error:', e); res.status(500).json({ error: e.message }); }
-});
-
-// List textbooks
-app.get('/api/textbooks', authMiddleware, (req, res) => {
-  const textbooks = loadTextbooks();
-  const list = (textbooks[req.userId] || []).map(t => ({ id: t.id, title: t.title, pageCount: t.pageCount, hasCurriculum: !!t.curriculum, uploadedAt: t.uploadedAt }));
-  res.json({ textbooks: list });
-});
-
-// Get textbook detail
-app.get('/api/textbooks/:id', authMiddleware, (req, res) => {
-  const textbooks = loadTextbooks();
-  const book = (textbooks[req.userId] || []).find(t => t.id === req.params.id);
-  if (!book) return res.status(404).json({ error: 'Not found' });
-  res.json({ textbook: { ...book, text: undefined, textPreview: book.text?.slice(0, 500) } });
-});
-
-// Generate curriculum from textbook
-app.post('/api/textbooks/:id/generate-curriculum', authMiddleware, async (req, res) => {
-  try {
-    const textbooks = loadTextbooks();
-    const book = (textbooks[req.userId] || []).find(t => t.id === req.params.id);
-    if (!book) return res.status(404).json({ error: 'Not found' });
-
-    // Use first ~15000 chars of text for curriculum generation (fits in context)
-    const excerpt = book.text.slice(0, 15000);
-
-    const system = `You are an expert curriculum designer. Given textbook content, create a structured curriculum outline. Output ONLY valid JSON with no markdown formatting, no code fences.`;
-    const user = `Based on this textbook content, create a comprehensive curriculum:
-
-TEXTBOOK: "${book.title}"
-CONTENT EXCERPT:
-${excerpt}
-
-Create 4-8 units with 3-6 lessons each that cover the key topics from this textbook.
-
-Return this exact JSON structure:
-{
-  "title": "Course Title based on textbook",
-  "description": "1-2 sentence description",
-  "units": [
-    {
-      "title": "Unit Title",
-      "description": "Brief description",
-      "lessons": [
-        { "title": "Lesson Title", "description": "One-line summary" }
-      ]
-    }
-  ]
-}`;
-
-    const result = await callGemini(system, [{ role: 'user', content: user }], DEFAULT_MODEL, 4096, { jsonMode: true, temperature: 0.5 });
-    if (!result.success) return res.status(500).json({ error: result.error });
-
-    const text = result.data.content?.[0]?.text || '';
-    const parsed = parseAIJson(text);
-    if (!parsed) console.error('Curriculum-restructure parse failed. First 400 chars:', text.slice(0, 400));
-
-    if (!parsed?.units) return res.status(500).json({ error: 'Failed to parse curriculum' });
-
-    // Process like regular curriculum
-    const curriculumId = crypto.randomUUID();
-    parsed.id = curriculumId;
-    parsed.textbookId = book.id;
-    parsed.createdAt = new Date().toISOString();
-    parsed.units = (parsed.units || []).map((unit, ui) => ({
-      ...unit,
-      id: `${curriculumId}-u${ui}`,
-      locked: false,
-      lessons: [
-        ...(unit.lessons || []).map((lesson, li) => ({
-          ...lesson,
-          id: `${curriculumId}-u${ui}-l${li}`,
-          type: 'lesson',
-          chatHistory: [], phase: null, phaseData: {}, content: null, isCompleted: false, score: null,
-        })),
-        {
-          id: `${curriculumId}-u${ui}-test`,
-          title: `${unit.title} — Assessment`,
-          description: `Test your knowledge of ${unit.title}`,
-          type: 'unit_test',
-          chatHistory: [], phase: null, phaseData: {}, content: null, isCompleted: false, score: null,
-        },
-      ],
-    }));
-
-    book.curriculum = parsed;
-    saveTextbooks(textbooks);
-
-    // Also save to user's curricula
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (email) {
-      users[email].data = migrateUserData(users[email].data);
-      users[email].data.curricula.unshift(parsed);
-      saveUsers(users);
-    }
-
-    res.json({ curriculum: parsed });
-  } catch (e) { console.error('Curriculum gen error:', e); res.status(500).json({ error: e.message }); }
-});
-
-// Chat with textbook (Q&A)
-app.post('/api/textbooks/:id/chat', authMiddleware, async (req, res) => {
-  try {
-    const { message } = req.body;
-    if (!message) return res.status(400).json({ error: 'message required' });
-
-    const textbooks = loadTextbooks();
-    const book = (textbooks[req.userId] || []).find(t => t.id === req.params.id);
-    if (!book) return res.status(404).json({ error: 'Not found' });
-
-    book.chatHistory = book.chatHistory || [];
-    book.chatHistory.push({ role: 'user', content: message, timestamp: new Date().toISOString() });
-
-    // Use last 10 messages for context + textbook excerpt
-    const recentHistory = book.chatHistory.slice(-10).map(m => ({ role: m.role, content: m.content }));
-    const excerpt = book.text.slice(0, 12000);
-
-    const system = `You are a knowledgeable tutor helping a student understand their textbook. Answer questions based on the textbook content below. Use markdown for formatting. Be clear, educational, and reference specific concepts from the text.
-
-TEXTBOOK: "${book.title}"
-CONTENT:
-${excerpt}
-
-If the question is outside the textbook's scope, say so but still try to help.`;
-
-    const result = await callAnthropic(system, recentHistory, DEFAULT_MODEL, 2048);
-    if (!result.success) return res.status(500).json({ error: result.error });
-
-    const reply = result.data.content?.[0]?.text || 'I could not generate a response.';
-    book.chatHistory.push({ role: 'assistant', content: reply, timestamp: new Date().toISOString() });
-
-    if (book.chatHistory.length > 100) book.chatHistory = book.chatHistory.slice(-100);
-    saveTextbooks(textbooks);
-
-    res.json({ reply });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Delete textbook
-app.delete('/api/textbooks/:id', authMiddleware, (req, res) => {
-  const textbooks = loadTextbooks();
-  if (textbooks[req.userId]) {
-    textbooks[req.userId] = textbooks[req.userId].filter(t => t.id !== req.params.id);
-    saveTextbooks(textbooks);
-  }
-  res.json({ success: true });
-});
+// (Standalone Textbooks app removed. Curriculum source-material upload
+// — PDF + URL ingestion at /api/files/extract and /api/sources/extract-url
+// — replaces it for the "give me a course aligned to this PDF" flow.)
 
 // ===== ADMIN =====
 
@@ -4892,6 +5264,11 @@ app.get('/api/lessons', authMiddleware, (req, res) => {
         createdAt: l.createdAt,
         lastActiveAt: l.lastActiveAt,
         messageCount: (l.chatHistory || []).length,
+        // New block-mode fields for the list UI: how far the user got
+        // through the 8 blocks, and whether the lesson is even using
+        // the new format (older rows just have chatHistory).
+        blocksTotal: Array.isArray(l.blocks) ? l.blocks.length : 0,
+        blocksDone: Array.isArray(l.blocks) ? l.blocks.filter(b => b.completedAt).length : 0,
       }));
     res.json({ lessons });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -4985,12 +5362,212 @@ app.post('/api/lessons/:id/reset', authMiddleware, (req, res) => {
     const lesson = findLesson(users[email].data, req.params.id);
     if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
     lesson.chatHistory = [];
+    // Block-mode lessons: drop the cached blocks so the next view triggers
+    // a fresh generation from scratch.
+    lesson.blocks = [];
     lesson.isCompleted = false;
     lesson.completionData = null;
     lesson.lastActiveAt = Date.now();
     saveUsers(users);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// =========================================================
+// STANDALONE-LESSON BLOCKS — same Claudius 4R/4Q + final SRS
+// flow as curriculum lessons, but without a parent unit/course.
+// Mirrors POST /api/curriculum/:id/lesson/:lessonId/blocks/* but
+// operates on users[email].data.lessons[].
+// =========================================================
+
+app.post('/api/lessons/:id/blocks/generate', authMiddleware, async (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const lesson = findLesson(users[email].data, req.params.id);
+    if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
+
+    // Idempotent: return cached blocks if already generated.
+    if (Array.isArray(lesson.blocks) && lesson.blocks.length >= 7) {
+      return res.json({ blocks: lesson.blocks });
+    }
+
+    const sys = `You generate one complete lesson as 7 blocks: 4 readings interleaved with 3 mid-quizzes. Output ONLY valid JSON — no markdown, no fences, no commentary.`;
+    const prompt = `Build a standalone lesson on "${lesson.topic || lesson.title}".
+Difficulty: ${lesson.difficulty || 'beginner'}.
+
+EXACTLY 7 blocks in this order:
+  1. reading_1 — Core definition + framing of the topic. The simplest correct mental model.
+  2. quiz_1   — 3 multiple-choice questions on reading 1.
+  3. reading_2 — Mechanics. How it works, with a worked numeric / concrete example.
+  4. quiz_2   — 3 multiple-choice questions on reading 2.
+  5. reading_3 — SPACED-REPETITION review of readings 1 + 2. The student has now seen R1 and R2 — return to the trickiest concepts from BOTH readings, re-frame from a different angle, hit the most common misconceptions head-on, and add ONE bridging idea that ties them together. This is NOT a new sub-concept — it is intentional review designed to make R1 + R2 stick. 350-450 words.
+  6. quiz_3   — 3 multiple-choice questions that mix R1, R2, and R3 (i.e. drag Q1/Q2-style content back in alongside the R3 framing).
+  7. reading_4 — Synthesis + edge cases. Surface 1-2 lingering subtleties.
+
+Each reading: 350-500 words of markdown (## sub-heading + body, with **bold**, lists, fenced code where useful, math via $...$ or $$...$$ if it fits).
+Each quiz question: a "prompt" (string), 4 "choices" (strings, no A) B) prefixes — UI adds them), an "answer" (the EXACT text of the correct choice), and an "explanation" (1-2 sentences naming the misconception each wrong option encodes).
+Distractors must be plausible — each wrong option encodes a real misconception.
+
+Return JSON exactly in this shape:
+{
+  "blocks": [
+    {"type":"reading","title":"Reading 1 — <name>","content":"<markdown>"},
+    {"type":"quiz","title":"Quiz 1","questions":[{"prompt":"...","choices":["...","...","...","..."],"answer":"...","explanation":"..."},...3 total...]},
+    ...
+    {"type":"reading","title":"Reading 4 — <name>","content":"<markdown>"}
+  ]
+}`;
+
+    const result = await callGemini(sys, [{ role: 'user', content: prompt }], GEMINI_FLASH, 8192, { jsonMode: true, temperature: 0.6 });
+    if (!result.success) return res.status(500).json({ error: result.error || 'Lesson generation failed' });
+    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
+    if (!parsed || !Array.isArray(parsed.blocks) || parsed.blocks.length !== 7) {
+      console.error('lessons blocks/generate parse failed. Got', parsed?.blocks?.length, 'blocks');
+      return res.status(500).json({ error: 'Lesson did not return 7 blocks. Try again.' });
+    }
+
+    const blocks = parsed.blocks.map((b, i) => {
+      const opts = i === 4 ? { srs: true } : {};
+      return stampBlock(lesson.id, b, i, opts);
+    });
+
+    lesson.blocks = blocks;
+    lesson.lastActiveAt = Date.now();
+    saveUsers(users);
+    res.json({ blocks });
+  } catch (e) {
+    console.error('lessons blocks/generate failed:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/lessons/:id/blocks/final-quiz/generate', authMiddleware, async (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const lesson = findLesson(users[email].data, req.params.id);
+    if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
+    if (!Array.isArray(lesson.blocks) || lesson.blocks.length < 7) {
+      return res.status(400).json({ error: 'Run blocks/generate first' });
+    }
+    if (lesson.blocks.length === 8) return res.json({ block: lesson.blocks[7] });
+
+    const missed = collectMissedFromLesson(lesson);
+    const missedBlock = missed.length
+      ? `MISSED QUESTIONS FROM Q1-Q3 (use these as the spine of the final quiz — re-test the same concepts from a different angle, do NOT repeat the questions verbatim):\n${missed.map((m, i) => `  ${i + 1}. Prompt: ${m.prompt}\n     Student picked: ${m.userPicked}\n     Correct: ${m.correctAnswer}\n     Why it tripped them: ${m.explanation}`).join('\n')}`
+      : `(The student got every Q1-Q3 question right. Push harder: 5 application / synthesis questions that integrate readings 1-4.)`;
+
+    const sys = `You write the FINAL QUIZ for a lesson — a 5-question multiple-choice quiz that integrates the whole lesson. Output ONLY valid JSON.`;
+    const prompt = `Lesson: "${lesson.topic || lesson.title}".
+Difficulty: ${lesson.difficulty || 'beginner'}.
+
+${missedBlock}
+
+Write 5 multiple-choice questions:
+- 3 of them must directly re-test the missed-concept areas from above (different angle, harder than the original question).
+- 2 of them must test synthesis — pulling ideas from at least 2 different readings together.
+
+Each question: a "prompt", 4 "choices" (no A) B) prefixes), an "answer" (the EXACT text of the correct choice), and an "explanation" (1-2 sentences naming the misconception each wrong option encodes).
+Distractors must be plausible — each wrong option encodes a real misconception.
+
+Return JSON exactly:
+{ "questions": [ ...5 total... ] }`;
+
+    const result = await callGemini(sys, [{ role: 'user', content: prompt }], GEMINI_FLASH, 4096, { jsonMode: true, temperature: 0.6 });
+    if (!result.success) return res.status(500).json({ error: result.error || 'Final quiz generation failed' });
+    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
+    if (!parsed || !Array.isArray(parsed.questions) || parsed.questions.length === 0) {
+      return res.status(500).json({ error: 'Final quiz returned no questions. Try again.' });
+    }
+
+    const block = stampBlock(lesson.id, { type: 'quiz', title: 'Final Quiz', questions: parsed.questions }, 7, { isFinal: true });
+    lesson.blocks.push(block);
+    saveUsers(users);
+    res.json({ block });
+  } catch (e) {
+    console.error('lessons blocks/final-quiz/generate failed:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/lessons/:id/blocks/:bid/grade', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const lesson = findLesson(users[email].data, req.params.id);
+    if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
+    const block = (lesson.blocks || []).find(b => b.id === req.params.bid);
+    if (!block || block.type !== 'quiz') return res.status(404).json({ error: 'Quiz block not found' });
+
+    const responses = Array.isArray(req.body?.responses) ? req.body.responses : [];
+    const results = block.questions.map(q => {
+      const r = responses.find(x => x.qid === q.id);
+      const given = r?.given || '';
+      const correct = !!given && given.trim().toLowerCase() === String(q.answer || '').trim().toLowerCase();
+      return { qid: q.id, given, correct };
+    });
+    const correctCount = results.filter(r => r.correct).length;
+    const score = block.questions.length > 0 ? Math.round((correctCount / block.questions.length) * 100) : 0;
+
+    block.score = score;
+    block.responses = results;
+    block.completedAt = new Date().toISOString();
+    saveUsers(users);
+
+    res.json({ score, results });
+  } catch (e) {
+    console.error('lessons blocks/grade failed:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/lessons/:id/blocks/:bid/complete', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const lesson = findLesson(users[email].data, req.params.id);
+    if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
+    const block = (lesson.blocks || []).find(b => b.id === req.params.bid);
+    if (!block) return res.status(404).json({ error: 'Block not found' });
+
+    if (!block.completedAt) block.completedAt = new Date().toISOString();
+
+    // Lesson completion: all 8 blocks done. Awards XP just like the legacy
+    // chat-mode lesson did, so the user's profile / streak / level still
+    // tick over correctly.
+    const allDone = (lesson.blocks || []).length === 8 && (lesson.blocks || []).every(b => b.completedAt);
+    if (allDone && !lesson.isCompleted) {
+      lesson.isCompleted = true;
+      lesson.completedAt = new Date().toISOString();
+      const quizScores = (lesson.blocks || [])
+        .filter(b => b.type === 'quiz' && typeof b.score === 'number').map(b => b.score);
+      lesson.score = quizScores.length ? Math.round(quizScores.reduce((s, n) => s + n, 0) / quizScores.length) : null;
+      // Mirror the chat-mode XP grant. 20 XP base, optionally tiered by score.
+      ensureLessonCompletionFields(users[email].data);
+      const xp = 20;
+      users[email].data.profile.xp = (users[email].data.profile.xp || 0) + xp;
+      while (users[email].data.profile.xp >= users[email].data.profile.xpToNextLevel) {
+        users[email].data.profile.level++;
+        users[email].data.profile.xp -= users[email].data.profile.xpToNextLevel;
+        users[email].data.profile.xpToNextLevel = Math.floor(users[email].data.profile.xpToNextLevel * 1.5);
+      }
+      lesson.completionData = { xpEarned: xp, score: lesson.score };
+    }
+    saveUsers(users);
+    res.json({ block, lesson: { isCompleted: !!lesson.isCompleted, score: lesson.score ?? null, completionData: lesson.completionData || null } });
+  } catch (e) {
+    console.error('lessons blocks/complete failed:', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Chat (SSE) — free-form single-lesson teaching. No phases; AI decides when done via [LESSON_DONE].
@@ -5700,6 +6277,113 @@ app.get('/api/health', (req, res) => {
 //   - State is in-memory; matches expire 1h after last activity.
 // =========================================================
 const matches = new Map(); // matchId (code) -> state
+
+// =========================================================
+// QBReader integration — pull real, human-written pyramidal tossups
+// from qbreader.org's public /api/random-tossup endpoint. Used by:
+//   - Solo Quiz Bowl ("Past QB questions" mode in QuizBowlApp)
+//   - (Optionally) multiplayer match start, when host picks QBReader.
+// =========================================================
+const QBREADER_BASE = 'https://www.qbreader.org/api';
+// UI category → QBReader categories.
+const QB_CATEGORY_MAP = {
+  Science: ['Science'],
+  History: ['History'],
+  Literature: ['Literature'],
+  Geography: ['Geography'],
+  Math: ['Science'],          // QBReader files math under Science
+  Art: ['Fine Arts'],
+  Music: ['Fine Arts'],
+  Philosophy: ['Philosophy'],
+  'Pop Culture': ['Trash'],
+  Mixed: [],
+};
+// UI difficulty → numeric difficulties (QBReader uses 1-10).
+const QB_DIFFICULTY_MAP = {
+  Easy:       [2, 3],
+  Medium:     [3, 4, 5],
+  Hard:       [5, 6, 7],
+  Tournament: [7, 8, 9],
+};
+function qbStripHtml(s) {
+  return String(s || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+}
+function qbExtractCanonical(answerHtml) {
+  if (!answerHtml) return '';
+  const m = answerHtml.match(/<u>([\s\S]*?)<\/u>/i);
+  if (m) return qbStripHtml(m[1]);
+  return qbStripHtml(answerHtml).split(/\[|\s+or\s+|\s+\(/)[0].trim();
+}
+function qbExtractAllAnswers(answerHtml) {
+  if (!answerHtml) return [];
+  const out = [];
+  const re = /<u>([\s\S]*?)<\/u>/gi;
+  let m;
+  while ((m = re.exec(answerHtml)) !== null) {
+    const t = qbStripHtml(m[1]);
+    if (t && !out.includes(t)) out.push(t);
+  }
+  return out;
+}
+async function fetchQBReaderTossups({ count = 10, category = 'Mixed', difficulty = 'Medium' } = {}) {
+  const cats = QB_CATEGORY_MAP[category] || [];
+  const diffs = QB_DIFFICULTY_MAP[difficulty] || QB_DIFFICULTY_MAP.Medium;
+  const params = new URLSearchParams({
+    number: String(Math.max(1, Math.min(40, count))),
+    difficulties: diffs.join(','),
+  });
+  if (cats.length) params.set('categories', cats.join(','));
+  const url = `${QBREADER_BASE}/random-tossup?${params.toString()}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  let r;
+  try {
+    r = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'covalent-ai/1.0 (+https://covalent.app)' },
+    });
+  } finally { clearTimeout(timeout); }
+  if (!r.ok) throw new Error(`QBReader ${r.status} ${r.statusText}`);
+  const data = await r.json();
+  const tossups = (data?.tossups || []).map(t => {
+    const text = t.question_sanitized || qbStripHtml(t.question);
+    const canonical = qbExtractCanonical(t.answer);
+    const alternates = qbExtractAllAnswers(t.answer);
+    return {
+      text,
+      answer: canonical || qbStripHtml(t.answer_sanitized || t.answer || ''),
+      answerHtml: t.answer || '',
+      answerAlternates: alternates,
+      source: 'qbreader',
+      qbId: t._id,
+      category: t.category,
+      subcategory: t.subcategory,
+      qbDifficulty: t.difficulty,
+      setName: t.set?.name || '',
+      year: t.set?.year || '',
+      packet: t.packet?.name || '',
+    };
+  }).filter(q => q.text && q.answer);
+  if (!tossups.length) throw new Error('QBReader returned no usable tossups');
+  return tossups;
+}
+
+// GET /api/quizbowl/tossups — pull real tossups from QBReader by
+// category + difficulty + count. Used by solo Quiz Bowl. The match
+// flow (multiplayer) has its own AI generation path; this endpoint
+// is the "Past QB questions" alternative for solo + future multiplayer.
+app.get('/api/quizbowl/tossups', authMiddleware, async (req, res) => {
+  try {
+    const count = Math.max(1, Math.min(40, Number(req.query.count) || 10));
+    const category = String(req.query.category || 'Mixed');
+    const difficulty = String(req.query.difficulty || 'Medium');
+    const tossups = await fetchQBReaderTossups({ count, category, difficulty });
+    res.json({ tossups, source: 'qbreader' });
+  } catch (e) {
+    console.error('qbreader tossups failed:', e);
+    res.status(502).json({ error: e.message || 'Failed to fetch from QBReader' });
+  }
+});
 
 function newMatchCode() {
   // 6-char alphanumeric, uppercase for easy sharing. Collisions: retry.

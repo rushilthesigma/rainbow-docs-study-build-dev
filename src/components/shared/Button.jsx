@@ -1,4 +1,4 @@
-import { Loader2 } from 'lucide-react';
+import { InlineProgress } from '../shared/ProgressBar';
 
 const variants = {
   primary: 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm',
@@ -13,6 +13,9 @@ const sizes = {
   lg: 'px-5 py-2.5 text-base',
 };
 
+// Loading button — instead of a Loader2 spinner, the in-button state
+// shows a tiny progress pill (live percentage). Indeterminate by default;
+// set value={n} for a known percentage.
 export default function Button({ children, variant = 'primary', size = 'md', loading, disabled, className = '', ...props }) {
   return (
     <button
@@ -20,7 +23,7 @@ export default function Button({ children, variant = 'primary', size = 'md', loa
       disabled={disabled || loading}
       {...props}
     >
-      {loading && <Loader2 size={16} className="animate-spin" />}
+      {loading && <InlineProgress active />}
       {children}
     </button>
   );

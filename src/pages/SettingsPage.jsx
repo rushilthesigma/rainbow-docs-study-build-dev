@@ -40,34 +40,21 @@ function Dropdown({ label, value, options, onChange }) {
 }
 
 function InterfaceSection() {
+  // macOS is the only shell now — the Desktop Style picker is gone.
   const { wallpaper, setWallpaper, dockSize, setDockSize, iconStyle, setIconStyle } = useUIPreference();
-
   const wallpaperOpts = WALLPAPER_LIST.map(w => ({ value: w.id, label: w.label }));
   const dockOpts = [{ value: 'small', label: 'Small' }, { value: 'medium', label: 'Medium' }, { value: 'large', label: 'Large' }];
   const iconOpts = [{ value: 'gradient', label: 'Colorful' }, { value: 'mono', label: 'Monochrome' }, { value: 'glass', label: 'Glass' }, { value: 'accent', label: 'Accent Tint' }];
-  const styleOpts = [
-    { value: 'macos', label: 'macOS', desc: 'Dock + Menu Bar' },
-    { value: 'windows', label: 'Windows', desc: 'Taskbar + Start Menu' },
-    { value: 'chromeos', label: 'ChromeOS', desc: 'Centered Shelf' },
-    { value: 'linux', label: 'Linux (GNOME)', desc: 'Top Panel + Dash' },
-    { value: 'mobile', label: 'Mobile (Dev)', desc: 'Bottom tabs, touch UI' },
-  ];
-
   const isMobileScreen = typeof window !== 'undefined' && window.innerWidth < 768;
-  const currentStyle = (typeof window !== 'undefined' && localStorage.getItem('cov-desktop-style')) || 'macos';
-  // Dock Size / Icon Style only matter on macOS (it's the only shell using Dock.jsx with these controls)
-  const isMacos = currentStyle === 'macos';
 
   return (
     <div className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-6 space-y-5">
       <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wide">{isMobileScreen ? 'Appearance' : 'Desktop'}</h3>
-
       {!isMobileScreen && (
         <>
-          <Dropdown label="Desktop Style" value={currentStyle} options={styleOpts} onChange={v => { localStorage.setItem('cov-desktop-style', v); window.location.reload(); }} />
           <Dropdown label="Wallpaper" value={wallpaper} options={wallpaperOpts} onChange={setWallpaper} />
-          {isMacos && <Dropdown label="Dock Size" value={dockSize} options={dockOpts} onChange={setDockSize} />}
-          {isMacos && <Dropdown label="Icon Style" value={iconStyle} options={iconOpts} onChange={setIconStyle} />}
+          <Dropdown label="Dock Size" value={dockSize} options={dockOpts} onChange={setDockSize} />
+          <Dropdown label="Icon Style" value={iconStyle} options={iconOpts} onChange={setIconStyle} />
         </>
       )}
     </div>
@@ -229,9 +216,9 @@ export default function SettingsPage() {
               <div>
                 <PillGroup
                   options={[
-                    { value: 'pro',        label: 'Pro',        description: 'Gemini 3.1 Pro · smartest' },
-                    { value: 'flash',      label: 'Flash',      description: 'Gemini 3 Flash · faster' },
-                    { value: 'flash-lite', label: 'Flash Lite', description: 'Gemini 3 Flash Lite · fastest + cheapest' },
+                    { value: 'pro',        label: 'Pro',        description: 'Smartest · best on hard problems' },
+                    { value: 'flash',      label: 'Flash',      description: 'Faster · solid for most lessons' },
+                    { value: 'flash-lite', label: 'Flash Lite', description: 'Fastest + cheapest · light tasks' },
                   ]}
                   value={effectiveValue}
                   onChange={setTier}

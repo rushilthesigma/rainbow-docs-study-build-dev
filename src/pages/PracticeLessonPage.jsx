@@ -3,9 +3,13 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-react';
 import { getCurriculum } from '../api/curriculum';
 import { apiFetch } from '../api/client';
-import MathCanvas from '../components/math/MathCanvas';
+import MathTutorApp from '../components/desktop/apps/MathTutorApp';
 import LoadingSpinner from '../components/shared/LoadingSpinner';
 
+// Practice lessons used to mount a standalone MathCanvas. That component
+// was deleted — the canvas now lives inside MathTutorApp under the
+// `defaultMode="canvas"` flag (the user can flip to Both / Tutor from
+// the in-app mode toggle).
 export default function PracticeLessonPage() {
   const { id: curriculumId, lessonId } = useParams();
   const navigate = useNavigate();
@@ -44,6 +48,8 @@ export default function PracticeLessonPage() {
   if (loading) return <div className="flex items-center justify-center h-64"><LoadingSpinner size={28} /></div>;
   if (!currentLesson) return <div className="text-center py-20 text-gray-500">Lesson not found</div>;
 
+  const seedTopic = currentLesson.practiceTopic || currentUnit?.title || '';
+
   return (
     <div className="w-full flex flex-col flex-1 min-h-0">
       {/* Header */}
@@ -55,8 +61,6 @@ export default function PracticeLessonPage() {
           <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{currentLesson.title}</p>
           <p className="text-xs text-gray-400">{currentUnit?.title}</p>
         </div>
-
-        {/* Nav + complete */}
         <div className="flex items-center gap-1.5">
           {currentIndex > 0 && (
             <button onClick={() => navigate(`/curriculum/${curriculumId}/lesson/${allLessons[currentIndex - 1].id}`)} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
@@ -74,8 +78,14 @@ export default function PracticeLessonPage() {
         </div>
       </div>
 
-      {/* Math Canvas */}
-      <MathCanvas className="flex-1 min-h-0" topic={currentLesson.practiceTopic || currentUnit?.title || ''} />
+      {/* Math Tutor — canvas-first, but the user can flip to Tutor or Both. */}
+      <div className="flex-1 min-h-0">
+        <MathTutorApp
+          seedTopic={seedTopic}
+          defaultMode="canvas"
+          onBack={() => navigate(`/curriculum/${curriculumId}`)}
+        />
+      </div>
     </div>
   );
 }

@@ -17,6 +17,13 @@ export const answerMatch = (code, answer) => apiFetch(`/api/quizbowl/match/${cod
 export const nextMatchQuestion = (code) => apiFetch(`/api/quizbowl/match/${code}/next`, { method: 'POST' });
 export const leaveMatch = (code) => apiFetch(`/api/quizbowl/match/${code}/leave`, { method: 'POST' });
 
+// Solo "Past QB questions" mode — pulls real tossups from QBReader by
+// category + difficulty. Returns { tossups, source: 'qbreader' }.
+export const fetchQBReaderTossups = ({ count = 10, category = 'Mixed', difficulty = 'Medium' } = {}) => {
+  const params = new URLSearchParams({ count: String(count), category, difficulty });
+  return apiFetch(`/api/quizbowl/tossups?${params.toString()}`);
+};
+
 // Subscribe to an SSE stream of match events.
 // handlers: { onSnapshot, onPlayerJoined, onQuestionStart, onBuzz, onAnswerResult, onMatchEnd, onPlayerLeft, onError }
 export function streamMatch(code, handlers) {

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ArrowLeft, FileText, Plus, Trash2, Layout, Sparkles, Wand2, Loader2, BookOpen } from 'lucide-react';
+import { InlineProgress } from '../../shared/ProgressBar';
 import { listNotes, createNote, deleteNote, getNote, updateNote, generateCues, generateSummary } from '../../../api/notes';
 import { apiFetch } from '../../../api/client';
 import { listCurricula, getCurriculum } from '../../../api/curriculum';
@@ -369,7 +370,7 @@ export default function NotesApp() {
                   </div>
                   <div className="max-h-48 overflow-y-auto rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-gray-50 dark:bg-[#0D0D14] p-2">
                     {curriculumLoading ? (
-                      <div className="flex items-center justify-center py-6 text-xs text-gray-400"><Loader2 size={12} className="animate-spin mr-1.5" /> Loading lessons…</div>
+                      <div className="flex items-center justify-center py-6 text-xs text-gray-400"><InlineProgress active /> Loading lessons…</div>
                     ) : !curriculumDetail ? (
                       <p className="text-[11px] text-gray-400 italic p-2">Curriculum not found.</p>
                     ) : (
@@ -422,7 +423,7 @@ export default function NotesApp() {
               onClick={handleGenerate}
               disabled={aiBusy || (aiSource === 'curriculum' ? (!selectedCurriculumId || selectedLessonIds.length === 0) : !aiPrompt.trim())}
             >
-              {aiBusy ? <><Loader2 size={14} className="animate-spin" /> Generating…</> : <><Wand2 size={14} /> Generate</>}
+              {aiBusy ? <><InlineProgress active /> Generating…</> : <><Wand2 size={14} /> Generate</>}
             </Button>
           </div>
         </div>

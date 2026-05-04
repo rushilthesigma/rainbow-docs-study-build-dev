@@ -7,6 +7,7 @@ import Input from '../components/shared/Input';
 import ProgressBar from '../components/curriculum/ProgressBar';
 import LoadingSpinner from '../components/shared/LoadingSpinner';
 import Modal from '../components/shared/Modal';
+import { InlineProgress } from '../components/shared/ProgressBar';
 
 export default function GoalsPage() {
   const [goals, setGoals] = useState([]);
@@ -121,7 +122,7 @@ export default function GoalsPage() {
           <div className="flex gap-2 justify-end">
             <Button size="sm" variant="ghost" onClick={() => { setShowAI(false); setAiError(null); }}>Cancel</Button>
             <Button size="sm" onClick={handleAIGenerate} disabled={!aiPrompt.trim() || aiBusy}>
-              {aiBusy ? <><Loader2 size={14} className="animate-spin" /> Generating…</> : <><Wand2 size={14} /> Generate</>}
+              {aiBusy ? <><InlineProgress active /> Generating…</> : <><Wand2 size={14} /> Generate</>}
             </Button>
           </div>
         </div>

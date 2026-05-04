@@ -1,17 +1,15 @@
 import { useState } from 'react';
-import { BookOpen, ChevronRight, Moon, Sun, Monitor, ArrowRight } from 'lucide-react';
+import { BookOpen, ChevronRight, Moon, Sun, ArrowRight } from 'lucide-react';
 
-// Fast pre-OS setup — 3 steps, ~30 seconds. The CURRICULUM tutorial is
+// Fast pre-OS setup — 2 steps, ~15 seconds. The CURRICULUM tutorial is
 // NOT here; it's the GuidedTour overlay that runs after the desktop
-// loads, anchored to real UI elements (Curricula dock icon, PAUSD Catalog
-// button, etc.). This modal just handles the quick choices that need to
-// happen before the desktop renders.
-const TOTAL_STEPS = 3;
+// loads. This modal just handles theme + tour-offer before the desktop
+// renders. macOS is the only shell now — no more Desktop Style step.
+const TOTAL_STEPS = 2;
 
 export default function Onboarding({ onComplete }) {
   const [step, setStep] = useState(0);
   const [dark, setDark] = useState(true);
-  const [desktopStyle, setDesktopStyle] = useState('macos');
 
   function pickDark() {
     setDark(true);
@@ -25,12 +23,8 @@ export default function Onboarding({ onComplete }) {
   }
 
   function finish(takeTour) {
-    localStorage.setItem('cov-desktop-style', desktopStyle);
     localStorage.setItem('covalent-onboarded', 'true');
-    if (takeTour) {
-      // Picked up by GuidedTour on first desktop render.
-      localStorage.setItem('cov-tour-step', '0');
-    }
+    if (takeTour) localStorage.setItem('cov-tour-step', '0');
     onComplete();
   }
 
@@ -47,8 +41,7 @@ export default function Onboarding({ onComplete }) {
   return (
     <div className="fixed inset-0 z-[3000] flex items-center justify-center transition-colors duration-300" style={{ background: bg }}>
       <div className="w-full max-w-md px-6">
-
-        {/* STEP 0 — Welcome + theme combined */}
+        {/* STEP 0 — Welcome + theme */}
         {step === 0 && (
           <div className="text-center">
             <div className="w-16 h-16 rounded-2xl bg-blue-600 flex items-center justify-center mx-auto mb-5 shadow-xl shadow-blue-500/20">
@@ -78,33 +71,8 @@ export default function Onboarding({ onComplete }) {
           </div>
         )}
 
-        {/* STEP 1 — Desktop style */}
+        {/* STEP 1 — Ready, with tour offer */}
         {step === 1 && (
-          <div className="text-center">
-            <h2 className={`text-xl font-bold ${textPrimary} mb-1.5`}>Pick a desktop</h2>
-            <p className={`${textMuted} text-xs mb-6`}>Changes the chrome around your apps. Switch later in Settings.</p>
-            <div className="grid grid-cols-2 gap-2.5 mb-6">
-              {[
-                { id: 'macos', label: 'macOS', desc: 'Dock + Menu Bar' },
-                { id: 'windows', label: 'Windows', desc: 'Taskbar + Start' },
-                { id: 'chromeos', label: 'ChromeOS', desc: 'Centered Shelf' },
-                { id: 'linux', label: 'Linux', desc: 'GNOME Panel' },
-              ].map(os => (
-                <button key={os.id} onClick={() => setDesktopStyle(os.id)} className={`rounded-xl p-3 border-2 transition-all text-left ${desktopStyle === os.id ? borderActive : borderInactive}`}>
-                  <Monitor size={16} className={desktopStyle === os.id ? 'text-blue-500 mb-1.5' : `${dark ? 'text-white/40' : 'text-gray-400'} mb-1.5`} />
-                  <p className={`text-[13px] font-semibold ${textPrimary}`}>{os.label}</p>
-                  <p className={`text-[10px] ${textMuted}`}>{os.desc}</p>
-                </button>
-              ))}
-            </div>
-            <button onClick={() => setStep(2)} className={`px-7 py-2.5 rounded-xl ${btnBg} font-medium text-sm transition-colors inline-flex items-center gap-1.5`}>
-              Continue <ChevronRight size={15} />
-            </button>
-          </div>
-        )}
-
-        {/* STEP 2 — Ready, with tour offer */}
-        {step === 2 && (
           <div className="text-center">
             <div className="w-16 h-16 rounded-2xl bg-emerald-500/15 flex items-center justify-center mx-auto mb-5">
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-500"><polyline points="20 6 9 17 4 12"/></svg>
@@ -115,16 +83,10 @@ export default function Onboarding({ onComplete }) {
             </p>
             <p className={`${textMuted} text-xs mb-6`}>You can replay it anytime from Settings.</p>
             <div className="flex items-center justify-center gap-2">
-              <button
-                onClick={() => finish(false)}
-                className={`px-4 py-2.5 rounded-xl border ${dark ? 'border-white/15 text-white/70 hover:bg-white/5' : 'border-gray-200 text-gray-600 hover:bg-gray-50'} text-sm transition-colors`}
-              >
+              <button onClick={() => finish(false)} className={`px-4 py-2.5 rounded-xl border ${dark ? 'border-white/15 text-white/70 hover:bg-white/5' : 'border-gray-200 text-gray-600 hover:bg-gray-50'} text-sm transition-colors`}>
                 Skip
               </button>
-              <button
-                onClick={() => finish(true)}
-                className={`px-6 py-2.5 rounded-xl ${btnBg} font-medium text-sm transition-colors inline-flex items-center gap-1.5`}
-              >
+              <button onClick={() => finish(true)} className={`px-6 py-2.5 rounded-xl ${btnBg} font-medium text-sm transition-colors inline-flex items-center gap-1.5`}>
                 Show me around <ArrowRight size={14} />
               </button>
             </div>
@@ -137,11 +99,9 @@ export default function Onboarding({ onComplete }) {
             <div
               key={i}
               className={`h-1 rounded-full transition-all ${
-                step === i
-                  ? `w-5 ${dark ? 'bg-white' : 'bg-gray-900'}`
-                  : i < step
-                    ? `w-1 ${dark ? 'bg-white/40' : 'bg-gray-500'}`
-                    : `w-1 ${dark ? 'bg-white/15' : 'bg-gray-300'}`
+                step === i ? `w-5 ${dark ? 'bg-white' : 'bg-gray-900'}` :
+                i < step ? `w-1 ${dark ? 'bg-white/40' : 'bg-gray-500'}` :
+                `w-1 ${dark ? 'bg-white/15' : 'bg-gray-300'}`
               }`}
             />
           ))}

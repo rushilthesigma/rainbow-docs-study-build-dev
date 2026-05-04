@@ -9,6 +9,7 @@ import { DemoModeProvider } from '../../context/DemoModeContext';
 import { setToken } from '../../api/client';
 import { devLogin } from '../../api/auth';
 import AppWindow from '../desktop/AppWindow';
+import { InlineProgress } from '../shared/ProgressBar';
 
 // =========================================================
 // LIVE mini OS for the landing page.
@@ -198,7 +199,7 @@ function DemoBootGate({ children }) {
         if (loading || !user) {
           return (
             <div className="h-full flex items-center justify-center gap-2 text-[12px] text-gray-400">
-              <Loader2 size={14} className="animate-spin" /> Spinning up a demo session…
+              <InlineProgress active /> Spinning up a demo session…
             </div>
           );
         }

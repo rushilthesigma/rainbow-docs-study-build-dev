@@ -138,8 +138,9 @@ function buildProfileContext(profile = {}, assessmentHistory = []) {
 
 // ===== CURRICULUM GENERATION =====
 
-export function buildCurriculumPrompt(settings) {
-  const system = `You are an expert curriculum designer creating rigorous, structured course outlines for a serious student. The output is a real syllabus, not a summary.
+export function buildCurriculumPrompt(settings, sources = []) {
+  const hasSources = Array.isArray(sources) && sources.length > 0;
+  const system = `You are an expert curriculum designer creating rigorous, structured course outlines for a serious student. The output is a real syllabus, not a summary.${hasSources ? '\n\nThe student has attached SOURCE MATERIAL (textbooks, web pages). When source material is provided, the curriculum MUST be aligned to it: unit titles, lesson titles, and the sequencing should follow the structure of the sources. Use the sources\' vocabulary and notation. Do not pull in topics that are NOT covered by the sources.' : ''}
 
 Bias HARD toward depth and difficulty over breadth-without-substance:
 - Each unit should be a real chapter's worth of work, not a one-line topic. A unit covers one major idea, broken into sub-skills.
@@ -151,7 +152,13 @@ Bias HARD toward depth and difficulty over breadth-without-substance:
 
 Output ONLY valid JSON with no markdown formatting, no code fences, no explanation. Just the raw JSON object.`;
 
-  const user = `Create a comprehensive, rigorous curriculum outline for: "${settings.topic}"
+  // Source material block — injected into the user prompt when the
+  // student attached textbooks / URLs to the New Curriculum form.
+  const sourcesBlock = hasSources
+    ? `\n\nSOURCE MATERIAL (the student attached these — base the curriculum on them):\n${sources.map((s, i) => `\n[${i + 1}] ${s.title}${s.url ? ` (${s.url})` : ''} — ${s.kind}\n"""\n${(s.content || '').slice(0, 12000)}\n"""`).join('\n')}\n\nIMPORTANT: The curriculum's units and lessons must align to the source material above. Don't invent topics the sources don't cover; do call out terminology and key examples from the sources directly.`
+    : '';
+
+  const user = `Create a comprehensive, rigorous curriculum outline for: "${settings.topic}"${sourcesBlock}
 
 Requirements:
 - Difficulty level: ${settings.difficulty} (treat this as the FLOOR — design slightly above it).

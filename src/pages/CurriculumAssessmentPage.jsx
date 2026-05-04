@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2, Check, X, RotateCcw } from 'lucide-react';
+import { InlineProgress } from '../components/shared/ProgressBar';
 import { getCurriculum } from '../api/curriculum';
 import { generateAssessment, gradeAssessment } from '../api/assessments';
 import { apiFetch } from '../api/client';
@@ -96,7 +97,7 @@ export default function CurriculumAssessmentPage() {
     return (
       <div className="flex flex-col items-center justify-center py-20">
         <div className="w-16 h-16 rounded-2xl bg-rose-100 dark:bg-rose-900/20 flex items-center justify-center mb-4">
-          <Loader2 size={28} className="animate-spin text-rose-500" />
+          <InlineProgress active />
         </div>
         <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Generating Assessment</h2>
         <p className="text-sm text-gray-500">{currentUnit?.title || 'Unit'} — {curriculum?.settings?.difficulty || 'beginner'}</p>
@@ -234,7 +235,7 @@ export default function CurriculumAssessmentPage() {
             disabled={!allAnswered || grading}
             className="flex items-center gap-2 px-5 py-2 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
           >
-            {grading ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+            {grading ? <InlineProgress active /> : <Check size={14} />}
             Submit
           </button>
         )}

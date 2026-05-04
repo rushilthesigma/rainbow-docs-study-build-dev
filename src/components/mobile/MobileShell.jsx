@@ -7,7 +7,6 @@ import MoreSheet from './MoreSheet';
 import CurriculaApp from '../desktop/apps/CurriculaApp';
 import NotesApp from '../desktop/apps/NotesApp';
 import SocialApp from '../desktop/apps/SocialApp';
-import TextbookApp from '../desktop/apps/TextbookApp';
 import StudyPage from '../../pages/StudyPage';
 import AssessmentsPage from '../../pages/AssessmentsPage';
 import MathPracticePage from '../../pages/MathPracticePage';
@@ -20,7 +19,6 @@ const PAGE_MAP = {
   assessments: { title: 'Assessments', component: AssessmentsPage },
   math: { title: 'Math Canvas', component: MathPracticePage, flex: true },
   social: { title: 'Social', component: SocialApp, flex: true },
-  textbook: { title: 'Textbooks', component: TextbookApp },
   settings: { title: 'Settings', component: SettingsPage },
 };
 

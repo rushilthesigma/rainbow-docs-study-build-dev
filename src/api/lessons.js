@@ -4,6 +4,26 @@ export async function listLessons() {
   return apiFetch('/api/lessons');
 }
 
+// ===== STANDALONE LESSON BLOCKS (Claudius 4R/4Q + final SRS) =====
+// Mirrors the curriculum-side block API but for the standalone Lessons
+// app — no parent curriculum/unit. Server endpoints live on
+// /api/lessons/:id/blocks/*.
+export async function generateLessonBlocks(lessonId) {
+  return apiFetch(`/api/lessons/${lessonId}/blocks/generate`, { method: 'POST' });
+}
+export async function generateLessonFinalQuiz(lessonId) {
+  return apiFetch(`/api/lessons/${lessonId}/blocks/final-quiz/generate`, { method: 'POST' });
+}
+export async function gradeLessonBlock(lessonId, blockId, responses) {
+  return apiFetch(`/api/lessons/${lessonId}/blocks/${blockId}/grade`, {
+    method: 'POST',
+    body: JSON.stringify({ responses }),
+  });
+}
+export async function completeLessonBlock(lessonId, blockId) {
+  return apiFetch(`/api/lessons/${lessonId}/blocks/${blockId}/complete`, { method: 'POST' });
+}
+
 export async function createLesson(topic, difficulty) {
   return apiFetch('/api/lessons', {
     method: 'POST',

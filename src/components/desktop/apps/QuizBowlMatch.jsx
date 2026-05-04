@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Zap, Users, Copy, Loader2, Check, X, Trophy, Play, LogOut } from 'lucide-react';
+import ProgressBar, { InlineProgress } from '../../shared/ProgressBar';
 import {
   createMatch, joinMatch, startMatch, buzzMatch, answerMatch, nextMatchQuestion,
   leaveMatch, streamMatch,
@@ -262,7 +263,7 @@ export default function QuizBowlMatch({ user, onExit }) {
 
           {/* Create is now instant — you get an invite code first, settings later. */}
           <button onClick={handleCreate} disabled={busy} className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold disabled:opacity-50 inline-flex items-center justify-center gap-2">
-            {busy ? <><Loader2 size={14} className="animate-spin" /> Creating…</> : <><Play size={14} /> Create invite code</>}
+            {busy ? <><InlineProgress active /> Creating…</> : <><Play size={14} /> Create invite code</>}
           </button>
 
           <div className="flex items-center gap-3">
@@ -334,7 +335,7 @@ export default function QuizBowlMatch({ user, onExit }) {
             ))}
             {waiting && (
               <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-gray-300 dark:border-gray-600 text-xs text-gray-400 italic">
-                <Loader2 size={12} className="animate-spin" /> Waiting for player 2…
+                <InlineProgress active /> Waiting for player 2…
               </div>
             )}
           </div>
@@ -384,14 +385,15 @@ export default function QuizBowlMatch({ user, onExit }) {
   // ============ GENERATING ============
   if (view === 'generating') {
     return (
-      <div className="h-full flex flex-col items-center justify-center p-6 text-center bg-white dark:bg-[#161622]">
-        <div className="w-14 h-14 rounded-2xl bg-amber-500/10 flex items-center justify-center mb-4">
-          <Loader2 size={26} className="animate-spin text-amber-500" />
+      <div className="h-full flex flex-col items-center justify-center p-6 bg-white dark:bg-[#161622]">
+        <div className="w-full max-w-sm">
+          <ProgressBar
+            active
+            label="Generating questions"
+            hint={`${(match?.questionCount || questionCount)} ${match?.category || category} · ${match?.difficulty || difficulty}`}
+            duration={15000}
+          />
         </div>
-        <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-1">Generating questions…</h2>
-        <p className="text-xs text-gray-500 dark:text-gray-400">
-          {(match?.questionCount || questionCount)} {match?.category || category} · {match?.difficulty || difficulty}
-        </p>
       </div>
     );
   }
@@ -448,7 +450,7 @@ export default function QuizBowlMatch({ user, onExit }) {
     );
   }
 
-  return <div className="h-full flex items-center justify-center text-sm text-gray-400 bg-white dark:bg-[#161622]"><Loader2 size={14} className="animate-spin inline mr-1" /> Loading…</div>;
+  return <div className="h-full flex items-center justify-center text-sm text-gray-400 bg-white dark:bg-[#161622]"><InlineProgress active /> Loading…</div>;
 }
 
 // ===== PLAYING VIEW =====
@@ -462,7 +464,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
   // Question can briefly be null after the snapshot/before question_start —
   // render a neutral placeholder instead of crashing on `match.players`.
   if (!match || !Array.isArray(match.players)) {
-    return <div className="p-5 text-center text-sm text-gray-400 bg-white dark:bg-[#0D0D14] h-full"><Loader2 size={14} className="animate-spin inline mr-1" /> Loading match…</div>;
+    return <div className="p-5 text-center text-sm text-gray-400 bg-white dark:bg-[#0D0D14] h-full"><InlineProgress active /> Loading match…</div>;
   }
 
   const players = match.players || [];
@@ -535,7 +537,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
 
         {buzz && !answerResult && !iBuzzed && (
           <div className="w-full py-3 rounded-xl bg-gray-100 dark:bg-[#1e1e2e] text-center text-xs text-gray-500">
-            <Loader2 size={12} className="animate-spin inline mr-1" /> {buzzerName} is answering…
+            <InlineProgress active /> {buzzerName} is answering…
           </div>
         )}
 

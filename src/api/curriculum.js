@@ -1,10 +1,42 @@
 import { apiFetch, getToken } from './client';
 
-export async function generateCurriculum(settings) {
+// `sources` is an optional array of { title, kind, content, url? }.
+// Each entry is already-extracted plain text (PDFs/text files via
+// extractFiles, URLs via extractSourceUrl). The server caps total
+// injection size, so callers don't need to pre-trim aggressively.
+export async function generateCurriculum(settings, sources = []) {
   return apiFetch('/api/curriculum/generate', {
     method: 'POST',
-    body: JSON.stringify({ settings }),
+    body: JSON.stringify({ settings, sources }),
   });
+}
+
+// Pull plain text out of a public web URL (server-side fetch — bypasses
+// CORS). Returns { url, title, kind:'url', content, chars }.
+export async function extractSourceUrl(url) {
+  return apiFetch('/api/sources/extract-url', {
+    method: 'POST',
+    body: JSON.stringify({ url }),
+  });
+}
+
+// Pull plain text out of one or more uploaded files (PDF / text).
+// Returns { files: [{ name, kind, text, error? }] }. Multipart, so
+// it skips apiFetch's JSON-only path.
+export async function extractFiles(files) {
+  const token = getToken();
+  const form = new FormData();
+  for (const f of files) form.append('files', f, f.name);
+  const res = await fetch('/api/files/extract', {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Extract failed: ${res.status}`);
+  }
+  return res.json();
 }
 
 export async function listCurricula() {
@@ -54,6 +86,50 @@ export async function toggleLessonComplete(curriculumId, lessonId) {
 
 export async function getStreak() {
   return apiFetch('/api/study/streak');
+}
+
+// ===== STRUCTURED LESSON BLOCKS (4 readings + 4 quizzes, no chat) =====
+export async function generateLessonBlocks(curriculumId, lessonId) {
+  return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/blocks/generate`, {
+    method: 'POST',
+  });
+}
+
+export async function generateFinalQuiz(curriculumId, lessonId) {
+  return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/blocks/final-quiz/generate`, {
+    method: 'POST',
+  });
+}
+
+export async function gradeQuizBlock(curriculumId, lessonId, blockId, responses) {
+  return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/blocks/${blockId}/grade`, {
+    method: 'POST',
+    body: JSON.stringify({ responses }),
+  });
+}
+
+export async function completeLessonBlock(curriculumId, lessonId, blockId) {
+  return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/blocks/${blockId}/complete`, {
+    method: 'POST',
+  });
+}
+
+// ===== MIDTERMS / FINALS (course-level SRS exams) =====
+export async function getCurriculumExams(curriculumId) {
+  return apiFetch(`/api/curriculum/${curriculumId}/exams`);
+}
+
+export async function generateCurriculumExam(curriculumId, kind /* 'midterm' | 'final' */) {
+  return apiFetch(`/api/curriculum/${curriculumId}/exams/${kind}/generate`, {
+    method: 'POST',
+  });
+}
+
+export async function gradeCurriculumExam(curriculumId, examId, responses) {
+  return apiFetch(`/api/curriculum/${curriculumId}/exams/${examId}/grade`, {
+    method: 'POST',
+    body: JSON.stringify({ responses }),
+  });
 }
 
 export async function getLessonHistory(curriculumId, lessonId) {

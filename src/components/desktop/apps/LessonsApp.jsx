@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, Plus, Lightbulb, Loader2, Trash2, RotateCcw, Trophy, CheckCircle2, Circle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { ArrowLeft, Plus, Lightbulb, Trash2, CheckCircle2, Circle } from 'lucide-react';
+import ProgressBar from '../../shared/ProgressBar';
 import {
-  listLessons, createLesson, getLessonHistory, sendLessonMessage,
-  resetLesson, deleteLesson,
+  listLessons, createLesson, deleteLesson,
+  generateLessonBlocks, generateLessonFinalQuiz,
+  gradeLessonBlock, completeLessonBlock,
 } from '../../../api/lessons';
 import { consumePendingLesson } from '../../../utils/pendingLesson';
-import { errorChatMessage } from '../../../utils/aiErrors';
 import useBrowserBack from '../../../hooks/useBrowserBack';
 import { DIFFICULTY_OPTIONS } from '../../../utils/constants';
 import Button from '../../shared/Button';
@@ -13,7 +14,7 @@ import Input from '../../shared/Input';
 import PillGroup from '../../shared/PillGroup';
 import LoadingSpinner from '../../shared/LoadingSpinner';
 import TopicSuggestions from '../../shared/TopicSuggestions';
-import ChatContainer from '../../chat/ChatContainer';
+import BlockLessonView from '../../lesson/BlockLessonView';
 
 export default function LessonsApp() {
   const [view, setView] = useState('list'); // list | new | lesson
@@ -29,21 +30,11 @@ export default function LessonsApp() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState(null);
 
-  // Active lesson
+  // Active lesson — drives the BlockLessonView. `resetKey` forces the
+  // view to remount when the user hits Reset (so the cleared blocks
+  // trigger fresh generation).
   const [activeLesson, setActiveLesson] = useState(null);
-  const [messages, setMessages] = useState([]);
-  const [streamingContent, setStreamingContent] = useState('');
-  const [streamingSources, setStreamingSources] = useState([]);
-  const [searchStatus, setSearchStatus] = useState(null);
-  // Source mode toggle persists across a single lesson session.
-  const [sourceMode, setSourceMode] = useState(false);
-  const [streaming, setStreaming] = useState(false);
-  const [completed, setCompleted] = useState(false);
-  const [completionData, setCompletionData] = useState(null);
-  const streamRef = useRef('');
-  const streamSourcesRef = useRef([]);
-  const abortRef = useRef(null);
-  const autoStartedRef = useRef(false);
+  const [resetKey, setResetKey] = useState(0);
 
   useEffect(() => {
     listLessons()
@@ -119,98 +110,12 @@ export default function LessonsApp() {
   }
 
   async function openLesson(lesson) {
+    // Reset key forces BlockLessonView to remount whenever a different
+    // lesson is opened, so cached blocks/state from the prior lesson
+    // don't bleed in.
     setActiveLesson(lesson);
+    setResetKey(k => k + 1);
     setView('lesson');
-    setMessages([]);
-    setCompleted(!!lesson.isCompleted);
-    setCompletionData(null);
-    setSourceMode(false);
-    autoStartedRef.current = false;
-
-    try {
-      const hist = await getLessonHistory(lesson.id);
-      setMessages(hist.chatHistory || []);
-      setCompleted(!!hist.isCompleted);
-      if (hist.completionData) setCompletionData(hist.completionData);
-
-      // Fresh lesson → auto-fire the FIRST teaching message WITH source
-      // mode on, so the opening always has citations. After that, the
-      // source-mode toggle at the bottom controls subsequent messages.
-      if (!hist.chatHistory?.length && !hist.isCompleted && !autoStartedRef.current) {
-        autoStartedRef.current = true;
-        setTimeout(() => doSend(`Teach me about "${lesson.topic}".`, lesson.id, { sourced: true }), 150);
-      }
-    } catch {}
-  }
-
-  function doSend(text, lessonId, opts = {}) {
-    const id = lessonId || activeLesson?.id;
-    if (!id) return;
-    const wasSourced = !!(opts.sourced ?? sourceMode);
-    const images = opts.images || [];
-    const userMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
-    if (images.length) userMsg.images = images.map(i => ({ dataUrl: i.dataUrl, name: i.name }));
-    setMessages(prev => [...prev, userMsg]);
-    setStreaming(true);
-    setStreamingContent('');
-    setStreamingSources([]);
-    setSearchStatus(wasSourced ? 'searching' : null);
-    streamRef.current = '';
-    streamSourcesRef.current = [];
-
-    const abort = sendLessonMessage(id, text, images, {
-      onChunk: (c) => { streamRef.current += c; setStreamingContent(streamRef.current); if (searchStatus) setSearchStatus(null); },
-      onSource: (src) => {
-        streamSourcesRef.current = [...streamSourcesRef.current, src];
-        setStreamingSources(streamSourcesRef.current);
-      },
-      onStatus: (s) => setSearchStatus(s),
-      onDone: () => {
-        const full = streamRef.current;
-        const sources = streamSourcesRef.current;
-        if (full) {
-          const aiMsg = { role: 'assistant', content: full, timestamp: new Date().toISOString() };
-          if (sources.length) aiMsg.sources = sources;
-          setMessages(m => [...m, aiMsg]);
-
-          const doneMatch = full.match(/\[LESSON_(?:DONE|COMPLETE)\]\s*(\{[^}]+\})/);
-          if (doneMatch || /\[LESSON_(?:DONE|COMPLETE)\]/.test(full)) {
-            setCompleted(true);
-            if (doneMatch) { try { setCompletionData(JSON.parse(doneMatch[1])); } catch {} }
-          }
-        }
-        setStreamingContent(''); setStreamingSources([]); setSearchStatus(null);
-        streamRef.current = ''; streamSourcesRef.current = [];
-        setStreaming(false);
-      },
-      onError: (err) => {
-        setMessages(m => [...m, errorChatMessage(err)]);
-        setStreamingContent(''); setStreamingSources([]); setSearchStatus(null);
-        streamRef.current = ''; streamSourcesRef.current = [];
-        setStreaming(false);
-      },
-    }, wasSourced);
-    abortRef.current = abort;
-  }
-
-  const handleSend = useCallback((text, images) => {
-    if (streaming || completed) return;
-    doSend(text, null, { images });
-  }, [streaming, completed, activeLesson]);
-
-  async function handleReset() {
-    if (!activeLesson) return;
-    if (!confirm('Reset this lesson? The conversation will be cleared.')) return;
-    try {
-      await resetLesson(activeLesson.id);
-      setMessages([]);
-      setCompleted(false);
-      setCompletionData(null);
-      // Re-fire the first teaching message with source mode ON (matches
-      // the open-fresh-lesson behavior).
-      autoStartedRef.current = true;
-      setTimeout(() => doSend(`Teach me about "${activeLesson.topic}".`, activeLesson.id, { sourced: true }), 150);
-    } catch (err) { console.error(err); }
   }
 
   async function handleDelete(id, e) {
@@ -224,119 +129,32 @@ export default function LessonsApp() {
   }
 
   // ===== LESSON VIEW =====
+  // Standalone lesson runs through the same Claudius 4R/4Q + final SRS
+  // block flow as curriculum lessons. The api prop wires it through the
+  // /api/lessons/:id/blocks/* endpoints (no parent curriculum).
   if (view === 'lesson' && activeLesson) {
-    const header = (
-      <div>
-        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622]">
-          <button onClick={() => setView('list')} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"><ArrowLeft size={16} /></button>
-          <Lightbulb size={14} className="text-yellow-500" />
-          <span className="text-sm font-semibold text-gray-900 dark:text-white truncate flex-1">{activeLesson.title}</span>
-          <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${
-            completed
-              ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'
-              : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
-          }`}>
-            {completed ? 'Complete' : 'In progress'}
-          </span>
-          <button onClick={handleReset} title="Reset" className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 p-1"><RotateCcw size={14} /></button>
-        </div>
-        {completed && completionData && (
-          <div className="bg-emerald-50 dark:bg-emerald-900/20 border-b border-emerald-200 dark:border-emerald-800 px-4 py-2">
-            <div className="flex items-center gap-2">
-              <Trophy size={14} className="text-emerald-600" />
-              <span className="font-semibold text-emerald-700 dark:text-emerald-400 text-xs">Lesson Complete!</span>
-              <span className="ml-auto text-xs font-bold text-emerald-600">+{completionData.xpEarned || 20} XP</span>
-            </div>
-            {completionData.summary && <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">{completionData.summary}</p>}
-          </div>
-        )}
-      </div>
-    );
-
-    // Editing a user message truncates the client display + re-sends the
-    // new text, getting a fresh reply.
-    function handleUserEdit(idx, newContent) {
-      if (streaming) return;
-      if (abortRef.current) try { abortRef.current(); } catch {}
-      setMessages(prev => prev.slice(0, idx));
-      setTimeout(() => doSend(newContent, activeLesson?.id), 30);
-    }
-    // Editing an AI message REPLACES the AI bubble in place. We drop the AI
-    // message + anything after it on the client, then send a hidden
-    // regenerate request to the server. The request looks like a normal
-    // user turn to the server but never appears in the visible transcript.
-    function handleAiInstruct(idx, instruction) {
-      if (streaming || !instruction?.trim()) return;
-      // Find the previous user message that prompted this AI reply.
-      let userIdx = idx - 1;
-      while (userIdx >= 0 && messages[userIdx]?.role !== 'user') userIdx--;
-      if (userIdx < 0) return;
-      const prevUserText = messages[userIdx].content || '';
-      if (abortRef.current) try { abortRef.current(); } catch {}
-      // Truncate to everything BEFORE the user msg we're regenerating against.
-      // We'll visually restore it by adding it back in the setTimeout so the
-      // display order is: ..., <unchanged user msg>, <new AI reply>.
-      const userMsgSnapshot = messages[userIdx];
-      setMessages(prev => [...prev.slice(0, userIdx), userMsgSnapshot]);
-      const hiddenText = `${prevUserText}\n\n[SYSTEM NOTE: Regenerate your previous answer — this time ${instruction.trim()}. Do NOT acknowledge this instruction. Just produce the revised answer directly.]`;
-      setTimeout(() => doSendRegenerate(hiddenText, activeLesson?.id), 30);
-    }
-    // Like doSend but does NOT add a user message to the visible state —
-    // we send `text` to the server (which records it in its own history)
-    // but the client display only gets the AI reply.
-    function doSendRegenerate(text, lessonId) {
-      const id = lessonId || activeLesson?.id;
-      if (!id) return;
-      setStreaming(true);
-      setStreamingContent('');
-      setStreamingSources([]);
-      streamRef.current = '';
-      streamSourcesRef.current = [];
-      const abort = sendLessonMessage(id, text, [], {
-        onChunk: (c) => { streamRef.current += c; setStreamingContent(streamRef.current); },
-        onSource: (src) => {
-          streamSourcesRef.current = [...streamSourcesRef.current, src];
-          setStreamingSources(streamSourcesRef.current);
-        },
-        onStatus: (s) => setSearchStatus(s),
-        onDone: () => {
-          const full = streamRef.current;
-          const sources = streamSourcesRef.current;
-          if (full) {
-            const aiMsg = { role: 'assistant', content: full, timestamp: new Date().toISOString(), _edited: true };
-            if (sources.length) aiMsg.sources = sources;
-            setMessages(m => [...m, aiMsg]);
-          }
-          setStreamingContent(''); setStreamingSources([]); setSearchStatus(null);
-          streamRef.current = ''; streamSourcesRef.current = [];
-          setStreaming(false);
-        },
-        onError: (err) => {
-          setMessages(m => [...m, errorChatMessage(err)]);
-          setStreamingContent(''); setStreamingSources([]); setSearchStatus(null);
-          streamRef.current = ''; streamSourcesRef.current = [];
-          setStreaming(false);
-        },
-      }, !!sourceMode);
-      abortRef.current = abort;
-    }
-
+    const lessonForView = {
+      ...activeLesson,
+      // Block-mode list endpoint doesn't include the full blocks array
+      // (only counts), so let BlockLessonView fetch them via generateBlocks.
+      blocks: Array.isArray(activeLesson.blocks) ? activeLesson.blocks : [],
+    };
+    const standaloneApi = {
+      generateBlocks: () => generateLessonBlocks(activeLesson.id),
+      generateFinalQuiz: () => generateLessonFinalQuiz(activeLesson.id),
+      gradeBlock: (bid, resp) => gradeLessonBlock(activeLesson.id, bid, resp),
+      completeBlock: (bid) => completeLessonBlock(activeLesson.id, bid),
+    };
     return (
-      <ChatContainer
-        messages={messages}
-        streamingContent={streamingContent}
-        streamingSources={streamingSources}
-        searchStatus={searchStatus}
-        onSend={handleSend}
-        disabled={streaming || completed}
-        placeholder={completed ? 'Lesson complete!' : streaming ? 'AI is teaching...' : 'Type your response...'}
-        header={header}
-        className="h-full"
-        sourceMode={sourceMode}
-        onToggleSource={setSourceMode}
-        onUserEditMessage={handleUserEdit}
-        onAiInstruct={handleAiInstruct}
-      />
+      <div className="h-full overflow-y-auto">
+        <BlockLessonView
+          key={`${activeLesson.id}-${resetKey}`}
+          lesson={lessonForView}
+          api={standaloneApi}
+          backLabel="Back to lessons"
+          onBack={() => setView('list')}
+        />
+      </div>
     );
   }
 
@@ -351,9 +169,13 @@ export default function LessonsApp() {
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">One topic, one focused lesson. The AI will teach it directly.</p>
 
         {creating ? (
-          <div className="flex flex-col items-center justify-center py-16">
-            <Loader2 size={28} className="animate-spin text-yellow-500 mb-3" />
-            <p className="text-sm text-gray-500">Preparing lesson on <span className="font-medium text-gray-700 dark:text-gray-300">{topic}</span>...</p>
+          <div className="py-10 max-w-md mx-auto w-full">
+            <ProgressBar
+              active
+              label={`Preparing lesson on ${topic || 'your topic'}`}
+              hint="10-20 seconds. Don't refresh."
+              duration={15000}
+            />
           </div>
         ) : (
           <div className="space-y-4">

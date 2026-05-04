@@ -11,17 +11,11 @@
     <meta name="theme-color" content="#2563EB" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Noto+Sans:wght@400;500;600;700&family=Ubuntu:wght@400;500;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <style>
-      html,body,#root{margin:0;padding:0;min-height:100vh}
+      html,body,#root{margin:0;padding:0;min-height:100vh;font-family:'Inter',system-ui,sans-serif}
       .dark body,.dark #root{background:#0D0D14}
     </style>
-    <script>
-      // Apply font based on desktop style
-      var s=localStorage.getItem('cov-desktop-style')||'macos';
-      var fonts={'macos':'Inter','windows':'Noto Sans','chromeos':'Roboto','linux':'Ubuntu'};
-      document.documentElement.style.fontFamily=fonts[s]+', system-ui, sans-serif';
-    </script>
     <title>RushilAI</title>
     <meta name="description" content="RushilAI" />
   </head>
