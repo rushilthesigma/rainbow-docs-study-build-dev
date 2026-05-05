@@ -140,6 +140,13 @@ body {
 }
 .animate-fade-up { animation: fade-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards; opacity: 0; }
 
+/* Slow "scroll for more" arrow bounce on the landing-page hero. */
+@keyframes bounce-slow {
+  0%, 100% { transform: translateY(0);   opacity: 0.65; }
+  50%      { transform: translateY(4px); opacity: 1; }
+}
+.animate-bounce-slow { animation: bounce-slow 1.8s ease-in-out infinite; }
+
 /* ===========================================================
    OS-specific app UI tweaks
    Root <html> gets an os-<style> class from DesktopShell.

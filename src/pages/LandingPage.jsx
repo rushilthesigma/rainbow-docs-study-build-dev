@@ -5,18 +5,22 @@ import { useUIPreference } from '../context/UIPreferenceContext';
 import { googleLogin } from '../api/auth';
 import { WALLPAPERS } from '../components/desktop/DesktopBackground';
 import {
-  Loader2 as Loader, Sparkles, ArrowRight, X, Check, BookOpen, Brain, Zap, PenTool, Cpu, Repeat,
+  Loader2 as Loader, Sparkles, ArrowRight, X, Check, ChevronDown,
+  BookOpen, Brain, Zap, PenTool, Cpu, Repeat,
 } from 'lucide-react';
 
-// macOS-style login screen — RushilAI flavor.
+// Two scroll-snap sections, Apple-homepage style:
+//   1. Hero    — big headline over the wallpaper, scroll cue
+//   2. Sign-in — macOS-style lock screen with "Why not GPT?" link
 //
-// Wallpaper: same one the desktop shell uses (read via useUIPreference;
-// defaults to lavender). Real Unsplash photo, no procedural fill.
+// The "Why not GPT?" link opens a full-screen modal with the
+// RushilAI vs ChatGPT comparison rather than living as its own
+// section in the scroll flow.
 //
-// No password field, no preloaded profile cache (everything UI-pref
-// related is server-side now — we don't have a way to know the
-// previous user without localStorage). The screen is a clean "RushilAI
-// brand mark + Welcome + Sign in with Google" lock-screen.
+// The wallpaper stays fixed under everything (parallax effect — the
+// content sections slide up over it). CSS scroll-snap on the
+// container makes each section come to rest at the top of the
+// viewport when the user scrolls.
 export default function LandingPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -24,6 +28,7 @@ export default function LandingPage() {
   const [loading, setLoading] = useState(false);
   const [whyOpen, setWhyOpen] = useState(false);
   const googleBtnRef = useRef(null);
+  const scrollerRef = useRef(null);
 
   useEffect(() => {
     const script = document.createElement('script');
@@ -67,36 +72,118 @@ export default function LandingPage() {
   }
 
   function newAccount() {
-    // Force the account picker so a returning user can pick a
-    // different account / a brand new user can run the Google
-    // create-account flow.
     if (window.google?.accounts?.id) {
       try { window.google.accounts.id.disableAutoSelect(); } catch {}
     }
     triggerGoogle();
   }
 
-  // Resolve the wallpaper: prefer the user's pref if present (for
-  // returning sessions where we still have an auth token), else the
-  // canonical default (lavender).
+  function scrollTo(idx) {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const target = el.querySelectorAll('[data-section]')[idx];
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   const wp = WALLPAPERS[wallpaper] || WALLPAPERS.lavender;
   const wallpaperUrl = wp?.url || WALLPAPERS.lavender.url;
 
   return (
-    <div className="relative min-h-screen w-full overflow-hidden bg-black text-white select-none">
-      {/* Real photographic wallpaper */}
-      <div className="absolute inset-0">
+    <div className="relative h-screen w-full overflow-hidden bg-black text-white select-none">
+      {/* Fixed wallpaper layer — parallax bedrock for every section */}
+      <div className="absolute inset-0 z-0">
         <div
-          className="absolute inset-0 bg-cover bg-center bg-no-repeat scale-105"
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat scale-110"
           style={{ backgroundImage: `url(${wallpaperUrl})` }}
         />
-        <div className="absolute inset-0 bg-black/45" />
+        {/* Always a soft top gradient so the menu bar reads */}
+        <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-black/55 to-transparent" />
       </div>
 
       <Clock />
 
-      {/* Lock-screen content — pushed below center. */}
-      <div className="relative z-10 min-h-screen flex flex-col items-center px-6" style={{ paddingTop: '45vh' }}>
+      {/* Scroll container — snap-mandatory between sections, smooth */}
+      <div
+        ref={scrollerRef}
+        className="relative z-10 h-screen overflow-y-scroll snap-y snap-mandatory scrollbar-hide"
+        style={{ scrollBehavior: 'smooth' }}
+      >
+        <HeroSection onNext={() => scrollTo(1)} />
+        <SignInSection
+          loading={loading}
+          onSignIn={triggerGoogle}
+          onNewAccount={newAccount}
+          onWhyNotGpt={() => setWhyOpen(true)}
+        />
+      </div>
+
+      {/* Why not GPT? modal — full-screen overlay over the snap flow */}
+      {whyOpen && <WhyNotGptModal onClose={() => setWhyOpen(false)} />}
+
+      {/* Hidden GIS button — mounted off-screen so the script + button
+          are present in the DOM. All sign-in CTAs click this. */}
+      <div
+        ref={googleBtnRef}
+        aria-hidden="true"
+        style={{ position: 'absolute', left: -99999, top: 0, width: 1, height: 1, overflow: 'hidden', pointerEvents: 'none' }}
+      />
+    </div>
+  );
+}
+
+// ===== Section 1: Hero =====
+function HeroSection({ onNext }) {
+  return (
+    <section
+      data-section="hero"
+      className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative"
+    >
+      {/* Subtle scrim so the headline reads against any wallpaper */}
+      <div className="absolute inset-0 bg-black/40" />
+
+      <div className="relative z-10 max-w-4xl text-center animate-fade-up">
+        <h1 className="text-[44px] sm:text-[68px] md:text-[88px] leading-[0.95] font-bold tracking-[-0.04em] text-white drop-shadow-2xl">
+          Type a topic.
+          <br />
+          <span className="bg-gradient-to-br from-blue-300 via-indigo-300 to-fuchsia-300 bg-clip-text text-transparent">
+            Get a curriculum.
+          </span>
+        </h1>
+        <p className="mt-6 text-[16px] sm:text-[19px] leading-relaxed text-white/85 max-w-2xl mx-auto drop-shadow-md">
+          Make a fully featured curriculum in a single click (well, maybe a few).
+        </p>
+
+        <button
+          onClick={onNext}
+          className="mt-10 inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-full bg-white text-gray-900 text-[14.5px] font-bold hover:bg-white/95 active:scale-[0.98] transition-all shadow-2xl shadow-black/30"
+        >
+          Get started <ChevronDown size={15} />
+        </button>
+      </div>
+
+      {/* Scroll cue at the bottom */}
+      <button
+        onClick={onNext}
+        aria-label="Scroll down"
+        className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-1 text-white/65 hover:text-white transition-colors"
+      >
+        <span className="text-[10px] font-bold uppercase tracking-[0.22em]">Scroll</span>
+        <ChevronDown size={16} className="animate-bounce-slow" strokeWidth={2.4} />
+      </button>
+    </section>
+  );
+}
+
+// ===== Section 2: Sign-in =====
+function SignInSection({ loading, onSignIn, onNewAccount, onWhyNotGpt }) {
+  return (
+    <section
+      data-section="signin"
+      className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative"
+    >
+      <div className="absolute inset-0 bg-black/45" />
+
+      <div className="relative z-10 flex flex-col items-center text-center animate-fade-up">
         {/* RushilAI brand mark */}
         <div className="relative w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 grid place-items-center ring-2 ring-white/30 shadow-2xl shadow-black/50">
           <Sparkles size={36} className="text-white drop-shadow-lg" strokeWidth={2.2} />
@@ -110,7 +197,7 @@ export default function LandingPage() {
 
         {/* Primary sign-in CTA */}
         <button
-          onClick={triggerGoogle}
+          onClick={onSignIn}
           disabled={loading}
           className="group mt-6 inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 hover:brightness-110 active:scale-[0.98] text-white text-[14.5px] font-bold transition-all disabled:opacity-50 shadow-xl shadow-blue-900/40 w-[280px] max-w-full"
         >
@@ -119,44 +206,31 @@ export default function LandingPage() {
             : <>Sign in with Google <ArrowRight size={15} className="group-hover:translate-x-0.5 transition-transform" /></>}
         </button>
 
-        {/* Secondary link */}
         <button
-          onClick={newAccount}
+          onClick={onNewAccount}
           className="mt-4 text-[13px] font-medium text-white/75 hover:text-white transition-colors"
         >
           I&apos;m a new user
         </button>
       </div>
 
-      {/* Bottom-of-screen "Why not ChatGPT?" link */}
+      {/* "Why not GPT?" link pinned to the bottom of the sign-in section */}
       <button
-        onClick={() => setWhyOpen(true)}
-        className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 text-[12.5px] font-medium text-white/70 hover:text-white drop-shadow-md transition-colors inline-flex items-center gap-1.5"
+        onClick={onWhyNotGpt}
+        className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 text-[12.5px] font-medium text-white/70 hover:text-white drop-shadow-md transition-colors inline-flex items-center gap-1.5"
       >
-        <span className="opacity-70">·</span> Why not ChatGPT?
+        <span className="opacity-70">·</span> Why not GPT?
       </button>
-
-      {/* Comparison modal */}
-      {whyOpen && <WhyNotChatGPT onClose={() => setWhyOpen(false)} />}
-
-      {/* Hidden GIS button — mounted off-screen so the script + button
-          are present in the DOM. Both CTAs click this. */}
-      <div
-        ref={googleBtnRef}
-        aria-hidden="true"
-        style={{ position: 'absolute', left: -99999, top: 0, width: 1, height: 1, overflow: 'hidden', pointerEvents: 'none' }}
-      />
-    </div>
+    </section>
   );
 }
 
-// ===== Why not ChatGPT? =====
+// ===== Why not GPT? modal =====
 //
-// Full-screen glass overlay. Side-by-side comparison: RushilAI does
-// these things; ChatGPT structurally cannot. Tap anywhere on the
-// backdrop or the X to close.
-function WhyNotChatGPT({ onClose }) {
-  // Lock background scroll while open + escape-to-close.
+// Full-screen glass overlay containing the RushilAI vs ChatGPT
+// comparison. Click the backdrop or X to close, Esc also closes,
+// background scroll is locked while open.
+function WhyNotGptModal({ onClose }) {
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -203,42 +277,12 @@ function WhyNotChatGPT({ onClose }) {
 
         {/* Comparison rows */}
         <div className="px-3 sm:px-5 py-4 space-y-1.5">
-          <Row
-            icon={<BookOpen size={15} />}
-            title="It builds the course for you"
-            us="Type a topic and get a real course back — units, lessons, quizzes, even a midterm and final. Takes a few seconds."
-            them="Spits out a wall of text. You'd have to organize it into a course on your own."
-          />
-          <Row
-            icon={<Repeat size={15} />}
-            title="It remembers what you missed"
-            us="When you get something wrong on a quiz, it shows up again on the next one. The final quiz hits all your weak spots."
-            them="Forgets everything the second the chat ends."
-          />
-          <Row
-            icon={<Brain size={15} />}
-            title="It picks up where you left off"
-            us="Your courses, lessons, streaks — all saved. Open it next week and just keep going."
-            them="Every chat starts from scratch. You're the one keeping track of where you are."
-          />
-          <Row
-            icon={<PenTool size={15} />}
-            title="It grades your math, not just your answer"
-            us="Solve on a real canvas. We read your work line by line and tell you where you slipped."
-            them="Just gives you the answer. If you got the wrong number, you won't know why."
-          />
-          <Row
-            icon={<Zap size={15} />}
-            title="You can play your friends"
-            us="Head-to-head Quiz Bowl with a real buzzer. Pyramidal tossups, real packets, real scoreboard."
-            them="Can't do this. It's one person, one chat box."
-          />
-          <Row
-            icon={<Cpu size={15} />}
-            title="Built for school"
-            us="Made for studying first. We use whichever AI is best right now — Gemini, Claude, GPT, whoever."
-            them="One model, one chat box. That's the whole app."
-          />
+          <Row icon={<BookOpen size={15} />} title="It builds the course for you" us="Type a topic and get a real course back — units, lessons, quizzes, even a midterm and final. Takes a few seconds." them="Spits out a wall of text. You'd have to organize it into a course on your own." />
+          <Row icon={<Repeat size={15} />}   title="It remembers what you missed" us="When you get something wrong on a quiz, it shows up again on the next one. The final quiz hits all your weak spots." them="Forgets everything the second the chat ends." />
+          <Row icon={<Brain size={15} />}    title="It picks up where you left off" us="Your courses, lessons, streaks — all saved. Open it next week and just keep going." them="Every chat starts from scratch. You're the one keeping track of where you are." />
+          <Row icon={<PenTool size={15} />}  title="It grades your math, not just your answer" us="Solve on a real canvas. We read your work line by line and tell you where you slipped." them="Just gives you the answer. If you got the wrong number, you won't know why." />
+          <Row icon={<Zap size={15} />}      title="You can play your friends" us="Head-to-head Quiz Bowl with a real buzzer. Pyramidal tossups, real packets, real scoreboard." them="Can't do this. It's one person, one chat box." />
+          <Row icon={<Cpu size={15} />}      title="Built for school" us="Made for studying first. We use whichever AI is best right now — Gemini, Claude, GPT, whoever." them="One model, one chat box. That's the whole app." />
         </div>
 
         {/* Footer */}
@@ -294,7 +338,7 @@ function Clock() {
   const time = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   const date = now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
   return (
-    <div className="absolute top-3 right-5 z-20 flex items-center gap-3 text-[12.5px] font-medium text-white/90 tabular-nums tracking-tight drop-shadow-md">
+    <div className="absolute top-3 right-5 z-30 flex items-center gap-3 text-[12.5px] font-medium text-white/90 tabular-nums tracking-tight drop-shadow-md">
       <span>{date}</span>
       <span>{time}</span>
     </div>
