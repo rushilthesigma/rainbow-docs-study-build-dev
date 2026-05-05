@@ -563,14 +563,41 @@ GLOBAL RULES:
 
 // ===== STUDY MODE =====
 
-export function buildStudyModePrompt(profile, goals, curricula, prefs, assessmentHistory = []) {
+export function buildStudyModePrompt(profile, goals, curricula, prefs, assessmentHistory = [], context = null) {
   const prefsCtx = buildPrefsContext(prefs);
   const profileCtx = buildProfileContext(profile, assessmentHistory);
+
+  // Optional integration: when the student "Integrate with curriculum"-d
+  // a course, surface its title + unit/lesson outline so the assistant
+  // can answer questions inside that scope. Plus: any sources they
+  // attached (URL extracts, PDF text) — included verbatim so the model
+  // can cite them.
+  let integrationCtx = '';
+  if (context?.curriculumId && Array.isArray(curricula)) {
+    const linked = curricula.find((c) => c.id === context.curriculumId);
+    if (linked) {
+      const outline = (linked.units || [])
+        .map((u, i) => `  ${i + 1}. ${u.title}${(u.lessons || []).length ? '\n' + (u.lessons || []).map((l) => `     - ${l.title}`).join('\n') : ''}`)
+        .join('\n');
+      integrationCtx += `\n\nLINKED COURSE — the student integrated this study session with their course "${linked.title}". When they ask about it, answer inside the scope of THIS course. Outline:\n${outline || '(no units yet)'}\n`;
+    }
+  }
+  if (Array.isArray(context?.sources) && context.sources.length) {
+    const sourcesBlock = context.sources
+      .map((s, i) => {
+        const head = `[${i + 1}] ${s.title || s.url || s.name || 'Source'}${s.url ? ` (${s.url})` : ''}`;
+        const body = (s.content || s.text || '').slice(0, 12000); // hard cap per source
+        return `${head}\n${body}`.trim();
+      })
+      .join('\n\n---\n\n');
+    integrationCtx += `\n\nATTACHED SOURCES — the student added these. Reference them by [n] when you cite. Do not invent content beyond what's in them.\n\n${sourcesBlock}\n`;
+  }
 
   return `You are a general-purpose AI study assistant for RushilAI. The student opens this when they want to chat, ask, learn, or work through whatever's on their mind. You follow THEIR lead.
 
 ${profileCtx}
 ${prefsCtx}
+${integrationCtx}
 
 THE STUDENT IS IN CHARGE HERE:
 - This is NOT a class. This is NOT a curriculum lesson. There is no preset agenda. The student picks the topic, the depth, and the format. You answer.

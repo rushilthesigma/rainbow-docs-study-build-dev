@@ -22,7 +22,6 @@ import SettingsPage from './pages/SettingsPage';
 import AppShell from './components/layout/AppShell';
 import DesktopShell from './components/desktop/DesktopShell';
 import MobileShell from './components/mobile/MobileShell';
-import MobileLanding from './components/mobile/MobileLanding';
 import Onboarding from './components/desktop/Onboarding';
 import LoadingSpinner from './components/shared/LoadingSpinner';
 
@@ -103,7 +102,9 @@ function ClassicRoutes() {
 
 function AppRouter() {
   const { user, loading } = useAuth();
-  const [onboarded, setOnboarded] = useState(() => !!localStorage.getItem('covalent-onboarded'));
+  // Onboarded flag lives in user.data.preferences (server-side), not
+  // localStorage. Falls back to false for fresh accounts.
+  const onboarded = !!user?.data?.preferences?.onboarded;
   // Re-evaluate on resize so a desktop user dragging the window narrow
   // (or a phone rotating between portrait / landscape) flips shells live.
   const [isMobile, setIsMobile] = useState(getIsMobile);
@@ -133,55 +134,49 @@ function AppRouter() {
 
   if (loading) return <LoadingSpinner fullScreen />;
 
-  // Signed-out: phone gets MobileLanding, desktop gets the full
-  // marketing landing page. The mobile landing's "Sign in" CTA fires
-  // the same Google flow LandingPage uses (handled inside MobileLanding
-  // by reusing the Google Identity Services button mounted there).
+  // Signed-out: same macOS-style login screen on every viewport. The
+  // page is responsive — wallpaper + form scale to phone width without
+  // breaking the layout, so we don't need a separate mobile variant.
   if (!user) {
-    if (isMobile) {
-      return <Routes><Route path="*" element={<MobileLandingRoute />} /></Routes>;
-    }
     return <Routes><Route path="*" element={<LandingPage />} /></Routes>;
   }
 
   if (!onboarded) {
     // Desktop onboarding is built for wide layouts and looks broken
-    // on a phone. On mobile, auto-complete it so users land directly
-    // in MobileShell.
+    // on a phone. On mobile, auto-mark onboarded server-side so the
+    // user lands directly in MobileShell.
     if (isMobile) {
-      localStorage.setItem('covalent-onboarded', 'true');
-      setOnboarded(true);
+      // Fire-and-forget — by the time fetchUser refreshes, the gate
+      // re-evaluates with onboarded=true and we render MobileShell.
+      autoCompleteOnboarding(user);
       return <LoadingSpinner fullScreen />;
     }
-    return <Onboarding onComplete={() => { setOnboarded(true); window.location.reload(); }} />;
+    return <Onboarding onComplete={() => { /* fetchUser inside Onboarding refreshes the gate */ }} />;
   }
   return isMobile ? <MobileShell /> : <DesktopShell />;
 }
 
-// Tiny wrapper so MobileLanding's "Sign in" CTA fires the real Google
-// flow used by the desktop LandingPage. Cheapest path: render the
-// LandingPage offscreen and trigger its hidden Google button.
-function MobileLandingRoute() {
-  function triggerGoogle() {
-    // The hidden Google button rendered by LandingPage stays in the
-    // DOM as long as that component is mounted. Falling back to the
-    // GIS prompt if the button isn't there (e.g. script failed to load).
-    const el = document.querySelector('[aria-hidden="true"] div[role=button], [aria-hidden="true"] button');
-    if (el) el.click();
-    else if (window.google?.accounts?.id) window.google.accounts.id.prompt();
-  }
-  return (
-    <>
-      <MobileLanding onSignIn={triggerGoogle} />
-      {/* LandingPage is rendered for its side effects only — it loads
-          the Google Identity Services script + mounts the hidden
-          sign-in button that `triggerGoogle` above clicks. Hidden via
-          fixed off-screen positioning. */}
-      <div style={{ position: 'fixed', left: -99999, top: 0, width: 1, height: 1, overflow: 'hidden', pointerEvents: 'none' }} aria-hidden="true">
-        <LandingPage />
-      </div>
-    </>
-  );
+// Mobile auto-onboard helper. Imported lazily so the syncData module
+// doesn't get pulled into the main bundle just for the rare case of
+// a fresh signed-in mobile user hitting the gate.
+let _autoCompleteOnboardingPromise = null;
+function autoCompleteOnboarding(user) {
+  if (_autoCompleteOnboardingPromise) return;
+  _autoCompleteOnboardingPromise = (async () => {
+    try {
+      const { syncData } = await import('./api/auth');
+      await syncData({
+        preferences: { ...(user?.data?.preferences || {}), onboarded: true },
+      });
+      // Reload so AuthContext refetches the user with the new flag
+      // and the gate flips through to MobileShell. Easier than wiring
+      // fetchUser through the helper.
+      window.location.reload();
+    } catch (err) {
+      console.error('Auto-onboard failed:', err);
+      _autoCompleteOnboardingPromise = null; // allow retry
+    }
+  })();
 }
 
 export default function App() {

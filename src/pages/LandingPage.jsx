@@ -1,16 +1,28 @@
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useUIPreference } from '../context/UIPreferenceContext';
 import { googleLogin } from '../api/auth';
-import { useEffect, useRef, useState } from 'react';
+import { WALLPAPERS } from '../components/desktop/DesktopBackground';
 import {
-  BookOpen, Shield, Brain, Zap, PenTool, Cpu, Loader2 as Loader, ArrowRight,
+  Loader2 as Loader, Sparkles, ArrowRight, X, Check, BookOpen, Brain, Zap, PenTool, Cpu, Repeat,
 } from 'lucide-react';
-import MiniOS from '../components/landing/MiniOS';
 
+// macOS-style login screen — RushilAI flavor.
+//
+// Wallpaper: same one the desktop shell uses (read via useUIPreference;
+// defaults to lavender). Real Unsplash photo, no procedural fill.
+//
+// No password field, no preloaded profile cache (everything UI-pref
+// related is server-side now — we don't have a way to know the
+// previous user without localStorage). The screen is a clean "RushilAI
+// brand mark + Welcome + Sign in with Google" lock-screen.
 export default function LandingPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const { wallpaper } = useUIPreference();
   const [loading, setLoading] = useState(false);
+  const [whyOpen, setWhyOpen] = useState(false);
   const googleBtnRef = useRef(null);
 
   useEffect(() => {
@@ -25,11 +37,9 @@ export default function LandingPage() {
         });
         if (googleBtnRef.current) {
           window.google.accounts.id.renderButton(googleBtnRef.current, {
-            theme: 'outline',
+            theme: 'filled_blue',
             size: 'large',
             width: 300,
-            text: 'continue_with',
-            shape: 'pill',
           });
         }
       }
@@ -56,341 +66,237 @@ export default function LandingPage() {
     else if (window.google?.accounts?.id) window.google.accounts.id.prompt();
   }
 
+  function newAccount() {
+    // Force the account picker so a returning user can pick a
+    // different account / a brand new user can run the Google
+    // create-account flow.
+    if (window.google?.accounts?.id) {
+      try { window.google.accounts.id.disableAutoSelect(); } catch {}
+    }
+    triggerGoogle();
+  }
+
+  // Resolve the wallpaper: prefer the user's pref if present (for
+  // returning sessions where we still have an auth token), else the
+  // canonical default (lavender).
+  const wp = WALLPAPERS[wallpaper] || WALLPAPERS.lavender;
+  const wallpaperUrl = wp?.url || WALLPAPERS.lavender.url;
+
   return (
-    <div className="relative min-h-screen overflow-x-hidden bg-[#F4F5F7] dark:bg-[#0c0c16]">
-      {/* ============================================================
-          Atmospheric backdrop — two soft radial glows in the upper half
-          only. Dark mode only. Bottom of the page stays clean so cards
-          and copy don't disappear into a haze.
-          ============================================================ */}
-      <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-0 hidden dark:block">
-        <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[1100px] h-[700px] rounded-full opacity-15 blur-[120px]"
-             style={{ background: 'radial-gradient(closest-side, #4f46e5 0%, transparent 70%)' }} />
-        <div className="absolute top-[20%] -right-40 w-[600px] h-[600px] rounded-full opacity-10 blur-[120px]"
-             style={{ background: 'radial-gradient(closest-side, #06b6d4 0%, transparent 70%)' }} />
+    <div className="relative min-h-screen w-full overflow-hidden bg-black text-white select-none">
+      {/* Real photographic wallpaper */}
+      <div className="absolute inset-0">
+        <div
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat scale-105"
+          style={{ backgroundImage: `url(${wallpaperUrl})` }}
+        />
+        <div className="absolute inset-0 bg-black/45" />
       </div>
 
-      {/* ============================================================
-          Top nav — translucent glass with a subtle border glow.
-          ============================================================ */}
-      <header className="relative z-40 sticky top-0 px-6 py-3 border-b border-gray-200/70 dark:border-white/10 bg-white/80 dark:bg-[#0c0c16]/80 backdrop-blur-xl">
-        <div className="max-w-6xl mx-auto w-full flex items-center gap-4">
-          <a href="#top" className="flex items-center gap-2.5 group" onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 grid place-items-center group-hover:scale-105 transition-transform">
-              <BookOpen size={17} className="text-white" strokeWidth={2.4} />
+      <Clock />
+
+      {/* Lock-screen content — pushed below center. */}
+      <div className="relative z-10 min-h-screen flex flex-col items-center px-6" style={{ paddingTop: '45vh' }}>
+        {/* RushilAI brand mark */}
+        <div className="relative w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 grid place-items-center ring-2 ring-white/30 shadow-2xl shadow-black/50">
+          <Sparkles size={36} className="text-white drop-shadow-lg" strokeWidth={2.2} />
+          <span className="pointer-events-none absolute inset-1 rounded-2xl bg-gradient-to-b from-white/25 to-transparent" />
+        </div>
+
+        <p className="mt-3 text-[18px] font-bold tracking-tight text-white drop-shadow-md">
+          Welcome to RushilAI
+        </p>
+        <p className="text-[13px] text-white/75 mt-0.5 drop-shadow-md">Sign in to continue</p>
+
+        {/* Primary sign-in CTA */}
+        <button
+          onClick={triggerGoogle}
+          disabled={loading}
+          className="group mt-6 inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 hover:brightness-110 active:scale-[0.98] text-white text-[14.5px] font-bold transition-all disabled:opacity-50 shadow-xl shadow-blue-900/40 w-[280px] max-w-full"
+        >
+          {loading
+            ? <><Loader size={15} className="animate-spin" /> Signing in…</>
+            : <>Sign in with Google <ArrowRight size={15} className="group-hover:translate-x-0.5 transition-transform" /></>}
+        </button>
+
+        {/* Secondary link */}
+        <button
+          onClick={newAccount}
+          className="mt-4 text-[13px] font-medium text-white/75 hover:text-white transition-colors"
+        >
+          I&apos;m a new user
+        </button>
+      </div>
+
+      {/* Bottom-of-screen "Why not ChatGPT?" link */}
+      <button
+        onClick={() => setWhyOpen(true)}
+        className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 text-[12.5px] font-medium text-white/70 hover:text-white drop-shadow-md transition-colors inline-flex items-center gap-1.5"
+      >
+        <span className="opacity-70">·</span> Why not ChatGPT?
+      </button>
+
+      {/* Comparison modal */}
+      {whyOpen && <WhyNotChatGPT onClose={() => setWhyOpen(false)} />}
+
+      {/* Hidden GIS button — mounted off-screen so the script + button
+          are present in the DOM. Both CTAs click this. */}
+      <div
+        ref={googleBtnRef}
+        aria-hidden="true"
+        style={{ position: 'absolute', left: -99999, top: 0, width: 1, height: 1, overflow: 'hidden', pointerEvents: 'none' }}
+      />
+    </div>
+  );
+}
+
+// ===== Why not ChatGPT? =====
+//
+// Full-screen glass overlay. Side-by-side comparison: RushilAI does
+// these things; ChatGPT structurally cannot. Tap anywhere on the
+// backdrop or the X to close.
+function WhyNotChatGPT({ onClose }) {
+  // Lock background scroll while open + escape-to-close.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    function onKey(e) { if (e.key === 'Escape') onClose(); }
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-black/70 backdrop-blur-md animate-fade-in">
+      <button
+        aria-label="Close"
+        onClick={onClose}
+        className="absolute inset-0 -z-0"
+      />
+      <div className="relative my-12 mx-4 w-full max-w-3xl rounded-3xl bg-[#0c0e1c] border border-white/10 shadow-2xl shadow-black/50 overflow-hidden">
+        {/* Header */}
+        <div className="relative px-7 pt-7 pb-5 border-b border-white/10">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 grid place-items-center">
+              <Sparkles size={18} className="text-white" />
             </div>
-            <span className="font-bold text-[16px] tracking-tight text-gray-900 dark:text-white">RushilAI</span>
-          </a>
-          <nav className="hidden md:flex items-center gap-1 ml-6">
-            <NavLink href="#demo">Live demo</NavLink>
-            <NavLink href="#how">How it works</NavLink>
-            <NavLink href="#why">Why us</NavLink>
-            <NavLink href="#integrity">Academic use</NavLink>
-          </nav>
-          <div className="ml-auto flex items-center gap-2">
-            <a
-              href="https://discord.gg/UetMmE8SkS"
-              target="_blank"
-              rel="noopener noreferrer"
-              title="Join the RushilAI Discord"
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 text-indigo-600 dark:text-indigo-300 hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors text-[12px] font-medium"
-            >
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                <path d="M13.545 2.907a13.227 13.227 0 0 0-3.257-1.011.05.05 0 0 0-.052.025c-.141.25-.297.577-.406.833a12.19 12.19 0 0 0-3.658 0 8.258 8.258 0 0 0-.412-.833.051.051 0 0 0-.052-.025c-1.125.194-2.22.534-3.257 1.011a.041.041 0 0 0-.021.018C.356 6.024-.213 9.047.066 12.032c.001.014.01.028.021.037a13.276 13.276 0 0 0 3.995 2.02.05.05 0 0 0 .056-.019c.308-.42.582-.863.818-1.329a.05.05 0 0 0-.01-.059.051.051 0 0 0-.018-.011 8.875 8.875 0 0 1-1.248-.595.05.05 0 0 1-.02-.066.051.051 0 0 1 .015-.019c.084-.063.168-.129.248-.195a.05.05 0 0 1 .051-.007c2.619 1.196 5.454 1.196 8.041 0a.052.052 0 0 1 .053.007c.08.066.164.132.248.195a.051.051 0 0 1-.004.085 8.254 8.254 0 0 1-1.249.594.05.05 0 0 0-.03.03.052.052 0 0 0 .003.041c.24.465.515.909.817 1.329a.05.05 0 0 0 .056.019 13.235 13.235 0 0 0 4.001-2.02.049.049 0 0 0 .021-.037c.334-3.451-.559-6.449-2.366-9.106a.034.034 0 0 0-.02-.019Zm-8.198 7.307c-.789 0-1.438-.724-1.438-1.612 0-.889.637-1.613 1.438-1.613.807 0 1.45.73 1.438 1.613 0 .888-.637 1.612-1.438 1.612Zm5.316 0c-.788 0-1.438-.724-1.438-1.612 0-.889.637-1.613 1.438-1.613.807 0 1.451.73 1.438 1.613 0 .888-.631 1.612-1.438 1.612Z" />
-              </svg>
-              <span>Discord</span>
-            </a>
-            <button
-              onClick={triggerGoogle}
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-blue-600 text-white hover:bg-blue-700 transition-colors text-[12.5px] font-semibold"
-            >
-              {loading ? <><Loader size={12} className="animate-spin" /> Signing in…</> : <>Sign in <ArrowRight size={12} /></>}
-            </button>
+            <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-blue-300">RushilAI vs ChatGPT</span>
           </div>
-        </div>
-      </header>
-
-      {/* Hidden Google sign-in button — wired through the header CTA. */}
-      <div ref={googleBtnRef} aria-hidden="true" style={{ position: 'absolute', left: '-9999px', top: 0, visibility: 'hidden' }} />
-
-      {/* ============================================================
-          HERO — bold headline, gradient flourish, twin CTAs.
-          ============================================================ */}
-      <section id="top" className="relative z-10 px-6 pt-16 md:pt-24 pb-12">
-        <div className="max-w-5xl mx-auto text-center">
-          <h1 className="text-[40px] sm:text-[56px] md:text-[72px] leading-[0.98] font-bold tracking-[-0.04em] text-gray-900 dark:text-white mb-5">
-            Type a topic.{' '}
-            <span className="relative inline-block">
-              <span className="bg-gradient-to-r from-blue-500 via-indigo-500 to-fuchsia-500 bg-clip-text text-transparent">Get a curriculum</span>
-              <svg className="absolute -bottom-2 left-0 w-full" height="10" viewBox="0 0 200 10" preserveAspectRatio="none" aria-hidden="true">
-                <path d="M0,5 Q50,0 100,5 T200,5" fill="none" stroke="url(#hl)" strokeWidth="3" strokeLinecap="round" />
-                <defs><linearGradient id="hl" x1="0" x2="1"><stop offset="0" stopColor="#3b82f6" /><stop offset="1" stopColor="#d946ef" /></linearGradient></defs>
-              </svg>
-            </span>
-            <br className="hidden sm:block" />
-            in one click.
-          </h1>
-
-          <p className="text-[16px] md:text-[19px] leading-relaxed text-gray-600 dark:text-gray-300 max-w-xl mx-auto mb-8">
-            Not a chatbot. A real course that teaches itself to you, one block at a time.
-          </p>
-
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-6">
-            <button
-              onClick={triggerGoogle}
-              className="group inline-flex items-center justify-center gap-2 px-6 py-3 rounded-full bg-blue-600 text-white text-[14.5px] font-semibold hover:bg-blue-700 transition-colors"
-            >
-              {loading ? <><Loader size={15} className="animate-spin" /> Signing in…</> : <>Start free with Google <ArrowRight size={15} className="group-hover:translate-x-0.5 transition-transform" /></>}
-            </button>
-            <a
-              href="#demo"
-              onClick={(e) => { e.preventDefault(); document.getElementById('demo')?.scrollIntoView({ behavior: 'smooth' }); }}
-              className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-full border border-gray-300 dark:border-white/15 bg-white/80 dark:bg-white/5 backdrop-blur text-gray-700 dark:text-gray-200 text-[14.5px] font-semibold hover:bg-white dark:hover:bg-white/10 transition-colors"
-            >
-              Try the live demo
-            </a>
-          </div>
-
-          <p className="text-[12px] text-gray-500 dark:text-gray-400">
-            Free tier · no credit card · cancel anytime
-          </p>
-        </div>
-      </section>
-
-      {/* ============================================================
-          STATS row — concrete numbers / signals before the demo.
-          ============================================================ */}
-      <section className="relative z-10 px-6 pb-12">
-        <div className="max-w-5xl mx-auto">
-          <div className="rounded-2xl border border-gray-200 dark:border-white/10 bg-white/60 dark:bg-[#13131f] backdrop-blur-xl px-6 py-5 grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Stat n="8" label="blocks per lesson" sub="4 readings + 4 quizzes" />
-            <Stat n="∞" label="Quiz Bowl tossups" sub="real packets via QBReader" />
-            <Stat n="SRS" label="across every quiz" sub="targets actual misses" />
-            <Stat n="2-way" label="multiplayer Quiz Bowl" sub="real-time SSE buzz-in" />
-          </div>
-        </div>
-      </section>
-
-      {/* ============================================================
-          LIVE DEMO — MiniOS (the centerpiece).
-          ============================================================ */}
-      <section id="demo" className="relative z-10 px-6 pb-20">
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-6">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-blue-600 dark:text-blue-400 mb-2">Live demo</p>
-            <h2 className="text-[26px] md:text-[34px] leading-tight font-bold tracking-[-0.02em] text-gray-900 dark:text-white">
-              Try it. No sign-up.
-            </h2>
-          </div>
-          <MiniOS />
-        </div>
-      </section>
-
-      {/* ============================================================
-          HOW IT WORKS — 3-step flow.
-          ============================================================ */}
-      <section id="how" className="relative z-10 px-6 pb-20">
-        <div className="max-w-5xl mx-auto">
-          <div className="text-center mb-10">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-blue-600 dark:text-blue-400 mb-2">The flow</p>
-            <h2 className="text-[28px] md:text-[36px] font-bold tracking-[-0.02em] text-gray-900 dark:text-white">
-              Build → Learn → Master.
-            </h2>
-          </div>
-          <div className="grid md:grid-cols-3 gap-4 relative">
-            <Step n="01" title="Build"
-                  body="Units, lessons, quizzes, midterm + final. Generated in seconds, editable any time." />
-            <Step n="02" title="Learn"
-                  body="Each lesson runs 4 readings + 4 quizzes. The 3rd reading reviews 1 + 2; the final quiz drills what you missed." />
-            <Step n="03" title="Master"
-                  body="Quiz Bowl on real packets, a math canvas that grades your working, and exams that revisit course-wide misses." />
-          </div>
-        </div>
-      </section>
-
-      {/* ============================================================
-          WHY US — proof points (renamed from "Not a wrapper").
-          ============================================================ */}
-      <section id="why" className="relative z-10 px-6 pb-20">
-        <div className="max-w-6xl mx-auto">
-          <div className="rounded-3xl border border-gray-200 dark:border-white/10 bg-white/70 dark:bg-[#13131f] backdrop-blur-xl p-8 md:p-12 relative overflow-hidden">
-            <div className="relative text-center max-w-2xl mx-auto mb-10">
-              <h2 className="text-[28px] md:text-[36px] leading-tight font-bold tracking-[-0.02em] text-gray-900 dark:text-white">
-                Not another AI wrapper.
-              </h2>
-            </div>
-
-            <div className="relative grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
-              <DiffCard icon={<Brain size={16} />} title="Remembers you"
-                body="Weak spots and progress persist. Every turn starts with what you missed last time." />
-              <DiffCard icon={<BookOpen size={16} />} title="Real course structure"
-                body="Editable units + lessons + assessments. Not a chat log." />
-              <DiffCard icon={<Zap size={16} />} title="Live multiplayer"
-                body="Head-to-head Quiz Bowl with real-time buzz-in. A wrapper can&apos;t do this." />
-              <DiffCard icon={<PenTool size={16} />} title="Step-graded math"
-                body="Solve on a canvas. We grade your working line by line, not just the answer." />
-              <DiffCard icon={<Cpu size={16} />} title="Model-agnostic"
-                body="Frontier models are swapped in as they ship. The product stays the same." />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ============================================================
-          FINAL CTA — single short ask, no repeat copy.
-          ============================================================ */}
-      <section className="relative z-10 px-6 pb-20">
-        <div className="max-w-3xl mx-auto text-center">
-          <h2 className="text-[28px] md:text-[40px] font-bold tracking-[-0.02em] text-gray-900 dark:text-white leading-tight mb-6">
-            Start your first course.
+          <h2 className="text-[28px] sm:text-[32px] font-bold tracking-[-0.02em] text-white leading-tight">
+            ChatGPT answers questions.
+            <br />
+            <span className="bg-gradient-to-br from-blue-400 to-indigo-400 bg-clip-text text-transparent">RushilAI actually teaches you.</span>
           </h2>
+          <p className="mt-2 text-[13.5px] text-white/65 leading-relaxed max-w-xl">
+            One&apos;s a chatbot. The other walks you through a real course. Here&apos;s what that looks like:
+          </p>
           <button
-            onClick={triggerGoogle}
-            className="group inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-full bg-blue-600 text-white text-[15px] font-bold hover:bg-blue-700 transition-colors"
+            onClick={onClose}
+            aria-label="Close"
+            className="absolute top-5 right-5 w-9 h-9 rounded-full grid place-items-center text-white/60 hover:text-white hover:bg-white/[0.08] transition-colors"
           >
-            {loading ? <><Loader size={16} className="animate-spin" /> Signing in…</> : <>Sign in with Google <ArrowRight size={15} className="group-hover:translate-x-0.5 transition-transform" /></>}
+            <X size={16} />
           </button>
         </div>
-      </section>
 
-      {/* ============================================================
-          ACADEMIC INTEGRITY — full-width formal statement.
-          ============================================================ */}
-      <section id="integrity" className="relative z-10 px-6 pb-24">
-        <div className="max-w-3xl mx-auto">
-          {/* Header — centered emblem + title */}
-          <div className="text-center mb-10">
-            <div className="inline-grid place-items-center w-14 h-14 rounded-2xl bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-300 mb-4">
-              <Shield size={22} />
-            </div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-blue-600 dark:text-blue-300 mb-2">Legal · policy</p>
-            <h3 className="text-[26px] md:text-[32px] font-bold text-gray-900 dark:text-white tracking-[-0.02em] leading-tight">
-              Academic Integrity
-            </h3>
-          </div>
-
-          {/* Numbered cards — each paragraph stands on its own */}
-          <div className="space-y-3">
-            <IntegrityCard n="01" title="Our position">
-              RushilAI is a learning platform. Our mission is to help students master difficult material, build lasting knowledge, and gain confidence in their coursework. We <strong className="text-gray-900 dark:text-white">do not endorse, encourage, or condone academic dishonesty</strong> in any form.
-            </IntegrityCard>
-
-            <IntegrityCard n="02" title="Trust by default">
-              As a deliberate product choice, <strong className="text-gray-900 dark:text-white">we do not impose technical restrictions, content gates, or behavioral limits on how users engage with the platform.</strong> The most effective learning tools treat learners as adults capable of directing their own education — and we extend that trust by default.
-            </IntegrityCard>
-
-            <IntegrityCard n="03" title="Responsibility lives with you">
-              By using RushilAI, you affirm that your use complies with the academic integrity policies, honor codes, exam regulations, and institutional rules that apply to you. <strong className="text-gray-900 dark:text-white">Any violation — including submitting AI output as original work or circumventing assessment policies — is the sole responsibility of the individual user who commits it.</strong>
-            </IntegrityCard>
-
-            <IntegrityCard n="04" title="What we don't do">
-              RushilAI, its operators, and its affiliates accept no responsibility for how individuals choose to apply the platform in academic or professional settings. We do not monitor or approve student usage case-by-case, and make no representations that our output is appropriate for direct submission in any graded context.
-            </IntegrityCard>
-          </div>
-
-          {/* Pull-quote */}
-          <blockquote className="mt-8 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white p-6 md:p-7 text-center">
-            <p className="text-[15px] md:text-[17px] leading-relaxed font-medium italic">
-              Our work is to help you understand. What you choose to do with that understanding — and any consequences that follow — is entirely yours.
-            </p>
-          </blockquote>
-
-          {/* Fine print */}
-          <p className="mt-6 text-center text-[11.5px] text-gray-500 dark:text-gray-500 leading-relaxed">
-            By creating an account or continuing to use RushilAI, you acknowledge you have read and agreed to this statement. Questions:{' '}
-            <a href="mailto:rushilkelapure@gmail.com" className="text-blue-600 dark:text-blue-400 hover:underline">rushilkelapure@gmail.com</a>.
-          </p>
+        {/* Comparison rows */}
+        <div className="px-3 sm:px-5 py-4 space-y-1.5">
+          <Row
+            icon={<BookOpen size={15} />}
+            title="It builds the course for you"
+            us="Type a topic and get a real course back — units, lessons, quizzes, even a midterm and final. Takes a few seconds."
+            them="Spits out a wall of text. You'd have to organize it into a course on your own."
+          />
+          <Row
+            icon={<Repeat size={15} />}
+            title="It remembers what you missed"
+            us="When you get something wrong on a quiz, it shows up again on the next one. The final quiz hits all your weak spots."
+            them="Forgets everything the second the chat ends."
+          />
+          <Row
+            icon={<Brain size={15} />}
+            title="It picks up where you left off"
+            us="Your courses, lessons, streaks — all saved. Open it next week and just keep going."
+            them="Every chat starts from scratch. You're the one keeping track of where you are."
+          />
+          <Row
+            icon={<PenTool size={15} />}
+            title="It grades your math, not just your answer"
+            us="Solve on a real canvas. We read your work line by line and tell you where you slipped."
+            them="Just gives you the answer. If you got the wrong number, you won't know why."
+          />
+          <Row
+            icon={<Zap size={15} />}
+            title="You can play your friends"
+            us="Head-to-head Quiz Bowl with a real buzzer. Pyramidal tossups, real packets, real scoreboard."
+            them="Can't do this. It's one person, one chat box."
+          />
+          <Row
+            icon={<Cpu size={15} />}
+            title="Built for school"
+            us="Made for studying first. We use whichever AI is best right now — Gemini, Claude, GPT, whoever."
+            them="One model, one chat box. That's the whole app."
+          />
         </div>
-      </section>
 
-      {/* ============================================================
-          FOOTER
-          ============================================================ */}
-      <footer className="relative z-10 border-t border-gray-200 dark:border-white/10 px-6 py-8 bg-white/60 dark:bg-[#0c0c16]/80 backdrop-blur-xl">
-        <div className="max-w-6xl mx-auto w-full flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px] text-gray-500 dark:text-gray-400">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-gradient-to-br from-blue-500 to-indigo-600 grid place-items-center">
-              <BookOpen size={11} className="text-white" strokeWidth={2.4} />
-            </div>
-            <span className="font-semibold text-gray-700 dark:text-gray-300">RushilAI</span>
-          </div>
-          <span className="hidden sm:inline text-gray-300 dark:text-white/20">·</span>
-          <span>&copy; {new Date().getFullYear()}</span>
-          <span className="hidden sm:inline text-gray-300 dark:text-white/20">·</span>
-          <span>We do not sell your personal information.</span>
-          <span className="hidden sm:inline text-gray-300 dark:text-white/20">·</span>
-          <a href="#integrity" className="hover:text-gray-900 dark:hover:text-white transition-colors">Academic integrity</a>
-          <span className="hidden sm:inline text-gray-300 dark:text-white/20">·</span>
-          <a href="mailto:rushilkelapure@gmail.com" className="hover:text-gray-900 dark:hover:text-white transition-colors">rushilkelapure@gmail.com</a>
+        {/* Footer */}
+        <div className="px-7 py-5 border-t border-white/10 flex items-center justify-end">
+          <button
+            onClick={onClose}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 hover:brightness-110 active:scale-[0.98] text-white text-[13px] font-bold transition-all"
+          >
+            Got it <ArrowRight size={13} />
+          </button>
         </div>
-      </footer>
-    </div>
-  );
-}
-
-// ===== Sub-components =====
-
-function NavLink({ href, children }) {
-  return (
-    <a
-      href={href}
-      onClick={(e) => {
-        e.preventDefault();
-        const el = document.querySelector(href);
-        if (el) el.scrollIntoView({ behavior: 'smooth' });
-      }}
-      className="px-3 py-1.5 rounded-full text-[13px] text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
-    >
-      {children}
-    </a>
-  );
-}
-
-function Stat({ n, label, sub }) {
-  return (
-    <div className="text-center md:text-left">
-      <div className="text-[26px] md:text-[32px] font-bold tracking-tight bg-gradient-to-br from-blue-500 to-indigo-500 bg-clip-text text-transparent leading-none mb-1">{n}</div>
-      <div className="text-[12px] font-semibold text-gray-700 dark:text-gray-200">{label}</div>
-      <div className="text-[11px] text-gray-500 dark:text-gray-400">{sub}</div>
-    </div>
-  );
-}
-
-function Step({ n, title, body }) {
-  return (
-    <div className="group relative rounded-2xl border border-gray-200 dark:border-white/10 bg-white/70 dark:bg-[#13131f] backdrop-blur-xl p-6 hover:border-blue-400 dark:hover:border-blue-500/50 hover:-translate-y-0.5 transition-all">
-      <div className="flex items-center gap-3 mb-3">
-        <div className="font-mono text-[11px] font-bold tracking-[0.2em] text-blue-500 dark:text-blue-400">{n}</div>
-        <div className="flex-1 h-px bg-gradient-to-r from-blue-500/40 to-transparent" />
       </div>
-      <h3 className="text-[18px] font-bold text-gray-900 dark:text-white tracking-tight mb-2">{title}</h3>
-      <p className="text-[13.5px] leading-relaxed text-gray-600 dark:text-gray-400">{body}</p>
     </div>
   );
 }
 
-function DiffCard({ icon, title, body }) {
+function Row({ icon, title, us, them }) {
   return (
-    <div className="group rounded-xl border border-gray-200 dark:border-white/10 bg-white/70 dark:bg-[#161624] p-4 hover:border-blue-400 dark:hover:border-blue-500/50 hover:-translate-y-0.5 transition-all">
-      <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-500 text-white flex items-center justify-center mb-3">
-        {icon}
+    <div className="rounded-2xl px-4 py-3 hover:bg-white/[0.03] transition-colors">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="w-7 h-7 rounded-lg bg-blue-500/15 text-blue-300 grid place-items-center">
+          {icon}
+        </span>
+        <span className="text-[14px] font-bold tracking-tight text-white">{title}</span>
       </div>
-      <h3 className="text-[13px] font-bold text-gray-900 dark:text-white mb-1 tracking-tight">{title}</h3>
-      <p className="text-[11.5px] leading-relaxed text-gray-500 dark:text-gray-400">{body}</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 ml-9">
+        <div className="flex items-start gap-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-3 py-2">
+          <Check size={13} className="text-emerald-400 mt-0.5 shrink-0" strokeWidth={3} />
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-emerald-300/85 mb-0.5">RushilAI</p>
+            <p className="text-[12.5px] leading-relaxed text-white/85">{us}</p>
+          </div>
+        </div>
+        <div className="flex items-start gap-2 rounded-lg bg-rose-500/[0.07] border border-rose-500/15 px-3 py-2">
+          <X size={13} className="text-rose-400 mt-0.5 shrink-0" strokeWidth={3} />
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-rose-300/85 mb-0.5">ChatGPT</p>
+            <p className="text-[12.5px] leading-relaxed text-white/65">{them}</p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
-function IntegrityCard({ n, title, children }) {
+// ===== Clock =====
+function Clock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+  const time = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const date = now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
   return (
-    <div className="rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-[#13131f] p-5 md:p-6">
-      <div className="flex items-center gap-3 mb-2">
-        <span className="font-mono text-[10px] font-bold tracking-[0.22em] text-blue-500 dark:text-blue-300">{n}</span>
-        <span className="h-px flex-1 bg-gradient-to-r from-blue-500/30 to-transparent" />
-      </div>
-      <h4 className="text-[15px] font-bold tracking-tight text-gray-900 dark:text-white mb-2">{title}</h4>
-      <p className="text-[13.5px] leading-relaxed text-gray-600 dark:text-gray-300">{children}</p>
+    <div className="absolute top-3 right-5 z-20 flex items-center gap-3 text-[12.5px] font-medium text-white/90 tabular-nums tracking-tight drop-shadow-md">
+      <span>{date}</span>
+      <span>{time}</span>
     </div>
   );
 }
-

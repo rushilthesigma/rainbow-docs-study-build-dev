@@ -1,9 +1,10 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { History, Trash2, Plus, ChevronLeft, Compass, Lightbulb, Calculator, Beaker, Sparkles, Swords } from 'lucide-react';
-import { sendStudyMessage, listStudySessions, getStudySession, deleteStudySession } from '../../api/curriculum';
+import { History, Trash2, Plus, ChevronLeft, Compass, Lightbulb, Calculator, Beaker, Sparkles, Swords, BookOpen, Link2, X, Check, Paperclip, Globe } from 'lucide-react';
+import { sendStudyMessage, listStudySessions, getStudySession, deleteStudySession, listCurricula, extractSourceUrl, extractFiles } from '../../api/curriculum';
 import ChatContainer from '../chat/ChatContainer';
 import DebatePanel from './DebatePanel';
 import { errorChatMessage } from '../../utils/aiErrors';
+import { InlineProgress } from '../shared/ProgressBar';
 
 // Quick-start prompts shown in the empty state. Replaces the bland
 // "Start the conversation..." default with concrete suggestions tied to
@@ -26,6 +27,13 @@ export default function StudyModePanel({ className = '', initialMessage }) {
   const [sessionId, setSessionId] = useState(null);
   // Debate sub-view — replaces the chat with the DebatePanel when true.
   const [debateOpen, setDebateOpen] = useState(false);
+  // Curriculum integration + extra sources. Both flow into the
+  // request `context` object on every send. Sheets toggle from the
+  // header buttons. Sources are { id, title, url?, content }.
+  const [linkedCurriculumId, setLinkedCurriculumId] = useState(null);
+  const [sources, setSources] = useState([]);
+  const [showCurriculumPicker, setShowCurriculumPicker] = useState(false);
+  const [showSourcesSheet, setShowSourcesSheet] = useState(false);
   const abortRef = useRef(null);
   const streamContentRef = useRef('');
   const streamSourcesRef = useRef([]);
@@ -51,7 +59,20 @@ export default function StudyModePanel({ className = '', initialMessage }) {
     streamContentRef.current = '';
     streamSourcesRef.current = [];
 
-    const abort = sendStudyMessage(text, sessionId, {}, images, {
+    // Build the context payload — only include what the server cares
+    // about. `sources` already contains extracted text from /api/files
+    // /extract-url so the server doesn't have to re-fetch.
+    const ctx = {};
+    if (linkedCurriculumId) ctx.curriculumId = linkedCurriculumId;
+    if (sources.length) {
+      ctx.sources = sources.map((s) => ({
+        title: s.title || s.name || s.url || 'Source',
+        url: s.url || null,
+        content: s.content || s.text || '',
+      }));
+    }
+
+    const abort = sendStudyMessage(text, sessionId, ctx, images, {
       onChunk: (chunk) => {
         streamContentRef.current += chunk;
         setStreamingContent(streamContentRef.current);
@@ -202,6 +223,7 @@ export default function StudyModePanel({ className = '', initialMessage }) {
   // Distinctive header — gradient strip, mode badge, action buttons.
   // NOT the simple "icon + title bar" pattern.
   const messageCount = messages.length;
+  const integrationActive = !!linkedCurriculumId || sources.length > 0;
   const header = (
     <div className="relative px-4 py-2.5 border-b border-gray-200 dark:border-[#2A2A40] bg-gradient-to-r from-blue-50 via-white to-indigo-50 dark:from-blue-950/30 dark:via-[#161622] dark:to-indigo-950/30">
       <div className="flex items-center gap-2.5">
@@ -213,8 +235,38 @@ export default function StudyModePanel({ className = '', initialMessage }) {
           <p className="text-[10px] text-gray-500 dark:text-gray-400 tabular-nums">
             {messageCount === 0 ? 'New session — ready when you are' : `${messageCount} message${messageCount === 1 ? '' : 's'}`}
             {sourceMode && <span className="ml-2 inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold uppercase tracking-wider"><span className="w-1 h-1 rounded-full bg-amber-500" /> Source · 2×</span>}
+            {integrationActive && (
+              <span className="ml-2 inline-flex items-center gap-1 text-blue-600 dark:text-blue-300 font-semibold uppercase tracking-wider">
+                <span className="w-1 h-1 rounded-full bg-blue-500" />
+                {linkedCurriculumId ? 'Linked' : ''}
+                {linkedCurriculumId && sources.length ? ' · ' : ''}
+                {sources.length ? `${sources.length} source${sources.length === 1 ? '' : 's'}` : ''}
+              </span>
+            )}
           </p>
         </div>
+        <button
+          onClick={() => setShowCurriculumPicker(true)}
+          className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold transition-colors ${
+            linkedCurriculumId
+              ? 'text-blue-600 dark:text-blue-300 bg-blue-100/70 dark:bg-blue-500/15'
+              : 'text-blue-600 dark:text-blue-400 hover:bg-white dark:hover:bg-[#1e1e2e]'
+          }`}
+          title="Integrate this study session with a curriculum"
+        >
+          <BookOpen size={12} /> {linkedCurriculumId ? 'Linked' : 'Integrate'}
+        </button>
+        <button
+          onClick={() => setShowSourcesSheet(true)}
+          className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold transition-colors ${
+            sources.length
+              ? 'text-emerald-600 dark:text-emerald-300 bg-emerald-100/70 dark:bg-emerald-500/15'
+              : 'text-emerald-600 dark:text-emerald-400 hover:bg-white dark:hover:bg-[#1e1e2e]'
+          }`}
+          title="Attach URLs or PDFs the AI will reference"
+        >
+          <Link2 size={12} /> {sources.length ? `Sources · ${sources.length}` : 'Sources'}
+        </button>
         <button
           onClick={() => setDebateOpen(true)}
           className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:bg-white dark:hover:bg-[#1e1e2e] transition-colors"
@@ -306,21 +358,238 @@ export default function StudyModePanel({ className = '', initialMessage }) {
   );
 
   return (
-    <ChatContainer
-      messages={messages}
-      streamingContent={streamingContent}
-      streamingSources={streamingSources}
-      searchStatus={searchStatus}
-      onSend={handleSend}
-      disabled={streaming}
-      placeholder={streaming ? 'AI is thinking...' : 'Message...'}
-      header={header}
-      className={className}
-      sourceMode={sourceMode}
-      onToggleSource={setSourceMode}
-      onUserEditMessage={handleUserEdit}
-      onAiInstruct={handleAiInstruct}
-      emptyState={emptyState}
-    />
+    <>
+      <ChatContainer
+        messages={messages}
+        streamingContent={streamingContent}
+        streamingSources={streamingSources}
+        searchStatus={searchStatus}
+        onSend={handleSend}
+        disabled={streaming}
+        placeholder={streaming ? 'AI is thinking...' : 'Message...'}
+        header={header}
+        className={className}
+        sourceMode={sourceMode}
+        onToggleSource={setSourceMode}
+        onUserEditMessage={handleUserEdit}
+        onAiInstruct={handleAiInstruct}
+        emptyState={emptyState}
+      />
+      {showCurriculumPicker && (
+        <CurriculumPickerModal
+          activeId={linkedCurriculumId}
+          onClose={() => setShowCurriculumPicker(false)}
+          onPick={(id) => { setLinkedCurriculumId(id); setShowCurriculumPicker(false); }}
+        />
+      )}
+      {showSourcesSheet && (
+        <SourcesModal
+          sources={sources}
+          onClose={() => setShowSourcesSheet(false)}
+          onChange={setSources}
+        />
+      )}
+    </>
+  );
+}
+
+// ===== Curriculum picker modal =====
+//
+// Lists the user's curricula. The "None" row clears the link. Clicking
+// any course wires its id into the next study send's `context` so the
+// system prompt scopes answers to that course.
+function CurriculumPickerModal({ activeId, onClose, onPick }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    listCurricula()
+      .then((d) => setItems(d.curricula || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+  return (
+    <ModalShell title="Integrate with a course" onClose={onClose}>
+      <p className="text-[12px] text-gray-500 dark:text-gray-400 mb-3">
+        The AI will scope its answers to this course&apos;s units + lessons.
+      </p>
+      <div className="space-y-1.5 max-h-[380px] overflow-y-auto pr-1">
+        <PickRow active={activeId == null} onClick={() => onPick(null)} title="None" sub="Free-form study chat" />
+        {loading && <p className="text-[12px] text-gray-400 py-3 text-center">Loading…</p>}
+        {!loading && items.map((c) => {
+          const totalLessons = (c.units || []).reduce((s, u) => s + (u.lessons?.length || 0), 0);
+          return (
+            <PickRow
+              key={c.id}
+              active={activeId === c.id}
+              onClick={() => onPick(c.id)}
+              title={c.title}
+              sub={`${c.units?.length || 0} unit${c.units?.length === 1 ? '' : 's'} · ${totalLessons} lesson${totalLessons === 1 ? '' : 's'}`}
+            />
+          );
+        })}
+      </div>
+    </ModalShell>
+  );
+}
+
+function PickRow({ active, onClick, title, sub }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-colors ${
+        active
+          ? 'border-blue-500 bg-blue-50 dark:bg-blue-500/10'
+          : 'border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0d0d14] hover:border-blue-400/60'
+      }`}
+    >
+      <div className={`w-8 h-8 rounded-lg grid place-items-center shrink-0 ${active ? 'bg-blue-500 text-white' : 'bg-blue-100/70 dark:bg-blue-500/15 text-blue-500'}`}>
+        <BookOpen size={15} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[13px] font-bold text-gray-900 dark:text-white truncate">{title}</p>
+        <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">{sub}</p>
+      </div>
+      {active && <Check size={14} className="text-blue-500 shrink-0" strokeWidth={3} />}
+    </button>
+  );
+}
+
+// ===== Sources modal =====
+//
+// Add URLs (server-side fetch + extract) or PDF/text files (multipart
+// upload + extract). Each chip shows a status. Send turns include the
+// extracted text in the prompt context.
+function SourcesModal({ sources, onClose, onChange }) {
+  const [url, setUrl] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const fileRef = useRef(null);
+
+  async function addUrl(e) {
+    e?.preventDefault?.();
+    const u = url.trim();
+    if (!u || busy) return;
+    setBusy(true); setError('');
+    try {
+      const s = await extractSourceUrl(u);
+      onChange([...sources, { id: crypto.randomUUID?.() || String(Date.now()), ...s }]);
+      setUrl('');
+    } catch (err) {
+      setError(err.message || 'Failed to fetch URL');
+    } finally { setBusy(false); }
+  }
+
+  async function addFiles(e) {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setBusy(true); setError('');
+    try {
+      const { files: extracted = [] } = await extractFiles(files);
+      const next = [...sources];
+      for (const f of extracted) {
+        if (f.error) { setError(`${f.name}: ${f.error}`); continue; }
+        next.push({
+          id: crypto.randomUUID?.() || String(Date.now() + Math.random()),
+          title: f.name, kind: f.kind, content: f.text,
+        });
+      }
+      onChange(next);
+    } catch (err) {
+      setError(err.message || 'Failed to extract files');
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  }
+
+  function remove(id) {
+    onChange(sources.filter((s) => s.id !== id));
+  }
+
+  return (
+    <ModalShell title="Sources" onClose={onClose}>
+      <p className="text-[12px] text-gray-500 dark:text-gray-400 mb-3">
+        Drop URLs or PDFs the AI should reference. Cited inline as [1], [2], …
+      </p>
+
+      <form onSubmit={addUrl} className="flex items-center gap-2 mb-2">
+        <div className="relative flex-1">
+          <Globe size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://…"
+            className="w-full pl-8 pr-3 py-2 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0d0d14] text-[13px] text-gray-900 dark:text-white outline-none focus:border-blue-400"
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={!url.trim() || busy}
+          className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-blue-600 text-white text-[12px] font-bold disabled:opacity-50"
+        >
+          {busy ? <InlineProgress active /> : <><Plus size={11} /> Add URL</>}
+        </button>
+      </form>
+
+      <button
+        type="button"
+        onClick={() => fileRef.current?.click()}
+        disabled={busy}
+        className="w-full inline-flex items-center justify-center gap-1.5 py-2 rounded-lg border border-dashed border-gray-300 dark:border-[#2A2A40] text-[12px] text-gray-600 dark:text-gray-300 hover:border-blue-400 disabled:opacity-50"
+      >
+        <Paperclip size={12} /> Attach PDFs or text files
+      </button>
+      <input
+        ref={fileRef}
+        type="file"
+        multiple
+        accept="application/pdf,text/plain,text/markdown,.md,.txt"
+        onChange={addFiles}
+        className="hidden"
+      />
+
+      {error && <p className="mt-2 text-[11.5px] text-rose-500">{error}</p>}
+
+      {sources.length > 0 && (
+        <div className="mt-4 space-y-1.5 max-h-[260px] overflow-y-auto pr-1">
+          {sources.map((s, i) => (
+            <div key={s.id} className="flex items-center gap-3 px-3 py-2 rounded-xl border border-gray-200 dark:border-[#2A2A40] bg-gray-50 dark:bg-[#0d0d14]">
+              <span className="text-[10px] font-mono font-bold text-blue-500 dark:text-blue-300 w-5 text-center">[{i + 1}]</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-[12.5px] font-semibold text-gray-900 dark:text-white truncate">{s.title || s.url || 'Source'}</p>
+                {s.url && <p className="text-[10.5px] text-gray-500 dark:text-gray-400 truncate">{s.url}</p>}
+                {!s.url && s.content && <p className="text-[10.5px] text-gray-500 dark:text-gray-400">{(s.content.split(/\s+/).filter(Boolean).length)} words</p>}
+              </div>
+              <button onClick={() => remove(s.id)} aria-label="Remove" className="p-1 text-gray-400 hover:text-rose-500">
+                <X size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </ModalShell>
+  );
+}
+
+// ===== Modal shell =====
+function ModalShell({ title, onClose, children }) {
+  useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onClose(); }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center px-4">
+      <button aria-label="Close" onClick={onClose} className="absolute inset-0 bg-black/55 backdrop-blur-[2px] animate-fade-in" />
+      <div className="relative w-full max-w-md rounded-2xl bg-white dark:bg-[#13131f] border border-gray-200 dark:border-white/10 shadow-2xl p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-[14.5px] font-bold text-gray-900 dark:text-white">{title}</h3>
+          <button onClick={onClose} className="w-8 h-8 rounded-full grid place-items-center text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
+            <X size={15} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
   );
 }

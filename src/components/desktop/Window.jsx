@@ -199,8 +199,15 @@ export default function Window({ win, isActive, children }) {
   // Pick title bar based on desktop style
   const TitleBar = STYLE === 'windows' ? WindowsTitleBar : STYLE === 'chromeos' || STYLE === 'linux' ? GenericTitleBar : MacTitleBar;
 
-  // Window border radius: macOS = rounded, Windows = sharp corners, others = slightly rounded
-  const radius = STYLE === 'windows' ? 'rounded-sm' : STYLE === 'macos' ? 'rounded-xl' : 'rounded-lg';
+  // Window border radius: macOS = rounded, Windows = sharp corners,
+  // others = slightly rounded. Snapped to `rounded-none` whenever the
+  // window is taking the full screen (zoom OR browser fullscreen) so
+  // the corners don't leave dark gaps against the desktop / OS chrome.
+  const radius = (maxed || isFullscreen)
+    ? 'rounded-none'
+    : (STYLE === 'windows' ? 'rounded-sm' : STYLE === 'macos' ? 'rounded-xl' : 'rounded-lg');
+
+  const fullBleed = maxed || isFullscreen;
 
   return (
     <div
@@ -208,14 +215,23 @@ export default function Window({ win, isActive, children }) {
       className={`absolute flex flex-col ${radius} overflow-hidden ${animClass}`}
       style={{
         ...style,
+        // Belt-and-suspenders for the rounded-none class — explicit
+        // borderRadius:0 so any inherited radius from a parent (or a
+        // hot-reload class race) can't reintroduce visible corners.
+        ...(fullBleed ? { borderRadius: 0 } : null),
         // Minimize = shrink + fade (CSS-transition driven, never unmount).
         transform: minimized ? 'scale(0.2)' : 'scale(1)',
         transformOrigin: 'bottom center',
         opacity: minimized ? 0 : 1,
         pointerEvents: minimized ? 'none' : 'auto',
-        boxShadow: isActive
-          ? '0 25px 50px -12px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.1)'
-          : '0 10px 30px -8px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.05)',
+        // Drop shadows + the 1px white outline are great for floating
+        // windows but render as a visible halo when the window covers
+        // the whole viewport. Kill the shadow when full-bleed.
+        boxShadow: fullBleed
+          ? 'none'
+          : isActive
+            ? '0 25px 50px -12px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.1)'
+            : '0 10px 30px -8px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.05)',
         transition:
           'left 0.25s cubic-bezier(0.22, 1, 0.36, 1),' +
           ' top 0.25s cubic-bezier(0.22, 1, 0.36, 1),' +

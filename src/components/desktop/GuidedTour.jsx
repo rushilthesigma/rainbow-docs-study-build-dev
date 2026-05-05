@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { ArrowRight, X, GraduationCap, Sparkles } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import { syncData } from '../../api/auth';
 
 // Guided product tour. Anchors a spotlight + tooltip to a real DOM
 // element identified by a CSS selector. Each step's `target` element is
@@ -54,13 +56,38 @@ const STEPS = [
   },
 ];
 
-const STORAGE_KEY = 'cov-tour-step';
+// Tour state lives in user.data.preferences.tourStep on the server
+// (no localStorage). Onboarding sets it to 0 when the user picks
+// "Show me around"; this component reads it on mount and persists
+// every advance / skip. `null` means no tour active.
+function persistTourStep(user, value) {
+  return syncData({
+    preferences: { ...(user?.data?.preferences || {}), tourStep: value },
+  }).catch(() => {});
+}
 
 export default function GuidedTour() {
+  const { user } = useAuth();
+  // Initialize from the server-side flag. If the user record loads
+  // late, we'll re-sync once it's available via the effect below.
   const [stepIdx, setStepIdx] = useState(() => {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw == null ? -1 : Math.max(0, Math.min(STEPS.length - 1, parseInt(raw, 10) || 0));
+    const raw = user?.data?.preferences?.tourStep;
+    if (raw == null) return -1;
+    return Math.max(0, Math.min(STEPS.length - 1, parseInt(raw, 10) || 0));
   });
+  // When user.data lands after first render (post-fetch), pick up the
+  // tour step on the way through.
+  const initRef = useRef(false);
+  useEffect(() => {
+    if (initRef.current) return;
+    if (!user) return;
+    initRef.current = true;
+    const raw = user?.data?.preferences?.tourStep;
+    if (raw != null) {
+      setStepIdx(Math.max(0, Math.min(STEPS.length - 1, parseInt(raw, 10) || 0)));
+    }
+  }, [user]);
+
   const [rect, setRect] = useState(null);
   const [hasScrolled, setHasScrolled] = useState(false);
   const tipRef = useRef(null);
@@ -74,19 +101,19 @@ export default function GuidedTour() {
     setStepIdx(prev => {
       const next = prev + 1;
       if (next >= STEPS.length) {
-        localStorage.removeItem(STORAGE_KEY);
+        persistTourStep(user, null);
         return -1;
       }
-      localStorage.setItem(STORAGE_KEY, String(next));
+      persistTourStep(user, next);
       return next;
     });
-  }, []);
+  }, [user]);
 
   const skip = useCallback(() => {
-    localStorage.removeItem(STORAGE_KEY);
+    persistTourStep(user, null);
     setStepIdx(-1);
     setRect(null);
-  }, []);
+  }, [user]);
 
   // Note: we used to auto-advance from the first step when the Curricula
   // app window opened, but that fired in addition to the click-handler

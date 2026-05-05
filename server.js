@@ -312,6 +312,14 @@ function createDefaultData() {
       aiPersonality: 'friendly',
       fluffLevel: 'normal',
       customInstructions: '',
+      // ----- UI prefs (moved off localStorage) -----
+      theme: 'dark',
+      wallpaper: 'lavender',
+      dockSize: 'medium',
+      iconStyle: 'gradient',
+      dockPosition: 'bottom',
+      onboarded: false,
+      tourStep: null,
     },
     profile: { level: 1, xp: 0, xpToNextLevel: 100, strengths: [], weaknesses: [], topicScores: {} },
     goals: [],
@@ -2603,6 +2611,11 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
     if (!session) {
       session = { id: crypto.randomUUID(), startedAt: new Date().toISOString(), lastMessageAt: null, messages: [], context: context || {} };
       users[email].data.studySessions.unshift(session);
+    } else if (context && (context.curriculumId !== undefined || context.sources !== undefined)) {
+      // Mid-session context updates: caller flipped on curriculum
+      // integration or attached sources after the session started.
+      // Merge into the persisted context so subsequent turns inherit it.
+      session.context = { ...(session.context || {}), ...context };
     }
 
     session.messages.push({ role: 'user', content: message, timestamp: new Date().toISOString() });
@@ -2611,7 +2624,8 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
     const systemPrompt = buildStudyModePrompt(
       users[email].data.profile, users[email].data.goals,
       users[email].data.curricula, users[email].data.preferences,
-      users[email].data.assessmentHistory || []
+      users[email].data.assessmentHistory || [],
+      session.context || null
     );
 
     const aiMessages = session.messages.map(m => ({ role: m.role, content: m.content }));
