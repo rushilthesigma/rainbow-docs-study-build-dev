@@ -1,4 +1,4 @@
-import { BookOpen, MessageSquare, FileText, ClipboardCheck, Settings, Users, Shield, Zap, Lightbulb, Calculator } from 'lucide-react';
+import { BookOpen, MessageSquare, FileText, ClipboardCheck, Settings, Users, Shield, Zap, Lightbulb, Calculator, Smartphone } from 'lucide-react';
 
 const APP_REGISTRY = [
   { id: 'curricula', label: 'Curricula', icon: BookOpen, color: '#3b82f6', gradient: 'from-blue-500 to-blue-700' },
@@ -11,6 +11,7 @@ const APP_REGISTRY = [
   { id: 'quizbowl', label: 'Quiz Bowl', icon: Zap, color: '#f59e0b', gradient: 'from-amber-400 to-orange-500' },
   // Debate is no longer a top-level app — it's a button inside Study Mode.
   { id: 'admin', label: 'Admin', icon: Shield, color: '#dc2626', gradient: 'from-red-500 to-red-700', adminOnly: true },
+  { id: 'mobilepreview', label: 'Mobile Preview', icon: Smartphone, color: '#0ea5e9', gradient: 'from-sky-400 to-blue-600', adminOnly: true },
   { id: 'settings', label: 'Settings', icon: Settings, color: '#6b7280', gradient: 'from-gray-400 to-gray-600' },
 ];
 

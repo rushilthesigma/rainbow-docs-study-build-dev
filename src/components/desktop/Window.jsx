@@ -15,7 +15,7 @@ function MacTitleBar({ windowId, isMaximized, isActive, title, onDragStart, onDo
   const { closeWindow, minimizeWindow, maximizeWindow } = useWindowManager();
   const [hovered, setHovered] = useState(false);
   return (
-    <div className={`h-8 flex items-center flex-shrink-0 ${isActive ? 'bg-[#e8e8ea] dark:bg-[#2c2c2e]' : 'bg-[#f0f0f0] dark:bg-[#383838]'}`} onPointerDown={onDragStart} onDoubleClick={onDoubleClick} data-titlebar={windowId}>
+    <div className={`h-8 flex items-center flex-shrink-0 select-none ${isActive ? 'bg-[#e8e8ea] dark:bg-[#2c2c2e]' : 'bg-[#f0f0f0] dark:bg-[#383838]'}`} onPointerDown={onDragStart} onDoubleClick={onDoubleClick} data-titlebar={windowId}>
       <div className="flex items-center gap-[7px] px-3" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
         <button onClick={e => { e.stopPropagation(); closeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FF5F57] hover:brightness-90 flex items-center justify-center" title="Close"><X size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#4a0002]" /></button>
         <button onClick={e => { e.stopPropagation(); minimizeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FEBC2E] hover:brightness-90 flex items-center justify-center" title="Minimize"><Minus size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#5a3e00]" /></button>
@@ -205,7 +205,7 @@ export default function Window({ win, isActive, children }) {
   return (
     <div
       ref={windowRef}
-      className={`absolute flex flex-col ${radius} overflow-hidden select-none ${animClass}`}
+      className={`absolute flex flex-col ${radius} overflow-hidden ${animClass}`}
       style={{
         ...style,
         // Minimize = shrink + fade (CSS-transition driven, never unmount).
@@ -234,7 +234,7 @@ export default function Window({ win, isActive, children }) {
         {children}
       </div>
 
-      {!maxed && !isFullscreen && <>
+      {!maxed && !isFullscreen && !win.fixedSize && <>
         <div className="absolute top-0 left-0 right-0 h-1 cursor-n-resize" onPointerDown={e => handleResizeStart(e, 'n')} />
         <div className="absolute bottom-0 left-0 right-0 h-1 cursor-s-resize" onPointerDown={e => handleResizeStart(e, 's')} />
         <div className="absolute top-0 left-0 bottom-0 w-1 cursor-w-resize" onPointerDown={e => handleResizeStart(e, 'w')} />

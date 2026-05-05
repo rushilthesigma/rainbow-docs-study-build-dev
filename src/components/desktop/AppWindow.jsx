@@ -5,6 +5,7 @@ import SocialApp from './apps/SocialApp';
 import AdminApp from './apps/AdminApp';
 import QuizBowlApp from './apps/QuizBowlApp';
 import MathTutorApp from './apps/MathTutorApp';
+import MobilePreview from '../admin/MobilePreview';
 import StudyPage from '../../pages/StudyPage';
 import AssessmentsPage from '../../pages/AssessmentsPage';
 import SettingsPage from '../../pages/SettingsPage';
@@ -22,11 +23,12 @@ const APP_COMPONENTS = {
   social: SocialApp,
   quizbowl: QuizBowlApp,
   admin: AdminApp,
+  mobilepreview: MobilePreview,
   settings: SettingsPage,
 };
 
 // Apps that need flex container without scroll (they manage their own scrolling)
-const FLEX_APPS = new Set(['notes', 'study', 'debate', 'mathtutor', 'social']);
+const FLEX_APPS = new Set(['notes', 'study', 'debate', 'mathtutor', 'social', 'mobilepreview']);
 
 export default function AppWindow({ appId }) {
   const Component = APP_COMPONENTS[appId];

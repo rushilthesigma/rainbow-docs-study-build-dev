@@ -2,13 +2,21 @@ import { useState, useEffect, useRef } from 'react';
 import { Search, CornerDownLeft } from 'lucide-react';
 import APP_REGISTRY from './appRegistry';
 import { useWindowManager } from '../../context/WindowManagerContext';
+import { checkAdmin } from '../../api/admin';
 
 export default function Spotlight({ open, onClose }) {
   const [query, setQuery] = useState('');
   const [selectedIdx, setSelectedIdx] = useState(0);
+  const [isAdmin, setIsAdmin] = useState(false);
   const inputRef = useRef(null);
   const listRef = useRef(null);
   const { openApp } = useWindowManager();
+
+  // Check admin status once so adminOnly apps (Admin, Mobile Preview)
+  // are hidden from non-admin users in spotlight search results.
+  useEffect(() => {
+    checkAdmin().then((d) => setIsAdmin(!!d.isAdmin)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (open) {
@@ -41,12 +49,15 @@ export default function Spotlight({ open, onClose }) {
 
   if (!open) return null;
 
+  // adminOnly apps are filtered out unconditionally for non-admins so
+  // they never surface in spotlight regardless of search text.
+  const visibleRegistry = APP_REGISTRY.filter((a) => !a.adminOnly || isAdmin);
   const results = query.trim()
-    ? APP_REGISTRY.filter(a =>
+    ? visibleRegistry.filter(a =>
         a.label.toLowerCase().includes(query.toLowerCase()) ||
         a.id.toLowerCase().includes(query.toLowerCase())
       )
-    : APP_REGISTRY;
+    : visibleRegistry;
 
   function handleSelect(app) {
     openApp(app.id, app.label);

@@ -12,9 +12,18 @@ function getDefaultSize(appId) {
     newcurriculum: { w: 650, h: 550 },
     goals: { w: 950, h: 600 },
     assessments: { w: 900, h: 600 },
+    // Mobile Preview: window size matches a phone (375×812 + window
+    // chrome). The window itself IS the phone — no inner bezel.
+    mobilepreview: { w: 380, h: 870 },
   };
   return sizes[appId] || { w: 800, h: 560 };
 }
+
+// Apps whose windows are locked to their default size — no resize, no
+// maximize. Used for the Mobile Preview cutout where changing the
+// dimensions would defeat the point of the preview.
+const FIXED_SIZE_APPS = new Set(['mobilepreview']);
+function isFixedSize(appId) { return FIXED_SIZE_APPS.has(appId); }
 
 function getCascadePos(offset) {
   const base = { x: 80, y: 50 };
@@ -38,11 +47,12 @@ function reducer(state, action) {
       const id = `win-${action.appId}-${Date.now()}`;
       const size = getDefaultSize(action.appId);
       const position = getCascadePos(state.cascadeOffset);
+      const fixedSize = isFixedSize(action.appId);
       return {
         ...state,
         windows: {
           ...state.windows,
-          [id]: { id, appId: action.appId, title: action.title || action.appId, position, size, zIndex: state.nextZIndex, isMinimized: false, isMaximized: false, isClosing: false, preMaximize: null },
+          [id]: { id, appId: action.appId, title: action.title || action.appId, position, size, zIndex: state.nextZIndex, isMinimized: false, isMaximized: false, isClosing: false, preMaximize: null, fixedSize },
         },
         nextZIndex: state.nextZIndex + 1,
         activeWindowId: id,
@@ -91,6 +101,9 @@ function reducer(state, action) {
     case 'MAXIMIZE_WINDOW': {
       const w = state.windows[action.windowId];
       if (!w) return state;
+      // Fixed-size apps (Mobile Preview) ignore zoom — the dimensions
+      // are the whole point of the app.
+      if (w.fixedSize) return state;
       if (w.isMaximized) {
         return { ...state, windows: { ...state.windows, [action.windowId]: { ...w, isMaximized: false, position: w.preMaximize?.position || w.position, size: w.preMaximize?.size || w.size, preMaximize: null } } };
       }
@@ -109,6 +122,8 @@ function reducer(state, action) {
     case 'RESIZE_WINDOW': {
       const w = state.windows[action.windowId];
       if (!w) return state;
+      // Fixed-size apps reject any resize attempt.
+      if (w.fixedSize) return state;
       return { ...state, windows: { ...state.windows, [action.windowId]: { ...w, size: action.size, ...(action.position ? { position: action.position } : {}) } } };
     }
     case 'SET_TITLE': {

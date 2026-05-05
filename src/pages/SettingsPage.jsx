@@ -216,7 +216,7 @@ export default function SettingsPage() {
               <div>
                 <PillGroup
                   options={[
-                    { value: 'pro',        label: 'Pro',        description: 'Smartest · best on hard problems' },
+                    { value: 'pro',        label: 'Pro',        description: 'Smartest · 1M-token context · best on hard problems' },
                     { value: 'flash',      label: 'Flash',      description: 'Faster · solid for most lessons' },
                     { value: 'flash-lite', label: 'Flash Lite', description: 'Fastest + cheapest · light tasks' },
                   ]}

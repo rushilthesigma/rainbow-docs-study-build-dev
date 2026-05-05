@@ -94,8 +94,12 @@ export default function Dock() {
       <div className="fixed bottom-2 left-1/2 -translate-x-1/2 z-[1002]">
         <div
           ref={dockRef}
-          className="flex items-end gap-1.5 px-3 py-2 rounded-2xl border border-white/15 dark:border-white/10 shadow-2xl"
-          style={{ background: 'rgba(30, 30, 40, 0.55)', backdropFilter: 'blur(40px) saturate(1.8)', WebkitBackdropFilter: 'blur(40px) saturate(1.8)' }}
+          // Theme-aware glass: bright translucent panel in light mode,
+          // smoked glass in dark mode. Backdrop saturation is inlined
+          // since Tailwind's `backdrop-saturate-150` taps out at 1.5×
+          // and we want the punchier 1.8×.
+          className="flex items-end gap-1.5 px-3 py-2 rounded-2xl border border-gray-300/50 dark:border-white/10 shadow-2xl bg-white/70 dark:bg-[rgba(30,30,40,0.55)]"
+          style={{ backdropFilter: 'blur(40px) saturate(1.8)', WebkitBackdropFilter: 'blur(40px) saturate(1.8)' }}
           onMouseMove={handleMouseMove}
           onMouseLeave={() => setMouseX(null)}
         >
@@ -109,7 +113,7 @@ export default function Dock() {
             else openApp(app.id, app.label);
           }} size={size} iconStyle={iconStyle} />
           ))}
-          <div className="w-px bg-white/15 mx-1 self-center" style={{ height: size * 0.7 }} />
+          <div className="w-px bg-gray-400/40 dark:bg-white/15 mx-1 self-center" style={{ height: size * 0.7 }} />
           {utilApps.map(app => (
             <DockIcon key={app.id} app={app} mouseX={mouseX} iconRef={getIconRef(app.id)} isOpen={openAppIds.has(app.id)} onClick={() => {
             // If there's already a window for this app that's minimized, restore it.

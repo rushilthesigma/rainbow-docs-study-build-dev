@@ -69,20 +69,40 @@ export default function ProgressBar({
 }
 
 // Inline pill — same idea but compact, for use INSIDE buttons.
-export function InlineProgress({ value, active = true, target = 92, label }) {
+//
+// Tuned for fast actions (save settings, etc.): the easing reaches
+// `target` over `duration` ms (default 2.5s), and when `active` flips
+// to false the bar SNAPS to 100% before fading. The old version
+// approached 92% over 8s and dropped straight to 0 — for a 1-second
+// save that meant the user saw the bar peak around ~33% and vanish,
+// reading as "the save bar ends at 33%".
+export function InlineProgress({ value, active = true, target = 92, duration = 2500, label }) {
   const [simulated, setSimulated] = useState(0);
   const startedAt = useRef(null);
+  const wasActive = useRef(false);
   useEffect(() => {
     if (value !== undefined) return;
-    if (!active) { setSimulated(0); startedAt.current = null; return; }
+    if (!active) {
+      // If we were animating, snap to 100% briefly so the user gets
+      // a "completed" beat instead of the bar collapsing to 0%.
+      if (wasActive.current) {
+        setSimulated(100);
+        const t = setTimeout(() => { setSimulated(0); startedAt.current = null; }, 250);
+        wasActive.current = false;
+        return () => clearTimeout(t);
+      }
+      setSimulated(0); startedAt.current = null;
+      return;
+    }
+    wasActive.current = true;
     if (startedAt.current === null) startedAt.current = Date.now();
     const id = setInterval(() => {
       const elapsed = Date.now() - startedAt.current;
-      const ratio = 1 - Math.exp(-(elapsed / 8000) * 3);
+      const ratio = 1 - Math.exp(-(elapsed / duration) * 3);
       setSimulated(Math.min(target, Math.round(ratio * target)));
-    }, 120);
+    }, 80);
     return () => clearInterval(id);
-  }, [active, value, target]);
+  }, [active, value, target, duration]);
   const pct = value !== undefined ? Math.max(0, Math.min(100, value)) : simulated;
   return (
     <span className="inline-flex items-center gap-1.5">

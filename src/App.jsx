@@ -21,6 +21,10 @@ import SocialPage from './pages/SocialPage';
 import SettingsPage from './pages/SettingsPage';
 import AppShell from './components/layout/AppShell';
 import DesktopShell from './components/desktop/DesktopShell';
+// MobileShell is intentionally NOT auto-rendered for narrow viewports.
+// The mobile UI is a developer / QA tool that ships only inside the
+// admin-only Mobile Preview app. Real users — phone, tablet, desktop —
+// all get the macOS-style desktop shell.
 import Onboarding from './components/desktop/Onboarding';
 import LoadingSpinner from './components/shared/LoadingSpinner';
 

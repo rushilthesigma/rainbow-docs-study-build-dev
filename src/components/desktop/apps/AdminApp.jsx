@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Shield, ArrowLeft, Ban, Trash2, User, BookOpen, FileText, Target, Layers,
   MessageSquare, Lightbulb, Trophy, CreditCard, Search, Crown, Calendar,
-  RefreshCw, ChevronRight, Zap,
+  RefreshCw, ChevronRight, Zap, Smartphone,
 } from 'lucide-react';
 import {
   checkAdmin, listUsers, getUser, toggleBan, deleteUser,
@@ -11,6 +11,7 @@ import {
 import { ownerGrantPro, ownerRevokePro } from '../../../api/billing';
 import LoadingSpinner from '../../shared/LoadingSpinner';
 import AdvisorBadge from '../../shared/AdvisorBadge';
+import { useWindowManager } from '../../../context/WindowManagerContext';
 
 // Advisor emails mirrored from server so the admin table can tag rows without
 // an extra lookup. Keep in sync with ADVISOR_EMAILS in server.js.
@@ -23,6 +24,9 @@ export default function AdminApp() {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState('list'); // list | detail | chat
+  // Mobile Preview is its own app — admin just spawns a window for it.
+  const wm = useWindowManager();
+  const openMobilePreview = () => wm.openApp('mobilepreview', 'Mobile Preview');
   const [selectedUser, setSelectedUser] = useState(null);
   const [conv, setConv] = useState(null); // active conversation viewer payload
 
@@ -172,6 +176,7 @@ export default function AdminApp() {
       includeDemo={includeDemo} setIncludeDemo={setIncludeDemo}
       onOpen={openUser}
       onRefresh={refreshList}
+      onOpenMobilePreview={openMobilePreview}
     />
   );
 }
@@ -179,16 +184,25 @@ export default function AdminApp() {
 function sumMsgs(u) { return (u.chatMessages?.study || 0) + (u.chatMessages?.lessons || 0) + (u.chatMessages?.curriculum || 0); }
 
 /* ====================== USER LIST ====================== */
-function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, sort, setSort, includeDemo, setIncludeDemo, onOpen, onRefresh }) {
+function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, sort, setSort, includeDemo, setIncludeDemo, onOpen, onRefresh, onOpenMobilePreview }) {
   return (
     <div>
       <div className="flex items-center gap-2 mb-4">
         <Shield size={20} className="text-blue-500" />
         <h2 className="text-lg font-bold text-gray-900 dark:text-white">Admin Panel</h2>
         <span className="text-xs text-gray-400 ml-2">{users.length} of {total}</span>
-        <button onClick={onRefresh} className="ml-auto text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-[#1e1e2e]" title="Refresh">
-          <RefreshCw size={14} />
-        </button>
+        <div className="ml-auto flex items-center gap-1.5">
+          <button
+            onClick={onOpenMobilePreview}
+            title="Open the live mobile UI in an iPhone preview"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-blue-200 dark:border-blue-700/50 bg-blue-50 dark:bg-blue-900/20 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
+          >
+            <Smartphone size={13} /> Mobile preview
+          </button>
+          <button onClick={onRefresh} className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-[#1e1e2e]" title="Refresh">
+            <RefreshCw size={14} />
+          </button>
+        </div>
       </div>
 
       {/* Toolbar */}
