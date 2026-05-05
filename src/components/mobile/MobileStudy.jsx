@@ -94,7 +94,12 @@ export default function MobileStudy() {
   const empty = messages.length === 0 && !streaming;
 
   return (
-    <div className="flex flex-col h-full bg-[#F4F5F7] dark:bg-[#0a0a14]">
+    // `flex-1 min-h-0` (not `h-full`) so this fills the parent flex
+    // column deterministically. h-full vs flex-1 matters here because
+    // the parent uses flex-1 itself — `height: 100%` of a flex-grown
+    // parent resolves inconsistently across browsers, while `flex-1`
+    // on the child is rock solid.
+    <div className="flex-1 min-h-0 flex flex-col bg-[#F4F5F7] dark:bg-[#0a0a14]">
       {/* Slim header */}
       <header className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 dark:border-white/[0.06] flex-shrink-0">
         <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 grid place-items-center">

@@ -1,11 +1,14 @@
-import { Home, BookOpen, Lightbulb, FileText, MoreHorizontal } from 'lucide-react';
+import { Home, BookOpen, Lightbulb, FileText, Settings } from 'lucide-react';
 
+// Five primary tabs. `More` is gone — secondary surfaces (Study,
+// Quiz Bowl) are reachable from the Home tiles, and Settings lives
+// here as its own tab.
 const TABS = [
   { id: 'home',      label: 'Home',      icon: Home },
   { id: 'curricula', label: 'Courses',   icon: BookOpen },
   { id: 'lessons',   label: 'Lessons',   icon: Lightbulb },
   { id: 'notes',     label: 'Notes',     icon: FileText },
-  { id: 'more',      label: 'More',      icon: MoreHorizontal },
+  { id: 'settings',  label: 'Settings',  icon: Settings },
 ];
 
 // Glassy tab bar with a sliding pill behind the active tab. Sits

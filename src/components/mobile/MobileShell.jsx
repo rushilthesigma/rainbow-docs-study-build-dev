@@ -1,8 +1,7 @@
-import { useState, useRef, useImperativeHandle, forwardRef } from 'react';
+import { useState, useImperativeHandle, forwardRef } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import BottomTabs from './BottomTabs';
 import MobileHeader from './MobileHeader';
-import MoreSheet from './MoreSheet';
 import MobileHome from './MobileHome';
 import MobileCurricula from './MobileCurricula';
 import MobileLessons from './MobileLessons';
@@ -10,20 +9,6 @@ import MobileNotes from './MobileNotes';
 import MobileQuizBowl from './MobileQuizBowl';
 import MobileSettings from './MobileSettings';
 import MobileStudy from './MobileStudy';
-import MobilePage from './MobilePage';
-
-import AssessmentsPage from '../../pages/AssessmentsPage';
-import GoalsPage from '../../pages/GoalsPage';
-import FlashcardsPage from '../../pages/FlashcardsPage';
-import SocialApp from '../desktop/apps/SocialApp';
-
-// Pages without a bespoke mobile build are wrapped with `MobilePage`
-// so they share the same centered title + spacious layout as the
-// purpose-built mobile screens.
-function WrappedAssessments() { return <MobilePage eyebrow="Practice" title="Assessments"><AssessmentsPage /></MobilePage>; }
-function WrappedGoals()       { return <MobilePage eyebrow="Targets" title="Goals"><GoalsPage /></MobilePage>; }
-function WrappedFlashcards()  { return <MobilePage eyebrow="Memory" title="Flashcards"><FlashcardsPage /></MobilePage>; }
-function WrappedSocial()      { return <MobilePage eyebrow="Friends" title="Social"><div className="rounded-2xl border border-gray-200 dark:border-white/[0.06] bg-white dark:bg-[#13131f] overflow-hidden"><SocialApp /></div></MobilePage>; }
 
 // Page registry for the mobile shell.
 //   - `hideHeader`   → suppresses MobileHeader (page renders its own).
@@ -32,23 +17,24 @@ function WrappedSocial()      { return <MobilePage eyebrow="Friends" title="Soci
 //     this flag the shell wraps the page in an `overflow-y-auto`
 //     scroller, which conflicts with the page's own `flex-col h-full`
 //     and breaks the input-pinning. With it, the shell hands a bounded
-//     `flex-1 overflow-hidden` container directly to the page.
+//     `flex flex-col` container directly so the page's `flex-1`
+//     children resolve to the right height.
+//
+// `study` and `quizbowl` are reachable from MobileHome tiles, not
+// from the bottom tab bar. The "More" tab + sheet were dropped per
+// product direction.
 const PAGE_MAP = {
   home:        { title: 'RushilAI',  component: MobileHome,       isHome: true,  hideHeader: false },
   curricula:   { title: 'Courses',   component: MobileCurricula,                 hideHeader: true  },
   lessons:     { title: 'Lessons',   component: MobileLessons,                   hideHeader: true  },
-  notes:       { title: 'Notes',     component: MobileNotes,                     hideHeader: true,  manageLayout: true },
-  // Tabs surfaced via "More":
+  notes:       { title: 'Notes',     component: MobileNotes,                     hideHeader: true  },
+  settings:    { title: 'Settings',  component: MobileSettings,                  hideHeader: true  },
+  // Reachable via Home tiles only:
   study:       { title: 'Study',        component: MobileStudy,        hideHeader: true, manageLayout: true },
   quizbowl:    { title: 'Quiz Bowl',    component: MobileQuizBowl,     hideHeader: true },
-  flashcards:  { title: 'Flashcards',   component: WrappedFlashcards,  hideHeader: true },
-  goals:       { title: 'Goals',        component: WrappedGoals,       hideHeader: true },
-  assessments: { title: 'Assessments',  component: WrappedAssessments, hideHeader: true },
-  social:      { title: 'Social',       component: WrappedSocial,      hideHeader: true },
-  settings:    { title: 'Settings',     component: MobileSettings,     hideHeader: true },
 };
 
-const MAIN_TABS = ['home', 'curricula', 'lessons', 'notes'];
+const MAIN_TABS = ['home', 'curricula', 'lessons', 'notes', 'settings'];
 
 // Modern mobile shell. Renders full-bleed in a phone viewport (or
 // inside the AdminApp Mobile Preview cutout — either way it sizes to
@@ -59,7 +45,6 @@ const MAIN_TABS = ['home', 'curricula', 'lessons', 'notes'];
 const MobileShell = forwardRef(function MobileShell(_props, ref) {
   const [activeTab, setActiveTab] = useState('home');
   const [activePage, setActivePage] = useState('home');
-  const [moreOpen, setMoreOpen] = useState(false);
   // Browser-style nav history. `back` is the stack of previously
   // visited (tab, page) pairs; `forward` mirrors what we've popped
   // off so the user can redo with the forward button. Stored in state
@@ -83,7 +68,6 @@ const MobileShell = forwardRef(function MobileShell(_props, ref) {
       setForwardStack((f) => [...f, { activeTab, activePage }]);
       setActiveTab(prev.activeTab);
       setActivePage(prev.activePage);
-      setMoreOpen(false);
       return s.slice(0, -1);
     });
   }
@@ -94,36 +78,31 @@ const MobileShell = forwardRef(function MobileShell(_props, ref) {
       setBackStack((b) => [...b, { activeTab, activePage }]);
       setActiveTab(next.activeTab);
       setActivePage(next.activePage);
-      setMoreOpen(false);
       return f.slice(0, -1);
     });
   }
 
   function handleTabSelect(tabId) {
-    if (tabId === 'more') { setMoreOpen(true); return; }
     navigate(tabId, tabId);
   }
 
-  function handleMoreSelect(pageId) {
-    navigate('more', pageId);
-  }
-
-  // MobileHome triggers tab navigation via its own callbacks (so quick
-  // actions can route into "More" pages even from the home grid).
+  // MobileHome triggers tab navigation via its own callbacks. If the
+  // target is one of the bottom-tab pages we sync activeTab; otherwise
+  // (study, quizbowl) we leave activeTab on `home` so the Home tile
+  // stays highlighted while the user is in the secondary surface.
   function navigateFromHome(target) {
     if (MAIN_TABS.includes(target)) navigate(target, target);
-    else if (PAGE_MAP[target]) navigate('more', target);
+    else if (PAGE_MAP[target]) navigate('home', target);
   }
 
   useImperativeHandle(ref, () => ({
     goBack: () => {
       if (backStack.length) goBackOne();
-      else { setActiveTab('home'); setActivePage('home'); setMoreOpen(false); }
+      else { setActiveTab('home'); setActivePage('home'); }
     },
     goHome: () => {
       setBackStack([]); setForwardStack([]);
       setActiveTab('home'); setActivePage('home');
-      setMoreOpen(false);
     },
   }), [backStack.length]);
 
@@ -131,7 +110,7 @@ const MobileShell = forwardRef(function MobileShell(_props, ref) {
   const PageComponent = page.component;
   const isMain = MAIN_TABS.includes(activePage);
   const onBack = !isMain
-    ? () => navigate(activeTab !== 'more' ? activeTab : 'home', activeTab !== 'more' ? activeTab : 'home')
+    ? () => navigate(activeTab, activeTab)
     : null;
 
   return (
@@ -151,9 +130,13 @@ const MobileShell = forwardRef(function MobileShell(_props, ref) {
         style={{ paddingBottom: 'calc(90px + env(safe-area-inset-bottom, 0px))' }}
       >
         {page.manageLayout ? (
-          // Pages that own their own scrolling get a bounded container
-          // and render directly — no inner overflow-y-auto wrapper.
-          <div className="flex-1 min-h-0 overflow-hidden">
+          // Pages that own their own scrolling get a bounded flex
+          // column. The page renders as a flex-1 child of THIS column
+          // so its `h-full` / `flex-1 flex-col` resolves against a
+          // real bounded height — without `flex flex-col` here, the
+          // child's h-full collapsed to its content size and the form
+          // floated wherever the messages list ended.
+          <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
             <PageComponent />
           </div>
         ) : (
@@ -170,14 +153,13 @@ const MobileShell = forwardRef(function MobileShell(_props, ref) {
             2. BrowserControls (back / forward, 32px tall)
           The browser controls are explicitly BELOW the apps row so the
           finger sits over the tabs first when reaching for them. */}
-      <BottomTabs active={isMain ? activePage : 'more'} onSelect={handleTabSelect} />
+      <BottomTabs active={isMain ? activePage : activeTab} onSelect={handleTabSelect} />
       <BrowserControls
         canBack={backStack.length > 0}
         canForward={forwardStack.length > 0}
         onBack={goBackOne}
         onForward={goForwardOne}
       />
-      <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} onSelect={handleMoreSelect} />
     </div>
   );
 });
