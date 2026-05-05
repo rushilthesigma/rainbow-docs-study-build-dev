@@ -334,8 +334,15 @@ export default function QuizBowlMatch({ user, onExit }) {
               </div>
             ))}
             {waiting && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-gray-300 dark:border-gray-600 text-xs text-gray-400 italic">
-                <InlineProgress active /> Waiting for player 2…
+              // No progress bar here — there's nothing to measure;
+              // we're just blocking on an SSE join event. Show a
+              // pulsing dot + text instead.
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-gray-300 dark:border-gray-600 text-xs text-gray-500 dark:text-gray-400 italic">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75 animate-ping" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+                </span>
+                Waiting for player 2…
               </div>
             )}
           </div>
@@ -536,8 +543,14 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
         )}
 
         {buzz && !answerResult && !iBuzzed && (
-          <div className="w-full py-3 rounded-xl bg-gray-100 dark:bg-[#1e1e2e] text-center text-xs text-gray-500">
-            <InlineProgress active /> {buzzerName} is answering…
+          // No InlineProgress here either — we're waiting on the opponent
+          // to submit, not loading anything quantifiable.
+          <div className="w-full py-3 rounded-xl bg-gray-100 dark:bg-[#1e1e2e] text-center text-xs text-gray-500 inline-flex items-center justify-center gap-2">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75 animate-ping" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+            </span>
+            {buzzerName} is answering…
           </div>
         )}
 
