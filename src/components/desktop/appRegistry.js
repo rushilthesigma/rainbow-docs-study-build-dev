@@ -1,5 +1,11 @@
-import { BookOpen, MessageSquare, FileText, ClipboardCheck, Settings, Users, Shield, Zap, Lightbulb, Calculator, Smartphone } from 'lucide-react';
+import { BookOpen, MessageSquare, FileText, ClipboardCheck, Settings, Users, Shield, Zap, Lightbulb, Calculator } from 'lucide-react';
 
+// Mobile Preview was removed from the registry once App.jsx wired up
+// width-based mobile rendering — real phones get MobileShell directly,
+// so a dedicated preview app on the dock was redundant clutter. The
+// MobilePreview component still exists in the tree (admin/MobilePreview.jsx)
+// in case we want to re-surface it; just nothing references it from
+// the visible UI anymore.
 const APP_REGISTRY = [
   { id: 'curricula', label: 'Curricula', icon: BookOpen, color: '#3b82f6', gradient: 'from-blue-500 to-blue-700' },
   { id: 'lessons', label: 'Lessons', icon: Lightbulb, color: '#eab308', gradient: 'from-yellow-400 to-amber-600' },
@@ -11,7 +17,6 @@ const APP_REGISTRY = [
   { id: 'quizbowl', label: 'Quiz Bowl', icon: Zap, color: '#f59e0b', gradient: 'from-amber-400 to-orange-500' },
   // Debate is no longer a top-level app — it's a button inside Study Mode.
   { id: 'admin', label: 'Admin', icon: Shield, color: '#dc2626', gradient: 'from-red-500 to-red-700', adminOnly: true },
-  { id: 'mobilepreview', label: 'Mobile Preview', icon: Smartphone, color: '#0ea5e9', gradient: 'from-sky-400 to-blue-600', adminOnly: true },
   { id: 'settings', label: 'Settings', icon: Settings, color: '#6b7280', gradient: 'from-gray-400 to-gray-600' },
 ];
 

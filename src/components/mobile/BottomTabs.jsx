@@ -8,13 +8,15 @@ const TABS = [
   { id: 'more',      label: 'More',      icon: MoreHorizontal },
 ];
 
-// Glassy bottom tab bar with a sliding pill behind the active tab.
-// 5 tabs, all the same width. Honors the iOS home-indicator inset.
+// Glassy tab bar with a sliding pill behind the active tab. Sits
+// ABOVE the BrowserControls row at the bottom of the screen — the
+// `bottom` offset accounts for the controls height (32) + the iOS
+// home-indicator inset.
 export default function BottomTabs({ active, onSelect }) {
   return (
     <nav
-      className="fixed bottom-0 left-0 right-0 z-30 bg-white/85 dark:bg-[#0c0c16]/85 backdrop-blur-xl border-t border-gray-200/70 dark:border-white/[0.06]"
-      style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+      className="fixed left-0 right-0 z-30 bg-white/85 dark:bg-[#0c0c16]/85 backdrop-blur-xl border-t border-gray-200/70 dark:border-white/[0.06]"
+      style={{ bottom: 'calc(32px + env(safe-area-inset-bottom, 0px))' }}
     >
       <div className="relative flex items-stretch h-[58px] px-2">
         {TABS.map((tab) => {

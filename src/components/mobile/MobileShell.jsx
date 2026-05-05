@@ -25,18 +25,21 @@ function WrappedGoals()       { return <MobilePage eyebrow="Targets" title="Goal
 function WrappedFlashcards()  { return <MobilePage eyebrow="Memory" title="Flashcards"><FlashcardsPage /></MobilePage>; }
 function WrappedSocial()      { return <MobilePage eyebrow="Friends" title="Social"><div className="rounded-2xl border border-gray-200 dark:border-white/[0.06] bg-white dark:bg-[#13131f] overflow-hidden"><SocialApp /></div></MobilePage>; }
 
-// Page registry for the mobile shell. Bespoke mobile components own
-// their full layout (centered titles inside); the wrapped legacy pages
-// get the title from MobilePage. `hideHeader` hides the top
-// MobileHeader for screens that already render their own centered
-// title, avoiding doubled-up titles.
+// Page registry for the mobile shell.
+//   - `hideHeader`   → suppresses MobileHeader (page renders its own).
+//   - `manageLayout` → page owns its own scrolling + flex layout
+//     (chat-style screens that pin a footer to the bottom). Without
+//     this flag the shell wraps the page in an `overflow-y-auto`
+//     scroller, which conflicts with the page's own `flex-col h-full`
+//     and breaks the input-pinning. With it, the shell hands a bounded
+//     `flex-1 overflow-hidden` container directly to the page.
 const PAGE_MAP = {
   home:        { title: 'RushilAI',  component: MobileHome,       isHome: true,  hideHeader: false },
   curricula:   { title: 'Courses',   component: MobileCurricula,                 hideHeader: true  },
   lessons:     { title: 'Lessons',   component: MobileLessons,                   hideHeader: true  },
-  notes:       { title: 'Notes',     component: MobileNotes,                     hideHeader: true  },
+  notes:       { title: 'Notes',     component: MobileNotes,                     hideHeader: true,  manageLayout: true },
   // Tabs surfaced via "More":
-  study:       { title: 'Study',        component: MobileStudy,        hideHeader: true },
+  study:       { title: 'Study',        component: MobileStudy,        hideHeader: true, manageLayout: true },
   quizbowl:    { title: 'Quiz Bowl',    component: MobileQuizBowl,     hideHeader: true },
   flashcards:  { title: 'Flashcards',   component: WrappedFlashcards,  hideHeader: true },
   goals:       { title: 'Goals',        component: WrappedGoals,       hideHeader: true },
@@ -142,26 +145,38 @@ const MobileShell = forwardRef(function MobileShell(_props, ref) {
 
       <main
         className="flex-1 min-h-0 overflow-hidden flex flex-col"
-        // Browser controls row (32) + bottom tab bar (58) + iOS home
+        // Bottom tab bar (58) + browser controls row (32) + iOS home
         // indicator inset. Subtract this from the content area so the
         // last bit of every page isn't covered by chrome.
         style={{ paddingBottom: 'calc(90px + env(safe-area-inset-bottom, 0px))' }}
       >
-        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
-          {page.isHome
-            ? <PageComponent onNavigate={navigateFromHome} />
-            : <PageComponent />}
-        </div>
+        {page.manageLayout ? (
+          // Pages that own their own scrolling get a bounded container
+          // and render directly — no inner overflow-y-auto wrapper.
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <PageComponent />
+          </div>
+        ) : (
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+            {page.isHome
+              ? <PageComponent onNavigate={navigateFromHome} />
+              : <PageComponent />}
+          </div>
+        )}
       </main>
 
-      {/* Browser-style back / forward row sits ABOVE the tab bar. */}
+      {/* Bottom-of-screen chrome stack, top-to-bottom:
+            1. BottomTabs (apps row, 58px tall)
+            2. BrowserControls (back / forward, 32px tall)
+          The browser controls are explicitly BELOW the apps row so the
+          finger sits over the tabs first when reaching for them. */}
+      <BottomTabs active={isMain ? activePage : 'more'} onSelect={handleTabSelect} />
       <BrowserControls
         canBack={backStack.length > 0}
         canForward={forwardStack.length > 0}
         onBack={goBackOne}
         onForward={goForwardOne}
       />
-      <BottomTabs active={isMain ? activePage : 'more'} onSelect={handleTabSelect} />
       <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} onSelect={handleMoreSelect} />
     </div>
   );
@@ -169,16 +184,18 @@ const MobileShell = forwardRef(function MobileShell(_props, ref) {
 
 export default MobileShell;
 
-// Slim row that sits ABOVE the bottom tab bar. Two icon buttons drive
-// the in-shell back / forward stacks. Disabled state when there's
-// nothing to navigate to in that direction.
+// Slim row that sits at the VERY BOTTOM of the screen, BELOW the
+// tab bar. Two icon buttons drive the in-shell back / forward
+// stacks. Disabled state when there's nothing to navigate to in
+// that direction. The iOS home-indicator inset is absorbed into
+// this row's padding-bottom so the buttons stay tap-able.
 function BrowserControls({ canBack, canForward, onBack, onForward }) {
   return (
     <div
-      className="absolute left-0 right-0 z-20 flex items-center justify-center gap-3 px-3 py-1.5 border-t border-gray-200 dark:border-white/[0.06] bg-white/85 dark:bg-[#0c0c16]/85 backdrop-blur-xl"
+      className="fixed left-0 right-0 bottom-0 z-30 flex items-center justify-center gap-3 px-3 border-t border-gray-200 dark:border-white/[0.06] bg-white/85 dark:bg-[#0c0c16]/85 backdrop-blur-xl"
       style={{
-        bottom: 'calc(58px + env(safe-area-inset-bottom, 0px))',
-        height: 32,
+        height: 'calc(32px + env(safe-area-inset-bottom, 0px))',
+        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
       }}
     >
       <button
