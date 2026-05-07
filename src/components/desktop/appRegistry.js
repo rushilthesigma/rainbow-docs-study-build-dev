@@ -1,4 +1,4 @@
-import { BookOpen, MessageSquare, FileText, ClipboardCheck, Settings, Users, Shield, Zap, Lightbulb, Calculator } from 'lucide-react';
+import { BookOpen, MessageSquare, FileText, Settings, Users, Shield, Zap, Lightbulb, Calculator } from 'lucide-react';
 
 // Mobile Preview was removed from the registry once App.jsx wired up
 // width-based mobile rendering — real phones get MobileShell directly,
@@ -11,7 +11,6 @@ const APP_REGISTRY = [
   { id: 'lessons', label: 'Lessons', icon: Lightbulb, color: '#eab308', gradient: 'from-yellow-400 to-amber-600' },
   { id: 'study', label: 'Study Mode', icon: MessageSquare, color: '#3b82f6', gradient: 'from-sky-400 to-blue-600' },
   { id: 'notes', label: 'Notes', icon: FileText, color: '#10b981', gradient: 'from-emerald-400 to-emerald-600' },
-  { id: 'assessments', label: 'Assessments', icon: ClipboardCheck, color: '#ef4444', gradient: 'from-rose-400 to-red-600' },
   { id: 'mathtutor', label: 'Math Tutor', icon: Calculator, color: '#4f46e5', gradient: 'from-indigo-500 to-violet-600' },
   { id: 'social', label: 'Social', icon: Users, color: '#06b6d4', gradient: 'from-cyan-400 to-teal-500' },
   { id: 'quizbowl', label: 'Quiz Bowl', icon: Zap, color: '#f59e0b', gradient: 'from-amber-400 to-orange-500' },

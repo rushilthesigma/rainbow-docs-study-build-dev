@@ -10,7 +10,6 @@ const ROUTE_META = {
   '/goals': { label: 'Goals', color: '#f59e0b' },
   '/flashcards': { label: 'Flashcards', color: '#a855f7' },
   '/notes': { label: 'Notes', color: '#10b981' },
-  '/assessments': { label: 'Assessments', color: '#ef4444' },
   '/settings': { label: 'Settings', color: '#6b7280' },
 };
 

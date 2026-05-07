@@ -234,7 +234,7 @@ export default function StudyModePanel({ className = '', initialMessage }) {
           <p className="text-[13px] font-bold text-gray-900 dark:text-white leading-tight">Study Session</p>
           <p className="text-[10px] text-gray-500 dark:text-gray-400 tabular-nums">
             {messageCount === 0 ? 'New session — ready when you are' : `${messageCount} message${messageCount === 1 ? '' : 's'}`}
-            {sourceMode && <span className="ml-2 inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold uppercase tracking-wider"><span className="w-1 h-1 rounded-full bg-amber-500" /> Source · 2×</span>}
+            {sourceMode && <span className="ml-2 inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold uppercase tracking-wider"><span className="w-1 h-1 rounded-full bg-amber-500" /> Source</span>}
             {integrationActive && (
               <span className="ml-2 inline-flex items-center gap-1 text-blue-600 dark:text-blue-300 font-semibold uppercase tracking-wider">
                 <span className="w-1 h-1 rounded-full bg-blue-500" />

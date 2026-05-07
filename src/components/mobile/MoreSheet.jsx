@@ -1,4 +1,4 @@
-import { Target, ClipboardCheck, MessageSquare, Zap, Layers, Swords, Users, Settings, X } from 'lucide-react';
+import { Target, MessageSquare, Zap, Layers, Swords, Users, Settings, X } from 'lucide-react';
 
 // Bottom-sheet of secondary apps. Animates up from the dock so it
 // reads as "pulled out from the More tab".
@@ -7,7 +7,6 @@ const MORE_ITEMS = [
   { id: 'quizbowl',    label: 'Quiz Bowl',   icon: Zap,            color: 'text-amber-500',   bg: 'bg-amber-50 dark:bg-amber-900/25' },
   { id: 'flashcards',  label: 'Flashcards',  icon: Layers,         color: 'text-violet-500',  bg: 'bg-violet-50 dark:bg-violet-900/25' },
   { id: 'goals',       label: 'Goals',       icon: Target,         color: 'text-rose-500',    bg: 'bg-rose-50 dark:bg-rose-900/25' },
-  { id: 'assessments', label: 'Assessments', icon: ClipboardCheck, color: 'text-orange-500',  bg: 'bg-orange-50 dark:bg-orange-900/25' },
   { id: 'debate',      label: 'Debate',      icon: Swords,         color: 'text-blue-500',    bg: 'bg-blue-50 dark:bg-blue-900/25' },
   { id: 'social',      label: 'Social',      icon: Users,          color: 'text-cyan-500',    bg: 'bg-cyan-50 dark:bg-cyan-900/25' },
   { id: 'settings',    label: 'Settings',    icon: Settings,       color: 'text-gray-500',    bg: 'bg-gray-100 dark:bg-white/[0.06]' },

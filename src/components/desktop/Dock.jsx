@@ -61,8 +61,17 @@ function DockIcon({ app, mouseX, iconRef, isOpen, onClick, size, iconStyle }) {
           />
         </div>
       </button>
-      {isOpen && <div className="w-1 h-1 rounded-full bg-white/80 mt-0.5" />}
-      {!isOpen && <div className="w-1 h-1 mt-0.5" />}
+      {/* Open-app dot indicator — small (3px) glowing pip, like macOS
+          Sonoma. Reserved height keeps the icon row from shifting
+          when an app opens or closes. */}
+      <div className="h-1 mt-1 flex items-center justify-center">
+        {isOpen && (
+          <span
+            className="w-[3px] h-[3px] rounded-full bg-white"
+            style={{ boxShadow: '0 0 3px rgba(255,255,255,0.6)' }}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -80,7 +89,10 @@ export default function Dock() {
 
   const handleMouseMove = useCallback((e) => { setMouseX(e.clientX); }, []);
 
-  const mainApps = APP_REGISTRY.filter(a => !['settings', 'newcurriculum'].includes(a.id) && (!a.adminOnly || isAdmin));
+  // Social moved to the menu bar (bell icon with unread count) per
+  // user request — pull it out of the dock so we don't duplicate
+  // the entry point.
+  const mainApps = APP_REGISTRY.filter(a => !['settings', 'newcurriculum', 'social'].includes(a.id) && (!a.adminOnly || isAdmin));
   const utilApps = APP_REGISTRY.filter(a => ['settings'].includes(a.id));
   const openAppIds = new Set(Object.values(state.windows).map(w => w.appId));
 
@@ -110,7 +122,7 @@ export default function Dock() {
             const existing = Object.values(state.windows).find(w => w.appId === app.id);
             if (existing?.isMinimized) restoreWindow(existing.id);
             else if (existing) focusWindow(existing.id);
-            else openApp(app.id, app.label);
+            else openApp(app.id, app.label, true);
           }} size={size} iconStyle={iconStyle} />
           ))}
           <div className="w-px bg-gray-400/40 dark:bg-white/15 mx-1 self-center" style={{ height: size * 0.7 }} />
@@ -121,7 +133,7 @@ export default function Dock() {
             const existing = Object.values(state.windows).find(w => w.appId === app.id);
             if (existing?.isMinimized) restoreWindow(existing.id);
             else if (existing) focusWindow(existing.id);
-            else openApp(app.id, app.label);
+            else openApp(app.id, app.label, true);
           }} size={size} iconStyle={iconStyle} />
           ))}
         </div>

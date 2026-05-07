@@ -91,7 +91,7 @@ export default function ChatContainer({
         {searchStatus && (
           <div className="flex items-center gap-2 px-3 py-2 text-[11px] text-amber-600 dark:text-amber-400">
             <span className="inline-block w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
-            {searchStatus === 'searching' ? 'Searching the web…' : searchStatus === 'reading' ? 'Reading sources…' : searchStatus}
+            {searchStatus === 'searching' ? 'Sourcing…' : searchStatus === 'reading' ? 'Reading sources…' : searchStatus}
           </div>
         )}
       </div>

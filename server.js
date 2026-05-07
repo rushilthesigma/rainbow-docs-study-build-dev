@@ -1834,7 +1834,12 @@ async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOv
     ? `${systemPrompt}
 
 ---
-You have Google Search. Use it on every response to ground your answer in real web sources. Run 2-4 queries before writing, then base your explanation on what the search returns. Write naturally — do not mention that you searched, and do not include your own "Sources:" list (the UI shows one below the message).`
+SOURCE MODE — NON-NEGOTIABLE RULES:
+- You have Google Search. Use it on EVERY single response — short answers, follow-ups, clarifications, and "yes/no" replies included. No message is exempt.
+- Run 2-4 queries before writing each response, then base every factual claim on what the search returns.
+- Cite the supporting source inline using [1], [2], … markers placed immediately after the claim they back. The UI renders the sources list below your message; do NOT write your own "Sources:" footer.
+- If search returns nothing useful, say so plainly and refuse to fabricate — do not fall back to model-only answers in source mode.
+- Write naturally and do not mention that you searched.`
     : systemPrompt;
 
   const controller = new AbortController();
@@ -2006,6 +2011,12 @@ app.post('/api/curriculum/:id/lesson/:lessonId/chat', authMiddleware, requireMes
     // teach inside the chapter scope of the assigned textbook (Big Ideas
     // Math, NGSS), not pull random sources from the wider internet.
     if (curriculum.source === 'pausd') req.sourced = false;
+
+    // If the curriculum has attached source material (pdfs / urls), the
+    // model answers ONLY from those — same rule as Study Mode. The
+    // system prompt's ATTACHED SOURCES block forbids invention.
+    const lessonSources = Array.isArray(curriculum.sources) ? curriculum.sources : [];
+    if (lessonSources.length > 0) req.sourced = false;
 
     let lesson = null, unit = null;
     for (const u of curriculum.units || []) {
@@ -2597,7 +2608,17 @@ app.post('/api/curriculum/:id/exams/:examId/grade', authMiddleware, (req, res) =
 app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res) => {
   try {
     const { message, sessionId, context, sourced, images } = req.body;
-    req.sourced = !!sourced;
+    // Source-mode + attached sources interaction:
+    //   • If the user has attached PDFs/URLs (`context.sources`), the
+    //     model must answer ONLY from those — no web fallback. So when
+    //     attached sources are present, we disable web search entirely
+    //     even if `sourced=true` was sent. The system prompt's ATTACHED
+    //     SOURCES rules already enforce no-fabrication.
+    //   • Otherwise, `sourced=true` keeps the existing Google-Search
+    //     grounding path.
+    const hasAttachedSources = !!(context && Array.isArray(context.sources) && context.sources.length > 0);
+    req.sourced = !!sourced && !hasAttachedSources;
+    req.hasAttachedSources = hasAttachedSources;
     req.images = Array.isArray(images) ? images : [];
     if (!message && !req.images.length) return res.status(400).json({ error: 'Message required' });
 

@@ -590,7 +590,7 @@ export function buildStudyModePrompt(profile, goals, curricula, prefs, assessmen
         return `${head}\n${body}`.trim();
       })
       .join('\n\n---\n\n');
-    integrationCtx += `\n\nATTACHED SOURCES — the student added these. Reference them by [n] when you cite. Do not invent content beyond what's in them.\n\n${sourcesBlock}\n`;
+    integrationCtx += `\n\nATTACHED SOURCES — the student added these. The numbered [1], [2], … indices below are the citation handles you MUST use.\n\n${sourcesBlock}\n\nSOURCE-CITATION RULES (NON-NEGOTIABLE):\n- EVERY single response you write while sources are attached MUST cite at least one of the sources above using [n] inline. No exceptions, including short answers, follow-ups, "yes/no" replies, and quick clarifications.\n- Place the [n] tag immediately after the specific claim it supports — not at the end of the paragraph.\n- If multiple sources back the same claim, use [1][2].\n- If the user asks something the attached sources do NOT cover, say so plainly ("the attached sources don't cover that") and refuse to invent. Do not pull from outside knowledge unless the user explicitly waives the source restriction.\n- The UI renders the sources list separately. Do NOT write your own "Sources:" footer; just put [n] tags inline.\n`;
   }
 
   return `You are a general-purpose AI study assistant for RushilAI. The student opens this when they want to chat, ask, learn, or work through whatever's on their mind. You follow THEIR lead.

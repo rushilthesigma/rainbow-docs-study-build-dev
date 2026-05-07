@@ -7,18 +7,16 @@ import QuizBowlApp from './apps/QuizBowlApp';
 import MathTutorApp from './apps/MathTutorApp';
 import MobilePreview from '../admin/MobilePreview';
 import StudyPage from '../../pages/StudyPage';
-import AssessmentsPage from '../../pages/AssessmentsPage';
 import SettingsPage from '../../pages/SettingsPage';
 
-// Math Canvas + Math Tutor were unified into MathTutorApp
-// (TutorCanvas inside MathTutorApp handles both modes). The legacy
-// "math" app id was retired — only "mathtutor" remains.
+// The standalone Assessments app was retired — per-curriculum quizzes
+// (CurriculumAssessmentPage) still exist inside lessons; the
+// generic "make a quiz on any topic" surface is gone.
 const APP_COMPONENTS = {
   curricula: CurriculaApp,
   lessons: LessonsApp,
   study: StudyPage,
   notes: NotesApp,
-  assessments: AssessmentsPage,
   mathtutor: MathTutorApp,
   social: SocialApp,
   quizbowl: QuizBowlApp,

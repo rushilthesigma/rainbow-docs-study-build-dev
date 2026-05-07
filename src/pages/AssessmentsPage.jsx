@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ClipboardCheck, Plus, CheckCircle2, XCircle, Clock, ArrowRight } from 'lucide-react';
+import { ClipboardCheck, Plus, CheckCircle2, XCircle, Clock, ArrowRight, Sparkles, TrendingUp, Trophy, Target } from 'lucide-react';
 import { generateAssessment, gradeAssessment, getAssessmentHistory } from '../api/assessments';
 import Button from '../components/shared/Button';
 import Input from '../components/shared/Input';
@@ -94,19 +94,51 @@ export default function AssessmentsPage() {
 
   if (loading) return <div className="flex items-center justify-center h-64"><LoadingSpinner size={28} /></div>;
 
-  // Generating loading screen
+  // Generating loading screen — clean and confident, no skeleton
+  // bars. Big sparkle in a glass-y rounded square + gradient ring
+  // around it, the topic in serif italics, a subtle indeterminate
+  // progress bar that actually looks like progress (CSS keyframe
+  // sliding gradient instead of a fixed-65% pulsing bar).
   if (generating) {
     return (
-      <div className="w-full max-w-md mx-auto text-center py-20">
-        <div className="w-16 h-16 rounded-2xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center mx-auto mb-5">
-          <LoadingSpinner size={28} />
+      <div className="w-full max-w-md mx-auto text-center py-24 px-6">
+        <div className="relative mx-auto mb-7" style={{ width: 88, height: 88 }}>
+          <div
+            className="absolute inset-0 rounded-3xl"
+            style={{
+              background: 'conic-gradient(from 0deg, #60a5fa, #818cf8, #c084fc, #60a5fa)',
+              filter: 'blur(14px)',
+              opacity: 0.55,
+              animation: 'spin 6s linear infinite',
+            }}
+          />
+          <div className="relative w-full h-full rounded-3xl bg-white dark:bg-[#0f0f18] border border-gray-200 dark:border-white/10 grid place-items-center shadow-xl">
+            <Sparkles size={32} className="text-blue-500 dark:text-blue-300" strokeWidth={1.6} />
+          </div>
         </div>
-        <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Generating Quiz</h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">{topic}</p>
-        <p className="text-xs text-gray-400 mb-6">{questionCount} questions &middot; {difficulty}</p>
-        <div className="w-full h-2 bg-gray-100 dark:bg-[#1e1e2e] rounded-full overflow-hidden">
-          <div className="h-full bg-blue-600 rounded-full animate-pulse" style={{ width: '65%' }} />
+        <h2 className="text-[22px] font-bold tracking-tight text-gray-900 dark:text-white mb-2">Building your quiz</h2>
+        <p className="text-sm text-gray-700 dark:text-gray-200 mb-1">
+          <span className="italic">{topic}</span>
+        </p>
+        <p className="text-[11.5px] text-gray-400 mb-8 uppercase tracking-[0.18em] font-bold">
+          {questionCount} questions · {difficulty}
+        </p>
+        <div className="relative w-full h-1.5 bg-gray-100 dark:bg-white/[0.06] rounded-full overflow-hidden">
+          <div
+            className="absolute top-0 bottom-0 w-1/3 rounded-full"
+            style={{
+              background: 'linear-gradient(90deg, transparent, #3b82f6, transparent)',
+              animation: 'asmt-bar 1.6s ease-in-out infinite',
+            }}
+          />
         </div>
+        <p className="text-[11px] text-gray-400 mt-4">Usually takes 5-10 seconds.</p>
+        <style>{`
+          @keyframes asmt-bar {
+            0%   { transform: translateX(-100%); }
+            100% { transform: translateX(400%); }
+          }
+        `}</style>
       </div>
     );
   }
@@ -271,15 +303,52 @@ export default function AssessmentsPage() {
   }
 
   // Default: history + create
+  // ===== History list view =====
+  //
+  // Top: stats strip (avg score, total taken, best topic), CTA button.
+  // Body: card-based history with score chip, topic, date, difficulty,
+  // and a chevron-style "review" affordance (visual only — re-take
+  // flow stays in the modal). Empty state gets a richer, more inviting
+  // illustration than the bare "No quizzes" line it had before.
+  const stats = computeAssessmentStats(history);
+
   return (
     <div className="w-full max-w-3xl mx-auto">
+      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-bold text-gray-900 dark:text-white">Assessments</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">{history.length} completed</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            {history.length === 0 ? 'No quizzes yet' : `${history.length} ${history.length === 1 ? 'quiz' : 'quizzes'} completed`}
+          </p>
         </div>
         <Button onClick={() => setShowCreate(true)} size="sm"><Plus size={16} /> New Quiz</Button>
       </div>
+
+      {/* Stats strip — only when there's history */}
+      {history.length > 0 && (
+        <div className="grid grid-cols-3 gap-3 mb-6">
+          <StatCard
+            icon={<TrendingUp size={14} className="text-blue-500" />}
+            label="Average"
+            value={`${stats.avg}%`}
+            tone={stats.avg >= 80 ? 'good' : stats.avg >= 60 ? 'mid' : 'low'}
+          />
+          <StatCard
+            icon={<Trophy size={14} className="text-amber-500" />}
+            label="Best run"
+            value={`${stats.best}%`}
+            tone="good"
+          />
+          <StatCard
+            icon={<Target size={14} className="text-rose-500" />}
+            label="Streak"
+            value={`${stats.streak}`}
+            sub={stats.streak === 1 ? 'quiz' : 'quizzes'}
+            tone="neutral"
+          />
+        </div>
+      )}
 
       {/* Create modal */}
       <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Create Quiz">
@@ -310,36 +379,103 @@ export default function AssessmentsPage() {
       </Modal>
 
       {history.length === 0 && !showCreate ? (
-        <div className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-12 text-center">
-          <ClipboardCheck size={28} className="text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">No quizzes taken yet</p>
-          <Button onClick={() => setShowCreate(true)} size="sm"><Plus size={16} /> Take a Quiz</Button>
+        <div className="relative overflow-hidden bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/15 dark:to-indigo-950/15 rounded-2xl border border-blue-100 dark:border-white/[0.06] p-10 text-center">
+          <div className="absolute -top-6 -right-6 w-24 h-24 rounded-full bg-blue-200/40 dark:bg-blue-500/10 blur-2xl pointer-events-none" />
+          <div className="relative">
+            <div className="inline-grid place-items-center w-14 h-14 rounded-2xl bg-white dark:bg-[#0f0f18] border border-gray-200 dark:border-white/10 mb-4 shadow-sm">
+              <ClipboardCheck size={22} className="text-blue-500" strokeWidth={1.6} />
+            </div>
+            <h3 className="text-base font-bold text-gray-900 dark:text-white mb-1">Take your first quiz</h3>
+            <p className="text-[12.5px] text-gray-500 dark:text-gray-400 mb-5 max-w-sm mx-auto">
+              Pick any topic. The engine builds a 3-20 question multiple-choice quiz on the spot, grades it, and tracks your progress.
+            </p>
+            <Button onClick={() => setShowCreate(true)} size="sm"><Plus size={16} /> Start a quiz</Button>
+          </div>
         </div>
       ) : (
         <div className="space-y-2">
-          {history.map(h => (
-            <div key={h.id} className="flex items-center gap-4 bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] px-5 py-4">
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${
-                h.percentage >= 80 ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600' :
-                h.percentage >= 60 ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-600' :
-                'bg-rose-50 dark:bg-rose-900/20 text-rose-600'
-              }`}>
-                {h.percentage}%
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{h.topic}</p>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <span className="text-xs text-gray-400">{h.score}/{h.total} correct</span>
-                  <span className="text-xs text-gray-300">&middot;</span>
-                  <span className="text-xs text-gray-400 flex items-center gap-1">
-                    <Clock size={10} /> {new Date(h.createdAt).toLocaleDateString()}
-                  </span>
-                </div>
-              </div>
-            </div>
+          {history.map((h) => (
+            <HistoryCard key={h.id} h={h} />
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Stats / history helpers — split into named components so the
+// main view body reads as a list of intentional surfaces, not a
+// 100-line tangle of nested divs.
+// ─────────────────────────────────────────────────────────────
+function computeAssessmentStats(history = []) {
+  if (!history.length) return { avg: 0, best: 0, streak: 0 };
+  const pcts = history.map((h) => Number(h.percentage) || 0);
+  const avg = Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length);
+  const best = Math.max(...pcts);
+  // Streak = consecutive most-recent quizzes scoring >= 60%.
+  let streak = 0;
+  for (const h of history) {
+    if ((Number(h.percentage) || 0) >= 60) streak += 1;
+    else break;
+  }
+  return { avg, best, streak };
+}
+
+function StatCard({ icon, label, value, sub, tone = 'neutral' }) {
+  const valueTone = {
+    good:    'text-emerald-600 dark:text-emerald-400',
+    mid:     'text-amber-600 dark:text-amber-400',
+    low:     'text-rose-600 dark:text-rose-400',
+    neutral: 'text-gray-900 dark:text-white',
+  }[tone] || 'text-gray-900 dark:text-white';
+  return (
+    <div className="rounded-xl border border-gray-200 dark:border-white/[0.06] bg-white dark:bg-[#161622] px-4 py-3">
+      <div className="flex items-center gap-1.5 text-[10.5px] uppercase tracking-[0.16em] font-bold text-gray-500 dark:text-gray-400 mb-1.5">
+        {icon} {label}
+      </div>
+      <div className="flex items-baseline gap-1.5">
+        <span className={`text-[22px] font-bold tracking-tight tabular-nums ${valueTone}`}>{value}</span>
+        {sub && <span className="text-[11px] text-gray-500">{sub}</span>}
+      </div>
+    </div>
+  );
+}
+
+function HistoryCard({ h }) {
+  const pct = Number(h.percentage) || 0;
+  const tone = pct >= 80 ? 'good' : pct >= 60 ? 'mid' : 'low';
+  const TONE = {
+    good: { ring: 'ring-emerald-500/40', text: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-50 dark:bg-emerald-500/10' },
+    mid:  { ring: 'ring-amber-500/40',   text: 'text-amber-600 dark:text-amber-400',     bg: 'bg-amber-50 dark:bg-amber-500/10' },
+    low:  { ring: 'ring-rose-500/40',    text: 'text-rose-600 dark:text-rose-400',       bg: 'bg-rose-50 dark:bg-rose-500/10' },
+  }[tone];
+  return (
+    <div className="group flex items-center gap-4 bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] hover:border-gray-300 dark:hover:border-white/15 px-4 py-3.5 transition-colors">
+      <div
+        className={`relative w-12 h-12 rounded-full flex items-center justify-center text-[13px] font-bold flex-shrink-0 ${TONE.bg} ${TONE.text} ring-2 ${TONE.ring}`}
+        title={`${h.score}/${h.total} correct`}
+      >
+        {pct}%
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[13.5px] font-semibold text-gray-900 dark:text-gray-100 truncate">{h.topic || 'Untitled quiz'}</p>
+        <div className="flex items-center gap-2 mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+          <span className="tabular-nums">{h.score}/{h.total} correct</span>
+          {h.difficulty && (
+            <>
+              <span className="text-gray-300 dark:text-gray-600">·</span>
+              <span className="capitalize">{h.difficulty}</span>
+            </>
+          )}
+          <span className="text-gray-300 dark:text-gray-600">·</span>
+          <span className="inline-flex items-center gap-1">
+            <Clock size={10} />
+            {new Date(h.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+          </span>
+        </div>
+      </div>
+      <ArrowRight size={14} className="text-gray-300 dark:text-gray-600 group-hover:text-gray-500 group-hover:translate-x-0.5 transition-all" />
     </div>
   );
 }

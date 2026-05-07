@@ -11,7 +11,6 @@ function getDefaultSize(appId) {
     settings: { w: 600, h: 500 },
     newcurriculum: { w: 650, h: 550 },
     goals: { w: 950, h: 600 },
-    assessments: { w: 900, h: 600 },
     // Mobile Preview: window size matches a phone (375×812 + window
     // chrome). The window itself IS the phone — no inner bezel.
     mobilepreview: { w: 380, h: 870 },
@@ -35,16 +34,31 @@ function getCascadePos(offset) {
 function reducer(state, action) {
   switch (action.type) {
     case 'OPEN_WINDOW': {
-      const existing = Object.values(state.windows).find(w => w.appId === action.appId);
-      if (existing) {
-        return {
-          ...state,
-          activeWindowId: existing.id,
-          windows: { ...state.windows, [existing.id]: { ...existing, isMinimized: false, zIndex: state.nextZIndex } },
-          nextZIndex: state.nextZIndex + 1,
-        };
+      // Multi-instance: by default `openApp(id)` opens a NEW window
+      // every time, so the user can have several Curricula or Study
+      // windows side-by-side. The legacy "focus existing instead" path
+      // is opt-in via `action.focusIfOpen` — used by the Dock so a
+      // single click on an app icon doesn't spawn a duplicate when
+      // the app is already running and visible.
+      const focusIfOpen = !!action.focusIfOpen;
+      // Mobile Preview is the one app where multiple instances make
+      // no sense (it iframes the mobile site at a fixed size). Always
+      // refocus its existing window if it's open.
+      const oneInstanceOnly = action.appId === 'mobilepreview' || focusIfOpen;
+      if (oneInstanceOnly) {
+        const existing = Object.values(state.windows).find(w => w.appId === action.appId);
+        if (existing) {
+          return {
+            ...state,
+            activeWindowId: existing.id,
+            windows: { ...state.windows, [existing.id]: { ...existing, isMinimized: false, zIndex: state.nextZIndex } },
+            nextZIndex: state.nextZIndex + 1,
+          };
+        }
       }
-      const id = `win-${action.appId}-${Date.now()}`;
+      // Use a random suffix so two `openApp` calls in the same ms (e.g.
+      // user double-clicking) each get unique ids.
+      const id = `win-${action.appId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       const size = getDefaultSize(action.appId);
       const position = getCascadePos(state.cascadeOffset);
       const fixedSize = isFixedSize(action.appId);
@@ -156,7 +170,12 @@ function reducer(state, action) {
 export function WindowManagerProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, INITIAL_STATE);
 
-  const openApp = useCallback((appId, title) => dispatch({ type: 'OPEN_WINDOW', appId, title }), []);
+  // Default: spawn a fresh window (multi-instance). Pass
+  // `focusIfOpen=true` (3rd arg) when you want the legacy "single
+  // instance per app" behaviour — used by the Dock click handler so
+  // the user can refocus a running app without spawning duplicates.
+  const openApp = useCallback((appId, title, focusIfOpen = false) =>
+    dispatch({ type: 'OPEN_WINDOW', appId, title, focusIfOpen }), []);
   const closeWindow = useCallback((windowId) => dispatch({ type: 'CLOSE_WINDOW', windowId }), []);
   const removeWindow = useCallback((windowId) => dispatch({ type: 'REMOVE_WINDOW', windowId }), []);
   const minimizeWindow = useCallback((windowId) => dispatch({ type: 'MINIMIZE_WINDOW', windowId }), []);

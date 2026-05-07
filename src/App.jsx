@@ -12,7 +12,6 @@ import FlashcardsPage from './pages/FlashcardsPage';
 import FlashcardDeckPage from './pages/FlashcardDeckPage';
 import NotesPage from './pages/NotesPage';
 import NoteEditorPage from './pages/NoteEditorPage';
-import AssessmentsPage from './pages/AssessmentsPage';
 import StudyPage from './pages/StudyPage';
 // MathPracticePage was folded into MathTutorApp (canvas + tutor unified).
 import CurriculumAssessmentPage from './pages/CurriculumAssessmentPage';
@@ -92,7 +91,6 @@ function ClassicRoutes() {
       <Route path="/flashcards/:id" element={<AppRoute><FlashcardDeckPage /></AppRoute>} />
       <Route path="/notes" element={<AppRoute><NotesPage /></AppRoute>} />
       <Route path="/notes/:id" element={<AppRoute><NoteEditorPage /></AppRoute>} />
-      <Route path="/assessments" element={<AppRoute><AssessmentsPage /></AppRoute>} />
       <Route path="/social" element={<AppRoute><SocialPage /></AppRoute>} />
       <Route path="/settings" element={<AppRoute><SettingsPage /></AppRoute>} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

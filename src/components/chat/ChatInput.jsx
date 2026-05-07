@@ -277,7 +277,7 @@ export default function ChatInput({
               }`}
             >
               <Globe size={12} />
-              {sourceMode ? 'Source · 2×' : 'Source'}
+              Source
             </button>
           )}
           <span className="flex-1" />

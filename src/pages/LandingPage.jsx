@@ -7,6 +7,7 @@ import { WALLPAPERS } from '../components/desktop/DesktopBackground';
 import {
   Loader2 as Loader, Sparkles, ArrowRight, X, Check, ChevronDown,
   BookOpen, Brain, Zap, PenTool, Cpu, Repeat,
+  Lightbulb, Calculator, MessageSquare, Target, ClipboardCheck,
 } from 'lucide-react';
 
 // Two scroll-snap sections, Apple-homepage style:
@@ -102,13 +103,20 @@ export default function LandingPage() {
 
       <Clock />
 
-      {/* Scroll container — snap-mandatory between sections, smooth */}
+      {/* Scroll container. Snap-mandatory between sections, smooth.
+          Order: hero, how it works, features grid, numbers strip,
+          subject spotlight, sign-in. Wallpaper stays fixed under
+          everything. */}
       <div
         ref={scrollerRef}
         className="relative z-10 h-screen overflow-y-scroll snap-y snap-mandatory scrollbar-hide"
         style={{ scrollBehavior: 'smooth' }}
       >
         <HeroSection onNext={() => scrollTo(1)} />
+        <HowItWorksSection />
+        <FeaturesGridSection />
+        <NumbersStrip />
+        <SubjectsSpotlight />
         <SignInSection
           loading={loading}
           onSignIn={triggerGoogle}
@@ -174,7 +182,273 @@ function HeroSection({ onNext }) {
   );
 }
 
-// ===== Section 2: Sign-in =====
+// ===== Section 2: How it works =====
+//
+// Three numbered glass cards explaining the type-quiz-train loop.
+// All copy intentionally avoids em dashes per user spec.
+function HowItWorksSection() {
+  const STEPS = [
+    {
+      n: '01',
+      icon: Sparkles,
+      title: 'Type a topic',
+      body: 'Calculus BC, AP Bio, Roman history, anything. The engine drafts a real syllabus with units, lessons, a midterm, and a final.',
+    },
+    {
+      n: '02',
+      icon: ClipboardCheck,
+      title: 'Take quizzes',
+      body: 'Every lesson ends in a short quiz. Wrong answers get logged by topic so the engine learns where you actually need work.',
+    },
+    {
+      n: '03',
+      icon: Target,
+      title: 'Train your gaps',
+      body: 'Final quizzes are built from your weak spots, not a generic pool. Quiz Bowl can also generate a "train on weaknesses" round on demand.',
+    },
+  ];
+  return (
+    <section data-section="how" className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative">
+      <div className="absolute inset-0 bg-black/55" />
+      <div className="relative z-10 max-w-6xl w-full animate-fade-up">
+        <p className="text-center text-[11px] font-bold uppercase tracking-[0.22em] text-white/55 mb-3">How it works</p>
+        <h2 className="text-center text-[34px] sm:text-[44px] md:text-[56px] leading-[1.05] font-bold tracking-[-0.025em] text-white drop-shadow-2xl mb-12">
+          Three steps,{' '}
+          <span className="bg-gradient-to-br from-blue-300 via-indigo-300 to-fuchsia-300 bg-clip-text text-transparent italic">
+            no busywork.
+          </span>
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {STEPS.map((s) => {
+            const Icon = s.icon;
+            return (
+              <div
+                key={s.n}
+                className="rounded-2xl p-6 border border-white/15 bg-white/[0.06] backdrop-blur-xl shadow-2xl shadow-black/30"
+              >
+                <div className="flex items-center justify-between mb-5">
+                  <span className="text-[11px] font-mono font-bold tracking-wider text-white/45">{s.n}</span>
+                  <span className="grid place-items-center w-9 h-9 rounded-full bg-white/15 border border-white/20">
+                    <Icon size={16} className="text-white" strokeWidth={2} />
+                  </span>
+                </div>
+                <h3 className="text-[19px] font-bold tracking-tight text-white mb-2">{s.title}</h3>
+                <p className="text-[13.5px] text-white/70 leading-relaxed">{s.body}</p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ===== Section 3: Features bento =====
+function FeaturesGridSection() {
+  return (
+    <section data-section="features" className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative">
+      <div className="absolute inset-0 bg-black/60" />
+      <div className="relative z-10 max-w-6xl w-full animate-fade-up">
+        <p className="text-center text-[11px] font-bold uppercase tracking-[0.22em] text-white/55 mb-3">What&apos;s inside</p>
+        <h2 className="text-center text-[34px] sm:text-[44px] md:text-[56px] leading-[1.05] font-bold tracking-[-0.025em] text-white drop-shadow-2xl mb-10">
+          One app,{' '}
+          <span className="bg-gradient-to-br from-blue-300 via-indigo-300 to-fuchsia-300 bg-clip-text text-transparent italic">
+            every learning surface.
+          </span>
+        </h2>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 grid-rows-3 md:grid-rows-2 gap-3 h-[440px]">
+          <FeatureTile
+            className="col-span-2 row-span-2 md:col-span-2 md:row-span-2"
+            icon={BookOpen}
+            tone="from-blue-500/30 to-indigo-500/15"
+            title="Curricula"
+            body="Type a topic, get a real course. Units, lessons, a midterm, and a final. All generated, all editable."
+            big
+          />
+          <FeatureTile
+            className="col-span-2 md:col-span-1"
+            icon={Lightbulb}
+            tone="from-amber-400/30 to-orange-500/15"
+            title="Lessons"
+            body="Eight-block format with built-in spaced-repetition quizzes."
+          />
+          <FeatureTile
+            className="col-span-2 md:col-span-1"
+            icon={Calculator}
+            tone="from-indigo-400/30 to-violet-500/15"
+            title="Math Tutor"
+            body="Solve on a real canvas. The tutor reads each line."
+          />
+          <FeatureTile
+            className="col-span-1"
+            icon={Zap}
+            tone="from-amber-400/30 to-rose-500/15"
+            title="Quiz Bowl"
+            body="Pyramidal tossups, real packets, head-to-head."
+          />
+          <FeatureTile
+            className="col-span-1"
+            icon={MessageSquare}
+            tone="from-sky-400/30 to-blue-500/15"
+            title="Study Mode"
+            body="Free-form chat with optional curriculum and sources."
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function FeatureTile({ icon: Icon, title, body, tone, className = '', big = false }) {
+  return (
+    <div
+      className={`relative rounded-2xl p-4 sm:p-5 border border-white/15 bg-white/[0.05] backdrop-blur-xl shadow-2xl shadow-black/30 overflow-hidden flex flex-col ${className}`}
+    >
+      <div className={`absolute inset-0 bg-gradient-to-br ${tone} pointer-events-none`} />
+      <div className="relative z-10 flex flex-col h-full">
+        <span className="grid place-items-center w-9 h-9 rounded-xl bg-white/15 border border-white/20 mb-3">
+          <Icon size={16} className="text-white" strokeWidth={2} />
+        </span>
+        <h3 className={`font-bold tracking-tight text-white ${big ? 'text-[26px] sm:text-[30px]' : 'text-[16px]'}`}>
+          {title}
+        </h3>
+        <p className={`text-white/70 leading-relaxed mt-1 ${big ? 'text-[14px]' : 'text-[12px]'}`}>
+          {body}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ===== Section 4: Numbers strip =====
+function NumbersStrip() {
+  const STATS = [
+    { n: '8',    label: 'apps in one workspace' },
+    { n: '<5s',  label: 'to draft a full curriculum' },
+    { n: '500+', label: 'tossups in the Quiz Bowl pool' },
+    { n: '1M',   label: 'token context per chat' },
+  ];
+  return (
+    <section data-section="numbers" className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative">
+      <div className="absolute inset-0 bg-black/65" />
+      <div className="relative z-10 max-w-5xl w-full animate-fade-up">
+        <h2 className="text-center text-[28px] sm:text-[36px] md:text-[44px] leading-[1.05] font-bold tracking-[-0.025em] text-white drop-shadow-2xl mb-3">
+          Built thin,{' '}
+          <span className="italic bg-gradient-to-br from-blue-300 to-indigo-300 bg-clip-text text-transparent">
+            runs heavy.
+          </span>
+        </h2>
+        <p className="text-center text-[13px] sm:text-[15px] text-white/65 max-w-xl mx-auto mb-10">
+          One workspace, every learning surface, the smartest model under the hood.
+        </p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {STATS.map((s) => (
+            <div key={s.label} className="rounded-2xl p-5 border border-white/15 bg-white/[0.06] backdrop-blur-xl text-center">
+              <div className="text-[34px] sm:text-[40px] font-bold tracking-tight text-white tabular-nums leading-none">
+                {s.n}
+              </div>
+              <p className="text-[11px] uppercase tracking-[0.18em] text-white/55 mt-2">{s.label}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ===== Section 5: Subjects spotlight =====
+//
+// Four sample-curriculum cards showing what RushilAI generates. Each
+// one is a mini-syllabus preview with unit/lesson counts and the
+// first four unit titles.
+function SubjectsSpotlight() {
+  const SAMPLES = [
+    {
+      title: 'AP Calculus BC',
+      tag: 'High school',
+      tone: 'from-blue-500/30 to-indigo-500/15',
+      units: 8,
+      lessons: 64,
+      preview: ['Limits & continuity', 'Derivatives & applications', 'Integrals & FTC', 'Series & convergence'],
+    },
+    {
+      title: 'Organic Chemistry',
+      tag: 'College',
+      tone: 'from-emerald-400/25 to-teal-500/15',
+      units: 10,
+      lessons: 72,
+      preview: ['Hybridization & VSEPR', 'Stereochemistry', 'SN1 / SN2 mechanisms', 'Carbonyl chemistry'],
+    },
+    {
+      title: 'Roman Republic',
+      tag: 'Self-study',
+      tone: 'from-amber-400/25 to-orange-500/15',
+      units: 6,
+      lessons: 38,
+      preview: ['Founding myths & monarchy', 'Patrician vs plebeian', 'Punic Wars', 'Fall of the Republic'],
+    },
+    {
+      title: 'MCAT Bio + Biochem',
+      tag: 'Test prep',
+      tone: 'from-rose-400/25 to-fuchsia-500/15',
+      units: 9,
+      lessons: 58,
+      preview: ['Cellular respiration', 'Genetics & gene expression', 'Enzyme kinetics', 'Metabolism integration'],
+    },
+  ];
+  return (
+    <section data-section="subjects" className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative">
+      <div className="absolute inset-0 bg-black/60" />
+      <div className="relative z-10 w-full max-w-6xl animate-fade-up">
+        <p className="text-center text-[11px] font-bold uppercase tracking-[0.22em] text-white/55 mb-3">Built for</p>
+        <h2 className="text-center text-[32px] sm:text-[40px] md:text-[50px] leading-[1.05] font-bold tracking-[-0.025em] text-white drop-shadow-2xl mb-10">
+          Whatever you&apos;re{' '}
+          <span className="italic bg-gradient-to-br from-blue-300 via-indigo-300 to-fuchsia-300 bg-clip-text text-transparent">
+            studying.
+          </span>
+        </h2>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {SAMPLES.map((s) => (
+            <div
+              key={s.title}
+              className="relative rounded-2xl p-5 border border-white/15 bg-white/[0.06] backdrop-blur-xl shadow-2xl shadow-black/30 overflow-hidden flex flex-col"
+            >
+              <div className={`absolute inset-0 bg-gradient-to-br ${s.tone} pointer-events-none`} />
+              <div className="relative z-10 flex flex-col h-full">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-[10px] font-mono uppercase tracking-[0.16em] text-white/55">{s.tag}</span>
+                  <BookOpen size={13} className="text-white/45" />
+                </div>
+                <h3 className="text-[17px] font-bold tracking-tight text-white leading-tight mb-3">{s.title}</h3>
+                <div className="flex items-center gap-3 mb-3 text-[11px] text-white/65 tabular-nums">
+                  <span><strong className="text-white">{s.units}</strong> units</span>
+                  <span className="w-1 h-1 rounded-full bg-white/30" />
+                  <span><strong className="text-white">{s.lessons}</strong> lessons</span>
+                </div>
+                <ul className="space-y-1 flex-1">
+                  {s.preview.map((p, i) => (
+                    <li key={i} className="flex items-center gap-1.5 text-[11.5px] text-white/70">
+                      <span className="text-[8px] font-mono text-white/40 tabular-nums w-3.5">{String(i + 1).padStart(2, '0')}</span>
+                      <span className="truncate">{p}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <p className="text-center text-[12px] text-white/50 mt-6">
+          All four were generated in under 10 seconds each.
+        </p>
+      </div>
+    </section>
+  );
+}
+
+// ===== Section 6: Sign-in =====
 function SignInSection({ loading, onSignIn, onNewAccount, onWhyNotGpt }) {
   return (
     <section
