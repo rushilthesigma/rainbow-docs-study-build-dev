@@ -46,72 +46,72 @@ function NoteEditor({ noteId, onBack }) {
   }
 
   if (loading) return <div className="flex items-center justify-center h-48"><LoadingSpinner size={24} /></div>;
-  if (!note) return <div className="text-center py-12 text-gray-500 text-sm">Note not found</div>;
+  if (!note) return <div className="text-center py-12 text-white/30 text-sm">Note not found</div>;
 
   const isCornell = note.type === 'cornell';
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
       <div className="flex items-center justify-between mb-3 flex-shrink-0">
-        <button onClick={onBack} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-200">
+        <button onClick={onBack} className="flex items-center gap-2 text-sm text-white/35 hover:text-white/60 transition-colors">
           <ArrowLeft size={16} /> Notes
         </button>
-        <span className="text-xs text-gray-400">{saving ? 'Saving...' : 'Auto-saved'}</span>
+        <span className="text-xs text-white/25">{saving ? 'Saving...' : 'Auto-saved'}</span>
       </div>
 
       <input
         value={note.title}
         onChange={e => handleChange('title', e.target.value)}
-        className="w-full text-xl font-bold bg-transparent border-none outline-none text-gray-900 dark:text-white placeholder-gray-400 mb-3 flex-shrink-0"
+        className="w-full text-xl font-bold bg-transparent border-none outline-none text-white/95 placeholder-white/25 mb-3 flex-shrink-0"
         placeholder="Note title..."
       />
 
       {isCornell ? (
         <div className="flex flex-col flex-1 min-h-0 gap-3">
-          <div className="flex-1 min-h-0 grid grid-cols-[200px_1fr] bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] overflow-hidden">
-            <div className="border-r border-gray-200 dark:border-[#2A2A40] p-3 bg-gray-50 dark:bg-[#0D0D14] overflow-y-auto">
+          <div className="flex-1 min-h-0 grid grid-cols-[200px_1fr] bg-white/[0.02] rounded-2xl border border-white/[0.07] overflow-hidden">
+            <div className="border-r border-white/[0.06] p-3 bg-white/[0.02] overflow-y-auto">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Cues</span>
-                <button onClick={handleGenCues} disabled={genCues} className="text-blue-500 hover:text-blue-600 disabled:opacity-50"><Sparkles size={12} /></button>
+                <span className="text-[10px] font-semibold text-white/35 uppercase tracking-wide">Cues</span>
+                <button onClick={handleGenCues} disabled={genCues} className="text-white/40 hover:text-white/70 disabled:opacity-50 transition-colors"><Sparkles size={12} /></button>
               </div>
               {(note.cues || []).length > 0 ? (
                 <div className="space-y-1.5">
                   {note.cues.map((cue, i) => (
-                    <div key={i} className="text-[11px] text-gray-700 dark:text-gray-300 bg-white dark:bg-[#161622] rounded-lg px-2.5 py-1.5 border border-gray-100 dark:border-[#2A2A40]">{cue}</div>
+                    <div key={i} className="text-[11px] text-white/80 bg-white/[0.04] rounded-xl px-2.5 py-1.5 border border-white/[0.06]">{cue}</div>
                   ))}
                 </div>
               ) : (
-                <p className="text-[10px] text-gray-400 italic">Write notes, then click sparkle to generate cues</p>
+                <p className="text-[10px] text-white/25 italic">Write notes, then click sparkle to generate cues</p>
               )}
             </div>
             <textarea
               value={note.mainNotes}
               onChange={e => handleChange('mainNotes', e.target.value)}
-              className="w-full h-full p-3 bg-transparent text-sm text-gray-800 dark:text-gray-200 placeholder-gray-400 resize-none outline-none"
+              className="w-full h-full p-3 bg-transparent text-sm text-white/88 placeholder-white/25 resize-none outline-none"
               placeholder="Write your notes here..."
             />
           </div>
-          <div className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-3 flex-shrink-0">
+          <div className="bg-white/[0.02] rounded-2xl border border-white/[0.06] p-3 flex-shrink-0">
             <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Summary</span>
-              <button onClick={handleGenSummary} disabled={genSummary} className="flex items-center gap-1 text-[10px] text-blue-500 hover:text-blue-600 disabled:opacity-50">
+              <span className="text-[10px] font-semibold text-white/35 uppercase tracking-wide">Summary</span>
+              <button onClick={handleGenSummary} disabled={genSummary} className="flex items-center gap-1 text-[10px] text-white/40 hover:text-white/65 disabled:opacity-50 transition-colors">
                 <Sparkles size={10} /> Generate
               </button>
             </div>
             <textarea
               value={note.summary}
               onChange={e => handleChange('summary', e.target.value)}
-              className="w-full bg-transparent text-sm text-gray-800 dark:text-gray-200 placeholder-gray-400 resize-none outline-none min-h-[40px]"
+              className="w-full bg-transparent text-sm text-white/88 placeholder-white/25 resize-none outline-none min-h-[40px]"
               placeholder="Summary..."
             />
           </div>
         </div>
       ) : (
-        <div className="flex-1 min-h-0 bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] overflow-hidden">
+        <div className="flex-1 min-h-0 bg-white/[0.02] rounded-2xl border border-white/[0.06] overflow-hidden">
           <textarea
             value={note.mainNotes}
             onChange={e => handleChange('mainNotes', e.target.value)}
-            className="w-full h-full p-4 bg-transparent text-sm text-gray-800 dark:text-gray-200 placeholder-gray-400 resize-none outline-none leading-relaxed"
+            className="w-full h-full p-4 bg-transparent text-sm text-white/88 placeholder-white/25 resize-none outline-none leading-relaxed"
             placeholder="Start writing..."
           />
         </div>
@@ -222,8 +222,8 @@ export default function NotesApp() {
       const isCornell = aiType === 'cornell';
       const system = `You are a study-note generator. Output ONLY valid JSON, no markdown fences, no prose. ${
         isCornell
-          ? `Shape: {"title": "...", "mainNotes": "...", "cues": ["keyword 1", ...], "summary": "..."}. The body goes in mainNotes (markdown allowed — bold, bullets, headings, KaTeX math in $...$ or $$...$$ ). Cues are 4-8 short keyword prompts. Summary is 2-3 sentences.`
-          : `Shape: {"title": "...", "mainNotes": "..."}. Put the full note body in mainNotes using markdown (headings, bullets, bold, KaTeX math in $...$ or $$...$$).`
+          ? `Shape: {"title": "...", "mainNotes": "...", "cues": ["keyword 1", ...], "summary": "..."}. Write mainNotes as plain text only — no markdown, no asterisks, no hashes, no bullet dashes. Use line breaks and indentation for structure. Cues are 4-8 short keyword phrases. Summary is 2-3 plain sentences.`
+          : `Shape: {"title": "...", "mainNotes": "..."}. Write mainNotes as plain text only — no markdown, no asterisks, no hashes, no bullet dashes. Use line breaks and indentation for structure.`
       } The note should be organized, dense, and useful for studying — not a paragraph of fluff.${
         usingCurriculum ? ' When LESSON MATERIAL is provided, base the note on that material: pull definitions, examples, formulas, and key points directly from the lessons. Do not invent facts that the lessons don\'t support.' : ''
       }`;
@@ -289,7 +289,7 @@ export default function NotesApp() {
   return (
     <div>
       <div className="flex items-center justify-between mb-5">
-        <h2 className="text-lg font-bold text-gray-900 dark:text-white">Notes</h2>
+        <h2 className="text-lg font-bold text-white/90">Notes</h2>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="ghost" onClick={() => setShowAI(true)}>
             <Wand2 size={14} /> Generate with AI
@@ -302,17 +302,17 @@ export default function NotesApp() {
         <div className="space-y-3">
           {/* Source tabs */}
           <div>
-            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">Source</label>
+            <label className="text-xs font-medium text-white/40 mb-1.5 block">Source</label>
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => setAiSource('prompt')}
-                className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs ${aiSource === 'prompt' ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300' : 'border-gray-200 dark:border-[#2A2A40] text-gray-700 dark:text-gray-300'}`}
+                className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs transition-colors backdrop-blur-sm ${aiSource === 'prompt' ? 'border-white/[0.18] bg-white/[0.10] text-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}
               >
                 <Wand2 size={12} /> From prompt
               </button>
               <button
                 onClick={() => setAiSource('curriculum')}
-                className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs ${aiSource === 'curriculum' ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300' : 'border-gray-200 dark:border-[#2A2A40] text-gray-700 dark:text-gray-300'}`}
+                className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs transition-colors backdrop-blur-sm ${aiSource === 'curriculum' ? 'border-white/[0.18] bg-white/[0.10] text-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}
               >
                 <BookOpen size={12} /> From curriculum
               </button>
@@ -321,12 +321,12 @@ export default function NotesApp() {
 
           {/* Note type */}
           <div>
-            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">Type</label>
+            <label className="text-xs font-medium text-white/40 mb-1.5 block">Type</label>
             <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => setAiType('regular')} className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs ${aiType === 'regular' ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300' : 'border-gray-200 dark:border-[#2A2A40] text-gray-700 dark:text-gray-300'}`}>
+              <button onClick={() => setAiType('regular')} className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs transition-colors backdrop-blur-sm ${aiType === 'regular' ? 'border-white/[0.18] bg-white/[0.10] text-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}>
                 <FileText size={12} /> Regular
               </button>
-              <button onClick={() => setAiType('cornell')} className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs ${aiType === 'cornell' ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300' : 'border-gray-200 dark:border-[#2A2A40] text-gray-700 dark:text-gray-300'}`}>
+              <button onClick={() => setAiType('cornell')} className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs transition-colors backdrop-blur-sm ${aiType === 'cornell' ? 'border-white/[0.18] bg-white/[0.10] text-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}>
                 <Layout size={12} /> Cornell
               </button>
             </div>
@@ -336,11 +336,11 @@ export default function NotesApp() {
           {aiSource === 'curriculum' && (
             <>
               <div>
-                <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">Curriculum</label>
+                <label className="text-xs font-medium text-white/40 mb-1.5 block">Curriculum</label>
                 <select
                   value={selectedCurriculumId || ''}
                   onChange={e => setSelectedCurriculumId(e.target.value || null)}
-                  className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500/40"
+                  className="w-full px-3 py-2 rounded-xl border border-white/[0.06] bg-white/[0.04] text-sm text-white/70 outline-none"
                 >
                   <option value="">— Pick a curriculum —</option>
                   {curricula.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
@@ -350,7 +350,7 @@ export default function NotesApp() {
               {selectedCurriculumId && (
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Lessons ({selectedLessonIds.length} selected)</label>
+                    <label className="text-xs font-medium text-white/40">Lessons ({selectedLessonIds.length} selected)</label>
                     {curriculumDetail && (
                       <div className="flex gap-1.5">
                         <button
@@ -359,35 +359,35 @@ export default function NotesApp() {
                             for (const u of curriculumDetail.units || []) for (const l of u.lessons || []) all.push(l.id);
                             setSelectedLessonIds(all);
                           }}
-                          className="text-[10px] text-blue-500 hover:underline"
+                          className="text-[10px] text-white/40 hover:text-white/70 hover:underline"
                         >All</button>
                         <button
                           onClick={() => setSelectedLessonIds([])}
-                          className="text-[10px] text-gray-400 hover:underline"
+                          className="text-[10px] text-white/30 hover:text-white/50 hover:underline"
                         >None</button>
                       </div>
                     )}
                   </div>
-                  <div className="max-h-48 overflow-y-auto rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-gray-50 dark:bg-[#0D0D14] p-2">
+                  <div className="max-h-48 overflow-y-auto rounded-xl border border-white/[0.06] bg-white/[0.02] p-2">
                     {curriculumLoading ? (
-                      <div className="flex items-center justify-center py-6 text-xs text-gray-400"><InlineProgress active /> Loading lessons…</div>
+                      <div className="flex items-center justify-center py-6 text-xs text-white/30"><InlineProgress active /> Loading lessons…</div>
                     ) : !curriculumDetail ? (
-                      <p className="text-[11px] text-gray-400 italic p-2">Curriculum not found.</p>
+                      <p className="text-[11px] text-white/25 italic p-2">Curriculum not found.</p>
                     ) : (
                       (curriculumDetail.units || []).map(u => (
                         <div key={u.id} className="mb-2 last:mb-0">
-                          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider px-1 mb-1">{u.title}</p>
+                          <p className="text-[10px] font-semibold text-white/35 uppercase tracking-wider px-1 mb-1">{u.title}</p>
                           {(u.lessons || []).map(l => {
                             const checked = selectedLessonIds.includes(l.id);
                             return (
-                              <label key={l.id} className="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-white dark:hover:bg-[#1e1e2e] cursor-pointer">
+                              <label key={l.id} className="flex items-center gap-2 px-1.5 py-1 rounded-lg hover:bg-white/[0.04] cursor-pointer">
                                 <input
                                   type="checkbox"
                                   checked={checked}
                                   onChange={() => setSelectedLessonIds(prev => checked ? prev.filter(id => id !== l.id) : [...prev, l.id])}
-                                  className="w-3 h-3 accent-indigo-500"
+                                  className="w-3 h-3 accent-white"
                                 />
-                                <span className="text-xs text-gray-700 dark:text-gray-200">{l.title}</span>
+                                <span className="text-xs text-white/60">{l.title}</span>
                               </label>
                             );
                           })}
@@ -401,7 +401,7 @@ export default function NotesApp() {
           )}
 
           <div>
-            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">
+            <label className="text-xs font-medium text-white/40 mb-1.5 block">
               {aiSource === 'curriculum' ? 'Extra instructions (optional)' : 'What should the note cover?'}
             </label>
             <textarea
@@ -411,11 +411,11 @@ export default function NotesApp() {
               placeholder={aiSource === 'curriculum'
                 ? 'e.g., Focus on formulas and definitions only. Or leave blank.'
                 : 'e.g., Photosynthesis — inputs/outputs, light vs dark reactions. Include the chemical equation.'}
-              className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500/40 resize-none"
+              className="w-full px-3 py-2 rounded-xl border border-white/[0.06] bg-white/[0.04] text-sm text-white/70 placeholder-white/20 outline-none resize-none"
             />
           </div>
 
-          {aiError && <p className="text-xs text-rose-500">{aiError}</p>}
+          {aiError && <p className="text-xs text-rose-400">{aiError}</p>}
           <div className="flex gap-2 justify-end">
             <Button size="sm" variant="ghost" onClick={() => { setShowAI(false); setAiError(null); }}>Cancel</Button>
             <Button
@@ -430,39 +430,39 @@ export default function NotesApp() {
       </Modal>
 
       <Modal open={showCreate} onClose={() => setShowCreate(false)} title="New Note">
-        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Choose a note type:</p>
+        <p className="text-sm text-white/40 mb-4">Choose a note type:</p>
         <div className="grid grid-cols-2 gap-3">
-          <button onClick={() => handleCreate('regular')} className="flex flex-col items-center gap-2 p-5 rounded-xl border border-gray-200 dark:border-[#2A2A40] hover:border-blue-400 dark:hover:border-blue-600 transition-colors text-center">
-            <FileText size={24} className="text-blue-500" />
-            <span className="text-sm font-medium text-gray-900 dark:text-gray-100">Regular Note</span>
-            <span className="text-xs text-gray-400">Freeform writing</span>
+          <button onClick={() => handleCreate('regular')} className="flex flex-col items-center gap-2 p-5 rounded-2xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.06] hover:border-white/[0.14] transition-colors text-center backdrop-blur-sm">
+            <FileText size={24} className="text-white/50" />
+            <span className="text-sm font-medium text-white/70">Regular Note</span>
+            <span className="text-xs text-white/30">Freeform writing</span>
           </button>
-          <button onClick={() => handleCreate('cornell')} className="flex flex-col items-center gap-2 p-5 rounded-xl border border-gray-200 dark:border-[#2A2A40] hover:border-emerald-400 dark:hover:border-emerald-600 transition-colors text-center">
-            <Layout size={24} className="text-emerald-500" />
-            <span className="text-sm font-medium text-gray-900 dark:text-gray-100">Cornell Note</span>
-            <span className="text-xs text-gray-400">Cues, notes, summary</span>
+          <button onClick={() => handleCreate('cornell')} className="flex flex-col items-center gap-2 p-5 rounded-2xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.06] hover:border-white/[0.14] transition-colors text-center backdrop-blur-sm">
+            <Layout size={24} className="text-white/50" />
+            <span className="text-sm font-medium text-white/70">Cornell Note</span>
+            <span className="text-xs text-white/30">Cues, notes, summary</span>
           </button>
         </div>
       </Modal>
 
       {notes.length === 0 ? (
         <div className="text-center py-12">
-          <FileText size={28} className="text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-          <p className="text-sm text-gray-500 mb-3">No notes yet</p>
+          <FileText size={28} className="text-white/35 mx-auto mb-3" />
+          <p className="text-sm text-white/55 mb-3">No notes yet</p>
           <Button size="sm" onClick={() => setShowCreate(true)}><Plus size={14} /> Create Note</Button>
         </div>
       ) : (
         <div className="space-y-1.5">
           {notes.map(note => (
-            <div key={note.id} onClick={() => openNote(note.id)} className="flex items-center gap-3 bg-white dark:bg-[#1e1e2e] rounded-xl border border-gray-200 dark:border-[#2A2A40] px-4 py-3 cursor-pointer hover:border-blue-300 dark:hover:border-blue-700 transition-colors group">
-              <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${note.type === 'cornell' ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-500' : 'bg-blue-50 dark:bg-blue-900/20 text-blue-500'}`}>
+            <div key={note.id} onClick={() => openNote(note.id)} className="flex items-center gap-3 bg-white/[0.03] rounded-2xl border border-white/[0.06] px-4 py-3 cursor-pointer hover:bg-white/[0.06] hover:border-white/[0.10] transition-colors group">
+              <div className="w-8 h-8 rounded-xl bg-white/[0.07] flex items-center justify-center flex-shrink-0 text-white/45">
                 {note.type === 'cornell' ? <Layout size={14} /> : <FileText size={14} />}
               </div>
               <div className="flex-1 min-w-0">
-                <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{note.title}</h3>
-                <p className="text-xs text-gray-400">{note.type === 'cornell' ? 'Cornell' : 'Note'} · {new Date(note.updatedAt || note.createdAt).toLocaleDateString()}</p>
+                <h3 className="text-sm font-medium text-white/90 truncate">{note.title}</h3>
+                <p className="text-xs text-white/55">{note.type === 'cornell' ? 'Cornell' : 'Note'} · {new Date(note.updatedAt || note.createdAt).toLocaleDateString()}</p>
               </div>
-              <button onClick={e => handleDelete(e, note.id)} className="p-1 rounded text-gray-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={13} /></button>
+              <button onClick={e => handleDelete(e, note.id)} className="p-1 rounded text-white/20 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={13} /></button>
             </div>
           ))}
         </div>

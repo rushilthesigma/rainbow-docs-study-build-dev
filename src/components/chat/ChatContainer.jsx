@@ -6,15 +6,14 @@ import ChatInput from './ChatInput';
 export default function ChatContainer({
   messages, streamingContent, streamingSources, onSend, disabled, placeholder,
   header, className = '', sourceMode, onToggleSource, searchStatus,
-  // Optional: hide the built-in input (caller supplies its own controls),
-  // and opt-in editing support (set of editable msg indices + handler).
   hideInput = false,
   editableIndices = null,
   onEditMessage = null,
-  onUserEditMessage = null,   // called when user edits their own message (restart semantics)
-  onAiInstruct = null,        // called with (index, instruction) for an AI redo request
-  // Optional: custom empty-state element shown when there are no messages.
+  onUserEditMessage = null,
+  onAiInstruct = null,
   emptyState = null,
+  // When true, renders flush (no glass-card, no rounded corners) — use for full-page panels
+  flush = false,
 }) {
   const scrollRef = useRef(null);
   // Track whether the user has intentionally scrolled up. If so, we stop
@@ -54,7 +53,7 @@ export default function ChatContainer({
   }
 
   return (
-    <div className={`flex flex-col bg-gray-50 dark:bg-[#0D0D14] rounded-xl border border-gray-200 dark:border-[#2A2A40] overflow-hidden ${className} relative`}>
+    <div className={`flex flex-col overflow-hidden ${flush ? '' : 'glass-card rounded-2xl'} ${className} relative`}>
       {header}
       <div
         ref={scrollRef}
@@ -89,8 +88,8 @@ export default function ChatContainer({
           );
         })}
         {searchStatus && (
-          <div className="flex items-center gap-2 px-3 py-2 text-[11px] text-amber-600 dark:text-amber-400">
-            <span className="inline-block w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
+          <div className="flex items-center gap-2 px-3 py-2 text-[11px] text-gray-500 dark:text-gray-400">
+            <span className="inline-block w-1.5 h-1.5 bg-white/60 rounded-full animate-pulse" />
             {searchStatus === 'searching' ? 'Sourcing…' : searchStatus === 'reading' ? 'Reading sources…' : searchStatus}
           </div>
         )}
@@ -111,6 +110,7 @@ export default function ChatContainer({
           placeholder={placeholder}
           sourceMode={sourceMode}
           onToggleSource={onToggleSource}
+          flush={flush}
         />
       )}
     </div>

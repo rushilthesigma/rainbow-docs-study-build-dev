@@ -18,7 +18,7 @@ export default function AssessmentsPage() {
   const [difficulty, setDifficulty] = useState('beginner');
   const [questionCount, setQuestionCount] = useState(5);
 
-  // Active quiz state
+  // Active quiz state.
   const [quiz, setQuiz] = useState(null);
   const [currentQ, setCurrentQ] = useState(0);
   const [answers, setAnswers] = useState({});
@@ -33,7 +33,7 @@ export default function AssessmentsPage() {
   const [genError, setGenError] = useState(null);
 
   async function handleGenerate(e) {
-    e.preventDefault();
+    e?.preventDefault?.();
     if (!topic.trim()) return;
     setGenerating(true);
     setShowCreate(false);
@@ -94,51 +94,15 @@ export default function AssessmentsPage() {
 
   if (loading) return <div className="flex items-center justify-center h-64"><LoadingSpinner size={28} /></div>;
 
-  // Generating loading screen — clean and confident, no skeleton
-  // bars. Big sparkle in a glass-y rounded square + gradient ring
-  // around it, the topic in serif italics, a subtle indeterminate
-  // progress bar that actually looks like progress (CSS keyframe
-  // sliding gradient instead of a fixed-65% pulsing bar).
+  // Generating — small inline spinner. Flash Lite + jsonMode resolves
+  // in 1-3 seconds so we don't need a fancy progress UI.
   if (generating) {
     return (
       <div className="w-full max-w-md mx-auto text-center py-24 px-6">
-        <div className="relative mx-auto mb-7" style={{ width: 88, height: 88 }}>
-          <div
-            className="absolute inset-0 rounded-3xl"
-            style={{
-              background: 'conic-gradient(from 0deg, #60a5fa, #818cf8, #c084fc, #60a5fa)',
-              filter: 'blur(14px)',
-              opacity: 0.55,
-              animation: 'spin 6s linear infinite',
-            }}
-          />
-          <div className="relative w-full h-full rounded-3xl bg-white dark:bg-[#0f0f18] border border-gray-200 dark:border-white/10 grid place-items-center shadow-xl">
-            <Sparkles size={32} className="text-blue-500 dark:text-blue-300" strokeWidth={1.6} />
-          </div>
+        <div className="inline-flex items-center gap-3 text-sm text-gray-700 dark:text-gray-200">
+          <LoadingSpinner size={18} />
+          <span>Building your quiz on <span className="italic">{topic}</span>…</span>
         </div>
-        <h2 className="text-[22px] font-bold tracking-tight text-gray-900 dark:text-white mb-2">Building your quiz</h2>
-        <p className="text-sm text-gray-700 dark:text-gray-200 mb-1">
-          <span className="italic">{topic}</span>
-        </p>
-        <p className="text-[11.5px] text-gray-400 mb-8 uppercase tracking-[0.18em] font-bold">
-          {questionCount} questions · {difficulty}
-        </p>
-        <div className="relative w-full h-1.5 bg-gray-100 dark:bg-white/[0.06] rounded-full overflow-hidden">
-          <div
-            className="absolute top-0 bottom-0 w-1/3 rounded-full"
-            style={{
-              background: 'linear-gradient(90deg, transparent, #3b82f6, transparent)',
-              animation: 'asmt-bar 1.6s ease-in-out infinite',
-            }}
-          />
-        </div>
-        <p className="text-[11px] text-gray-400 mt-4">Usually takes 5-10 seconds.</p>
-        <style>{`
-          @keyframes asmt-bar {
-            0%   { transform: translateX(-100%); }
-            100% { transform: translateX(400%); }
-          }
-        `}</style>
       </div>
     );
   }
@@ -161,7 +125,6 @@ export default function AssessmentsPage() {
 
     return (
       <div className="w-full max-w-3xl mx-auto">
-        {/* Quiz header */}
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-lg font-bold text-gray-900 dark:text-white">{quiz.title}</h1>
@@ -193,7 +156,6 @@ export default function AssessmentsPage() {
           })}
         </div>
 
-        {/* Question card */}
         {q && (
           <div className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-6">
             <p className="text-xs text-gray-400 mb-3">Question {currentQ + 1} of {total}</p>
@@ -224,7 +186,6 @@ export default function AssessmentsPage() {
               })}
             </div>
 
-            {/* Nav */}
             <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-100 dark:border-[#2A2A40]">
               <Button variant="ghost" size="sm" onClick={prevQuestion} disabled={currentQ === 0}>
                 Previous

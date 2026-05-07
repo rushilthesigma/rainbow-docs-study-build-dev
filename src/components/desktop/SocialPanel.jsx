@@ -150,10 +150,10 @@ export default function SocialPanel({ open, onClose, anchorRect }) {
       className="fixed z-[1300] w-[340px] max-h-[70vh] flex flex-col rounded-2xl overflow-hidden text-[12.5px] text-gray-200"
       style={{
         top, right,
-        background: 'rgba(20, 20, 28, 0.92)',
-        backdropFilter: 'blur(40px) saturate(1.8)',
-        WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
-        border: '1px solid rgba(255,255,255,0.10)',
+        background: 'rgba(20, 20, 28, 0.55)',
+        backdropFilter: 'blur(48px) saturate(2)',
+        WebkitBackdropFilter: 'blur(48px) saturate(2)',
+        border: '1px solid rgba(255,255,255,0.08)',
         boxShadow: '0 20px 50px -10px rgba(0,0,0,0.55), 0 8px 20px -8px rgba(0,0,0,0.40)',
       }}
     >
@@ -207,12 +207,12 @@ export default function SocialPanel({ open, onClose, anchorRect }) {
           <Section label="Find people">
             <div className="px-3 py-1.5">
               <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.06]">
-                <Search size={12} className="text-gray-500 shrink-0" />
+                <Search size={12} className="text-gray-300 shrink-0" />
                 <input
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
                   placeholder="Search by handle or name"
-                  className="flex-1 bg-transparent text-[12.5px] text-gray-100 placeholder-gray-500 outline-none"
+                  className="flex-1 bg-transparent text-[12.5px] text-gray-100 placeholder-gray-300 outline-none"
                 />
               </div>
               {searchResults.length > 0 && (
@@ -262,9 +262,9 @@ export default function SocialPanel({ open, onClose, anchorRect }) {
           {/* Empty state */}
           {requests.length === 0 && friends.length === 0 && (
             <div className="px-4 py-8 text-center">
-              <Users size={20} className="text-gray-600 mx-auto mb-2" />
-              <p className="text-[12px] text-gray-400">No friends yet.</p>
-              <p className="text-[10.5px] text-gray-500 mt-0.5">Search above to connect with someone.</p>
+              <Users size={20} className="text-gray-300 mx-auto mb-2" />
+              <p className="text-[12px] text-gray-100">No friends yet.</p>
+              <p className="text-[10.5px] text-gray-300 mt-0.5">Search above to connect with someone.</p>
             </div>
           )}
         </div>
@@ -279,7 +279,7 @@ export default function SocialPanel({ open, onClose, anchorRect }) {
 function Section({ label, children }) {
   return (
     <div className="border-b border-white/[0.04] last:border-b-0">
-      <p className="px-3 pt-2.5 pb-1 text-[10px] font-bold uppercase tracking-[0.18em] text-gray-500">{label}</p>
+      <p className="px-3 pt-2.5 pb-1 text-[10px] font-bold uppercase tracking-[0.18em] text-gray-300">{label}</p>
       <div className="pb-1.5">{children}</div>
     </div>
   );
@@ -337,7 +337,7 @@ function DmView({ peer, messages, onBack, draft, setDraft, send }) {
           placeholder="Message…"
           className="flex-1 bg-white/[0.04] border border-white/[0.06] rounded-lg px-2.5 py-1.5 text-[12px] text-gray-100 placeholder-gray-500 outline-none"
         />
-        <button type="submit" disabled={!draft.trim()} className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-[11px] font-semibold">
+        <button type="submit" disabled={!draft.trim()} className="px-2.5 py-1.5 rounded-lg border border-white/[0.12] disabled:opacity-40 text-gray-100 text-[11px] font-semibold transition-colors" style={{ background: 'rgba(255,255,255,0.12)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)' }}>
           Send
         </button>
       </form>

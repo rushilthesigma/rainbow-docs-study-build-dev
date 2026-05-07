@@ -66,7 +66,7 @@ export default function CurriculumPage() {
     <div className="max-w-3xl mx-auto">
       <button
         onClick={() => navigate('/dashboard')}
-        className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 mb-6 transition-colors"
+        className="flex items-center gap-2 text-sm text-white/45 hover:text-white/80 mb-6 transition-colors"
       >
         <ArrowLeft size={16} />
         Back to Dashboard
@@ -76,9 +76,9 @@ export default function CurriculumPage() {
       <div className="mb-6">
         <div className="flex items-start justify-between">
           <div className="flex-1">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{curriculum.title}</h1>
+            <h1 className="text-2xl font-bold text-white/90">{curriculum.title}</h1>
             {curriculum.description && (
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{curriculum.description}</p>
+              <p className="text-sm text-white/50 mt-1">{curriculum.description}</p>
             )}
           </div>
           <Button variant="ghost" onClick={handleDelete} loading={deleting} size="sm" className="text-gray-400 hover:text-rose-500">
@@ -95,17 +95,17 @@ export default function CurriculumPage() {
       {curriculum.settings && (
         <div className="flex flex-wrap gap-2 mt-4 mb-6">
           {curriculum.settings.difficulty && (
-            <span className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 text-xs font-medium">
+            <span className="px-2.5 py-1 rounded-full bg-white/[0.06] border border-white/[0.10] text-white/70 text-xs font-medium">
               {curriculum.settings.difficulty}
             </span>
           )}
           {curriculum.settings.learningStyle && (
-            <span className="px-2.5 py-1 rounded-lg bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 text-xs font-medium">
+            <span className="px-2.5 py-1 rounded-full bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800/40 text-purple-600 dark:text-purple-400 text-xs font-medium">
               {curriculum.settings.learningStyle}
             </span>
           )}
           {curriculum.settings.tone && (
-            <span className="px-2.5 py-1 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 text-xs font-medium">
+            <span className="px-2.5 py-1 rounded-full bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/40 text-amber-600 dark:text-amber-400 text-xs font-medium">
               {curriculum.settings.tone}
             </span>
           )}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { syncData } from '../api/auth';
 import { DIFFICULTY_OPTIONS, LEARNING_STYLE_OPTIONS, LESSON_LENGTH_OPTIONS, TONE_OPTIONS, RIGOR_OPTIONS, TEMPO_OPTIONS, PERSONALITY_OPTIONS, FLUFF_OPTIONS } from '../utils/constants';
@@ -6,41 +6,72 @@ import PillGroup from '../components/shared/PillGroup';
 import Toggle from '../components/shared/Toggle';
 import { Textarea } from '../components/shared/Input';
 import Button from '../components/shared/Button';
-import { Settings, Save, User, GraduationCap } from 'lucide-react';
+import { Settings, Save, GraduationCap, ChevronDown, Check } from 'lucide-react';
 import { useUIPreference } from '../context/UIPreferenceContext';
-
 import { WALLPAPER_LIST } from '../components/desktop/DesktopBackground';
 
 function Dropdown({ label, value, options, onChange }) {
   const [open, setOpen] = useState(false);
+  const ref = useRef(null);
   const selected = options.find(o => o.value === value);
+
+  useEffect(() => {
+    if (!open) return;
+    function handle(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, [open]);
+
   return (
     <div>
-      <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2 block">{label}</label>
-      <div className="relative">
-        <button onClick={() => setOpen(!open)} className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-sm text-gray-900 dark:text-white">
+      {label && (
+        <label className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-white/40 mb-2 block">
+          {label}
+        </label>
+      )}
+      <div className="relative" ref={ref}>
+        <button
+          onClick={() => setOpen(!open)}
+          className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl border border-white/[0.08] bg-white/[0.04] text-[13px] text-white/85 hover:bg-white/[0.07] hover:border-white/[0.12] transition-colors"
+        >
           <span>{selected?.label || value}</span>
-          <svg width="12" height="12" viewBox="0 0 12 12" className={`transition-transform ${open ? 'rotate-180' : ''}`}><path d="M3 5l3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+          <ChevronDown size={13} className={`text-white/35 transition-transform ${open ? 'rotate-180' : ''}`} />
         </button>
         {open && (
-          <>
-            <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-            <div className="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622] shadow-xl py-1">
-              {options.map(o => (
-                <button key={o.value} onClick={() => { onChange(o.value); setOpen(false); }} className={`w-full text-left px-3 py-2 text-sm ${value === o.value ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-medium' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[#1e1e2e]'}`}>
-                  {o.label}{o.desc ? <span className="text-[10px] text-gray-400 ml-2">{o.desc}</span> : ''}
-                </button>
-              ))}
-            </div>
-          </>
+          <div className="absolute z-20 mt-1.5 w-full max-h-52 overflow-y-auto rounded-xl border border-white/[0.08] bg-[#0c0c18]/95 backdrop-blur-xl shadow-2xl py-1">
+            {options.map(o => (
+              <button
+                key={o.value}
+                onClick={() => { onChange(o.value); setOpen(false); }}
+                className={`w-full text-left px-3.5 py-2 text-[13px] flex items-center justify-between transition-colors ${
+                  value === o.value
+                    ? 'text-white/95 font-medium bg-white/[0.08]'
+                    : 'text-white/60 hover:bg-white/[0.05] hover:text-white/85'
+                }`}
+              >
+                <span>{o.label}{o.desc ? <span className="text-[10px] text-white/30 ml-2">{o.desc}</span> : ''}</span>
+                {value === o.value && <Check size={12} className="text-white/50 shrink-0" />}
+              </button>
+            ))}
+          </div>
         )}
       </div>
     </div>
   );
 }
 
+function Section({ title, children }) {
+  return (
+    <div className="rounded-2xl border border-white/[0.07] bg-white/[0.03] backdrop-blur-sm p-6 space-y-5">
+      <h3 className="text-[10px] font-black uppercase tracking-[0.22em] text-white/40">{title}</h3>
+      {children}
+    </div>
+  );
+}
+
 function InterfaceSection() {
-  // macOS is the only shell now — the Desktop Style picker is gone.
   const { wallpaper, setWallpaper, dockSize, setDockSize, iconStyle, setIconStyle } = useUIPreference();
   const wallpaperOpts = WALLPAPER_LIST.map(w => ({ value: w.id, label: w.label }));
   const dockOpts = [{ value: 'small', label: 'Small' }, { value: 'medium', label: 'Medium' }, { value: 'large', label: 'Large' }];
@@ -48,8 +79,7 @@ function InterfaceSection() {
   const isMobileScreen = typeof window !== 'undefined' && window.innerWidth < 768;
 
   return (
-    <div className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-6 space-y-5">
-      <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wide">{isMobileScreen ? 'Appearance' : 'Desktop'}</h3>
+    <Section title={isMobileScreen ? 'Appearance' : 'Desktop'}>
       {!isMobileScreen && (
         <>
           <Dropdown label="Wallpaper" value={wallpaper} options={wallpaperOpts} onChange={setWallpaper} />
@@ -57,26 +87,15 @@ function InterfaceSection() {
           <Dropdown label="Icon Style" value={iconStyle} options={iconOpts} onChange={setIconStyle} />
         </>
       )}
-    </div>
+    </Section>
   );
 }
 
-// Demo accounts (landing-page mini-OS throwaways with emails like
-// demo-landing-XXX@covalent.test) are intentionally ephemeral — every
-// visit gets a fresh user. We do NOT persist their prefs locally, so
-// each demo session starts genuinely clean. The localStorage mirror
-// below is gated on real signed-in accounts only.
 function isDemoEmail(email) {
   const e = String(email || '').toLowerCase();
   return e.startsWith('demo-landing-') || e.endsWith('@covalent.test');
 }
 
-// localStorage mirror of a real user's preferences. Survives any
-// transient state where /api/auth/me hasn't finished hydrating yet,
-// and acts as a backup if the server save round-trip fails. On
-// initial settings load, anything in the mirror that the server
-// doesn't have gets reapplied AND synced back so the server truth
-// catches up.
 const PREFS_LS_KEY = 'cov-prefs';
 function loadPrefsMirror() {
   try { return JSON.parse(localStorage.getItem(PREFS_LS_KEY) || '{}') || {}; }
@@ -90,28 +109,18 @@ export default function SettingsPage() {
   const { user, fetchUser } = useAuth();
   const isDemo = isDemoEmail(user?.email);
 
-  // If the current session is a demo account, wipe any stray mirror
-  // that was written by a previous (real-user OR pre-fix demo) session.
-  // Demo accounts must never read or write the mirror.
   useEffect(() => {
     if (isDemo) {
       try { localStorage.removeItem(PREFS_LS_KEY); } catch {}
     }
   }, [isDemo]);
 
-  // Initial state: server preferences. For real users, also merge in
-  // anything in the local mirror as a backup. Demo users skip the
-  // mirror entirely so they truly start fresh each visit.
   const [prefs, setPrefs] = useState(() => ({
     ...(isDemo ? {} : loadPrefsMirror()),
     ...(user?.data?.preferences || {}),
   }));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  // Track keys the user has touched locally. Server-side refreshes (fetchUser)
-  // will NOT clobber these until the user explicitly saves. This prevents the
-  // "I clicked Flash but it jumped back to Pro" flicker when the auto-save
-  // round-trips or when any other refresh fires.
   const dirtyKeys = useRef(new Set());
 
   useEffect(() => {
@@ -119,19 +128,12 @@ export default function SettingsPage() {
     const fromServer = user.data.preferences;
     const mirror = isDemo ? {} : loadPrefsMirror();
     setPrefs(prev => {
-      // Server is the truth, but preserve in-flight local edits AND
-      // (for real users only) any mirror values for keys the server
-      // doesn't have yet.
       const next = { ...mirror, ...fromServer };
       for (const k of dirtyKeys.current) {
         if (prev[k] !== undefined) next[k] = prev[k];
       }
       return next;
     });
-
-    // Backfill: only for real users. If the mirror has a key the
-    // server is missing, sync it back so future loads see it from
-    // the server too. Demo users skip this entirely.
     if (!isDemo) {
       const missingFromServer = {};
       for (const k of Object.keys(mirror)) {
@@ -146,8 +148,6 @@ export default function SettingsPage() {
     }
   }, [user, isDemo]);
 
-  // Mirror prefs to localStorage on every change — REAL users only.
-  // Demo accounts deliberately don't persist anything locally.
   useEffect(() => {
     if (isDemo) return;
     savePrefsMirror(prefs);
@@ -174,26 +174,25 @@ export default function SettingsPage() {
   const profile = user?.data?.profile;
 
   return (
-    <div className="max-w-2xl mx-auto space-y-4">
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-600">
+    <div className="max-w-2xl mx-auto space-y-3 px-1">
+
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-7 pt-1">
+        <div className="w-11 h-11 rounded-2xl bg-white/[0.08] border border-white/[0.10] flex items-center justify-center text-white/55">
           <Settings size={20} />
         </div>
         <div>
-          <h1 className="text-xl font-bold text-gray-900 dark:text-white">Settings</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Customize your learning experience</p>
+          <h1 className="text-[20px] font-bold text-white/90 tracking-tight">Settings</h1>
+          <p className="text-[12px] text-white/35">Customize your learning experience</p>
         </div>
       </div>
 
-      {/* Interface Mode */}
+      {/* Desktop / Interface */}
       <InterfaceSection />
 
       {/* AI Behavior */}
-      <div className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-6 space-y-5">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wide">AI Behavior</h3>
-
+      <Section title="AI Behavior">
         {(() => {
-          // Everyone gets the full model picker — no tier gating.
           async function setTier(v) {
             const next = { ...prefs, modelTier: v };
             setPrefs(next);
@@ -202,29 +201,27 @@ export default function SettingsPage() {
               await syncData({ preferences: next });
               dirtyKeys.current.delete('modelTier');
               await fetchUser();
-            } catch (err) {
-              console.error('Failed to save model tier:', err);
-            }
+            } catch (err) { console.error('Failed to save model tier:', err); }
           }
           const effectiveValue = prefs.modelTier || 'pro';
           return (
             <div>
               <div className="flex items-center gap-2 mb-2">
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Model</label>
-                <span className="text-[10px] text-gray-400">· auto-saves</span>
+                <label className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-white/40">Model</label>
+                <span className="text-[10px] text-white/20">· auto-saves</span>
               </div>
-              <div>
-                <PillGroup
-                  options={[
-                    { value: 'pro',        label: 'Pro',        description: 'Smartest · 1M-token context · best on hard problems' },
-                    { value: 'flash',      label: 'Flash',      description: 'Faster · solid for most lessons' },
-                    { value: 'flash-lite', label: 'Flash Lite', description: 'Fastest + cheapest · light tasks' },
-                  ]}
-                  value={effectiveValue}
-                  onChange={setTier}
-                />
-              </div>
-              <p className="text-[10px] text-gray-400 mt-2">All three tiers share the same 1M-token input context. Pro is best for proofs and edge-case reasoning; Flash is the balanced default; Flash Lite is fastest for short Q&amp;A.</p>
+              <PillGroup
+                options={[
+                  { value: 'pro',        label: 'Pro',        description: '· smartest' },
+                  { value: 'flash',      label: 'Flash',      description: '· faster' },
+                  { value: 'flash-lite', label: 'Flash Lite', description: '· fastest' },
+                ]}
+                value={effectiveValue}
+                onChange={setTier}
+              />
+              <p className="text-[10px] text-white/25 mt-2 leading-relaxed">
+                All three tiers share the same 1M-token context. Pro is best for proofs; Flash is the balanced default; Flash Lite is fastest for short Q&amp;A.
+              </p>
             </div>
           );
         })()}
@@ -241,68 +238,63 @@ export default function SettingsPage() {
           onChange={e => update('customInstructions', e.target.value)}
           rows={3}
         />
-      </div>
+      </Section>
 
       {/* Curriculum Defaults */}
-      <div className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-6 space-y-5">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wide">Curriculum Defaults</h3>
-
+      <Section title="Curriculum Defaults">
         <PillGroup label="Default Difficulty" options={DIFFICULTY_OPTIONS} value={prefs.defaultDifficulty} onChange={v => update('defaultDifficulty', v)} />
         <PillGroup label="Default Learning Style" options={LEARNING_STYLE_OPTIONS} value={prefs.defaultStyle} onChange={v => update('defaultStyle', v)} />
         <PillGroup label="Default Tone" options={TONE_OPTIONS} value={prefs.defaultTone} onChange={v => update('defaultTone', v)} />
         <PillGroup label="Default Lesson Length" options={LESSON_LENGTH_OPTIONS} value={prefs.defaultLength} onChange={v => update('defaultLength', v)} />
 
-        <div className="space-y-3 pt-2">
+        <div className="space-y-3 pt-1">
           <Toggle label="Include examples by default" checked={prefs.includeExamples ?? true} onChange={v => update('includeExamples', v)} />
           <Toggle label="Include exercises by default" checked={prefs.includeExercises ?? true} onChange={v => update('includeExercises', v)} />
         </div>
-      </div>
+      </Section>
 
-      <div className="pt-2">
+      {/* Save */}
+      <div className="pt-1">
         <Button onClick={handleSave} loading={saving}>
-          <Save size={16} />
+          <Save size={15} />
           {saved ? 'Saved!' : 'Save Settings'}
         </Button>
       </div>
 
-      {/* Account & Profile */}
-      <div className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-6">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wide mb-3">Account</h3>
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-sm font-semibold text-blue-600">
+      {/* Account */}
+      <Section title="Account">
+        <div className="flex items-center gap-3 mb-1">
+          <div className="w-10 h-10 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center text-[13px] font-bold text-white/70">
             {user?.name?.charAt(0)?.toUpperCase() || '?'}
           </div>
           <div>
-            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{user?.name}</p>
-            <p className="text-xs text-gray-400">{user?.email}</p>
+            <p className="text-[13px] font-semibold text-white/90">{user?.name}</p>
+            <p className="text-[11px] text-white/35">{user?.email}</p>
           </div>
         </div>
         {profile && (
-          <div className="grid grid-cols-3 gap-3 text-center">
-            <div className="bg-gray-50 dark:bg-[#0D0D14] rounded-lg p-3">
-              <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{profile.level}</p>
-              <p className="text-xs text-gray-500">Level</p>
-            </div>
-            <div className="bg-gray-50 dark:bg-[#0D0D14] rounded-lg p-3">
-              <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{profile.xp}</p>
-              <p className="text-xs text-gray-500">XP</p>
-            </div>
-            <div className="bg-gray-50 dark:bg-[#0D0D14] rounded-lg p-3">
-              <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{Object.keys(profile.topicScores || {}).length}</p>
-              <p className="text-xs text-gray-500">Topics</p>
-            </div>
+          <div className="grid grid-cols-3 gap-2 mt-3">
+            {[
+              { label: 'Level', value: profile.level },
+              { label: 'XP', value: profile.xp },
+              { label: 'Topics', value: Object.keys(profile.topicScores || {}).length },
+            ].map(({ label, value }) => (
+              <div key={label} className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-3 text-center">
+                <p className="text-[18px] font-bold text-white/90 tabular-nums">{value}</p>
+                <p className="text-[10px] text-white/35 mt-0.5">{label}</p>
+              </div>
+            ))}
           </div>
         )}
-      </div>
+      </Section>
 
-      {/* Onboarding / Tutorial */}
-      <div className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-6 space-y-3">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase tracking-wide">Tutorial</h3>
-        <div className="flex items-center justify-between gap-3">
+      {/* Tutorial */}
+      <Section title="Tutorial">
+        <div className="flex items-center justify-between gap-4">
           <div className="min-w-0">
-            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Restart onboarding</p>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-              Replay the 8-step welcome tutorial — pedagogy, PAUSD catalog, lesson flow, progress.
+            <p className="text-[13px] font-medium text-white/85">Restart onboarding</p>
+            <p className="text-[11px] text-white/35 mt-0.5 leading-relaxed">
+              Replay the 8-step welcome tutorial — pedagogy, catalog, lesson flow, progress.
             </p>
           </div>
           <button
@@ -312,12 +304,13 @@ export default function SettingsPage() {
               localStorage.removeItem('cov-launch-app');
               window.location.reload();
             }}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors flex-shrink-0"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/[0.07] border border-white/[0.10] hover:bg-white/[0.12] text-white/65 hover:text-white/85 text-[12px] font-semibold transition-colors flex-shrink-0"
           >
-            <GraduationCap size={14} /> Restart
+            <GraduationCap size={13} /> Restart
           </button>
         </div>
-      </div>
+      </Section>
+
     </div>
   );
 }

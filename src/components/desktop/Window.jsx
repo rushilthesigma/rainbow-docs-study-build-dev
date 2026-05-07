@@ -15,13 +15,13 @@ function MacTitleBar({ windowId, isMaximized, isActive, title, onDragStart, onDo
   const { closeWindow, minimizeWindow, maximizeWindow } = useWindowManager();
   const [hovered, setHovered] = useState(false);
   return (
-    <div className={`h-8 flex items-center flex-shrink-0 select-none ${isActive ? 'bg-[#e8e8ea] dark:bg-[#2c2c2e]' : 'bg-[#f0f0f0] dark:bg-[#383838]'}`} onPointerDown={onDragStart} onDoubleClick={onDoubleClick} data-titlebar={windowId}>
+    <div className={`h-8 flex items-center flex-shrink-0 select-none ${isActive ? 'bg-[#e8e8ea]/65 dark:bg-[#18182a]/80 backdrop-blur-md' : 'bg-[#f0f0f0]/55 dark:bg-[#222235]/70 backdrop-blur-md'}`} onPointerDown={onDragStart} onDoubleClick={onDoubleClick} data-titlebar={windowId}>
       <div className="flex items-center gap-[7px] px-3" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
         <button onClick={e => { e.stopPropagation(); closeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FF5F57] hover:brightness-90 flex items-center justify-center" title="Close"><X size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#4a0002]" /></button>
         <button onClick={e => { e.stopPropagation(); minimizeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FEBC2E] hover:brightness-90 flex items-center justify-center" title="Minimize"><Minus size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#5a3e00]" /></button>
         <button onClick={e => { e.stopPropagation(); maximizeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#28C840] hover:brightness-90 flex items-center justify-center" title={isMaximized ? 'Restore' : 'Zoom — fills the desktop. ⌘⇧P for true fullscreen.'}><Maximize2 size={hovered ? 7 : 0} strokeWidth={2.5} className="text-[#005200]" /></button>
       </div>
-      <div className="flex-1 text-center text-xs font-medium text-gray-600 dark:text-gray-300 truncate pr-12 pointer-events-none">{title}</div>
+      <div className="flex-1 text-center text-xs font-medium text-gray-600 dark:text-white/60 truncate pr-12 pointer-events-none">{title}</div>
     </div>
   );
 }
@@ -212,7 +212,7 @@ export default function Window({ win, isActive, children }) {
   return (
     <div
       ref={windowRef}
-      className={`absolute flex flex-col ${radius} overflow-hidden ${animClass}`}
+      className={`absolute flex flex-col ${radius} overflow-hidden ${animClass} backdrop-blur-xl`}
       style={{
         ...style,
         // Belt-and-suspenders for the rounded-none class — explicit
@@ -246,7 +246,7 @@ export default function Window({ win, isActive, children }) {
     >
       <TitleBar windowId={win.id} isMaximized={maxed} isActive={isActive} title={win.title} onDragStart={handleDragStart} onDoubleClick={() => maximizeWindow(win.id)} onFullscreen={toggleFullscreen} />
 
-      <div className="flex-1 overflow-hidden bg-white dark:bg-[#0D0D14]">
+      <div className="flex-1 overflow-hidden bg-white/20 dark:bg-black/55">
         {children}
       </div>
 

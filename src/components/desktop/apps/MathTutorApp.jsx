@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
-  Calculator, Pen, Eraser, Undo2, Trash2, Loader2, Send, Sparkles, Check,
-  ArrowLeft, ClipboardCheck, Settings, Plus,
+  Calculator, Pen, Eraser, Undo2, Trash2, Sparkles, Check,
+  ArrowLeft, ClipboardCheck, Settings, MessageSquare, Layers, RotateCcw,
 } from 'lucide-react';
 import { sendMathTutorMessage } from '../../../api/mathTutor';
 import ChatContainer from '../../chat/ChatContainer';
@@ -9,9 +9,9 @@ import { errorChatMessage } from '../../../utils/aiErrors';
 import useBrowserBack from '../../../hooks/useBrowserBack';
 import { InlineProgress } from '../../shared/ProgressBar';
 
-// Persist the in-progress tutor session across window closes.
 const STORAGE_KEY = 'covalent-math-tutor-state-v1';
 const PEN_SIZES = { thin: 2, medium: 4, thick: 7 };
+
 
 function loadState() {
   try {
@@ -24,29 +24,25 @@ function saveState(s) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch {}
 }
 
-// ============== CANVAS (reused drawing surface, returns PNG on demand) ==============
-function TutorCanvas({ onCaptureReady, dark }) {
+// ============== CANVAS ==============
+function TutorCanvas({ onCaptureReady }) {
   const canvasRef = useRef(null);
-  const ctxRef = useRef(null);
-  const [tool, setTool] = useState('pen');
+  const ctxRef    = useRef(null);
+  const [tool, setTool]       = useState('pen');
   const [penSize, setPenSize] = useState('medium');
   const [drawing, setDrawing] = useState(false);
-  const strokesRef = useRef([]);
+  const strokesRef      = useRef([]);
   const currentStrokeRef = useRef([]);
 
-  const bgColor = dark ? '#000000' : '#ffffff';
-  const penColor = dark ? '#ffffff' : '#1a1a2e';
-
   function clearCanvas(ctx, w, h) {
-    ctx.fillStyle = bgColor;
-    ctx.fillRect(0, 0, w, h);
+    ctx.clearRect(0, 0, w, h);
   }
 
   function replayStrokes() {
     const canvas = canvasRef.current;
     if (!canvas || !ctxRef.current) return;
     const rect = canvas.getBoundingClientRect();
-    const ctx = ctxRef.current;
+    const ctx  = ctxRef.current;
     clearCanvas(ctx, rect.width, rect.height);
     for (const s of strokesRef.current) {
       if (s.tool === 'eraser') {
@@ -54,7 +50,7 @@ function TutorCanvas({ onCaptureReady, dark }) {
         ctx.globalCompositeOperation = 'destination-out';
         ctx.strokeStyle = 'rgba(0,0,0,1)';
       } else {
-        ctx.strokeStyle = penColor;
+        ctx.strokeStyle = '#ffffff';
       }
       ctx.lineWidth = s.size;
       ctx.beginPath();
@@ -64,33 +60,28 @@ function TutorCanvas({ onCaptureReady, dark }) {
     }
   }
 
-  // Expose a capture function to the parent.
   useEffect(() => {
     if (typeof onCaptureReady !== 'function') return;
     onCaptureReady({
       capture: () => canvasRef.current?.toDataURL('image/png') || null,
-      clear: () => { strokesRef.current = []; replayStrokes(); },
+      clear:   () => { strokesRef.current = []; replayStrokes(); },
       isEmpty: () => strokesRef.current.length === 0,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onCaptureReady]);
 
-  // Re-initialize the backing store when layout changes (e.g. toolbar renders
-  // after mount, window resizes, dark mode flips). Without this, the backing
-  // store dimensions drift from the CSS dimensions and drawing lands at the
-  // wrong pixel.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     function sync() {
-      const dpr = window.devicePixelRatio || 1;
+      const dpr  = window.devicePixelRatio || 1;
       const rect = canvas.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) return;
-      canvas.width = Math.round(rect.width * dpr);
+      canvas.width  = Math.round(rect.width  * dpr);
       canvas.height = Math.round(rect.height * dpr);
       const ctx = canvas.getContext('2d');
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.lineCap = 'round';
+      ctx.lineCap  = 'round';
       ctx.lineJoin = 'round';
       ctxRef.current = ctx;
       clearCanvas(ctx, rect.width, rect.height);
@@ -101,10 +92,8 @@ function TutorCanvas({ onCaptureReady, dark }) {
     ro.observe(canvas);
     return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dark]);
+  }, []);
 
-  // Use the native MouseEvent.offsetX/offsetY — it's always measured from the
-  // canvas element's own top-left in CSS pixels, so no stale-rect drift.
   function getPos(e) {
     const nativeEvent = e.nativeEvent || e;
     const touch = e.touches?.[0];
@@ -112,9 +101,7 @@ function TutorCanvas({ onCaptureReady, dark }) {
       const rect = canvasRef.current.getBoundingClientRect();
       return { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
     }
-    if (typeof nativeEvent.offsetX === 'number' && typeof nativeEvent.offsetY === 'number') {
-      return { x: nativeEvent.offsetX, y: nativeEvent.offsetY };
-    }
+    if (typeof nativeEvent.offsetX === 'number') return { x: nativeEvent.offsetX, y: nativeEvent.offsetY };
     const rect = canvasRef.current.getBoundingClientRect();
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   }
@@ -129,10 +116,10 @@ function TutorCanvas({ onCaptureReady, dark }) {
       ctx.save();
       ctx.globalCompositeOperation = 'destination-out';
       ctx.strokeStyle = 'rgba(0,0,0,1)';
-      ctx.lineWidth = 22;
+      ctx.lineWidth   = 22;
     } else {
-      ctx.strokeStyle = penColor;
-      ctx.lineWidth = PEN_SIZES[penSize];
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth   = PEN_SIZES[penSize];
     }
     ctx.beginPath();
     ctx.moveTo(pos.x, pos.y);
@@ -151,45 +138,55 @@ function TutorCanvas({ onCaptureReady, dark }) {
     const ctx = ctxRef.current;
     if (tool === 'eraser') ctx.restore();
     if (currentStrokeRef.current.length > 1) {
-      strokesRef.current.push({
-        points: currentStrokeRef.current,
-        tool,
-        size: tool === 'eraser' ? 22 : PEN_SIZES[penSize],
-      });
+      strokesRef.current.push({ points: currentStrokeRef.current, tool, size: tool === 'eraser' ? 22 : PEN_SIZES[penSize] });
     }
     currentStrokeRef.current = [];
   }
+  function handleUndo()  { strokesRef.current.pop(); replayStrokes(); }
+  function handleClear() { strokesRef.current = []; replayStrokes(); }
 
-  function handleUndo() {
-    strokesRef.current.pop();
-    replayStrokes();
-  }
-  function handleClear() {
-    strokesRef.current = [];
-    replayStrokes();
-  }
+  const iconBtn = (active, onClick, children, title) => (
+    <button
+      onClick={onClick}
+      title={title}
+      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
+        active ? 'bg-white/15 text-white' : 'text-white/35 hover:text-white/80 hover:bg-white/10'
+      }`}
+    >
+      {children}
+    </button>
+  );
 
   return (
-    <div className="flex flex-col h-full border border-gray-200 dark:border-[#2A2A40] rounded-xl overflow-hidden bg-white dark:bg-black">
-      <div className="flex items-center gap-1 px-2 py-1.5 border-b border-gray-100 dark:border-[#2A2A40] bg-gray-50 dark:bg-[#0D0D14] flex-shrink-0">
-        <button onClick={() => setTool('pen')} className={`p-1.5 rounded-lg ${tool === 'pen' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}><Pen size={14} /></button>
-        <button onClick={() => setTool('eraser')} className={`p-1.5 rounded-lg ${tool === 'eraser' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}><Eraser size={14} /></button>
-        <div className="w-px h-4 bg-gray-200 dark:bg-[#2A2A40] mx-1" />
+    <div className="flex flex-col h-full border border-white/10 rounded-2xl overflow-hidden bg-black/30 backdrop-blur-sm">
+      {/* Canvas toolbar */}
+      <div className="flex items-center gap-1 px-3 py-2 border-b border-white/8 bg-black/20 flex-shrink-0">
+        {iconBtn(tool === 'pen',    () => setTool('pen'),    <Pen    size={13} />, 'Pen')}
+        {iconBtn(tool === 'eraser', () => setTool('eraser'), <Eraser size={13} />, 'Eraser')}
+        <div className="w-px h-4 bg-white/10 mx-1" />
         {Object.keys(PEN_SIZES).map(s => (
-          <button key={s} onClick={() => setPenSize(s)} className={`w-6 h-6 rounded-full flex items-center justify-center ${penSize === s && tool === 'pen' ? 'bg-gray-300 dark:bg-gray-600' : 'hover:bg-gray-200 dark:hover:bg-[#1e1e2e]'}`}>
-            <div className="rounded-full bg-gray-800 dark:bg-gray-200" style={{ width: PEN_SIZES[s], height: PEN_SIZES[s] }} />
+          <button
+            key={s}
+            onClick={() => setPenSize(s)}
+            title={s}
+            className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
+              penSize === s && tool === 'pen' ? 'bg-white/15' : 'hover:bg-white/10'
+            }`}
+          >
+            <div className="rounded-full bg-white" style={{ width: PEN_SIZES[s], height: PEN_SIZES[s], opacity: penSize === s && tool === 'pen' ? 1 : 0.35 }} />
           </button>
         ))}
-        <div className="w-px h-4 bg-gray-200 dark:bg-[#2A2A40] mx-1" />
-        <button onClick={handleUndo} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600"><Undo2 size={14} /></button>
-        <button onClick={handleClear} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600"><Trash2 size={14} /></button>
+        <div className="w-px h-4 bg-white/10 mx-1" />
+        {iconBtn(false, handleUndo,  <Undo2  size={13} />, 'Undo')}
+        {iconBtn(false, handleClear, <Trash2 size={13} />, 'Clear')}
         <div className="flex-1" />
-        <span className="text-[10px] text-gray-400">Work on the canvas. Tap "Get feedback" to show it to the tutor.</span>
+        <span className="text-[10px] text-white/25">Draw · tap "Get feedback" to share with tutor</span>
       </div>
       <div className="flex-1 relative min-h-0">
         <canvas
           ref={canvasRef}
-          className={`absolute inset-0 w-full h-full cursor-crosshair ${dark ? 'bg-black' : 'bg-white'}`}
+          className="absolute inset-0 w-full h-full cursor-crosshair"
+          style={{ background: 'rgba(0,0,0,0.55)' }}
           onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
           onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw}
         />
@@ -199,51 +196,29 @@ function TutorCanvas({ onCaptureReady, dark }) {
 }
 
 // ============== MAIN APP ==============
-//
-// Props:
-//   seedTopic — when set (e.g. when embedded inline from a curriculum
-//               math_tutor lesson), bypass the setup view and start the
-//               tutor immediately on the given topic.
-//   onBack    — when set, replaces the setup-view back-button behavior so
-//               an embedding parent can return to its own view.
 export default function MathTutorApp({ seedTopic = null, onBack = null, defaultMode = 'both' } = {}) {
   const persisted = loadState();
-  // When seeded, start in 'tutor' view directly. Otherwise restore from
-  // localStorage like normal.
   const [view, setView] = useState(seedTopic ? 'tutor' : (persisted?.view || 'setup'));
-  // Tutor-view mode: 'both' (default) shows chat + canvas side-by-side,
-  // 'tutor' hides the canvas (chat full width), 'canvas' hides the chat
-  // (canvas full width). Persisted across sessions.
   const [mode, setMode] = useState(() => {
     const valid = ['both', 'tutor', 'canvas'];
     if (defaultMode && valid.includes(defaultMode)) return defaultMode;
     if (persisted?.mode && valid.includes(persisted.mode)) return persisted.mode;
     return 'both';
   });
-  // When embedded (onBack supplied by parent), DO NOT register our own
-  // browser-back handler — the parent (e.g. CurriculaApp) owns history
-  // management for the embed. Nested useBrowserBack hooks fight each other
-  // in React 18 dev (the inner cleanup calls history.back, which fires
-  // popstate, which the outer hook handles by bailing the embedded view).
   useBrowserBack(!onBack && view === 'tutor', () => setView('setup'));
-  const [topic, setTopic] = useState(seedTopic || persisted?.topic || '');
+  const [topic, setTopic]                       = useState(seedTopic || persisted?.topic || '');
   const [customInstructions, setCustomInstructions] = useState(persisted?.customInstructions || '');
-  const [messages, setMessages] = useState(seedTopic ? [] : (persisted?.messages || []));
-  const [streaming, setStreaming] = useState(false);
+  const [messages, setMessages]                 = useState(seedTopic ? [] : (persisted?.messages || []));
+  const [streaming, setStreaming]               = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
-  const [error, setError] = useState(null);
-  const [input, setInput] = useState('');
-  const [showSettings, setShowSettings] = useState(false);
+  const [error, setError]                       = useState(null);
+  const [input, setInput]                       = useState('');
+  const [showSettings, setShowSettings]         = useState(false);
   const seedKickedOff = useRef(false);
-
-  const streamRef = useRef('');
-  const abortRef = useRef(null);
+  const streamRef  = useRef('');
+  const abortRef   = useRef(null);
   const captureRef = useRef(null);
-  const dark = typeof window !== 'undefined' && document.documentElement.classList.contains('dark');
 
-  // Persist across window close. Cap at ~50 msgs of 3k chars each so we don't
-  // blow up localStorage on long sessions. Don't persist seeded sessions —
-  // they're tied to a specific curriculum lesson, not a free session.
   useEffect(() => {
     if (seedTopic) return;
     const trimmed = messages.slice(-50).map(m => ({
@@ -252,55 +227,25 @@ export default function MathTutorApp({ seedTopic = null, onBack = null, defaultM
     saveState({ view, mode, topic, customInstructions, messages: trimmed });
   }, [view, mode, topic, customInstructions, messages, seedTopic]);
 
-  // Clean up an aborted stream if the component unmounts mid-turn.
   useEffect(() => () => abortRef.current?.(), []);
 
-  function startTutor() {
-    if (!topic.trim()) return;
-    setView('tutor');
-    setMessages([]);
-    setError(null);
-    // Kick off the opening lesson automatically.
-    setTimeout(() => doSend({ text: `Teach me about "${topic.trim()}". Give me a real lesson — definition, why it matters, worked examples in KaTeX, then one problem to try on the canvas.`, phase: 'lesson', hidden: true }), 50);
-  }
-
-  // Auto-start when embedded with a seed topic — runs once on mount.
-  useEffect(() => {
-    if (!seedTopic || seedKickedOff.current) return;
-    seedKickedOff.current = true;
-    setTimeout(() => doSend({
-      text: `Teach me about "${seedTopic}". Give me a real lesson — definition, why it matters, worked examples in KaTeX, then one problem to try on the canvas.`,
-      phase: 'lesson',
-      hidden: true,
-    }), 60);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seedTopic]);
-
-  function doSend({ text, phase = 'lesson', imageDataUrl = null, hidden = false }) {
+  function doSend({ text, phase = 'lesson', imageDataUrl = null, hidden = false, topicOverride = null }) {
     if (streaming) return;
     const userMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
     if (imageDataUrl) userMsg.images = [{ dataUrl: imageDataUrl, mimeType: 'image/png' }];
     if (hidden) userMsg._hidden = true;
-
-    // For hidden kickoff messages, don't show the user bubble; otherwise do.
     setMessages(prev => [...prev, userMsg]);
     setStreaming(true);
     setStreamingContent('');
     streamRef.current = '';
 
-    // Trim conversation for the server: keep last 20 messages + strip images
-    // from older turns so we're not re-sending canvases we already processed.
     const history = [...messages, userMsg].slice(-20).map((m, i, arr) => {
       const isLast = i === arr.length - 1;
-      return {
-        role: m.role,
-        content: m.content,
-        ...(isLast && m.images ? { images: m.images } : {}),
-      };
+      return { role: m.role, content: m.content, ...(isLast && m.images ? { images: m.images } : {}) };
     });
 
     const body = {
-      topic: topic.trim(),
+      topic: (topicOverride ?? topic).trim(),
       customInstructions: customInstructions.trim(),
       phase,
       messages: history.map(({ role, content }) => ({ role, content })),
@@ -312,151 +257,122 @@ export default function MathTutorApp({ seedTopic = null, onBack = null, defaultM
       onDone: () => {
         const full = streamRef.current;
         if (full) setMessages(m => [...m, { role: 'assistant', content: full, timestamp: new Date().toISOString() }]);
-        setStreaming(false);
-        setStreamingContent('');
-        streamRef.current = '';
+        setStreaming(false); setStreamingContent(''); streamRef.current = '';
       },
       onError: (err) => {
         setMessages(m => [...m, errorChatMessage(err)]);
-        setStreaming(false);
-        setStreamingContent('');
-        streamRef.current = '';
+        setStreaming(false); setStreamingContent(''); streamRef.current = '';
       },
     });
     abortRef.current = abort;
   }
+
+  function startTutor() {
+    if (!topic.trim()) return;
+    setView('tutor');
+    setMessages([]);
+    setError(null);
+    setTimeout(() => doSend({ text: `Teach me about "${topic.trim()}". Give me a real lesson — definition, why it matters, worked examples in KaTeX, then one problem to try on the canvas.`, phase: 'lesson', hidden: true }), 50);
+  }
+
+
+  useEffect(() => {
+    if (!seedTopic || seedKickedOff.current) return;
+    seedKickedOff.current = true;
+    setTimeout(() => doSend({
+      text: `Teach me about "${seedTopic}". Give me a real lesson — definition, why it matters, worked examples in KaTeX, then one problem to try on the canvas.`,
+      phase: 'lesson', hidden: true,
+    }), 60);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seedTopic]);
 
   function handleSend(text) {
     if (!text.trim() || streaming) return;
     doSend({ text: text.trim(), phase: 'lesson' });
     setInput('');
   }
-
   function handleFeedback() {
     const png = captureRef.current?.capture?.();
-    if (!png || captureRef.current.isEmpty()) {
-      setError('Draw something on the canvas first.');
-      setTimeout(() => setError(null), 2500);
-      return;
-    }
-    doSend({
-      text: 'Here is my current work. Give me step-by-step feedback — point out the step where I am, whether it\'s correct, and hint at the next step without solving it for me.',
-      phase: 'practice',
-      imageDataUrl: png,
-    });
+    if (!png || captureRef.current.isEmpty()) { setError('Draw something on the canvas first.'); setTimeout(() => setError(null), 2500); return; }
+    doSend({ text: 'Here is my current work. Give me step-by-step feedback — point out the step where I am, whether it\'s correct, and hint at the next step without solving it for me.', phase: 'practice', imageDataUrl: png });
   }
-
   function handleGrade() {
     const png = captureRef.current?.capture?.();
-    if (!png || captureRef.current.isEmpty()) {
-      setError('Draw your solution on the canvas before asking for a grade.');
-      setTimeout(() => setError(null), 2500);
-      return;
-    }
-    doSend({
-      text: 'Here is my final work. Grade it out of 10 and show me the model solution.',
-      phase: 'grade',
-      imageDataUrl: png,
-    });
+    if (!png || captureRef.current.isEmpty()) { setError('Draw your solution on the canvas before asking for a grade.'); setTimeout(() => setError(null), 2500); return; }
+    doSend({ text: 'Here is my final work. Grade it out of 10 and show me the model solution.', phase: 'grade', imageDataUrl: png });
   }
-
   function handleReset() {
     if (!confirm('Reset this tutor session? Your conversation and canvas will be cleared.')) return;
-    setMessages([]);
-    setStreamingContent('');
-    streamRef.current = '';
-    captureRef.current?.clear?.();
-    setError(null);
-    saveState(null);
+    setMessages([]); setStreamingContent(''); streamRef.current = '';
+    captureRef.current?.clear?.(); setError(null); saveState(null);
   }
+  function handleStop() { abortRef.current?.(); setStreaming(false); }
 
-  function handleStop() {
-    abortRef.current?.();
-    setStreaming(false);
-  }
-
-  // ----- Setup view -----
+  // ─── Setup view ─────────────────────────────────────────────────────────────
   if (view === 'setup') {
     return (
-      <div className="h-full overflow-y-auto">
-        <div className="max-w-md mx-auto p-6 space-y-4">
+      <div className="h-full overflow-y-auto bg-transparent">
+        <div className="max-w-md mx-auto px-6 py-10 space-y-5">
+          {/* Icon + title */}
           <div className="text-center">
-            <div className="w-12 h-12 rounded-xl bg-indigo-500/10 flex items-center justify-center mx-auto mb-3">
-              <Calculator size={22} className="text-indigo-500" />
+            <div className="w-11 h-11 rounded-2xl bg-white/10 flex items-center justify-center mx-auto mb-3">
+              <Calculator size={20} className="text-[#aaa]" />
             </div>
-            <h1 className="text-lg font-bold text-gray-900 dark:text-white">Math Tutor</h1>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Lesson, practice with a canvas, step-by-step feedback, and a final grade.</p>
+            <h1 className="text-white text-[17px] font-semibold tracking-tight">Math Tutor</h1>
           </div>
 
+          {/* Topic */}
           <div>
-            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">Topic</label>
+            <label className="text-[11px] font-medium text-[#555] uppercase tracking-widest block mb-2">
+              What do you need help on?
+            </label>
             <input
               value={topic}
               onChange={e => setTopic(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && topic.trim() && startTutor()}
               placeholder="e.g. Quadratic equations, Definite integrals, Long division"
-              className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500/40"
+              className="w-full px-3 py-2.5 rounded-xl border border-white/10 bg-white/10 backdrop-blur-sm text-sm text-white outline-none focus:border-white/25 placeholder:text-white/25 transition-colors"
               autoFocus
             />
           </div>
 
-          {/* Mode picker — Both / Tutor / Canvas. Same toggle is also
-              available in the tutor-view header so you can flip mid-session. */}
+          {/* Custom instructions — collapsed by default */}
           <div>
-            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">Mode</label>
-            <div className="grid grid-cols-3 gap-1.5">
-              {[
-                { id: 'both',   label: 'Both',   sub: 'Tutor + canvas' },
-                { id: 'tutor',  label: 'Tutor',  sub: 'Chat only' },
-                { id: 'canvas', label: 'Canvas', sub: 'Drawing only' },
-              ].map(o => (
-                <button
-                  key={o.id}
-                  onClick={() => setMode(o.id)}
-                  className={`px-2.5 py-2 rounded-lg border text-left transition-all ${
-                    mode === o.id
-                      ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-200 shadow-sm'
-                      : 'border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-gray-700 dark:text-gray-300 hover:border-indigo-400'
-                  }`}
-                >
-                  <p className="text-[12px] font-bold">{o.label}</p>
-                  <p className="text-[10px] opacity-70">{o.sub}</p>
-                </button>
-              ))}
-            </div>
+            <button
+              onClick={() => setShowSettings(s => !s)}
+              className="flex items-center gap-1.5 text-[11px] font-medium text-[#484848] hover:text-[#888] uppercase tracking-widest transition-colors"
+            >
+              <Settings size={11} />
+              {showSettings ? 'Hide' : 'Custom instructions (optional)'}
+            </button>
+            {showSettings && (
+              <textarea
+                value={customInstructions}
+                onChange={e => setCustomInstructions(e.target.value)}
+                rows={3}
+                placeholder="e.g. Prep me for AP Calc BC. Use real exam-style problems. Don't give me answers — only hints."
+                className="mt-2 w-full px-3 py-2.5 rounded-xl border border-white/10 bg-white/10 backdrop-blur-sm text-sm text-white outline-none focus:border-white/25 resize-none placeholder:text-white/25 transition-colors"
+              />
+            )}
           </div>
 
-          <div>
-            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">Custom instructions (optional)</label>
-            <textarea
-              value={customInstructions}
-              onChange={e => setCustomInstructions(e.target.value)}
-              rows={3}
-              placeholder="e.g. Prep me for AP Calc BC. Use real exam-style problems. Don't give me answers — only hints."
-              className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500/40 resize-none"
-            />
-          </div>
-
+          {/* Start button */}
           <button
             onClick={startTutor}
             disabled={!topic.trim()}
-            className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
+            className="w-full py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-sm font-medium disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors"
           >
-            <Sparkles size={14} /> Start lesson
+            <Sparkles size={13} className="text-[#888]" /> Start
           </button>
         </div>
       </div>
     );
   }
 
-  // ----- Tutor view (chat + canvas) -----
-  // Hide "hidden" user kickoff messages; keep a parallel index map so edits
-  // land on the right slot in the unfiltered `messages` array.
+  // ─── Tutor view (chat + canvas) ─────────────────────────────────────────────
   const visibleIndices = messages.map((m, i) => m._hidden ? -1 : i).filter(i => i >= 0);
   const visibleMessages = visibleIndices.map(i => messages[i]);
 
-  // Editing a USER message restarts the conversation from that point:
-  // truncate everything at and after that index, then re-send the edited text.
   function onUserEditMessage(visibleIdx, newContent) {
     if (streaming) return;
     const realIdx = visibleIndices[visibleIdx];
@@ -466,24 +382,13 @@ export default function MathTutorApp({ seedTopic = null, onBack = null, defaultM
     setTimeout(() => doSend({ text: newContent, phase: 'practice' }), 30);
   }
 
-  // Editing an AI message REPLACES its content in place with a fresh answer.
-  // We keep every user message visible (including the original one), drop
-  // only the AI reply + anything after it, then stream a new reply that
-  // includes a hidden instruction the user gave us.
   function onAiInstruct(visibleIdx, instruction) {
     if (streaming || !instruction?.trim()) return;
     const realIdx = visibleIndices[visibleIdx];
     if (realIdx == null) return;
     if (abortRef.current) try { abortRef.current(); } catch {}
-    // Truncate the AI reply + everything after it. The original user msg
-    // right before it stays in the visible transcript, unchanged.
     const truncated = messages.slice(0, realIdx);
     setMessages(truncated);
-
-    // Call streamAIResponse directly with augmented history — append the
-    // instruction to the last user message IN THE API REQUEST ONLY, not in
-    // the visible state. That way the user sees their original message
-    // verbatim, but the AI knows what to change.
     const apiHistory = truncated.map(m => ({ role: m.role, content: m.content }));
     if (apiHistory.length && apiHistory[apiHistory.length - 1].role === 'user') {
       apiHistory[apiHistory.length - 1] = {
@@ -491,74 +396,97 @@ export default function MathTutorApp({ seedTopic = null, onBack = null, defaultM
         content: `${apiHistory[apiHistory.length - 1].content}\n\n[SYSTEM NOTE: Regenerate your previous answer — this time ${instruction.trim()}. Do NOT acknowledge this instruction in your response. Just produce the revised answer directly.]`,
       };
     }
-
-    setStreaming(true);
-    setStreamingContent('');
-    streamRef.current = '';
-    const body = {
-      topic: topic.trim(),
-      customInstructions: customInstructions.trim(),
-      phase: 'practice',
-      messages: apiHistory,
-      images: [],
-    };
+    setStreaming(true); setStreamingContent(''); streamRef.current = '';
+    const body = { topic: topic.trim(), customInstructions: customInstructions.trim(), phase: 'practice', messages: apiHistory, images: [] };
     const abort = sendMathTutorMessage(body, {
       onChunk: (c) => { streamRef.current += c; setStreamingContent(streamRef.current); },
       onDone: () => {
         const full = streamRef.current;
         if (full) setMessages(m => [...m, { role: 'assistant', content: full, timestamp: new Date().toISOString(), _edited: true }]);
-        setStreaming(false);
-        setStreamingContent('');
-        streamRef.current = '';
+        setStreaming(false); setStreamingContent(''); streamRef.current = '';
       },
       onError: (err) => {
         setMessages(m => [...m, errorChatMessage(err)]);
-        setStreaming(false);
-        setStreamingContent('');
-        streamRef.current = '';
+        setStreaming(false); setStreamingContent(''); streamRef.current = '';
       },
     });
     abortRef.current = abort;
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full bg-transparent" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif' }}>
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 dark:border-[#2A2A40] flex-shrink-0 bg-white dark:bg-[#161622]">
-        <button onClick={() => setView('setup')} className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-[#1e1e2e]" title="Change topic">
-          <ArrowLeft size={15} />
+      <div className="flex items-center gap-2.5 mx-2 mt-2 px-4 py-2.5 rounded-2xl flex-shrink-0 bg-white/8 border border-white/10 backdrop-blur-sm">
+        <button
+          onClick={() => setView('setup')}
+          className="w-7 h-7 rounded-lg flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+          title="Back"
+        >
+          <ArrowLeft size={14} />
         </button>
-        <Calculator size={16} className="text-indigo-500" />
-        <span className="text-sm font-semibold text-gray-900 dark:text-white truncate">{topic}</span>
+        <div className="w-6 h-6 rounded-lg bg-white/10 flex items-center justify-center">
+          <Sparkles size={12} className="text-white" />
+        </div>
+        <span className="text-white font-semibold text-[14px] tracking-tight truncate">{topic}</span>
         <div className="flex-1" />
-        <ModeToggle mode={mode} onChange={setMode} />
-        <button onClick={() => setShowSettings(s => !s)} className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-[#1e1e2e]" title="Custom instructions">
-          <Settings size={15} />
+
+        {/* Mode toggle */}
+        <div className="flex items-center gap-0.5 bg-white/5 border border-white/10 rounded-lg p-0.5">
+          {[
+            { id: 'tutor',  Icon: MessageSquare, label: 'Tutor only' },
+            { id: 'both',   Icon: Layers,        label: 'Tutor + Canvas' },
+            { id: 'canvas', Icon: Pen,           label: 'Canvas only' },
+          ].map(o => (
+            <button
+              key={o.id}
+              onClick={() => setMode(o.id)}
+              title={o.label}
+              className={`w-7 h-7 rounded-md flex items-center justify-center transition-colors ${
+                mode === o.id ? 'bg-white/15 text-white' : 'text-white/30 hover:text-white/70'
+              }`}
+            >
+              <o.Icon size={12} />
+            </button>
+          ))}
+        </div>
+
+        <button
+          onClick={() => setShowSettings(s => !s)}
+          title="Custom instructions"
+          className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
+            showSettings ? 'bg-white/15 text-white' : 'text-white/30 hover:text-white/70 hover:bg-white/10'
+          }`}
+        >
+          <Settings size={13} />
         </button>
-        <button onClick={handleReset} className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-[#1e1e2e]" title="Reset session">
-          <Plus size={15} />
+        <button
+          onClick={handleReset}
+          title="New session"
+          className="w-7 h-7 rounded-lg flex items-center justify-center text-white/30 hover:text-white/70 hover:bg-white/10 transition-colors"
+        >
+          <RotateCcw size={13} />
         </button>
       </div>
 
       {showSettings && (
-        <div className="px-3 py-2 bg-amber-50/50 dark:bg-amber-900/10 border-b border-amber-200 dark:border-amber-800/40 flex-shrink-0">
-          <label className="text-[10px] font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wider block mb-1">Custom instructions (live)</label>
+        <div className="px-4 py-3 border-b border-white/10 glass-header flex-shrink-0">
+          <label className="text-[10px] font-semibold text-white/30 uppercase tracking-widest block mb-2">Custom instructions (live)</label>
           <textarea
             value={customInstructions}
             onChange={e => setCustomInstructions(e.target.value)}
             rows={2}
             placeholder="Changes apply to the next message"
-            className="w-full px-2 py-1.5 rounded border border-amber-200 dark:border-amber-800 bg-white dark:bg-[#0D0D14] text-xs text-gray-900 dark:text-gray-100 outline-none resize-none"
+            className="w-full px-3 py-2 rounded-xl border border-white/10 bg-white/10 backdrop-blur-sm text-xs text-white outline-none resize-none placeholder:text-white/25"
           />
         </div>
       )}
 
-      {/* Split: chat on left, canvas on right. Columns hide based on `mode`. */}
-      <div className={`flex-1 min-h-0 grid gap-2 p-2 bg-gray-50 dark:bg-[#0D0D14] ${
+      {/* Main split */}
+      <div className={`flex-1 min-h-0 grid gap-2 p-2 bg-transparent ${
         mode === 'both' ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'
       }`}>
-        {/* Chat column — hidden in canvas-only mode */}
-        <div className={`flex flex-col min-h-0 border border-gray-200 dark:border-[#2A2A40] rounded-xl overflow-hidden bg-white dark:bg-[#161622] ${
+        {/* Chat column */}
+        <div className={`flex flex-col min-h-0 border border-white/10 rounded-2xl overflow-hidden bg-black/10 backdrop-blur-sm ${
           mode === 'canvas' ? 'hidden' : ''
         }`}>
           <div className="flex-1 min-h-0 overflow-hidden">
@@ -572,70 +500,64 @@ export default function MathTutorApp({ seedTopic = null, onBack = null, defaultM
               className="h-full border-0 rounded-none"
             />
           </div>
-          <div className="p-2 border-t border-gray-200 dark:border-[#2A2A40] flex-shrink-0 space-y-1.5">
-            <div className="flex gap-1.5">
-              <input
-                value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(input); } }}
-                placeholder={streaming ? 'Thinking…' : 'Ask a question or type a response…'}
-                disabled={streaming}
-                className="flex-1 px-3 py-2 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-gray-50 dark:bg-[#0D0D14] text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500/40"
-              />
-              {streaming ? (
-                <button onClick={handleStop} className="px-3 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-medium flex items-center gap-1">
-                  <InlineProgress active /> Stop
+
+          {/* Input area */}
+          <div className="p-2.5 flex-shrink-0">
+            <div className="bg-white/8 border border-white/10 rounded-2xl overflow-hidden backdrop-blur-sm">
+              <div className="flex items-center gap-2 px-4 py-3">
+                <input
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(input); } }}
+                  placeholder={streaming ? 'Thinking…' : 'Message...'}
+                  disabled={streaming}
+                  className="flex-1 bg-transparent border-none outline-none text-white text-[14px] placeholder:text-white/25"
+                />
+                {streaming ? (
+                  <button
+                    onClick={handleStop}
+                    className="text-[#f87171] hover:text-red-400 text-[13px] font-medium transition-colors flex items-center gap-1.5"
+                  >
+                    <InlineProgress active /> Stop
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleSend(input)}
+                    disabled={!input.trim()}
+                    className="text-white/35 hover:text-white text-[13px] font-medium disabled:opacity-0 transition-colors"
+                  >
+                    Send ↗
+                  </button>
+                )}
+              </div>
+              {/* Canvas action strip */}
+              <div className="flex gap-0 border-t border-white/8">
+                <button
+                  onClick={handleFeedback}
+                  disabled={streaming}
+                  className="flex-1 py-2.5 text-white/30 hover:text-white/80 text-[12px] font-medium disabled:opacity-30 flex items-center justify-center gap-1.5 transition-colors hover:bg-white/5"
+                >
+                  <Check size={11} /> Get feedback
                 </button>
-              ) : (
-                <button onClick={() => handleSend(input)} disabled={!input.trim()} className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium disabled:opacity-40 flex items-center gap-1">
-                  <Send size={12} /> Send
+                <div className="w-px bg-white/8" />
+                <button
+                  onClick={handleGrade}
+                  disabled={streaming}
+                  className="flex-1 py-2.5 text-white/30 hover:text-white/80 text-[12px] font-medium disabled:opacity-30 flex items-center justify-center gap-1.5 transition-colors hover:bg-white/5"
+                >
+                  <ClipboardCheck size={11} /> Grade my work
                 </button>
-              )}
+              </div>
             </div>
-            <div className="flex gap-1.5">
-              <button onClick={handleFeedback} disabled={streaming} className="flex-1 px-3 py-2 rounded-lg border border-indigo-400/60 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 text-xs font-semibold hover:bg-indigo-100 dark:hover:bg-indigo-500/20 disabled:opacity-40 inline-flex items-center justify-center gap-1.5">
-                <Check size={12} /> Get feedback
-              </button>
-              <button onClick={handleGrade} disabled={streaming} className="flex-1 px-3 py-2 rounded-lg border border-emerald-400/60 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 text-xs font-semibold hover:bg-emerald-100 dark:hover:bg-emerald-500/20 disabled:opacity-40 inline-flex items-center justify-center gap-1.5">
-                <ClipboardCheck size={12} /> Grade my work
-              </button>
-            </div>
-            {error && <p className="text-[11px] text-rose-500">{error}</p>}
+            {error && <p className="text-[11px] text-[#f87171] px-1 mt-1.5">{error}</p>}
           </div>
         </div>
 
-        {/* Canvas column — hidden in tutor-only mode */}
+        {/* Canvas column */}
         <div className={`min-h-[280px] ${mode === 'tutor' ? 'hidden' : ''}`}>
-          <TutorCanvas onCaptureReady={(api) => { captureRef.current = api; }} dark={dark} />
+          <TutorCanvas onCaptureReady={(api) => { captureRef.current = api; }} />
         </div>
       </div>
-    </div>
-  );
-}
-
-// Tutor-view mode toggle: Both | Tutor | Canvas. Segmented control.
-function ModeToggle({ mode, onChange }) {
-  const options = [
-    { id: 'both',   label: 'Both' },
-    { id: 'tutor',  label: 'Tutor' },
-    { id: 'canvas', label: 'Canvas' },
-  ];
-  return (
-    <div className="inline-flex items-center gap-0 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-gray-50 dark:bg-[#0D0D14] p-0.5">
-      {options.map(o => (
-        <button
-          key={o.id}
-          onClick={() => onChange(o.id)}
-          className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
-            mode === o.id
-              ? 'bg-indigo-600 text-white shadow-sm'
-              : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
-          }`}
-          title={`${o.label} mode`}
-        >
-          {o.label}
-        </button>
-      ))}
     </div>
   );
 }

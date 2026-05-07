@@ -12,8 +12,6 @@ import { ownerGrantPro, ownerRevokePro } from '../../../api/billing';
 import LoadingSpinner from '../../shared/LoadingSpinner';
 import AdvisorBadge from '../../shared/AdvisorBadge';
 
-// Advisor emails mirrored from server so the admin table can tag rows without
-// an extra lookup. Keep in sync with ADVISOR_EMAILS in server.js.
 const ADVISOR_EMAILS = new Set(['william.qiao.yang@gmail.com']);
 const isAdvisorEmail = (email) => ADVISOR_EMAILS.has((email || '').toLowerCase());
 
@@ -24,15 +22,11 @@ export default function AdminApp() {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState('list'); // list | detail | chat
   const [selectedUser, setSelectedUser] = useState(null);
-  const [conv, setConv] = useState(null); // active conversation viewer payload
+  const [conv, setConv] = useState(null);
 
-  // List view filters
   const [query, setQuery] = useState('');
-  const [planFilter, setPlanFilter] = useState('all'); // all | free | pro
-  const [sort, setSort] = useState('recent'); // recent | messages | created
-  // Demo / dev throwaway users are filtered server-side by default.
-  // Toggle on to surface them — useful for finding the demo session a
-  // specific landing-page visitor is using.
+  const [planFilter, setPlanFilter] = useState('all');
+  const [sort, setSort] = useState('recent');
   const [includeDemo, setIncludeDemo] = useState(false);
 
   useEffect(() => {
@@ -47,8 +41,6 @@ export default function AdminApp() {
       } catch {}
       setLoading(false);
     })();
-    // Refetch when the demo toggle flips, so the list reflects the new
-    // server filter without a manual refresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [includeDemo]);
 
@@ -107,7 +99,6 @@ export default function AdminApp() {
     }
   }
 
-  /* ---------- Filtering / sorting ---------- */
   const filtered = useMemo(() => {
     const q = query.toLowerCase().trim();
     let list = users.filter(u => {
@@ -121,20 +112,19 @@ export default function AdminApp() {
       list = [...list].sort((a, b) => (sumMsgs(b) - sumMsgs(a)));
     } else if (sort === 'created') {
       list = [...list].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-    } else { // recent
+    } else {
       list = [...list].sort((a, b) => (b.lastActiveAt || '').localeCompare(a.lastActiveAt || ''));
     }
     return list;
   }, [users, query, planFilter, sort]);
 
-  /* ---------- Renders ---------- */
   if (loading) return <div className="flex items-center justify-center h-48"><LoadingSpinner size={24} /></div>;
 
   if (!isAdmin) {
     return (
       <div className="flex flex-col items-center justify-center h-full">
-        <Shield size={36} className="text-gray-400 mb-3" />
-        <p className="text-sm text-gray-500">Admin access required</p>
+        <Shield size={36} className="text-white/25 mb-3" />
+        <p className="text-sm text-white/40">Admin access required</p>
       </div>
     );
   }
@@ -183,11 +173,17 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
   return (
     <div>
       <div className="flex items-center gap-2 mb-4">
-        <Shield size={20} className="text-blue-500" />
-        <h2 className="text-lg font-bold text-gray-900 dark:text-white">Admin Panel</h2>
-        <span className="text-xs text-gray-400 ml-2">{users.length} of {total}</span>
-        <div className="ml-auto flex items-center gap-1.5">
-          <button onClick={onRefresh} className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-[#1e1e2e]" title="Refresh">
+        <div className="w-8 h-8 rounded-xl bg-white/[0.08] border border-white/[0.10] flex items-center justify-center text-white/50 flex-shrink-0">
+          <Shield size={15} />
+        </div>
+        <h2 className="text-[15px] font-bold text-white/90">Admin Panel</h2>
+        <span className="text-[11px] text-white/30 ml-1">{users.length} of {total}</span>
+        <div className="ml-auto">
+          <button
+            onClick={onRefresh}
+            className="text-white/30 hover:text-white/65 p-1.5 rounded-lg hover:bg-white/[0.06] transition-colors"
+            title="Refresh"
+          >
             <RefreshCw size={14} />
           </button>
         </div>
@@ -196,12 +192,12 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <div className="relative flex-1 min-w-[200px]">
-          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/30" />
           <input
             value={query}
             onChange={e => setQuery(e.target.value)}
             placeholder="Search name, email, handle…"
-            className="w-full pl-7 pr-3 py-1.5 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-xs outline-none"
+            className="w-full pl-7 pr-3 py-1.5 rounded-lg border border-white/[0.08] bg-white/[0.04] text-white/85 placeholder:text-white/25 text-xs outline-none focus:border-white/[0.15] transition-colors"
           />
         </div>
         <TabChips
@@ -219,38 +215,38 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
           title="Show throwaway demo accounts (demo-landing-* / *@covalent.test)"
           className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
             includeDemo
-              ? 'bg-amber-100 dark:bg-amber-900/30 border-amber-400 dark:border-amber-700 text-amber-700 dark:text-amber-300'
-              : 'bg-white dark:bg-[#0D0D14] border-gray-200 dark:border-[#2A2A40] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+              ? 'bg-amber-900/20 border-amber-700/50 text-amber-400'
+              : 'bg-white/[0.04] border-white/[0.08] text-white/40 hover:text-white/65'
           }`}
         >
-          <span className={`w-3 h-3 rounded-full ${includeDemo ? 'bg-amber-500' : 'bg-gray-300 dark:bg-gray-600'}`} />
+          <span className={`w-3 h-3 rounded-full ${includeDemo ? 'bg-amber-500' : 'bg-white/20'}`} />
           Demo {includeDemo ? 'shown' : 'hidden'}
         </button>
       </div>
 
       <div className="space-y-1.5">
-        {users.length === 0 && <p className="text-xs text-gray-400 text-center py-8">No matches.</p>}
+        {users.length === 0 && <p className="text-xs text-white/30 text-center py-8">No matches.</p>}
         {users.map(u => (
           <div
             key={u.id}
             onClick={() => onOpen(u.id)}
-            className="group flex items-center gap-3 bg-white dark:bg-[#1e1e2e] rounded-xl border border-gray-200 dark:border-[#2A2A40] px-4 py-2.5 cursor-pointer hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
+            className="group flex items-center gap-3 bg-white/[0.03] rounded-xl border border-white/[0.07] px-4 py-2.5 cursor-pointer hover:bg-white/[0.05] hover:border-white/[0.13] transition-colors"
           >
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-[11px] font-bold text-white flex-shrink-0">
+            <div className="w-8 h-8 rounded-full bg-white/[0.10] border border-white/[0.15] flex items-center justify-center text-[11px] font-bold text-white/70 flex-shrink-0">
               {(u.name || u.email || '?')[0]?.toUpperCase()}
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{u.name || u.email}</p>
+                <p className="text-sm font-medium text-white/90 truncate">{u.name || u.email}</p>
                 {isAdvisorEmail(u.email) ? <AdvisorBadge /> : (u.plan === 'pro' && <ProPill />)}
-                {u.banned && <span className="px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-900/30 text-rose-500 text-[10px] font-medium">Banned</span>}
-                {u.isDemo && <span className="px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 text-[10px] font-bold uppercase tracking-wider">Demo</span>}
+                {u.banned && <span className="px-1.5 py-0.5 rounded bg-rose-900/30 text-rose-400 text-[10px] font-medium">Banned</span>}
+                {u.isDemo && <span className="px-1.5 py-0.5 rounded bg-amber-900/20 text-amber-400 text-[10px] font-bold uppercase tracking-wider">Demo</span>}
               </div>
-              <p className="text-[10px] text-gray-400 truncate">
+              <p className="text-[10px] text-white/35 truncate">
                 {u.handle ? `@${u.handle} · ` : ''}{u.email} · L{u.level} · {u.visitCount || 0} visits · {sumMsgs(u)} msgs · {u.curriculaCount} curr · {u.studySessionCount} study · {u.lessonCount} lessons
               </p>
             </div>
-            <ChevronRight size={14} className="text-gray-300 dark:text-gray-600 group-hover:text-blue-500 flex-shrink-0" />
+            <ChevronRight size={14} className="text-white/20 group-hover:text-white/50 transition-colors flex-shrink-0" />
           </div>
         ))}
       </div>
@@ -260,12 +256,12 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
 
 function TabChips({ options, value, onChange }) {
   return (
-    <div className="flex bg-gray-100 dark:bg-[#1e1e2e] rounded-lg p-0.5">
+    <div className="flex bg-white/[0.04] rounded-lg p-0.5">
       {options.map(([k, label]) => (
         <button
           key={k}
           onClick={() => onChange(k)}
-          className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${value === k ? 'bg-white dark:bg-[#2A2A40] text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+          className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${value === k ? 'bg-white/[0.10] text-white/90 shadow-sm' : 'text-white/40 hover:text-white/65'}`}
         >
           {label}
         </button>
@@ -284,7 +280,7 @@ function ProPill() {
 
 /* ====================== USER DETAIL ====================== */
 function UserDetail({ user: u, onBack, onBan, onDelete, onGrantPro, onRevokePro, onOpenConv }) {
-  const [tab, setTab] = useState('overview'); // overview | study | lessons | curriculum | other | billing
+  const [tab, setTab] = useState('overview');
 
   const totalMsgs =
     (u.studySessions || []).reduce((n, s) => n + (s.messageCount || 0), 0) +
@@ -293,25 +289,25 @@ function UserDetail({ user: u, onBack, onBan, onDelete, onGrantPro, onRevokePro,
 
   return (
     <div>
-      <button onClick={onBack} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 mb-4">
+      <button onClick={onBack} className="flex items-center gap-2 text-sm text-white/40 hover:text-white/70 mb-4 transition-colors">
         <ArrowLeft size={16} /> All Users
       </button>
 
       {/* Header */}
       <div className="flex items-start gap-3 mb-4">
-        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-lg font-bold text-white flex-shrink-0">
+        <div className="w-12 h-12 rounded-full bg-white/[0.10] border border-white/[0.15] flex items-center justify-center text-lg font-bold text-white/70 flex-shrink-0">
           {(u.name || u.email || '?')[0]?.toUpperCase()}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <h2 className="text-lg font-bold text-gray-900 dark:text-white truncate">{u.name || 'Unknown'}</h2>
+            <h2 className="text-lg font-bold text-white/90 truncate">{u.name || 'Unknown'}</h2>
             {isAdvisorEmail(u.email) ? <AdvisorBadge /> : (u.plan === 'pro' && <ProPill />)}
-            {u.banned && <span className="px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-900/30 text-rose-600 text-xs font-medium">Banned</span>}
+            {u.banned && <span className="px-2 py-0.5 rounded-full bg-rose-900/30 text-rose-400 text-xs font-medium">Banned</span>}
           </div>
-          <p className="text-xs text-gray-500 truncate">
+          <p className="text-xs text-white/40 truncate">
             {u.email}{u.handle ? ` · @${u.handle}` : ''}
           </p>
-          <p className="text-[11px] text-gray-400">
+          <p className="text-[11px] text-white/30">
             L{u.profile?.level || 1} · {u.profile?.xp || 0} XP · {totalMsgs} total AI messages
           </p>
         </div>
@@ -325,21 +321,21 @@ function UserDetail({ user: u, onBack, onBan, onDelete, onGrantPro, onRevokePro,
           </button>
         ) : (
           u.proGrantedBy === 'owner' && (
-            <button onClick={onRevokePro} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-amber-300 dark:border-amber-800 text-amber-600 text-xs font-medium">
+            <button onClick={onRevokePro} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-amber-700/50 text-amber-400 text-xs font-medium">
               Revoke Pro
             </button>
           )
         )}
-        <button onClick={onBan} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${u.banned ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'}`}>
+        <button onClick={onBan} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${u.banned ? 'bg-emerald-700/80 text-white' : 'bg-rose-700/80 text-white'}`}>
           <Ban size={12} className="inline mr-1" /> {u.banned ? 'Unban' : 'Ban'}
         </button>
-        <button onClick={onDelete} className="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-[#2A2A40] text-xs font-medium text-rose-500">
+        <button onClick={onDelete} className="px-3 py-1.5 rounded-lg border border-white/[0.08] text-xs font-medium text-rose-400 hover:bg-white/[0.04] transition-colors">
           <Trash2 size={12} className="inline mr-1" /> Delete
         </button>
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-gray-200 dark:border-[#2A2A40] mb-3 -mx-1 px-1 overflow-x-auto scrollbar-hide">
+      <div className="flex border-b border-white/[0.08] mb-3 -mx-1 px-1 overflow-x-auto scrollbar-hide">
         {[
           ['overview',   'Overview',   <User size={12} key="u" />],
           ['study',      `Study (${u.studySessions?.length || 0})`,      <MessageSquare size={12} key="s" />],
@@ -352,10 +348,10 @@ function UserDetail({ user: u, onBack, onBan, onDelete, onGrantPro, onRevokePro,
             key={k}
             onClick={() => setTab(k)}
             style={{ borderRadius: 0 }}
-            className={`relative flex-shrink-0 flex items-center gap-1.5 px-3 py-2 text-[11px] font-medium whitespace-nowrap ${tab === k ? 'text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`relative flex-shrink-0 flex items-center gap-1.5 px-3 py-2 text-[11px] font-medium whitespace-nowrap transition-colors ${tab === k ? 'text-white/90' : 'text-white/35 hover:text-white/60'}`}
           >
             {icon} {label}
-            {tab === k && <span className="absolute left-0 right-0 bottom-[-1px] h-[2px] bg-blue-600" />}
+            {tab === k && <span className="absolute left-0 right-0 bottom-[-1px] h-[2px] bg-white/60" />}
           </button>
         ))}
       </div>
@@ -400,7 +396,7 @@ function StudyTab({ u, onOpen }) {
     <div className="space-y-1.5">
       {list.map(s => (
         <Row key={s.id} onClick={() => onOpen(s.id)}
-          icon={<MessageSquare size={14} className="text-blue-500" />}
+          icon={<MessageSquare size={14} className="text-white/45" />}
           title={s.title || '(untitled session)'}
           meta={`${s.messageCount || 0} messages · ${s.updatedAt ? new Date(s.updatedAt).toLocaleString() : 'no activity'}`}
         />
@@ -416,7 +412,7 @@ function LessonsTab({ u, onOpen }) {
     <div className="space-y-1.5">
       {list.map(l => (
         <Row key={l.id} onClick={() => onOpen(l.id)}
-          icon={<Lightbulb size={14} className="text-yellow-500" />}
+          icon={<Lightbulb size={14} className="text-white/45" />}
           title={l.title || l.topic}
           meta={`${l.difficulty || 'beginner'} · ${l.messageCount || 0} msgs${l.isCompleted ? ' · completed' : ''}${l.lastActiveAt ? ' · ' + new Date(l.lastActiveAt).toLocaleString() : ''}`}
         />
@@ -433,7 +429,7 @@ function CurriculumTab({ u, onOpen }) {
       {list.map(c => (
         <Row key={`${c.curriculumId}-${c.lessonId}`}
           onClick={() => onOpen(c.curriculumId, c.lessonId)}
-          icon={<BookOpen size={14} className="text-blue-500" />}
+          icon={<BookOpen size={14} className="text-white/45" />}
           title={c.lessonTitle}
           meta={`${c.curriculumTitle} / ${c.unitTitle} · ${c.messageCount} msgs${c.lastActiveAt ? ' · ' + new Date(c.lastActiveAt).toLocaleString() : ''}`}
         />
@@ -445,11 +441,11 @@ function CurriculumTab({ u, onOpen }) {
 function OtherTab({ u }) {
   return (
     <div className="space-y-4">
-      <ListBlock title="Curricula" items={u.curricula} render={c => `${c.title} · ${c.completedLessons}/${c.lessonCount} lessons`} icon={<BookOpen size={10} />} />
-      <ListBlock title="Notes"     items={u.notes}     render={n => `${n.title} · ${n.type}`} icon={<FileText size={10} />} />
-      <ListBlock title="Goals"     items={u.goals}     render={g => `${g.title} · ${g.status}`} icon={<Target size={10} />} />
-      <ListBlock title="Flashcards" items={u.flashcardDecks} render={d => `${d.title} · ${d.cardCount} cards`} icon={<Layers size={10} />} />
-      <ListBlock title="Assessment history" items={u.assessmentHistory} render={a => `${a.title} · ${a.score}/${a.total} (${a.percentage}%)`} icon={<Trophy size={10} />} />
+      <ListBlock title="Curricula"          items={u.curricula}          render={c => `${c.title} · ${c.completedLessons}/${c.lessonCount} lessons`} icon={<BookOpen size={10} />} />
+      <ListBlock title="Notes"              items={u.notes}              render={n => `${n.title} · ${n.type}`}                                       icon={<FileText size={10} />} />
+      <ListBlock title="Goals"              items={u.goals}              render={g => `${g.title} · ${g.status}`}                                     icon={<Target size={10} />} />
+      <ListBlock title="Flashcards"         items={u.flashcardDecks}     render={d => `${d.title} · ${d.cardCount} cards`}                            icon={<Layers size={10} />} />
+      <ListBlock title="Assessment history" items={u.assessmentHistory}  render={a => `${a.title} · ${a.score}/${a.total} (${a.percentage}%)`}        icon={<Trophy size={10} />} />
     </div>
   );
 }
@@ -458,12 +454,12 @@ function ListBlock({ title, items, render, icon }) {
   if (!items?.length) return null;
   return (
     <div>
-      <h3 className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1">
-        {icon} {title} <span className="text-gray-300 dark:text-gray-600 font-normal">({items.length})</span>
+      <h3 className="text-[11px] font-semibold text-white/40 uppercase tracking-wider mb-2 flex items-center gap-1">
+        {icon} {title} <span className="text-white/20 font-normal">({items.length})</span>
       </h3>
       <div className="space-y-1">
         {items.map((x, i) => (
-          <div key={x.id || i} className="px-3 py-1.5 rounded-lg bg-white dark:bg-[#1e1e2e] border border-gray-200 dark:border-[#2A2A40] text-xs text-gray-800 dark:text-gray-200">
+          <div key={x.id || i} className="px-3 py-1.5 rounded-lg bg-white/[0.03] border border-white/[0.06] text-xs text-white/75">
             {render(x)}
           </div>
         ))}
@@ -475,11 +471,11 @@ function ListBlock({ title, items, render, icon }) {
 function BillingTab({ u }) {
   return (
     <div className="space-y-2">
-      <div className="bg-white dark:bg-[#1e1e2e] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-4 space-y-2">
+      <div className="rounded-2xl border border-white/[0.07] bg-white/[0.03] backdrop-blur-sm p-4 space-y-2">
         <div className="flex items-center justify-between">
-          <span className="text-xs text-gray-500 uppercase tracking-wider">Plan</span>
+          <span className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-white/40">Plan</span>
           <div className="flex items-center gap-1.5">
-            {isAdvisorEmail(u.email) ? <AdvisorBadge /> : (u.plan === 'pro' ? <ProPill /> : <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 dark:bg-[#2A2A40] text-gray-500">FREE</span>)}
+            {isAdvisorEmail(u.email) ? <AdvisorBadge /> : (u.plan === 'pro' ? <ProPill /> : <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/[0.08] text-white/40">FREE</span>)}
           </div>
         </div>
         <KV label="Granted by" value={u.proGrantedBy || '—'} />
@@ -487,11 +483,11 @@ function BillingTab({ u }) {
         <KV label="Stripe customer" value={u.stripeCustomerId || '—'} mono />
         <KV label="Stripe subscription" value={u.stripeSubscriptionId || '—'} mono />
       </div>
-      <div className="bg-white dark:bg-[#1e1e2e] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-4 space-y-2">
+      <div className="rounded-2xl border border-white/[0.07] bg-white/[0.03] backdrop-blur-sm p-4 space-y-2">
         <div className="flex items-center gap-1.5 mb-1">
-          <Zap size={12} className="text-blue-500" />
-          <span className="text-xs text-gray-500 uppercase tracking-wider">Today's usage</span>
-          <span className="ml-auto text-[10px] text-gray-400">{u.usage?.day || 'n/a'}</span>
+          <Zap size={12} className="text-white/45" />
+          <span className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-white/40">Today's usage</span>
+          <span className="ml-auto text-[10px] text-white/25">{u.usage?.day || 'n/a'}</span>
         </div>
         <KV label="AI messages" value={u.usage?.messages ?? 0} />
         <KV label="Quiz Bowl games" value={u.usage?.quizBowlGames ?? 0} />
@@ -503,30 +499,30 @@ function BillingTab({ u }) {
 /* ---------- Small UI bits ---------- */
 function Stat({ label, value }) {
   return (
-    <div className="bg-white dark:bg-[#1e1e2e] rounded-lg border border-gray-200 dark:border-[#2A2A40] p-3">
-      <p className="text-[10px] text-gray-400 uppercase tracking-wider">{label}</p>
-      <p className="text-lg font-bold text-gray-900 dark:text-white tabular-nums">{value}</p>
+    <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-3">
+      <p className="text-[10px] text-white/35 uppercase tracking-wider">{label}</p>
+      <p className="text-lg font-bold text-white/90 tabular-nums">{value}</p>
     </div>
   );
 }
 function Row({ icon, title, meta, onClick }) {
   return (
-    <button onClick={onClick} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-white dark:bg-[#1e1e2e] border border-gray-200 dark:border-[#2A2A40] text-left hover:border-blue-300 dark:hover:border-blue-700 transition-colors">
+    <button onClick={onClick} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.07] text-left hover:bg-white/[0.05] hover:border-white/[0.13] transition-colors">
       {icon}
       <div className="flex-1 min-w-0">
-        <p className="text-sm text-gray-900 dark:text-white truncate">{title}</p>
-        <p className="text-[10px] text-gray-400 truncate">{meta}</p>
+        <p className="text-sm text-white/85 truncate">{title}</p>
+        <p className="text-[10px] text-white/35 truncate">{meta}</p>
       </div>
-      <ChevronRight size={12} className="text-gray-400" />
+      <ChevronRight size={12} className="text-white/25" />
     </button>
   );
 }
-function Empty({ msg }) { return <p className="text-xs text-gray-400 text-center py-8">{msg}</p>; }
+function Empty({ msg }) { return <p className="text-xs text-white/30 text-center py-8">{msg}</p>; }
 function KV({ label, value, mono }) {
   return (
     <div className="flex items-center justify-between gap-2 text-xs">
-      <span className="text-gray-400">{label}</span>
-      <span className={`text-gray-800 dark:text-gray-200 ${mono ? 'font-mono text-[11px]' : ''} truncate max-w-[60%]`}>{value}</span>
+      <span className="text-white/40">{label}</span>
+      <span className={`text-white/75 ${mono ? 'font-mono text-[11px]' : ''} truncate max-w-[60%]`}>{value}</span>
     </div>
   );
 }
@@ -549,33 +545,33 @@ function ConversationViewer({ conv, onBack }) {
 
   return (
     <div>
-      <button onClick={onBack} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 mb-4">
+      <button onClick={onBack} className="flex items-center gap-2 text-sm text-white/40 hover:text-white/70 mb-4 transition-colors">
         <ArrowLeft size={16} /> Back to {user?.name || 'user'}
       </button>
 
       <div className="flex items-center gap-2 mb-3">
-        {kind === 'study' && <MessageSquare size={16} className="text-blue-500" />}
-        {kind === 'lesson' && <Lightbulb size={16} className="text-yellow-500" />}
-        {kind === 'curriculum' && <BookOpen size={16} className="text-blue-500" />}
-        <h3 className="text-base font-semibold text-gray-900 dark:text-white truncate">{title}</h3>
-        <span className="text-[11px] text-gray-400 ml-auto">{messages.length} messages</span>
+        {kind === 'study'      && <MessageSquare size={16} className="text-white/50" />}
+        {kind === 'lesson'     && <Lightbulb size={16} className="text-white/50" />}
+        {kind === 'curriculum' && <BookOpen size={16} className="text-white/50" />}
+        <h3 className="text-base font-semibold text-white/90 truncate">{title}</h3>
+        <span className="text-[11px] text-white/30 ml-auto">{messages.length} messages</span>
       </div>
 
       {loading && <div className="flex items-center justify-center py-12"><LoadingSpinner size={20} /></div>}
-      {error && <p className="text-xs text-rose-500">{error}</p>}
+      {error && <p className="text-xs text-rose-400">{error}</p>}
 
       {!loading && messages.length === 0 && <Empty msg="No messages in this conversation." />}
 
       <div className="space-y-2">
         {messages.map((m, i) => (
-          <div key={i} className={`rounded-xl p-3 border ${m.role === 'user' ? 'border-blue-200 dark:border-blue-900/40 bg-blue-50/60 dark:bg-blue-900/10' : 'border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#1e1e2e]'}`}>
+          <div key={i} className={`rounded-xl p-3 border ${m.role === 'user' ? 'border-white/[0.12] bg-white/[0.06]' : 'border-white/[0.07] bg-white/[0.03]'}`}>
             <div className="flex items-center gap-2 mb-1">
-              <span className={`text-[10px] font-bold uppercase tracking-wider ${m.role === 'user' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500'}`}>
+              <span className={`text-[10px] font-bold uppercase tracking-wider ${m.role === 'user' ? 'text-white/70' : 'text-white/35'}`}>
                 {m.role === 'user' ? 'User' : 'AI'}
               </span>
-              {m.timestamp && <span className="text-[10px] text-gray-400">{new Date(m.timestamp).toLocaleString()}</span>}
+              {m.timestamp && <span className="text-[10px] text-white/25">{new Date(m.timestamp).toLocaleString()}</span>}
             </div>
-            <div className="text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-words">{m.content}</div>
+            <div className="text-xs text-white/80 whitespace-pre-wrap break-words">{m.content}</div>
           </div>
         ))}
       </div>

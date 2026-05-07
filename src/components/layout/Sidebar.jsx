@@ -18,9 +18,9 @@ export default function Sidebar({ hidden, onNavigate }) {
   const { user, logout } = useAuth();
 
   return (
-    <aside className={`fixed left-0 top-0 h-screen w-60 bg-white dark:bg-[#161622] border-r border-gray-200 dark:border-[#2A2A40] flex flex-col transition-transform z-30 ${hidden ? '-translate-x-full' : 'translate-x-0'}`}>
-      <div className="flex items-center gap-3 px-4 h-16 border-b border-gray-200 dark:border-[#2A2A40]">
-        <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center flex-shrink-0">
+    <aside className={`fixed left-0 top-0 h-screen w-60 bg-white dark:bg-[#1a1a1a] border-r border-gray-200 dark:border-white/[0.06] flex flex-col transition-transform z-30 ${hidden ? '-translate-x-full' : 'translate-x-0'}`}>
+      <div className="flex items-center gap-3 px-4 h-16 border-b border-gray-200 dark:border-white/[0.06]">
+        <div className="w-8 h-8 rounded-lg bg-gray-900 dark:bg-white/[0.12] flex items-center justify-center flex-shrink-0">
           <BookOpen size={18} className="text-white" />
         </div>
         <span className="font-bold text-lg text-gray-900 dark:text-white">RushilAI</span>
@@ -35,8 +35,8 @@ export default function Sidebar({ hidden, onNavigate }) {
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                 isActive
-                  ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-[#1e1e2e]'
+                  ? 'bg-white/70 dark:bg-white/[0.09] text-gray-900 dark:text-white font-semibold'
+                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/[0.05]'
               }`
             }
           >
@@ -46,10 +46,10 @@ export default function Sidebar({ hidden, onNavigate }) {
         ))}
       </nav>
 
-      <div className="p-3 border-t border-gray-200 dark:border-[#2A2A40]">
+      <div className="p-3 border-t border-gray-200 dark:border-white/[0.06]">
         {user && (
           <div className="flex items-center gap-3 px-2 py-2 mb-2">
-            <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-xs font-semibold text-blue-600">
+            <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-white/10 flex items-center justify-center text-xs font-semibold text-gray-700 dark:text-gray-300">
               {user.name?.charAt(0)?.toUpperCase() || '?'}
             </div>
             <div className="flex-1 min-w-0">
@@ -60,7 +60,7 @@ export default function Sidebar({ hidden, onNavigate }) {
         )}
         <button
           onClick={logout}
-          className="flex items-center gap-3 px-3 py-2 w-full rounded-lg text-sm text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-[#1e1e2e] transition-colors"
+          className="flex items-center gap-3 px-3 py-2 w-full rounded-lg text-sm text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/[0.05] transition-colors"
         >
           <LogOut size={17} />
           Log out

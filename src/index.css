@@ -20,8 +20,8 @@
 
   --color-surface: #F4F5F7;
   --color-surface-card: #FFFFFF;
-  --color-surface-dark: #0D0D14;
-  --color-surface-card-dark: #161622;
+  --color-surface-dark: #111111;
+  --color-surface-card-dark: #1a1a1a;
 
   --color-text-primary: #111827;
   --color-text-secondary: #6B7280;
@@ -298,3 +298,91 @@ input[data-spotlight-input]:hover,
 
 /* Hard button press — GTK-style */
 .os-linux button:active { transform: translateY(1px); transition: transform 0.05s ease-out; }
+
+/* ===== LIQUID GLASS ===== */
+
+/* Light mode: bright frosted glass */
+.glass-card {
+  background: rgba(255, 255, 255, 0.38);
+  backdrop-filter: blur(32px) saturate(2);
+  -webkit-backdrop-filter: blur(32px) saturate(2);
+  border: 1px solid rgba(255, 255, 255, 0.45) !important;
+  box-shadow: 0 2px 20px rgba(0,0,0,0.06), 0 1px 4px rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,0.85);
+}
+/* Dark mode: translucent dark panel — no visible border to avoid edge lines */
+.dark .glass-card {
+  background: rgba(20, 20, 20, 0.15) !important;
+  border-color: transparent !important;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 4px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05) !important;
+  backdrop-filter: blur(40px) saturate(1.4) !important;
+  -webkit-backdrop-filter: blur(40px) saturate(1.4) !important;
+}
+
+.glass-card-hover:hover {
+  background: rgba(255, 255, 255, 0.60);
+  border-color: rgba(255, 255, 255, 0.65) !important;
+  box-shadow: 0 4px 28px rgba(0,0,0,0.07), inset 0 1px 0 rgba(255,255,255,0.9);
+}
+.dark .glass-card-hover:hover {
+  background: rgba(28, 28, 28, 0.45) !important;
+  border-color: transparent !important;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.09), 0 4px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.07) !important;
+}
+
+/* Light header/footer strip */
+.glass-header {
+  background: rgba(255, 255, 255, 0.35) !important;
+  backdrop-filter: blur(20px) saturate(1.6);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+}
+/* Dark header/footer strip */
+.dark .glass-header {
+  background: rgba(0, 0, 0, 0.14) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border-bottom: 1px solid rgba(255,255,255,0.06) !important;
+}
+
+.glass-progress-track {
+  background: rgba(0, 0, 0, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.38);
+}
+.dark .glass-progress-track {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.glass-progress-fill {
+  background: linear-gradient(90deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0.75) 55%, rgba(255,255,255,0.9) 100%);
+  box-shadow: 0 0 8px rgba(255,255,255,0.2);
+  position: relative;
+  overflow: hidden;
+}
+.dark .glass-progress-fill {
+  background: linear-gradient(90deg, rgba(255,255,255,0.35) 0%, rgba(255,255,255,0.55) 100%);
+  box-shadow: 0 0 8px rgba(255,255,255,0.12);
+}
+.glass-progress-fill::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 50%;
+  background: rgba(255, 255, 255, 0.28);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+/* Light input */
+.glass-input {
+  background: rgba(255, 255, 255, 0.65) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.55) !important;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.05) !important;
+}
+/* Dark input — subtle dark well */
+.dark .glass-input {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.25) !important;
+}

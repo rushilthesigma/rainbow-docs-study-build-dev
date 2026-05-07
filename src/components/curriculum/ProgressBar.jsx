@@ -4,9 +4,9 @@ export default function ProgressBar({ value = 0, max = 100, size = 'md', showLab
 
   return (
     <div className={`flex items-center gap-3 ${className}`}>
-      <div className={`flex-1 bg-gray-100 dark:bg-[#1e1e2e] rounded-full overflow-hidden ${heights[size]}`}>
+      <div className={`flex-1 bg-gray-100 dark:bg-gray-700/50 rounded-full overflow-hidden ${heights[size]}`}>
         <div
-          className="h-full bg-blue-600 rounded-full transition-all duration-500"
+          className="h-full bg-blue-500 rounded-full transition-all duration-500"
           style={{ width: `${pct}%` }}
         />
       </div>

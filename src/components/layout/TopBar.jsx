@@ -1,4 +1,4 @@
-import { Menu, Moon, Sun, PanelRight, X, MessageSquare } from 'lucide-react';
+import { Menu, PanelRight, X, MessageSquare } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useSplitView } from '../../context/SplitViewContext';
@@ -50,12 +50,6 @@ export default function TopBar({ onToggleSidebar, showHamburger = false }) {
             {isActive ? <X size={18} /> : <PanelRight size={18} />}
           </button>
         )}
-        <button
-          onClick={() => setDark(!dark)}
-          className="p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#1e1e2e] transition-colors"
-        >
-          {dark ? <Sun size={18} /> : <Moon size={18} />}
-        </button>
       </div>
     </header>
   );

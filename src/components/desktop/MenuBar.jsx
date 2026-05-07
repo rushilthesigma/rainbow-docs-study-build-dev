@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { BookOpen, Moon, Sun, Search, LogOut, ChevronDown, Bell, Users, MessageCircle } from 'lucide-react';
+import { BookOpen, Search, LogOut, ChevronDown, Bell, Users, MessageCircle } from 'lucide-react';
 import { useWindowManager } from '../../context/WindowManagerContext';
 import { getApp } from './appRegistry';
 import { useAuth } from '../../context/AuthContext';
@@ -110,10 +110,10 @@ export default function MenuBar({ onSpotlight }) {
     <div
       className="fixed top-0 left-0 right-0 h-7 flex items-center justify-between px-4 z-[1100] select-none text-[13px]"
       style={{
-        background: dark ? 'rgba(20, 20, 30, 0.65)' : 'rgba(240, 240, 245, 0.7)',
-        backdropFilter: 'blur(40px) saturate(1.8)',
-        WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
-        borderBottom: dark ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(0,0,0,0.08)',
+        background: dark ? 'rgba(22, 20, 42, 0.48)' : 'rgba(220, 220, 228, 0.50)',
+        backdropFilter: 'blur(64px) saturate(2.2)',
+        WebkitBackdropFilter: 'blur(64px) saturate(2.2)',
+        borderBottom: dark ? '1px solid rgba(255,255,255,0.09)' : '1px solid rgba(0,0,0,0.08)',
       }}
     >
       {/* Left */}
@@ -157,14 +157,6 @@ export default function MenuBar({ onSpotlight }) {
               {socialUnread > 9 ? '9+' : socialUnread}
             </span>
           )}
-        </button>
-
-        <button
-          onClick={() => setDark(!dark)}
-          className={`p-1 rounded ${dark ? 'text-white/50 hover:text-white/80' : 'text-gray-500 hover:text-gray-800'} transition-colors`}
-          title={dark ? 'Switch to light' : 'Switch to dark'}
-        >
-          {dark ? <Sun size={13} /> : <Moon size={13} />}
         </button>
 
         {/* User menu */}

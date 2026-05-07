@@ -255,7 +255,7 @@ export default function GuidedTour() {
             width: rect.width + spotlightPad * 2,
             height: rect.height + spotlightPad * 2,
             borderRadius: radius,
-            boxShadow: '0 0 0 2px rgba(96, 165, 250, 0.85), 0 0 28px 6px rgba(59, 130, 246, 0.5)',
+            boxShadow: '0 0 0 2px rgba(255,255,255,0.75), 0 0 28px 6px rgba(255,255,255,0.18)',
             animation: 'tour-pulse 1.6s ease-in-out infinite',
           }}
         />
@@ -264,36 +264,56 @@ export default function GuidedTour() {
       {/* Tooltip */}
       <div
         ref={tipRef}
-        className="absolute pointer-events-auto rounded-xl shadow-2xl bg-white dark:bg-[#161622] border border-gray-200 dark:border-[#2A2A40] p-4"
-        style={{ ...tipStyle, width: tipWidth }}
+        className="absolute pointer-events-auto rounded-2xl shadow-2xl border border-white/[0.10] p-4"
+        style={{
+          ...tipStyle,
+          width: tipWidth,
+          background: 'rgba(12,12,24,0.88)',
+          backdropFilter: 'blur(32px)',
+          WebkitBackdropFilter: 'blur(32px)',
+        }}
       >
+        {/* Step progress bars */}
+        <div className="flex gap-1 mb-3">
+          {STEPS.map((_, i) => (
+            <div
+              key={i}
+              className={`flex-1 h-[3px] rounded-full transition-all ${
+                i < stepIdx ? 'bg-white/50' : i === stepIdx ? 'bg-white' : 'bg-white/[0.12]'
+              }`}
+            />
+          ))}
+        </div>
+
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-1.5">
-            <Sparkles size={13} className={isWaiting ? 'text-amber-500 animate-pulse' : 'text-blue-500'} />
-            <span className={`text-[10px] font-bold uppercase tracking-[0.15em] ${isWaiting ? 'text-amber-500' : 'text-blue-500'}`}>
-              {isWaiting ? 'Loading' : `Tour · ${stepIdx + 1} of ${STEPS.length}`}
+            <Sparkles size={12} className={isWaiting ? 'text-white/40 animate-pulse' : 'text-white/55'} />
+            <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/45">
+              {isWaiting ? 'Loading…' : `Step ${stepIdx + 1} of ${STEPS.length}`}
             </span>
           </div>
-          <button onClick={skip} title="Skip tour (Esc)" className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 -m-1 p-1">
+          <button onClick={skip} title="Skip tour (Esc)" className="text-white/30 hover:text-white/65 -m-1 p-1 transition-colors">
             <X size={13} />
           </button>
         </div>
-        <h3 className="text-[14px] font-bold text-gray-900 dark:text-white mb-1">{title}</h3>
-        <p className="text-[12px] text-gray-600 dark:text-gray-300 leading-snug mb-3">{body}</p>
+
+        <h3 className="text-[14px] font-bold text-white/95 mb-1.5">{title}</h3>
+        <p className="text-[12px] text-white/55 leading-relaxed mb-3">{body}</p>
+
         <div className="flex items-center justify-between">
-          <button onClick={skip} className="text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-            Skip tour
+          <button onClick={skip} className="text-[11px] text-white/30 hover:text-white/55 transition-colors">
+            Skip
           </button>
           {step.advanceOn === 'click' ? (
-            <span className={`text-[11px] italic ${isWaiting ? 'text-gray-400' : 'text-blue-500'}`}>
+            <span className={`text-[11px] ${isWaiting ? 'text-white/25' : 'text-white/50'}`}>
               {isWaiting ? 'Waiting…' : 'Click the highlighted item →'}
             </span>
           ) : step.advanceOn === 'finish' ? (
-            <button onClick={advance} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold">
+            <button onClick={advance} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/[0.12] border border-white/[0.18] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] hover:bg-white/[0.18] text-white/90 text-[11px] font-semibold transition-colors">
               <GraduationCap size={12} /> Finish
             </button>
           ) : (
-            <button onClick={advance} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-semibold">
+            <button onClick={advance} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/[0.12] border border-white/[0.18] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] hover:bg-white/[0.18] text-white/90 text-[11px] font-semibold transition-colors">
               Next <ArrowRight size={11} />
             </button>
           )}
@@ -302,8 +322,8 @@ export default function GuidedTour() {
 
       <style>{`
         @keyframes tour-pulse {
-          0%, 100% { box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.85), 0 0 28px 6px rgba(59, 130, 246, 0.5); }
-          50%       { box-shadow: 0 0 0 3px rgba(96, 165, 250, 1.0), 0 0 40px 9px rgba(59, 130, 246, 0.7); }
+          0%, 100% { box-shadow: 0 0 0 2px rgba(255,255,255,0.75), 0 0 28px 6px rgba(255,255,255,0.18); }
+          50%       { box-shadow: 0 0 0 3px rgba(255,255,255,0.95), 0 0 40px 9px rgba(255,255,255,0.30); }
         }
       `}</style>
     </div>

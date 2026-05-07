@@ -17,7 +17,7 @@ const QUICK_PROMPTS = [
   { icon: Compass,    label: 'What\'s a good thing to study right now?', prompt: 'What should I work on right now?' },
 ];
 
-export default function StudyModePanel({ className = '', initialMessage }) {
+export default function StudyModePanel({ className = '', flush = false, initialMessage }) {
   const [messages, setMessages] = useState([]);
   const [streamingContent, setStreamingContent] = useState('');
   const [streamingSources, setStreamingSources] = useState([]);
@@ -176,14 +176,14 @@ export default function StudyModePanel({ className = '', initialMessage }) {
   if (showHistory) {
     return (
       <div className={`flex flex-col ${className}`}>
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622]">
+        <div className="flex items-center gap-2 px-4 py-3 bg-transparent">
           <button onClick={() => setShowHistory(false)} className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
             <ChevronLeft size={16} />
           </button>
-          <History size={16} className="text-blue-500" />
+          <History size={16} className="text-gray-500 dark:text-gray-400" />
           <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">Chat History</span>
           <div className="flex-1" />
-          <button onClick={newChat} className="flex items-center gap-1 text-xs text-blue-500 hover:text-blue-600 font-medium">
+          <button onClick={newChat} className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 font-medium">
             <Plus size={12} /> New Chat
           </button>
         </div>
@@ -197,7 +197,7 @@ export default function StudyModePanel({ className = '', initialMessage }) {
             <div
               key={s.id}
               onClick={() => resumeSession(s.id)}
-              className={`group flex items-start gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-[#1e1e2e] ${s.id === sessionId ? 'bg-blue-50 dark:bg-blue-900/15' : ''}`}
+              className={`group flex items-start gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-colors hover:bg-white/50 dark:hover:bg-white/[0.05] ${s.id === sessionId ? 'bg-white/60 dark:bg-white/[0.08]' : ''}`}
             >
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-medium text-gray-800 dark:text-gray-200 truncate">
@@ -220,76 +220,51 @@ export default function StudyModePanel({ className = '', initialMessage }) {
     );
   }
 
-  // Distinctive header — gradient strip, mode badge, action buttons.
-  // NOT the simple "icon + title bar" pattern.
-  const messageCount = messages.length;
-  const integrationActive = !!linkedCurriculumId || sources.length > 0;
   const header = (
-    <div className="relative px-4 py-2.5 border-b border-gray-200 dark:border-[#2A2A40] bg-gradient-to-r from-blue-50 via-white to-indigo-50 dark:from-blue-950/30 dark:via-[#161622] dark:to-indigo-950/30">
-      <div className="flex items-center gap-2.5">
-        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-sm">
-          <Sparkles size={14} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-[13px] font-bold text-gray-900 dark:text-white leading-tight">Study Session</p>
-          <p className="text-[10px] text-gray-500 dark:text-gray-400 tabular-nums">
-            {messageCount === 0 ? 'New session — ready when you are' : `${messageCount} message${messageCount === 1 ? '' : 's'}`}
-            {sourceMode && <span className="ml-2 inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold uppercase tracking-wider"><span className="w-1 h-1 rounded-full bg-amber-500" /> Source</span>}
-            {integrationActive && (
-              <span className="ml-2 inline-flex items-center gap-1 text-blue-600 dark:text-blue-300 font-semibold uppercase tracking-wider">
-                <span className="w-1 h-1 rounded-full bg-blue-500" />
-                {linkedCurriculumId ? 'Linked' : ''}
-                {linkedCurriculumId && sources.length ? ' · ' : ''}
-                {sources.length ? `${sources.length} source${sources.length === 1 ? '' : 's'}` : ''}
-              </span>
-            )}
-          </p>
-        </div>
-        <button
-          onClick={() => setShowCurriculumPicker(true)}
-          className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold transition-colors ${
-            linkedCurriculumId
-              ? 'text-blue-600 dark:text-blue-300 bg-blue-100/70 dark:bg-blue-500/15'
-              : 'text-blue-600 dark:text-blue-400 hover:bg-white dark:hover:bg-[#1e1e2e]'
-          }`}
-          title="Integrate this study session with a curriculum"
-        >
-          <BookOpen size={12} /> {linkedCurriculumId ? 'Linked' : 'Integrate'}
-        </button>
-        <button
-          onClick={() => setShowSourcesSheet(true)}
-          className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold transition-colors ${
-            sources.length
-              ? 'text-emerald-600 dark:text-emerald-300 bg-emerald-100/70 dark:bg-emerald-500/15'
-              : 'text-emerald-600 dark:text-emerald-400 hover:bg-white dark:hover:bg-[#1e1e2e]'
-          }`}
-          title="Attach URLs or PDFs the AI will reference"
-        >
-          <Link2 size={12} /> {sources.length ? `Sources · ${sources.length}` : 'Sources'}
-        </button>
-        <button
-          onClick={() => setDebateOpen(true)}
-          className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:bg-white dark:hover:bg-[#1e1e2e] transition-colors"
-          title="Debate (solo vs AI or head-to-head)"
-        >
-          <Swords size={12} /> Debate
-        </button>
-        <button
-          onClick={() => { loadHistory(); setShowHistory(true); }}
-          className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-[#1e1e2e] transition-colors"
-          title="Past sessions"
-        >
-          <History size={12} /> History
-        </button>
-        {sessionId && (
-          <button
-            onClick={newChat}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:bg-white dark:hover:bg-[#1e1e2e] transition-colors"
-          >
-            <Plus size={11} /> New
-          </button>
-        )}
+    <div className="flex items-center gap-2 px-3 py-2.5 bg-transparent">
+      <div className="w-7 h-7 rounded-xl bg-white/20 dark:bg-white/10 border border-white/40 dark:border-white/15 flex items-center justify-center text-gray-700 dark:text-gray-200 flex-shrink-0">
+        <Sparkles size={13} />
       </div>
+      <span className="text-[13px] font-bold text-gray-900 dark:text-white">Study</span>
+      <div className="flex-1" />
+      <button
+        onClick={() => setShowCurriculumPicker(true)}
+        title="Integrate with a curriculum"
+        className={`p-1.5 rounded-lg transition-colors ${linkedCurriculumId ? 'text-white bg-white/20' : 'text-white/70 hover:text-white hover:bg-white/[0.15]'}`}
+      >
+        <BookOpen size={14} />
+      </button>
+      <button
+        onClick={() => setShowSourcesSheet(true)}
+        title="Attach sources"
+        className={`p-1.5 rounded-lg transition-colors relative ${sources.length ? 'text-white bg-white/20' : 'text-white/70 hover:text-white hover:bg-white/[0.15]'}`}
+      >
+        <Link2 size={14} />
+        {sources.length > 0 && <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-white/80 text-gray-900 text-[8px] font-bold flex items-center justify-center">{sources.length}</span>}
+      </button>
+      <button
+        onClick={() => setDebateOpen(true)}
+        title="Debate mode"
+        className="p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/[0.15] transition-colors"
+      >
+        <Swords size={14} />
+      </button>
+      <button
+        onClick={() => { loadHistory(); setShowHistory(true); }}
+        title="History"
+        className="p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/[0.15] transition-colors"
+      >
+        <History size={14} />
+      </button>
+      {sessionId && (
+        <button
+          onClick={newChat}
+          title="New chat"
+          className="p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/[0.15] transition-colors"
+        >
+          <Plus size={14} />
+        </button>
+      )}
     </div>
   );
 
@@ -326,13 +301,6 @@ export default function StudyModePanel({ className = '', initialMessage }) {
   // Rich empty state — quick-prompt cards, NOT ChatGPT's blank greeting.
   const emptyState = (
     <div className="h-full flex flex-col items-center justify-center px-4 py-6">
-      <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/20 mb-4">
-        <Sparkles size={22} />
-      </div>
-      <h2 className="text-base font-bold text-gray-900 dark:text-white mb-1">What do you want to work on?</h2>
-      <p className="text-[12px] text-gray-500 dark:text-gray-400 max-w-sm text-center mb-5">
-        Ask anything, request a quiz, walk through a concept, or just say "what should I study?"
-      </p>
       <div className="grid sm:grid-cols-2 gap-2 w-full max-w-md">
         {QUICK_PROMPTS.map((p, i) => {
           const Icon = p.icon;
@@ -341,9 +309,9 @@ export default function StudyModePanel({ className = '', initialMessage }) {
               key={i}
               onClick={() => doSend(p.prompt)}
               disabled={streaming}
-              className="group text-left flex items-start gap-2.5 p-3 rounded-xl border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622] hover:border-blue-400 dark:hover:border-blue-600 hover:bg-blue-50/40 dark:hover:bg-blue-900/10 transition-colors disabled:opacity-50"
+              className="group text-left flex items-start gap-2.5 p-3 rounded-xl border border-white/[0.08] dark:border-white/[0.07] bg-white/[0.03] dark:bg-white/[0.03] hover:bg-white/[0.07] dark:hover:bg-white/[0.06] transition-colors duration-150 disabled:opacity-50"
             >
-              <div className="w-7 h-7 rounded-md bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 flex-shrink-0">
+              <div className="w-7 h-7 rounded-md bg-white/[0.07] dark:bg-white/[0.06] flex items-center justify-center text-gray-500 dark:text-gray-400 flex-shrink-0">
                 <Icon size={13} />
               </div>
               <p className="text-[12px] font-medium text-gray-800 dark:text-gray-200 leading-snug pt-0.5">{p.label}</p>
@@ -351,9 +319,6 @@ export default function StudyModePanel({ className = '', initialMessage }) {
           );
         })}
       </div>
-      <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-5">
-        Tap a prompt or just type below.
-      </p>
     </div>
   );
 
@@ -374,6 +339,7 @@ export default function StudyModePanel({ className = '', initialMessage }) {
         onUserEditMessage={handleUserEdit}
         onAiInstruct={handleAiInstruct}
         emptyState={emptyState}
+        flush={flush}
       />
       {showCurriculumPicker && (
         <CurriculumPickerModal
@@ -438,18 +404,18 @@ function PickRow({ active, onClick, title, sub }) {
       onClick={onClick}
       className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-colors ${
         active
-          ? 'border-blue-500 bg-blue-50 dark:bg-blue-500/10'
-          : 'border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0d0d14] hover:border-blue-400/60'
+          ? 'border-white/30 bg-white/10 dark:bg-white/[0.07]'
+          : 'border-gray-200 dark:border-white/[0.08] bg-white dark:bg-[#111111] hover:border-gray-400/60'
       }`}
     >
-      <div className={`w-8 h-8 rounded-lg grid place-items-center shrink-0 ${active ? 'bg-blue-500 text-white' : 'bg-blue-100/70 dark:bg-blue-500/15 text-blue-500'}`}>
+      <div className={`w-8 h-8 rounded-lg grid place-items-center shrink-0 ${active ? 'bg-white/20 text-white' : 'bg-white/10 dark:bg-white/[0.07] text-gray-500 dark:text-gray-400'}`}>
         <BookOpen size={15} />
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-[13px] font-bold text-gray-900 dark:text-white truncate">{title}</p>
         <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">{sub}</p>
       </div>
-      {active && <Check size={14} className="text-blue-500 shrink-0" strokeWidth={3} />}
+      {active && <Check size={14} className="text-gray-500 dark:text-gray-300 shrink-0" strokeWidth={3} />}
     </button>
   );
 }
@@ -519,13 +485,13 @@ function SourcesModal({ sources, onClose, onChange }) {
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://…"
-            className="w-full pl-8 pr-3 py-2 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0d0d14] text-[13px] text-gray-900 dark:text-white outline-none focus:border-blue-400"
+            className="w-full pl-8 pr-3 py-2 rounded-lg border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-[#111111] text-[13px] text-gray-900 dark:text-white outline-none focus:border-white/30"
           />
         </div>
         <button
           type="submit"
           disabled={!url.trim() || busy}
-          className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-blue-600 text-white text-[12px] font-bold disabled:opacity-50"
+          className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-white/15 hover:bg-white/25 text-white text-[12px] font-bold disabled:opacity-50 border border-white/20"
         >
           {busy ? <InlineProgress active /> : <><Plus size={11} /> Add URL</>}
         </button>
@@ -535,7 +501,7 @@ function SourcesModal({ sources, onClose, onChange }) {
         type="button"
         onClick={() => fileRef.current?.click()}
         disabled={busy}
-        className="w-full inline-flex items-center justify-center gap-1.5 py-2 rounded-lg border border-dashed border-gray-300 dark:border-[#2A2A40] text-[12px] text-gray-600 dark:text-gray-300 hover:border-blue-400 disabled:opacity-50"
+        className="w-full inline-flex items-center justify-center gap-1.5 py-2 rounded-lg border border-dashed border-gray-300 dark:border-white/[0.08] text-[12px] text-gray-600 dark:text-gray-300 hover:border-gray-400 disabled:opacity-50"
       >
         <Paperclip size={12} /> Attach PDFs or text files
       </button>
@@ -553,8 +519,8 @@ function SourcesModal({ sources, onClose, onChange }) {
       {sources.length > 0 && (
         <div className="mt-4 space-y-1.5 max-h-[260px] overflow-y-auto pr-1">
           {sources.map((s, i) => (
-            <div key={s.id} className="flex items-center gap-3 px-3 py-2 rounded-xl border border-gray-200 dark:border-[#2A2A40] bg-gray-50 dark:bg-[#0d0d14]">
-              <span className="text-[10px] font-mono font-bold text-blue-500 dark:text-blue-300 w-5 text-center">[{i + 1}]</span>
+            <div key={s.id} className="flex items-center gap-3 px-3 py-2 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-gray-50 dark:bg-[#111111]">
+              <span className="text-[10px] font-mono font-bold text-gray-400 dark:text-gray-500 w-5 text-center">[{i + 1}]</span>
               <div className="flex-1 min-w-0">
                 <p className="text-[12.5px] font-semibold text-gray-900 dark:text-white truncate">{s.title || s.url || 'Source'}</p>
                 {s.url && <p className="text-[10.5px] text-gray-500 dark:text-gray-400 truncate">{s.url}</p>}
@@ -581,7 +547,7 @@ function ModalShell({ title, onClose, children }) {
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center px-4">
       <button aria-label="Close" onClick={onClose} className="absolute inset-0 bg-black/55 backdrop-blur-[2px] animate-fade-in" />
-      <div className="relative w-full max-w-md rounded-2xl bg-white dark:bg-[#13131f] border border-gray-200 dark:border-white/10 shadow-2xl p-5">
+      <div className="relative w-full max-w-md rounded-2xl bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-2xl p-5">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-[14.5px] font-bold text-gray-900 dark:text-white">{title}</h3>
           <button onClick={onClose} className="w-8 h-8 rounded-full grid place-items-center text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">

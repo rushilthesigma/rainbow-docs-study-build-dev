@@ -30,10 +30,10 @@ export default function TabBar({ onToggleSidebar, showHamburger = false }) {
   }, [isMathPage]);
 
   return (
-    <div className="relative flex items-center gap-0 px-1.5 bg-gray-100 dark:bg-[#0A0A12] border-b border-gray-200 dark:border-[#2A2A40] flex-shrink-0 select-none">
+    <div className="relative flex items-center gap-0 px-1.5 bg-gray-100 dark:bg-[#141414] border-b border-gray-200 dark:border-white/[0.07] flex-shrink-0 select-none">
       {/* Hamburger (mobile) */}
       {showHamburger && (
-        <button onClick={onToggleSidebar} className="p-1.5 mr-1 rounded-lg text-gray-500 hover:bg-gray-200/60 dark:hover:bg-[#1e1e2e] transition-colors flex-shrink-0">
+        <button onClick={onToggleSidebar} className="p-1.5 mr-1 rounded-lg text-gray-500 hover:bg-gray-200/60 dark:hover:bg-white/[0.06] transition-colors flex-shrink-0">
           <Menu size={16} />
         </button>
       )}
@@ -48,7 +48,7 @@ export default function TabBar({ onToggleSidebar, showHamburger = false }) {
               onClick={() => switchTab(tab.id)}
               className={`group relative flex items-center gap-2 px-3.5 py-2 cursor-pointer transition-all duration-150 max-w-[180px] min-w-[80px] ${
                 isActive
-                  ? 'bg-white dark:bg-[#161622] text-gray-900 dark:text-white rounded-t-lg z-10 -mb-px border border-gray-200 dark:border-[#2A2A40] border-b-transparent shadow-sm'
+                  ? 'bg-white dark:bg-[#1a1a1a] text-gray-900 dark:text-white rounded-t-lg z-10 -mb-px border border-gray-200 dark:border-white/[0.07] border-b-transparent shadow-sm'
                   : 'text-gray-500 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-200/50 dark:hover:bg-[#161622]/50 rounded-t-lg mb-0'
               }`}
             >
@@ -64,7 +64,7 @@ export default function TabBar({ onToggleSidebar, showHamburger = false }) {
                   onClick={e => { e.stopPropagation(); closeTab(tab.id); }}
                   className={`flex-shrink-0 p-0.5 rounded transition-all ${
                     isActive
-                      ? 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#0D0D14]'
+                      ? 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/[0.04]'
                       : 'opacity-0 group-hover:opacity-100 text-gray-400 hover:text-gray-600 hover:bg-gray-300/50 dark:hover:bg-[#2A2A40]'
                   }`}
                 >
@@ -77,7 +77,7 @@ export default function TabBar({ onToggleSidebar, showHamburger = false }) {
 
         <button
           onClick={() => openTab('/dashboard')}
-          className="flex items-center justify-center w-7 h-7 mb-0.5 ml-0.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200/60 dark:hover:bg-[#1e1e2e] transition-colors flex-shrink-0"
+          className="flex items-center justify-center w-7 h-7 mb-0.5 ml-0.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200/60 dark:hover:bg-white/[0.06] transition-colors flex-shrink-0"
           title="New tab"
         >
           <Plus size={14} />
@@ -91,8 +91,8 @@ export default function TabBar({ onToggleSidebar, showHamburger = false }) {
             onClick={() => splitActive ? closeSplit() : openSplit('study')}
             className={`p-1.5 rounded-lg transition-colors ${
               splitActive
-                ? 'text-blue-600 bg-blue-50 dark:bg-blue-900/20'
-                : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200/60 dark:hover:bg-[#1e1e2e]'
+                ? 'text-gray-700 dark:text-white bg-white/70 dark:bg-white/[0.09]'
+                : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200/60 dark:hover:bg-white/[0.06]'
             }`}
             title={splitActive ? 'Close split view' : 'Split view'}
           >
@@ -101,7 +101,7 @@ export default function TabBar({ onToggleSidebar, showHamburger = false }) {
         )}
         <button
           onClick={() => setDark(!dark)}
-          className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200/60 dark:hover:bg-[#1e1e2e] transition-colors"
+          className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200/60 dark:hover:bg-white/[0.06] transition-colors"
           title={dark ? 'Light mode' : 'Dark mode'}
         >
           {dark ? <Sun size={15} /> : <Moon size={15} />}

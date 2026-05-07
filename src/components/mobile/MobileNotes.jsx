@@ -73,22 +73,22 @@ export default function MobileNotes() {
   // ===== EDIT =====
   if (view === 'edit' && activeId) {
     return (
-      <div className="flex flex-col h-full bg-[#F4F5F7] dark:bg-[#0a0a14]">
-        <header className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 dark:border-white/[0.06] flex-shrink-0">
-          <button onClick={() => { handleSave(); setView('list'); }} className="w-9 h-9 -ml-1 rounded-full grid place-items-center text-gray-600 dark:text-gray-300 active:bg-gray-100 dark:active:bg-white/[0.06]">
+      <div className="flex flex-col h-full bg-transparent">
+        <header className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.06] flex-shrink-0">
+          <button onClick={() => { handleSave(); setView('list'); }} className="w-9 h-9 -ml-1 rounded-full grid place-items-center text-white/50 active:bg-white/[0.06]">
             <ArrowLeft size={18} />
           </button>
-          <p className="flex-1 text-[12.5px] font-medium text-gray-500 dark:text-gray-400 truncate">
+          <p className="flex-1 text-[12.5px] font-medium text-white/35 truncate">
             {savedAt ? `Saved ${timeAgo(savedAt)}` : (saving ? 'Saving…' : 'Tap save to keep changes')}
           </p>
           <button
             onClick={handleSave}
             disabled={saving}
-            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-blue-600 disabled:opacity-50 text-white text-[12px] font-bold"
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-white/[0.10] border border-white/[0.14] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] disabled:opacity-50 text-white/70 text-[12px] font-bold"
           >
             <Save size={11} /> Save
           </button>
-          <button onClick={handleDelete} title="Delete" className="w-9 h-9 rounded-full grid place-items-center text-gray-400 hover:text-rose-500">
+          <button onClick={handleDelete} title="Delete" className="w-9 h-9 rounded-full grid place-items-center text-white/30 hover:text-rose-400">
             <Trash2 size={15} />
           </button>
         </header>
@@ -98,13 +98,13 @@ export default function MobileNotes() {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Note title"
-            className="text-[22px] font-bold tracking-[-0.02em] text-gray-900 dark:text-white bg-transparent outline-none mb-2"
+            className="text-[22px] font-bold tracking-[-0.02em] text-white/80 bg-transparent outline-none mb-2"
           />
           <textarea
             value={mainNotes}
             onChange={(e) => setMainNotes(e.target.value)}
             placeholder="Start writing…"
-            className="flex-1 min-h-[60vh] resize-none text-[14px] leading-relaxed text-gray-800 dark:text-gray-200 bg-transparent outline-none"
+            className="flex-1 min-h-[60vh] resize-none text-[14px] leading-relaxed text-white/88 placeholder-white/30 bg-transparent outline-none"
           />
         </div>
       </div>
@@ -120,21 +120,21 @@ export default function MobileNotes() {
     >
       <button
         onClick={handleNew}
-        className="w-full rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-500 text-white p-4 mb-4 active:scale-[0.99] transition-transform text-left"
+        className="w-full rounded-2xl bg-white/[0.13] border border-white/[0.24] shadow-[0_0_28px_rgba(255,255,255,0.07),inset_0_1px_0_rgba(255,255,255,0.22)] p-4 mb-4 active:scale-[0.99] transition-transform text-left backdrop-blur-sm"
       >
         <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-xl bg-white/20 grid place-items-center shrink-0">
-            <Plus size={20} className="text-white" />
+          <div className="w-11 h-11 rounded-xl bg-white/[0.15] grid place-items-center shrink-0">
+            <Plus size={20} className="text-white/85" />
           </div>
-          <p className="flex-1 text-[15px] font-bold tracking-tight">New note</p>
-          <ChevronRight size={16} className="text-white/80" />
+          <p className="flex-1 text-[15px] font-bold tracking-tight text-white/90">New note</p>
+          <ChevronRight size={16} className="text-white/55" />
         </div>
       </button>
 
       {!loading && notes.length === 0 && (
         <div className="text-center py-12">
-          <FileText size={32} className="text-gray-300 dark:text-white/15 mx-auto mb-3" />
-          <p className="text-[13px] text-gray-500 dark:text-gray-400">No notes yet.</p>
+          <FileText size={32} className="text-white/15 mx-auto mb-3" />
+          <p className="text-[13px] text-white/30">No notes yet.</p>
         </div>
       )}
 
@@ -143,20 +143,20 @@ export default function MobileNotes() {
           <button
             key={n.id}
             onClick={() => openNote(n)}
-            className="w-full rounded-2xl border border-gray-200 dark:border-white/[0.06] bg-white dark:bg-[#13131f] p-3.5 active:scale-[0.99] transition-transform text-left"
+            className="w-full rounded-2xl border border-white/[0.06] bg-white/[0.03] p-3.5 active:scale-[0.99] transition-transform text-left"
           >
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-500/15 grid place-items-center shrink-0">
-                <FileText size={18} className="text-emerald-500" />
+              <div className="w-10 h-10 rounded-xl bg-white/[0.07] grid place-items-center shrink-0">
+                <FileText size={18} className="text-white/40" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-[14px] font-bold tracking-tight text-gray-900 dark:text-white truncate">{n.title || 'Untitled'}</p>
-                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+                <p className="text-[14px] font-bold tracking-tight text-white/90 truncate">{n.title || 'Untitled'}</p>
+                <p className="text-[11px] text-white/30 mt-0.5 truncate">
                   {n.updatedAt ? new Date(n.updatedAt).toLocaleDateString() : 'just now'}
                   {n.preview ? ` · ${n.preview.slice(0, 40)}…` : ''}
                 </p>
               </div>
-              <ChevronRight size={14} className="text-gray-300 dark:text-white/30 shrink-0" />
+              <ChevronRight size={14} className="text-white/25 shrink-0" />
             </div>
           </button>
         ))}

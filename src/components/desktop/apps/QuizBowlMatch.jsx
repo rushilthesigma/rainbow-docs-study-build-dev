@@ -1,33 +1,23 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Zap, Users, Copy, Loader2, Check, X, Trophy, Play, LogOut } from 'lucide-react';
+import { Zap, Users, Copy, Check, X, Trophy, Play, LogOut, ArrowLeft } from 'lucide-react';
 import ProgressBar, { InlineProgress } from '../../shared/ProgressBar';
 import {
   createMatch, joinMatch, startMatch, buzzMatch, answerMatch, nextMatchQuestion,
   leaveMatch, streamMatch,
 } from '../../../api/quizMatch';
 
-// Client-side word-by-word reveal: compute from `startedAt` timestamp so
-// both players render identically, no polling required.
-//
-// Uses refs for frozen/frozenAt so the interval callback reads the latest
-// value (no stale closure). When frozen flips true, we LOCK the displayed
-// word index at the word that was visible at `frozenAt` and never move it
-// forward again until a new startedAt arrives (next question or resume).
 function useWordReveal(text, startedAt, speedMs, frozen, frozenAt) {
   const [, setTick] = useState(0);
   const frozenRef = useRef(frozen);
   const frozenAtRef = useRef(frozenAt);
-  const lockedIdxRef = useRef(null); // when frozen, the word index to pin at
+  const lockedIdxRef = useRef(null);
 
-  // Keep refs in sync with props.
   useEffect(() => {
     frozenRef.current = frozen;
     frozenAtRef.current = frozenAt;
-    if (!frozen) lockedIdxRef.current = null; // resume → recompute every tick
+    if (!frozen) lockedIdxRef.current = null;
   }, [frozen, frozenAt]);
 
-  // Drive re-renders while actively reading. When frozen goes true, the
-  // interval callback short-circuits so `now` never advances the display.
   useEffect(() => {
     if (!text) return;
     const id = setInterval(() => {
@@ -41,8 +31,6 @@ function useWordReveal(text, startedAt, speedMs, frozen, frozenAt) {
   const words = text.split(/\s+/);
   const start = startedAt || Date.now();
 
-  // When frozen, lock the index to what it was at frozenAt. If frozenAt is
-  // missing, lock to whatever it is right now.
   let idx;
   if (frozen) {
     if (lockedIdxRef.current == null) {
@@ -64,11 +52,9 @@ function useWordReveal(text, startedAt, speedMs, frozen, frozenAt) {
 }
 
 export default function QuizBowlMatch({ user, onExit }) {
-  // view: 'menu' (create/join) | 'lobby' (invite + configure) | 'generating' | 'playing' | 'finished'
   const [view, setView] = useState('menu');
   const [code, setCode] = useState('');
   const [joinCodeInput, setJoinCodeInput] = useState('');
-  // Settings are chosen AFTER the opponent joins, in the lobby view.
   const [category, setCategory] = useState('Mixed');
   const [difficulty, setDifficulty] = useState('Medium');
   const [questionCount, setQuestionCount] = useState(10);
@@ -77,31 +63,18 @@ export default function QuizBowlMatch({ user, onExit }) {
   const [error, setError] = useState(null);
   const [match, setMatch] = useState(null);
 
-  // Current question state pushed from server
-  const [question, setQuestion] = useState(null); // { text, startedAt }
-  const [buzz, setBuzz] = useState(null);         // { userId, buzzAt } | null
+  const [question, setQuestion] = useState(null);
+  const [buzz, setBuzz] = useState(null);
   const [answer, setAnswer] = useState('');
-  const [answerResult, setAnswerResult] = useState(null); // { userId, correct, answer, correctAnswer, autoAdvanceInMs? }
-  // Date.now() when the question will auto-advance. null if host must manually advance.
+  const [answerResult, setAnswerResult] = useState(null);
   const [autoAdvanceDeadline, setAutoAdvanceDeadline] = useState(null);
-  // Set of userIds locked out of buzzing on the CURRENT question (they
-  // already tried and got it wrong). Resets when question_start fires.
   const [lockedOut, setLockedOut] = useState([]);
-  // Flash a "Wrong — <name>" banner for ~1.5s when a wrong answer arrives
-  // while the question is still live.
   const [wrongFlash, setWrongFlash] = useState(null);
-  // When the server ends the match because the opponent left/disconnected
-  // mid-game we want the finished view to say "Opponent left" instead of
-  // declaring a winner off of partial scores.
-  const [abandoned, setAbandoned] = useState(null); // { leftBy, reason? } | null
+  const [abandoned, setAbandoned] = useState(null);
 
   const abortRef = useRef(null);
-  // Declared early because handleBuzz and the SSE handlers need it. `const`
-  // is block-scoped with a TDZ, so referencing `myId` before its declaration
-  // throws ReferenceError — which is what made the view render blank.
   const myId = user?.id;
 
-  // ----- Connect SSE stream once we have a match code -----
   useEffect(() => {
     if (!code) return;
     const abort = streamMatch(code, {
@@ -137,7 +110,6 @@ export default function QuizBowlMatch({ user, onExit }) {
       },
       onBuzz: ({ userId, buzzAt }) => setBuzz({ userId, buzzAt }),
       onWrongAnswer: ({ userId, answer: wrongAns, lockedOut: lock, questionStartedAt: newStart }) => {
-        // Resume the reveal for the still-playing player; show a brief flash.
         setBuzz(null);
         setAnswer('');
         setLockedOut(lock || []);
@@ -152,15 +124,8 @@ export default function QuizBowlMatch({ user, onExit }) {
       },
       onMatchEnd: ({ scores, abandoned: wasAbandoned, leftBy, reason }) => {
         setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: scores[p.userId] || 0 })) } : prev);
-        // Cancel any in-flight question UI state. The server has already
-        // cleared its timers, but the local "auto-advance in 5s" timer on
-        // the reveal screen would otherwise keep counting down visually.
-        setQuestion(null);
-        setBuzz(null);
-        setAnswer('');
-        setAnswerResult(null);
-        setAutoAdvanceDeadline(null);
-        setWrongFlash(null);
+        setQuestion(null); setBuzz(null); setAnswer(''); setAnswerResult(null);
+        setAutoAdvanceDeadline(null); setWrongFlash(null);
         if (wasAbandoned) setAbandoned({ leftBy, reason });
         setView('finished');
       },
@@ -170,9 +135,6 @@ export default function QuizBowlMatch({ user, onExit }) {
     return () => { try { abort(); } catch {} };
   }, [code]);
 
-  // ----- Actions -----
-  // Instant — no LLM call here. The host will pick settings in the lobby
-  // after player 2 joins, then press Start which runs question generation.
   async function handleCreate() {
     if (busy) return;
     setBusy(true); setError(null);
@@ -206,15 +168,9 @@ export default function QuizBowlMatch({ user, onExit }) {
 
   const handleBuzz = useCallback(async () => {
     if (!question || buzz) return;
-    if (lockedOut.includes(myId)) return; // already got this question wrong
-    // Optimistic: freeze my reveal immediately. If the server rejects (opponent
-    // buzzed first) the SSE `buzz` event will correct everyone to the winner.
+    if (lockedOut.includes(myId)) return;
     setBuzz({ userId: user?.id || 'me', buzzAt: Date.now(), _optimistic: true });
-    try {
-      await buzzMatch(code);
-    } catch (e) {
-      // 409 = someone else buzzed first, or you're locked out. SSE corrects.
-    }
+    try { await buzzMatch(code); } catch {}
   }, [question, buzz, code, user?.id, lockedOut, myId]);
 
   async function handleSubmitAnswer() {
@@ -234,7 +190,6 @@ export default function QuizBowlMatch({ user, onExit }) {
     onExit?.();
   }
 
-  // Space / Enter shortcuts during playing view.
   useEffect(() => {
     if (view !== 'playing') return;
     function onKey(e) {
@@ -251,29 +206,28 @@ export default function QuizBowlMatch({ user, onExit }) {
   // ============ MENU ============
   if (view === 'menu') {
     return (
-      <div className="h-full overflow-y-auto bg-white dark:bg-[#161622]">
-        <div className="p-5 space-y-5 max-w-md mx-auto">
-          <div className="text-center">
-            <Users size={28} className="text-amber-500 mx-auto mb-2" />
-            <h2 className="text-lg font-bold text-gray-900 dark:text-white">Head-to-Head Quiz Bowl</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Two players, pyramidal buzz-in, live.</p>
-          </div>
+      <div className="h-full overflow-y-auto bg-transparent">
+        <div className="p-5 space-y-4">
+          {/* Back */}
+          <button onClick={onExit}
+            className="flex items-center gap-1.5 text-[12px] text-white/35 hover:text-white/60 transition-colors">
+            <ArrowLeft size={13} /> Back
+          </button>
 
-          {error && <p className="text-xs text-rose-500 px-3 py-2 rounded-lg bg-rose-50 dark:bg-rose-900/15">{error}</p>}
+          {error && <p className="text-[11px] text-rose-400 px-3 py-2 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-center">{error}</p>}
 
-          {/* Create is now instant — you get an invite code first, settings later. */}
-          <button onClick={handleCreate} disabled={busy} className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold disabled:opacity-50 inline-flex items-center justify-center gap-2">
-            {busy ? <><InlineProgress active /> Creating…</> : <><Play size={14} /> Create invite code</>}
+          <button onClick={handleCreate} disabled={busy}
+            className="w-full py-3 rounded-2xl border border-white/[0.08] bg-white/[0.04] hover:bg-white/[0.07] text-white/70 hover:text-white/90 text-[13px] font-semibold disabled:opacity-40 inline-flex items-center justify-center gap-2 transition-colors backdrop-blur-sm">
+            {busy ? <><InlineProgress active /> Creating…</> : <><Play size={13} /> Create invite code</>}
           </button>
 
           <div className="flex items-center gap-3">
-            <div className="flex-1 h-px bg-gray-200 dark:bg-[#2A2A40]" />
-            <span className="text-[10px] text-gray-400 uppercase tracking-wider">or</span>
-            <div className="flex-1 h-px bg-gray-200 dark:bg-[#2A2A40]" />
+            <div className="flex-1 h-px bg-white/[0.04]" />
+            <span className="text-[10px] text-white/20 uppercase tracking-wider">or</span>
+            <div className="flex-1 h-px bg-white/[0.04]" />
           </div>
 
-          <div className="rounded-xl border border-gray-200 dark:border-[#2A2A40] p-4 space-y-3">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Join with code</p>
+          <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] backdrop-blur-sm p-4 space-y-3">
             <div className="flex gap-2">
               <input
                 value={joinCodeInput}
@@ -281,9 +235,12 @@ export default function QuizBowlMatch({ user, onExit }) {
                 placeholder="6-LETTER CODE"
                 maxLength={6}
                 onKeyDown={e => e.key === 'Enter' && handleJoin()}
-                className="flex-1 px-3 py-2.5 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-sm font-mono tracking-wider text-center text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-500/40"
+                className="flex-1 px-3 py-2.5 rounded-2xl border border-white/[0.06] bg-white/[0.03] text-[13px] font-mono tracking-[0.2em] text-center text-white/80 placeholder-white/20 outline-none focus:border-white/15 transition-colors"
               />
-              <button onClick={handleJoin} disabled={!joinCodeInput.trim() || busy} className="px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold disabled:opacity-50">Join</button>
+              <button onClick={handleJoin} disabled={!joinCodeInput.trim() || busy}
+                className="px-4 py-2.5 rounded-2xl border border-white/[0.08] bg-white/[0.05] hover:bg-white/[0.09] text-white/60 hover:text-white/80 text-[13px] font-semibold disabled:opacity-30 transition-colors backdrop-blur-sm">
+                Join
+              </button>
             </div>
           </div>
         </div>
@@ -291,96 +248,103 @@ export default function QuizBowlMatch({ user, onExit }) {
     );
   }
 
-  // ============ LOBBY (invite code + configure-on-join) ============
+  // ============ LOBBY ============
   if (view === 'lobby') {
     const playerCount = match?.players?.length || 0;
     const waiting = playerCount < 2;
     return (
-      <div className="h-full overflow-y-auto bg-white dark:bg-[#161622]">
-        <div className="p-5 space-y-4 max-w-md mx-auto">
-          <div className="text-center">
-            <Users size={28} className="text-amber-500 mx-auto mb-2" />
-            <h2 className="text-lg font-bold text-gray-900 dark:text-white">
-              {waiting ? 'Waiting for opponent' : (isHost ? 'Configure match' : 'Waiting for host')}
-            </h2>
-          </div>
+      <div className="h-full overflow-y-auto bg-transparent">
+        <div className="p-5 space-y-3">
+          {/* Back */}
+          <button onClick={handleLeave}
+            className="flex items-center gap-1.5 text-[12px] text-white/35 hover:text-white/60 transition-colors">
+            <ArrowLeft size={13} /> Back
+          </button>
 
-          {error && <p className="text-xs text-rose-500 px-3 py-2 rounded-lg bg-rose-50 dark:bg-rose-900/15">{error}</p>}
+          <p className="text-[13px] font-semibold text-white/60 text-center">
+            {waiting ? 'Waiting for opponent…' : isHost ? 'Configure match' : 'Waiting for host'}
+          </p>
 
-          {/* Invite code — always visible in lobby */}
-          <div className="rounded-xl border border-gray-200 dark:border-[#2A2A40] p-4 text-center">
-            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Invite code</p>
+          {error && <p className="text-[11px] text-rose-400 px-3 py-2 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-center">{error}</p>}
+
+          {/* Invite code */}
+          <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] backdrop-blur-sm p-4 text-center">
             <div className="flex items-center justify-center gap-2">
-              <p className="text-3xl font-mono font-bold tracking-[0.3em] text-amber-600 dark:text-amber-400">{code}</p>
-              <button onClick={() => { navigator.clipboard.writeText(code); }} className="p-1.5 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-gray-100 dark:hover:bg-[#1e1e2e]" title="Copy code">
-                <Copy size={14} />
+              <p className="text-[28px] font-mono font-bold tracking-[0.3em] text-white/70">{code}</p>
+              <button onClick={() => navigator.clipboard.writeText(code)}
+                className="p-1.5 rounded-xl text-white/25 hover:text-white/50 hover:bg-white/[0.05] transition-colors" title="Copy">
+                <Copy size={13} />
               </button>
             </div>
-            <p className="text-[10px] text-gray-400 mt-2">
-              {waiting ? 'Send this to a friend so they can join' : 'Opponent joined — ready to configure'}
+            <p className="text-[10px] text-white/25 mt-1">
+              {waiting ? 'Share with a friend' : 'Opponent joined'}
             </p>
           </div>
 
-          {/* Player list */}
-          <div className="space-y-2">
+          {/* Players */}
+          <div className="space-y-1.5">
             {(match?.players || []).map(p => (
-              <div key={p.userId} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white dark:bg-[#161622] border border-gray-200 dark:border-[#2A2A40]">
-                <div className="w-7 h-7 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center text-xs font-bold">
+              <div key={p.userId} className="flex items-center gap-2 px-3 py-2 rounded-2xl border border-white/[0.05] bg-white/[0.02]">
+                <div className="w-6 h-6 rounded-full bg-white/[0.08] text-white/50 flex items-center justify-center text-[11px] font-bold">
                   {(p.name || '?')[0]?.toUpperCase()}
                 </div>
-                <span className="text-sm font-medium text-gray-900 dark:text-white">{p.name}</span>
-                {p.userId === match?.hostId && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">HOST</span>}
-                {p.userId === myId && <span className="text-[9px] text-gray-400 ml-auto">you</span>}
+                <span className="text-[13px] font-medium text-white/70">{p.name}</span>
+                {p.userId === match?.hostId && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white/[0.06] text-white/30">HOST</span>}
+                {p.userId === myId && <span className="text-[9px] text-white/20 ml-auto">you</span>}
               </div>
             ))}
             {waiting && (
-              // No progress bar here — there's nothing to measure;
-              // we're just blocking on an SSE join event. Show a
-              // pulsing dot + text instead.
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-gray-300 dark:border-gray-600 text-xs text-gray-500 dark:text-gray-400 italic">
+              <div className="flex items-center gap-2 px-3 py-2 rounded-2xl border border-dashed border-white/[0.06] text-[11px] text-white/25 italic">
                 <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75 animate-ping" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-white/30 animate-ping" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-white/25" />
                 </span>
                 Waiting for player 2…
               </div>
             )}
           </div>
 
-          {/* Configure — only visible once both players are in, host only */}
+          {/* Settings — host only, both players present */}
           {!waiting && isHost && (
-            <div className="rounded-xl border border-amber-200 dark:border-amber-800/60 bg-amber-50/30 dark:bg-amber-900/10 p-4 space-y-3">
-              <p className="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wider">Game settings</p>
-              <Selector label="Category" value={category} onChange={setCategory}
+            <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] backdrop-blur-sm p-4 space-y-3">
+              <MatchSelector label="Category" value={category} onChange={setCategory}
                 options={['Science','History','Literature','Geography','Math','Art','Music','Philosophy','Pop Culture','Mixed']} />
-              <Selector label="Difficulty" value={difficulty} onChange={setDifficulty}
+              <MatchSelector label="Difficulty" value={difficulty} onChange={setDifficulty}
                 options={['Easy','Medium','Hard','Tournament']} grid="grid-cols-4" />
               <div>
-                <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">Questions: {questionCount}</label>
-                <input type="range" min="5" max="20" step="5" value={questionCount} onChange={e => setQuestionCount(Number(e.target.value))} className="w-full" />
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[10px] text-white/30 uppercase tracking-wider">Questions</span>
+                  <span className="text-[11px] font-mono text-white/35">{questionCount}</span>
+                </div>
+                <input type="range" min="5" max="20" step="5" value={questionCount}
+                  onChange={e => setQuestionCount(Number(e.target.value))} className="w-full" />
               </div>
               <div>
-                <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">
-                  Reading speed: {revealSpeedMs}ms/word <span className="text-gray-400">({revealSpeedMs <= 90 ? 'fast' : revealSpeedMs <= 160 ? 'normal' : 'slow'})</span>
-                </label>
-                <input type="range" min="60" max="300" step="10" value={revealSpeedMs} onChange={e => setRevealSpeedMs(Number(e.target.value))} className="w-full" />
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[10px] text-white/30 uppercase tracking-wider">Speed</span>
+                  <span className="text-[11px] font-mono text-white/35">{revealSpeedMs}ms</span>
+                </div>
+                <input type="range" min="60" max="300" step="10" value={revealSpeedMs}
+                  onChange={e => setRevealSpeedMs(Number(e.target.value))} className="w-full" />
               </div>
             </div>
           )}
 
           {!waiting && !isHost && (
-            <div className="rounded-xl border border-gray-200 dark:border-[#2A2A40] p-4 text-center text-xs text-gray-500">
-              Host is configuring the match. Questions will drop in shortly.
+            <div className="rounded-2xl border border-white/[0.05] bg-white/[0.02] p-3 text-center text-[11px] text-white/30">
+              Host is configuring. Questions coming soon…
             </div>
           )}
 
           <div className="flex gap-2">
-            <button onClick={handleLeave} className="flex-1 py-2.5 rounded-xl border border-gray-200 dark:border-[#2A2A40] text-sm font-medium text-gray-700 dark:text-gray-300 inline-flex items-center justify-center gap-1.5">
+            <button onClick={handleLeave}
+              className="flex-1 py-2.5 rounded-2xl border border-white/[0.06] bg-white/[0.02] text-[12px] font-medium text-white/40 hover:text-white/60 inline-flex items-center justify-center gap-1.5 transition-colors">
               <LogOut size={12} /> Leave
             </button>
             {isHost && (
-              <button onClick={handleStart} disabled={waiting} className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white text-sm font-semibold inline-flex items-center justify-center gap-1.5">
-                <Play size={12} /> Generate &amp; start
+              <button onClick={handleStart} disabled={waiting}
+                className="flex-1 py-2.5 rounded-2xl bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-sm disabled:opacity-30 text-white/65 text-[12px] font-semibold inline-flex items-center justify-center gap-1.5 transition-colors border border-white/[0.08]">
+                <Play size={12} /> Start
               </button>
             )}
           </div>
@@ -392,7 +356,7 @@ export default function QuizBowlMatch({ user, onExit }) {
   // ============ GENERATING ============
   if (view === 'generating') {
     return (
-      <div className="h-full flex flex-col items-center justify-center p-6 bg-white dark:bg-[#161622]">
+      <div className="h-full flex flex-col items-center justify-center p-6 bg-transparent">
         <div className="w-full max-w-sm">
           <ProgressBar
             active
@@ -425,53 +389,51 @@ export default function QuizBowlMatch({ user, onExit }) {
     const winner = sorted[0];
     const amIWinner = winner?.userId === myId;
     const opponentAbandoned = !!abandoned && abandoned.leftBy !== myId;
-    const iAbandoned = !!abandoned && abandoned.leftBy === myId;
     return (
-      <div className="h-full overflow-y-auto bg-white dark:bg-[#161622]">
-        <div className="p-5 space-y-5 max-w-md mx-auto text-center">
-          <Trophy size={40} className={`mx-auto ${amIWinner && !opponentAbandoned ? 'text-amber-500' : 'text-gray-400'}`} />
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-            {opponentAbandoned
-              ? 'Opponent left the match'
-              : iAbandoned
-                ? 'Match ended'
-                : amIWinner ? 'You won!' : winner ? `${winner.name} won` : 'Match over'}
-          </h2>
+      <div className="h-full overflow-y-auto bg-transparent">
+        <div className="p-5 space-y-4 text-center">
+          <Trophy size={36} className={`mx-auto ${amIWinner && !opponentAbandoned ? 'text-amber-400/70' : 'text-white/20'}`} />
+          <p className="text-[17px] font-bold text-white/80">
+            {opponentAbandoned ? 'Opponent left' : amIWinner ? 'You won' : winner ? `${winner.name} won` : 'Match over'}
+          </p>
           {opponentAbandoned && (
-            <p className="text-xs text-gray-500 dark:text-gray-400 -mt-3">
-              {abandoned?.reason === 'disconnect' ? 'They disconnected mid-game.' : 'They pressed leave mid-game.'}
+            <p className="text-[11px] text-white/30 -mt-2">
+              {abandoned?.reason === 'disconnect' ? 'Disconnected mid-game.' : 'Left mid-game.'}
             </p>
           )}
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             {sorted.map((p, i) => (
-              <div key={p.userId} className={`flex items-center gap-3 px-4 py-2.5 rounded-xl ${i === 0 ? 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800' : 'bg-gray-50 dark:bg-[#1e1e2e] border border-gray-200 dark:border-[#2A2A40]'}`}>
-                <span className="text-sm font-bold text-gray-500 w-5">#{i + 1}</span>
-                <span className="flex-1 text-left text-sm font-medium text-gray-900 dark:text-white">{p.name}{p.userId === myId ? ' (you)' : ''}</span>
-                <span className="text-sm font-bold tabular-nums">{p.score || 0}</span>
+              <div key={p.userId} className={`flex items-center gap-3 px-4 py-2.5 rounded-2xl border ${i === 0 ? 'bg-white/[0.05] border-white/10' : 'bg-white/[0.02] border-white/[0.04]'}`}>
+                <span className="text-[11px] font-bold text-white/30 w-4">#{i + 1}</span>
+                <span className="flex-1 text-left text-[13px] font-medium text-white/70">{p.name}{p.userId === myId ? ' (you)' : ''}</span>
+                <span className="text-[13px] font-bold tabular-nums text-white/60">{p.score || 0}</span>
               </div>
             ))}
           </div>
-          <button onClick={handleLeave} className="w-full py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium">Back to menu</button>
+          <button onClick={handleLeave}
+            className="w-full py-2.5 rounded-2xl border border-white/[0.06] bg-white/[0.03] text-[13px] font-medium text-white/50 hover:text-white/70 transition-colors">
+            Back
+          </button>
         </div>
       </div>
     );
   }
 
-  return <div className="h-full flex items-center justify-center text-sm text-gray-400 bg-white dark:bg-[#161622]"><InlineProgress active /> Loading…</div>;
+  return (
+    <div className="h-full flex items-center justify-center text-[12px] text-white/30 bg-transparent">
+      <InlineProgress active /> Loading…
+    </div>
+  );
 }
 
 // ===== PLAYING VIEW =====
 function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, onBuzz, onSubmitAnswer, onNext, onLeave, iBuzzed, isHost, myId, lockedOut = [], wrongFlash, autoAdvanceDeadline, revealSpeedMs }) {
   const frozen = !!buzz || !!answerResult;
   const frozenAt = buzz?.buzzAt || answerResult?.buzzAt || null;
-  // ALL hooks must be called before any early return — otherwise React will
-  // unmount the tree and the screen can go black on the next render.
   const { revealed, wordIndex, totalWords } = useWordReveal(question?.text || '', question?.startedAt || 0, revealSpeedMs, frozen, frozenAt);
 
-  // Question can briefly be null after the snapshot/before question_start —
-  // render a neutral placeholder instead of crashing on `match.players`.
   if (!match || !Array.isArray(match.players)) {
-    return <div className="p-5 text-center text-sm text-gray-400 bg-white dark:bg-[#0D0D14] h-full"><InlineProgress active /> Loading match…</div>;
+    return <div className="p-5 text-center text-[12px] text-white/30 bg-transparent h-full"><InlineProgress active /> Loading…</div>;
   }
 
   const players = match.players || [];
@@ -480,91 +442,96 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
   const iAmLocked = lockedOut.includes(myId);
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-gray-50 dark:bg-[#0D0D14]">
+    <div className="flex flex-col h-full min-h-0 bg-transparent">
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-200 dark:border-[#2A2A40] flex-shrink-0 bg-white dark:bg-[#161622]">
-        <Zap size={14} className="text-amber-500" />
-        <span className="text-sm font-semibold text-gray-900 dark:text-white">Q{(match.currentIdx || 0) + 1}/{match.totalQuestions}</span>
+      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-white/[0.04] flex-shrink-0">
+        <Zap size={13} className="text-amber-500/70" />
+        <span className="text-[12px] font-semibold text-white/50 tabular-nums">
+          Q{(match.currentIdx || 0) + 1}/{match.totalQuestions}
+        </span>
         <div className="flex-1 flex items-center gap-2 justify-center">
-          {match.players.map(p => (
-            <div key={p.userId} className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs ${p.userId === myId ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' : 'bg-gray-100 dark:bg-[#1e1e2e] text-gray-700 dark:text-gray-300'}`}>
-              <span className="font-medium">{p.name}{p.userId === myId ? ' (you)' : ''}</span>
+          {players.map(p => (
+            <div key={p.userId} className={`flex items-center gap-1.5 px-2 py-1 rounded-xl text-[11px] border ${p.userId === myId ? 'bg-white/[0.06] border-white/[0.10] text-white/60' : 'bg-white/[0.03] border-white/[0.05] text-white/35'}`}>
+              <span className="font-medium">{p.name}{p.userId === myId ? ' ·' : ''}</span>
               <span className="font-bold tabular-nums">{p.score || 0}</span>
             </div>
           ))}
         </div>
-        <button onClick={onLeave} className="text-xs text-gray-400 hover:text-rose-500"><LogOut size={12} /></button>
+        <button onClick={onLeave} className="text-white/20 hover:text-rose-400/60 transition-colors"><LogOut size={12} /></button>
       </div>
 
       {/* Question */}
       <div className="flex-1 overflow-y-auto p-5">
-        <p className="text-base leading-relaxed text-gray-900 dark:text-gray-100">
+        <p className="text-[15px] leading-relaxed text-white/85 font-light">
           {revealed}
           {!frozen && wordIndex < totalWords - 1 && (
-            <span className="inline-block w-0.5 h-4 bg-amber-500 animate-pulse ml-1 align-middle" />
+            <span className="inline-block w-0.5 h-4 bg-white/30 animate-pulse ml-1 align-middle rounded-sm" />
           )}
         </p>
         {buzz && !answerResult && (
-          <p className="text-xs text-amber-600 dark:text-amber-400 mt-3">
-            <Zap size={10} className="inline mr-0.5" /> {iBuzzed ? 'You buzzed — answer now!' : `${buzzerName} buzzed first`}
+          <p className="text-[11px] text-amber-400/60 mt-3">
+            <Zap size={9} className="inline mr-0.5" />
+            {iBuzzed ? 'You buzzed' : `${buzzerName} buzzed`}
           </p>
         )}
       </div>
 
       {/* Action bar */}
-      <div className="px-4 py-3 border-t border-gray-200 dark:border-[#2A2A40] flex-shrink-0 space-y-2 bg-white dark:bg-[#161622]">
+      <div className="px-4 py-3 border-t border-white/[0.04] flex-shrink-0 space-y-2">
         {wrongFlash && !buzz && !answerResult && (
-          <div className="px-3 py-1.5 rounded-lg bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300 text-center">
-            {wrongFlash.userId === myId ? 'Wrong' : `${wrongName} was wrong`}{wrongFlash.answer ? ` — "${wrongFlash.answer}"` : ''} · question continues
+          <div className="px-3 py-1.5 rounded-2xl bg-rose-500/[0.08] border border-rose-500/15 text-[11px] text-rose-400/70 text-center">
+            {wrongFlash.userId === myId ? 'Wrong' : `${wrongName} was wrong`}
+            {wrongFlash.answer ? ` — "${wrongFlash.answer}"` : ''} · continues
           </div>
         )}
         {!buzz && !answerResult && !iAmLocked && (
           <>
-            <button onClick={onBuzz} className="w-full py-4 rounded-xl bg-red-600 hover:bg-red-700 text-white text-lg font-bold uppercase tracking-wider active:scale-95 transition-transform">BUZZ</button>
-            <p className="text-[10px] text-gray-400 text-center">Press SPACE to buzz</p>
+            <button onClick={onBuzz}
+              className="w-full py-4 rounded-2xl bg-red-600/80 hover:bg-red-500/80 backdrop-blur-sm text-white text-[15px] font-bold uppercase tracking-[0.15em] active:scale-[0.98] transition-all shadow-[0_0_24px_rgba(239,68,68,0.2)]">
+              BUZZ
+            </button>
+            <p className="text-[10px] text-white/20 text-center">Space to buzz</p>
           </>
         )}
         {!buzz && !answerResult && iAmLocked && (
-          <div className="w-full py-3 rounded-xl bg-gray-100 dark:bg-[#1e1e2e] text-center text-xs text-gray-500">
-            You're locked out of this question. Wait for the next.
+          <div className="w-full py-3 rounded-2xl border border-white/[0.05] bg-white/[0.02] text-center text-[11px] text-white/25">
+            Locked out — wait for next question
           </div>
         )}
-
         {buzz && !answerResult && iBuzzed && (
           <div className="flex gap-2">
             <input
               autoFocus value={answer} onChange={e => setAnswer(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && answer.trim() && onSubmitAnswer()}
-              placeholder="Type your answer…"
-              className="flex-1 px-4 py-3 rounded-xl border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-sm outline-none focus:ring-2 focus:ring-amber-500/40"
+              placeholder="Answer…"
+              className="flex-1 px-4 py-3 rounded-2xl border border-white/[0.08] bg-white/[0.04] text-[14px] text-white/85 placeholder-white/20 outline-none focus:border-white/15 transition-colors"
             />
-            <button onClick={onSubmitAnswer} disabled={!answer.trim()} className="px-5 py-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold disabled:opacity-40">Submit</button>
+            <button onClick={onSubmitAnswer} disabled={!answer.trim()}
+              className="px-5 py-3 rounded-2xl bg-white/[0.07] hover:bg-white/[0.11] border border-white/[0.08] text-white/60 hover:text-white/80 text-[13px] font-semibold disabled:opacity-30 transition-colors">
+              →
+            </button>
           </div>
         )}
-
         {buzz && !answerResult && !iBuzzed && (
-          // No InlineProgress here either — we're waiting on the opponent
-          // to submit, not loading anything quantifiable.
-          <div className="w-full py-3 rounded-xl bg-gray-100 dark:bg-[#1e1e2e] text-center text-xs text-gray-500 inline-flex items-center justify-center gap-2">
+          <div className="w-full py-3 rounded-2xl border border-white/[0.05] bg-white/[0.02] text-center text-[11px] text-white/30 inline-flex items-center justify-center gap-2">
             <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75 animate-ping" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+              <span className="absolute inline-flex h-full w-full rounded-full bg-amber-400/50 animate-ping" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500/50" />
             </span>
             {buzzerName} is answering…
           </div>
         )}
-
         {answerResult && (
           <>
-            <div className={`p-3 rounded-xl text-center ${answerResult.correct ? 'bg-emerald-500/10 border-2 border-emerald-500' : answerResult.timeout || !answerResult.userId ? 'bg-gray-100 dark:bg-[#1e1e2e] border-2 border-gray-300 dark:border-[#2A2A40]' : 'bg-rose-500/10 border-2 border-rose-500'}`}>
-              <p className={`text-sm font-bold ${answerResult.correct ? 'text-emerald-600' : answerResult.timeout || !answerResult.userId ? 'text-gray-600 dark:text-gray-300' : 'text-rose-600'}`}>
+            <div className={`p-3 rounded-2xl text-center border ${answerResult.correct ? 'bg-emerald-500/[0.08] border-emerald-500/25' : (answerResult.timeout || !answerResult.userId) ? 'bg-white/[0.03] border-white/[0.06]' : 'bg-rose-500/[0.08] border-rose-500/25'}`}>
+              <p className={`text-[13px] font-bold ${answerResult.correct ? 'text-emerald-400/80' : (answerResult.timeout || !answerResult.userId) ? 'text-white/40' : 'text-rose-400/80'}`}>
                 {answerResult.correct
-                  ? (answerResult.userId === myId ? 'CORRECT — +1' : `${buzzerName} got it`)
+                  ? (answerResult.userId === myId ? '✓ Correct' : `${buzzerName} got it`)
                   : (answerResult.timeout || !answerResult.userId)
-                    ? "No one got it"
-                    : (answerResult.userId === myId ? 'WRONG' : `${buzzerName} was wrong`)}
+                    ? 'No one got it'
+                    : (answerResult.userId === myId ? '✗ Wrong' : `${buzzerName} was wrong`)}
               </p>
-              <p className="text-xs text-gray-700 dark:text-gray-300 mt-1">Answer: <strong>{answerResult.correctAnswer}</strong></p>
+              <p className="text-[11px] text-white/40 mt-1"><strong className="text-white/60">{answerResult.correctAnswer}</strong></p>
             </div>
             <AutoAdvanceCountdown deadline={autoAdvanceDeadline} isHost={isHost} onNext={onNext} />
           </>
@@ -574,9 +541,6 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
   );
 }
 
-// Live countdown until the server auto-advances. Refreshes every 100ms.
-// `deadline` is a Date.now() timestamp; when it passes, we stop ticking and
-// the server-pushed question_start event will drop us into the next question.
 function AutoAdvanceCountdown({ deadline, isHost, onNext }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -586,35 +550,35 @@ function AutoAdvanceCountdown({ deadline, isHost, onNext }) {
   }, [deadline]);
   if (!deadline) {
     return isHost
-      ? <button onClick={onNext} className="w-full py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold">Next question →</button>
-      : <p className="text-[11px] text-center text-gray-400">Waiting for host to advance…</p>;
+      ? <button onClick={onNext} className="w-full py-2.5 rounded-2xl border border-white/[0.06] bg-white/[0.03] text-[12px] font-semibold text-white/50 hover:text-white/70 transition-colors">Next →</button>
+      : <p className="text-[11px] text-center text-white/25">Waiting for host…</p>;
   }
   const msLeft = Math.max(0, deadline - now);
   const secondsLeft = Math.ceil(msLeft / 1000);
   const pct = Math.max(0, Math.min(100, (msLeft / 5000) * 100));
   return (
     <div className="space-y-1.5">
-      <div className="flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400">
-        <span>Next question in <strong className="text-gray-900 dark:text-white tabular-nums">{secondsLeft}s</strong></span>
-        {isHost && (
-          <button onClick={onNext} className="text-blue-500 hover:text-blue-600 font-medium">Skip →</button>
-        )}
+      <div className="flex items-center justify-between text-[11px] text-white/30">
+        <span>Next in <strong className="text-white/50 tabular-nums">{secondsLeft}s</strong></span>
+        {isHost && <button onClick={onNext} className="text-white/40 hover:text-white/60 font-medium">Skip →</button>}
       </div>
-      <div className="h-1 rounded-full bg-gray-200 dark:bg-[#2A2A40] overflow-hidden">
-        <div className="h-full bg-blue-500 transition-all duration-100" style={{ width: `${pct}%` }} />
+      <div className="h-0.5 rounded-full bg-white/[0.06] overflow-hidden">
+        <div className="h-full bg-white/25 transition-all duration-100" style={{ width: `${pct}%` }} />
       </div>
     </div>
   );
 }
 
-// Small presentational helper
-function Selector({ label, options, value, onChange, grid }) {
+function MatchSelector({ label, options, value, onChange, grid }) {
   return (
     <div>
-      <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">{label}</label>
+      <span className="text-[10px] text-white/30 uppercase tracking-wider block mb-1.5">{label}</span>
       <div className={grid ? `grid ${grid} gap-1.5` : 'flex flex-wrap gap-1.5'}>
         {options.map(o => (
-          <button key={o} onClick={() => onChange(o)} className={`px-2.5 py-1 rounded-lg text-xs font-medium ${value === o ? 'bg-amber-500 text-white' : 'bg-gray-100 dark:bg-[#1e1e2e] text-gray-700 dark:text-gray-300'}`}>{o}</button>
+          <button key={o} onClick={() => onChange(o)}
+            className={`px-2.5 py-1 rounded-xl text-[11px] font-semibold backdrop-blur-sm transition-colors ${value === o ? 'bg-white/[0.10] text-white/80 border border-white/[0.18] shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]' : 'bg-white/[0.04] border border-white/[0.04] text-white/35 hover:bg-white/[0.07] hover:text-white/55'}`}>
+            {o}
+          </button>
         ))}
       </div>
     </div>

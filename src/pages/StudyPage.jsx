@@ -6,11 +6,9 @@ export default function StudyPage() {
   const initialMessage = searchParams.get('q') || null;
 
   return (
-    // Full-width — the chat input row stretches across the entire
-    // window. The window manager already constrains horizontal size,
-    // and the input feels cramped at max-w-5xl on a wide window.
-    <div className="w-full flex flex-col flex-1 min-h-0">
-      <StudyModePanel className="flex-1 min-h-0" initialMessage={initialMessage} />
+    // Negative margins counteract the AppShell's p-4/p-6 so the panel is edge-to-edge.
+    <div className="-m-4 md:-m-6 flex flex-col flex-1 min-h-0">
+      <StudyModePanel className="flex-1 min-h-0" flush initialMessage={initialMessage} />
     </div>
   );
 }

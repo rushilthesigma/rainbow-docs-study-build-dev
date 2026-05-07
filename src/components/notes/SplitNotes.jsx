@@ -38,19 +38,19 @@ export default function SplitNotes({ className = '' }) {
     <div className={`flex flex-col ${className}`}>
       {!activeNote ? (
         <div className="flex-1 overflow-y-auto p-3">
-          <button onClick={handleCreate} className="w-full text-left px-3 py-2 rounded-lg text-sm text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 mb-2 font-medium">
+          <button onClick={handleCreate} className="w-full text-left px-3 py-2 rounded-xl text-sm text-white/50 hover:bg-white/[0.05] hover:text-white/70 mb-2 font-medium transition-colors">
             + New Quick Note
           </button>
           {loading ? (
-            <p className="text-sm text-gray-400 text-center py-4">Loading...</p>
+            <p className="text-sm text-white/30 text-center py-4">Loading...</p>
           ) : notes.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-4">No notes</p>
+            <p className="text-sm text-white/30 text-center py-4">No notes</p>
           ) : (
             <div className="space-y-1">
               {notes.map(n => (
-                <button key={n.id} onClick={() => selectNote(n)} className="w-full text-left px-3 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-[#1e1e2e] transition-colors">
-                  <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{n.title}</p>
-                  {n.preview && <p className="text-xs text-gray-400 truncate">{n.preview}</p>}
+                <button key={n.id} onClick={() => selectNote(n)} className="w-full text-left px-3 py-2 rounded-xl hover:bg-white/[0.05] transition-colors">
+                  <p className="text-sm font-medium text-white/88 truncate">{n.title}</p>
+                  {n.preview && <p className="text-xs text-white/30 truncate">{n.preview}</p>}
                 </button>
               ))}
             </div>
@@ -58,22 +58,22 @@ export default function SplitNotes({ className = '' }) {
         </div>
       ) : (
         <div className="flex-1 flex flex-col">
-          <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100 dark:border-[#2A2A40]">
-            <button onClick={() => setActiveNote(null)} className="text-xs text-gray-400 hover:text-gray-600">Back</button>
+          <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.06]">
+            <button onClick={() => setActiveNote(null)} className="text-xs text-white/30 hover:text-white/55 transition-colors">Back</button>
             <input
               value={activeNote.title}
               onChange={e => {
                 setActiveNote(prev => ({ ...prev, title: e.target.value }));
                 updateNote(activeNote.id, { title: e.target.value }).catch(() => {});
               }}
-              className="text-sm font-medium bg-transparent text-gray-800 dark:text-gray-200 outline-none text-center flex-1 mx-2"
+              className="text-sm font-medium bg-transparent text-white/88 outline-none text-center flex-1 mx-2"
             />
-            <span className="text-[10px] text-gray-400">Auto-saved</span>
+            <span className="text-[10px] text-white/30">Auto-saved</span>
           </div>
           <textarea
             value={content}
             onChange={e => handleContentChange(e.target.value)}
-            className="flex-1 p-3 bg-transparent text-sm text-gray-800 dark:text-gray-200 placeholder-gray-400 resize-none outline-none leading-relaxed"
+            className="flex-1 p-3 bg-transparent text-sm text-white/88 placeholder-white/20 resize-none outline-none leading-relaxed"
             placeholder="Write here..."
           />
         </div>

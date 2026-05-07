@@ -182,11 +182,11 @@ export default function LessonPage() {
 
   const phaseHeader = (
     <div>
-      <div className="px-4 py-3 border-b border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622]">
-        <p className="text-xs font-medium text-blue-600 dark:text-blue-400">
+      <div className="px-4 py-3 border-b border-white/[0.07] bg-white/[0.03]">
+        <p className="text-xs font-medium text-white/50">
           {currentUnit?.title} &middot; Lesson {currentIndex + 1} of {allLessons.length}
         </p>
-        <h2 className="font-semibold text-gray-900 dark:text-white text-sm mt-0.5">{currentLesson.title}</h2>
+        <h2 className="font-semibold text-white/90 text-sm mt-0.5">{currentLesson.title}</h2>
       </div>
       {currentLesson.type === 'lesson' && <PhaseIndicator currentPhase={phase} />}
     </div>
@@ -198,7 +198,7 @@ export default function LessonPage() {
       <div className="flex items-center justify-between mb-2 flex-shrink-0">
         <button
           onClick={() => navigate(`/curriculum/${curriculumId}`)}
-          className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+          className="flex items-center gap-2 text-sm text-white/45 hover:text-white/80 transition-colors"
         >
           <ArrowLeft size={16} />
           {curriculum.title}

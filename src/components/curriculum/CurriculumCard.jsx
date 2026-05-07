@@ -12,18 +12,18 @@ export default function CurriculumCard({ curriculum }) {
   return (
     <button
       onClick={() => navigate(`/curriculum/${id}`)}
-      className="w-full text-left bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-5 hover:border-blue-300 dark:hover:border-blue-700 transition-colors group"
+      className="w-full text-left bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] hover:border-blue-300 dark:hover:border-blue-700 p-5 transition-colors group"
     >
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-gray-900 dark:text-gray-100 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+          <h3 className="font-semibold text-gray-900 dark:text-gray-100 truncate transition-colors">
             {title}
           </h3>
           {description && (
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">{description}</p>
           )}
         </div>
-        <ArrowRight size={16} className="text-gray-300 dark:text-gray-600 group-hover:text-blue-500 transition-colors mt-1 flex-shrink-0 ml-3" />
+        <ArrowRight size={16} className="text-gray-300 dark:text-gray-600 group-hover:text-gray-500 dark:group-hover:text-gray-400 transition-colors mt-1 flex-shrink-0 ml-3" />
       </div>
 
       <ProgressBar value={completedLessons} max={totalLessons} size="sm" showLabel={false} className="mb-3" />
@@ -34,7 +34,7 @@ export default function CurriculumCard({ curriculum }) {
           {unitCount} unit{unitCount !== 1 ? 's' : ''} &middot; {totalLessons} lesson{totalLessons !== 1 ? 's' : ''}
         </span>
         {pct > 0 && (
-          <span className="text-blue-500 font-medium">{pct}% done</span>
+          <span className="text-gray-500 dark:text-gray-400 font-medium">{pct}% done</span>
         )}
         {timeAgo && (
           <span className="ml-auto flex items-center gap-1">

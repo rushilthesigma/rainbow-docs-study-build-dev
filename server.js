@@ -1211,7 +1211,7 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
       const retryResult = await callGemini(
         'You MUST output ONLY a valid JSON object. No markdown, no explanation, no text before or after. Just raw JSON.',
         [{ role: 'user', content: `${user}\n\nIMPORTANT: Output ONLY the JSON object, nothing else.` }],
-        DEFAULT_MODEL, 8192, { jsonMode: true, temperature: 0.3 }
+        GEMINI_FLASH, 8192, { jsonMode: true, temperature: 0.3 }
       );
       if (retryResult.success) {
         const retryText = retryResult.data.content?.[0]?.text || '';
@@ -1650,7 +1650,7 @@ app.post('/api/curriculum/:id/lesson/generate', authMiddleware, async (req, res)
           }
         }
       },
-      DEFAULT_MODEL,
+      GEMINI_FLASH,
     );
     return;
   } catch (e) {
@@ -1661,6 +1661,145 @@ app.post('/api/curriculum/:id/lesson/generate', authMiddleware, async (req, res)
       res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`);
       res.end();
     }
+  }
+});
+
+// Parse questions from plain-text format — far more robust than JSON.
+// Handles minor formatting variations without failing the whole response.
+function parseQuestionsFromText(text) {
+  const questions = [];
+  // Split on blank lines between questions, or on "N." / "N)" at line start
+  const raw = text.replace(/\r\n/g, '\n');
+  const blocks = raw.split(/\n(?=\d+[\.\)]\s)/);
+
+  for (const block of blocks) {
+    const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length < 3) continue;
+
+    // First line: strip leading "N." / "N)" numbering
+    const qText = lines[0].replace(/^\d+[\.\)]\s*/, '').trim();
+    if (!qText || qText.length < 5) continue;
+
+    const options = [];
+    let correct = '';
+    let explanation = '';
+
+    for (const line of lines.slice(1)) {
+      // Option lines: "A) ...", "A. ...", "A: ..."
+      const optMatch = line.match(/^([A-Da-d])[\.\)\:]\s+(.+)/);
+      if (optMatch) {
+        options.push(`${optMatch[1].toUpperCase()}) ${optMatch[2].trim()}`);
+        continue;
+      }
+      // Correct answer line
+      const answerMatch = line.match(/^(?:correct|answer|ans)[\s\:\-]+([A-Da-d])/i);
+      if (answerMatch) { correct = answerMatch[1].toUpperCase(); continue; }
+      // Explanation line
+      const expMatch = line.match(/^(?:explanation|explain|why|reason)[\s\:\-]+(.+)/i);
+      if (expMatch) { explanation = expMatch[1].trim(); continue; }
+      // Bare explanation after correct is set (continuation line)
+      if (correct && !explanation && line.length > 15 && !/^[A-D][\.\)]/i.test(line)) {
+        explanation = line;
+      }
+    }
+
+    if (qText && options.length >= 2 && correct) {
+      questions.push({
+        id: `q${questions.length + 1}`,
+        question: qText,
+        options,
+        correct,
+        explanation,
+      });
+    }
+  }
+  return questions;
+}
+
+// Get or generate a cached assessment for a lesson
+app.get('/api/curriculum/:id/lesson/:lessonId/assessment', authMiddleware, async (req, res) => {
+  try {
+    const { refresh } = req.query;
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+
+    const curriculum = (users[email].data?.curricula || []).find(c => c.id === req.params.id);
+    if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
+
+    let lesson = null;
+    let unit = null;
+    for (const u of curriculum.units || []) {
+      const l = (u.lessons || []).find(l => l.id === req.params.lessonId);
+      if (l) { lesson = l; unit = u; break; }
+    }
+    if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
+
+    // Return cached assessment unless refresh is requested
+    if (lesson.cachedAssessment && refresh !== '1') {
+      return res.json({ assessment: lesson.cachedAssessment });
+    }
+
+    const difficulty = curriculum.settings?.difficulty || 'beginner';
+    const topic = unit.title;
+    const lessonContent = lesson.content ? lesson.content.slice(0, 3000) : '';
+    const contentHint = lessonContent
+      ? `\n\nLesson content for context:\n${lessonContent}`
+      : '';
+
+    // Plain-text format — the model is much more reliable at this than JSON.
+    // Regex parsing below is tolerant of minor formatting variations.
+    const sys = 'You are a quiz writer. Output ONLY the numbered questions in the exact format shown. No intro, no outro, no markdown.';
+    const usr = `Write exactly 12 rigorous multiple-choice questions on "${topic}" (${difficulty} level). Test deep understanding: application, analysis, edge cases.${contentHint}
+
+Use EXACTLY this format for every question (blank line between questions):
+
+1. Question text here?
+A) First option
+B) Second option
+C) Third option
+D) Fourth option
+Correct: B
+Explanation: Why B is correct and the others are not.
+
+2. Next question?
+A) ...`;
+
+    let questions = [];
+    for (let attempt = 0; attempt < 3 && questions.length < 6; attempt++) {
+      const result = await callGemini(sys, [{ role: 'user', content: usr }], GEMINI_FLASH_LITE, 4096, { temperature: 0.5 });
+      if (result.success) {
+        const text = result.data.content?.[0]?.text || '';
+        const parsed = parseQuestionsFromText(text);
+        if (parsed.length > questions.length) questions = parsed;
+      }
+    }
+
+    if (questions.length < 3) return res.status(502).json({ error: 'Could not generate. Try again.' });
+
+    const assessment = {
+      id: crypto.randomUUID(),
+      title: topic,
+      type: 'quiz',
+      questions,
+      createdAt: new Date().toISOString(),
+    };
+
+    // Cache in lesson so next load is instant
+    const usersAfter = loadUsers();
+    const curr = (usersAfter[email]?.data?.curricula || []).find(c => c.id === req.params.id);
+    if (curr) {
+      for (const u of curr.units || []) {
+        const l = (u.lessons || []).find(l => l.id === req.params.lessonId);
+        if (l) { l.cachedAssessment = assessment; break; }
+      }
+      saveUsers(usersAfter);
+    }
+
+    res.json({ assessment });
+  } catch (e) {
+    console.error('Assessment fetch error:', e);
+    res.status(500).json({ error: e.message });
   }
 });
 
@@ -3125,24 +3264,48 @@ app.post('/api/notes/:nid/generate-summary', authMiddleware, async (req, res) =>
 
 // ===== ASSESSMENTS =====
 
+// One Flash-Lite call. Tight inline prompt that bypasses the verbose
+// buildAssessmentPrompt helper. Retries once on parse failure with a
+// shorter prompt so a single bad response doesn't surface as an error
+// to the user.
+async function generateAssessmentOnce({ topic, type, questionCount, difficulty }) {
+  const isEssay = type === 'essay';
+  const sys = 'Output ONLY valid JSON. No markdown, no preamble, no commentary. Just the JSON object.';
+  const usr = isEssay
+    ? `Create an essay assessment on "${topic}" (${difficulty} level).
+Return this exact JSON:
+{"title":"Essay: ${topic}","type":"essay","prompt":"the essay question (1-2 sentences)","rubric":[{"criterion":"...","maxScore":5,"description":"..."},{"criterion":"...","maxScore":5,"description":"..."},{"criterion":"...","maxScore":5,"description":"..."}]}`
+    : `Create ${questionCount} multiple-choice questions on "${topic}" (${difficulty} level). Each option starts with "A) ", "B) ", "C) ", or "D) ". The "correct" field is just the letter.
+Return this exact JSON:
+{"title":"Quiz: ${topic}","type":"quiz","questions":[{"id":"q1","question":"...","options":["A) ...","B) ...","C) ...","D) ..."],"correct":"A","explanation":"why A is right"}]}`;
+
+  // Tight maxOutputTokens — 2k is plenty for 5 short MCQs and forces
+  // the model to wrap quickly instead of padding explanations.
+  const result = await callGemini(sys, [{ role: 'user', content: usr }], GEMINI_FLASH_LITE, 2048, { jsonMode: true, temperature: 0.5 });
+  if (!result.success) return null;
+  const parsed = parseAIJson(result.data.content?.[0]?.text || '');
+  if (!parsed) return null;
+  // Sanity-check shape so a malformed response surfaces as null
+  // rather than a half-broken assessment.
+  if (isEssay) {
+    if (!parsed.prompt) return null;
+  } else {
+    if (!Array.isArray(parsed.questions) || parsed.questions.length === 0) return null;
+  }
+  return parsed;
+}
+
 app.post('/api/assessment/generate', authMiddleware, async (req, res) => {
   try {
-    const { topic, type, questionCount, difficulty } = req.body;
+    const { topic, type = 'quiz', questionCount = 5, difficulty = 'beginner' } = req.body;
     if (!topic) return res.status(400).json({ error: 'Topic required' });
 
-    const { system, user } = buildAssessmentPrompt(topic, type || 'quiz', questionCount || 5, difficulty || 'beginner');
-    // jsonMode forces Gemini to emit strict JSON — eliminates the "Failed
-    // to parse assessment" failures that came from the model wrapping
-    // output in markdown fences or adding a preamble.
-    const result = await callGemini(system, [{ role: 'user', content: user }], DEFAULT_MODEL, 4096, { jsonMode: true, temperature: 0.5 });
-    if (!result.success) return res.status(500).json({ error: result.error });
-
-    const rawText = result.data.content?.[0]?.text || '';
-    const parsed = parseAIJson(rawText);
-    if (!parsed) {
-      console.error('Assessment parse failed. First 400 chars:', rawText.slice(0, 400));
-      return res.status(500).json({ error: 'Failed to parse assessment. Try again.' });
-    }
+    // First attempt.
+    let parsed = await generateAssessmentOnce({ topic, type, questionCount, difficulty });
+    // One retry if the first response didn't parse cleanly. Catches
+    // the rare jsonMode hiccup without making the user click again.
+    if (!parsed) parsed = await generateAssessmentOnce({ topic, type, questionCount, difficulty });
+    if (!parsed) return res.status(502).json({ error: 'Could not generate. Try again.' });
 
     const assessment = { id: crypto.randomUUID(), ...parsed, createdAt: new Date().toISOString() };
     res.json({ assessment });
@@ -3193,8 +3356,7 @@ Return JSON exactly in this shape (one rubricScores entry per rubric criterion a
   "improvements": ["specific concrete revision", "another specific revision"]
 }`;
 
-      const tierModel = modelForUser(users[email], email);
-      const aiResp = await callGemini(sys, [{ role: 'user', content: usr }], tierModel, 2000, { jsonMode: true, temperature: 0.4 });
+      const aiResp = await callGemini(sys, [{ role: 'user', content: usr }], GEMINI_FLASH, 2000, { jsonMode: true, temperature: 0.4 });
       if (!aiResp.success) return res.status(500).json({ error: aiResp.error || 'Grading failed' });
       const parsed = parseAIJson(aiResp.data.content?.[0]?.text || '');
       if (!parsed || !Array.isArray(parsed.rubricScores)) {

@@ -110,8 +110,8 @@ export default function Dock() {
           // smoked glass in dark mode. Backdrop saturation is inlined
           // since Tailwind's `backdrop-saturate-150` taps out at 1.5×
           // and we want the punchier 1.8×.
-          className="flex items-end gap-1.5 px-3 py-2 rounded-2xl border border-gray-300/50 dark:border-white/10 shadow-2xl bg-white/70 dark:bg-[rgba(30,30,40,0.55)]"
-          style={{ backdropFilter: 'blur(40px) saturate(1.8)', WebkitBackdropFilter: 'blur(40px) saturate(1.8)' }}
+          className="flex items-end gap-1.5 px-3 py-2 rounded-2xl border border-white/[0.10] shadow-[0_8px_40px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.08)] bg-white/[0.06]"
+          style={{ backdropFilter: 'blur(48px) saturate(2)', WebkitBackdropFilter: 'blur(48px) saturate(2)' }}
           onMouseMove={handleMouseMove}
           onMouseLeave={() => setMouseX(null)}
         >
@@ -125,7 +125,7 @@ export default function Dock() {
             else openApp(app.id, app.label, true);
           }} size={size} iconStyle={iconStyle} />
           ))}
-          <div className="w-px bg-gray-400/40 dark:bg-white/15 mx-1 self-center" style={{ height: size * 0.7 }} />
+          <div className="w-px bg-white/[0.12] mx-1 self-center" style={{ height: size * 0.7 }} />
           {utilApps.map(app => (
             <DockIcon key={app.id} app={app} mouseX={mouseX} iconRef={getIconRef(app.id)} isOpen={openAppIds.has(app.id)} onClick={() => {
             // If there's already a window for this app that's minimized, restore it.
