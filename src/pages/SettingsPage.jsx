@@ -72,11 +72,12 @@ function Section({ title, children }) {
 }
 
 function InterfaceSection() {
-  const { wallpaper, setWallpaper, dockSize, setDockSize, iconStyle, setIconStyle } = useUIPreference();
+  const { wallpaper, setWallpaper, dockSize, setDockSize, iconStyle, setIconStyle, windowOpacity, setWindowOpacity, titlebarOpacity, setTitlebarOpacity } = useUIPreference();
   const wallpaperOpts = WALLPAPER_LIST.map(w => ({ value: w.id, label: w.label }));
   const dockOpts = [{ value: 'small', label: 'Small' }, { value: 'medium', label: 'Medium' }, { value: 'large', label: 'Large' }];
   const iconOpts = [{ value: 'gradient', label: 'Colorful' }, { value: 'mono', label: 'Monochrome' }, { value: 'glass', label: 'Glass' }, { value: 'accent', label: 'Accent Tint' }];
   const isMobileScreen = typeof window !== 'undefined' && window.innerWidth < 768;
+  const opacity = windowOpacity ?? 55;
 
   return (
     <Section title={isMobileScreen ? 'Appearance' : 'Desktop'}>
@@ -85,6 +86,44 @@ function InterfaceSection() {
           <Dropdown label="Wallpaper" value={wallpaper} options={wallpaperOpts} onChange={setWallpaper} />
           <Dropdown label="Dock Size" value={dockSize} options={dockOpts} onChange={setDockSize} />
           <Dropdown label="Icon Style" value={iconStyle} options={iconOpts} onChange={setIconStyle} />
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-white/40">Title Bar Transparency</label>
+              <span className="text-[11px] text-white/30 tabular-nums">{100 - (titlebarOpacity ?? 80)}%</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={titlebarOpacity ?? 80}
+              onChange={e => setTitlebarOpacity(Number(e.target.value))}
+              className="w-full accent-white/60 h-1.5 rounded-full cursor-pointer"
+            />
+            <div className="flex justify-between mt-1">
+              <span className="text-[10px] text-white/20">Fully glass</span>
+              <span className="text-[10px] text-white/20">Solid</span>
+            </div>
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-white/40">Window Transparency</label>
+              <span className="text-[11px] text-white/30 tabular-nums">{100 - opacity}%</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={opacity}
+              onChange={e => setWindowOpacity(Number(e.target.value))}
+              className="w-full accent-white/60 h-1.5 rounded-full cursor-pointer"
+            />
+            <div className="flex justify-between mt-1">
+              <span className="text-[10px] text-white/20">Fully glass</span>
+              <span className="text-[10px] text-white/20">Fully solid</span>
+            </div>
+          </div>
         </>
       )}
     </Section>

@@ -26,7 +26,7 @@ import useBrowserBack from '../../../hooks/useBrowserBack';
 import { InlineProgress } from '../../shared/ProgressBar';
 
 const TYPE_ICONS = { lesson: BookOpen, math_tutor: Calculator, practice: PenTool, essay: FileText, unit_test: ClipboardCheck };
-const TYPE_COLORS = { lesson: 'text-blue-400', math_tutor: 'text-indigo-400', practice: 'text-purple-400', essay: 'text-amber-400', unit_test: 'text-rose-400' };
+const TYPE_COLORS = { lesson: 'text-white/50', math_tutor: 'text-white/50', practice: 'text-white/50', essay: 'text-amber-400', unit_test: 'text-rose-400' };
 
 export default function CurriculaApp() {
   const { user } = useAuth();
@@ -310,7 +310,7 @@ export default function CurriculaApp() {
             <ArrowLeft size={16} /> Back to curriculum
           </button>
           <span className="text-xs text-gray-400">·</span>
-          <span className="text-xs font-semibold text-indigo-500 uppercase tracking-wider">{isPractice ? 'Practice' : 'Math Tutor'}</span>
+          <span className="text-xs font-semibold text-white/60 uppercase tracking-wider">{isPractice ? 'Practice' : 'Math Tutor'}</span>
           <span className="text-xs text-gray-400">·</span>
           <span className="text-xs text-white/60 truncate">{currentLesson.title}</span>
         </div>
@@ -556,12 +556,12 @@ export default function CurriculaApp() {
                   onChange={e => setSourceUrlInput(e.target.value)}
                   placeholder="https://example.com/article"
                   disabled={sourceBusy || sources.length >= 8}
-                  className="flex-1 px-3 py-2 rounded-lg border border-white/10 bg-white dark:bg-[#0D0D14] text-sm text-white outline-none focus:ring-2 focus:ring-blue-500/40 disabled:opacity-50"
+                  className="flex-1 px-3 py-2 rounded-lg border border-white/10 bg-white dark:bg-[#0D0D14] text-sm text-white outline-none focus:ring-2 focus:ring-white/20 disabled:opacity-50"
                 />
                 <button
                   type="submit"
                   disabled={sourceBusy || !sourceUrlInput.trim() || sources.length >= 8}
-                  className="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold disabled:opacity-40 inline-flex items-center gap-1.5"
+                  className="px-3 py-2 rounded-lg bg-white/[0.10] hover:bg-white/[0.15] border border-white/[0.12] text-white text-xs font-semibold disabled:opacity-40 inline-flex items-center gap-1.5"
                 >
                   {sourceBusy ? <InlineProgress active /> : <><Plus size={12} /> Add URL</>}
                 </button>
@@ -579,7 +579,7 @@ export default function CurriculaApp() {
               <button
                 onClick={() => sourceFileRef.current?.click()}
                 disabled={sourceBusy || sources.length >= 8}
-                className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border-2 border-dashed border-gray-300 dark:border-white/10 text-white/45 text-xs hover:border-blue-400 dark:hover:border-blue-600 hover:text-blue-600 dark:hover:text-blue-400 transition-colors disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border-2 border-dashed border-gray-300 dark:border-white/10 text-white/45 text-xs hover:border-white/30 hover:text-white/70 transition-colors disabled:opacity-50"
               >
                 {sourceBusy ? <InlineProgress active /> : <Paperclip size={13} />}
                 Attach textbook PDFs or text files
@@ -599,7 +599,7 @@ export default function CurriculaApp() {
                     const Icon = s.kind === 'url' ? Sparkles : FileText;
                     return (
                       <div key={s.id} className="group flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-white/[0.04] border border-white/10">
-                        <div className={`w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 ${s.kind === 'url' ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-500 dark:text-blue-400' : 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'}`}>
+                        <div className={`w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 ${s.kind === 'url' ? 'bg-white/[0.08] text-white/50' : 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'}`}>
                           <Icon size={11} />
                         </div>
                         <div className="flex-1 min-w-0">
@@ -677,7 +677,7 @@ export default function CurriculaApp() {
 
       {curricula.length === 0 ? (
         <div className="text-center py-12">
-          <BookOpen size={32} className="text-blue-400 mx-auto mb-3" />
+          <BookOpen size={32} className="text-white/40 mx-auto mb-3" />
           <p className="text-sm text-gray-500 mb-4">No curricula yet</p>
           <div className="flex items-center justify-center gap-2">
             <Button onClick={() => setView('new')}><Plus size={16} /> Create Curriculum</Button>
@@ -962,7 +962,7 @@ function AssessmentView({ lesson, curriculum, onBack }) {
             )}
 
             {/* Textarea */}
-            <div className="bg-white/[0.07] backdrop-blur-sm border border-white/10 rounded-2xl overflow-hidden focus-within:border-blue-400 dark:focus-within:border-blue-600 transition-colors">
+            <div className="bg-white/[0.07] backdrop-blur-sm border border-white/10 rounded-2xl overflow-hidden focus-within:border-white/30 transition-colors">
               <div className="px-4 pt-3 pb-1 border-b border-gray-100 dark:border-[#1e1e2e]">
                 <p className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Your Response</p>
               </div>
@@ -1053,8 +1053,8 @@ function AssessmentView({ lesson, curriculum, onBack }) {
 
             {/* Overall feedback */}
             {result.overallFeedback && (
-              <div className="relative bg-white/[0.07] backdrop-blur-sm border border-blue-200 dark:border-blue-900/60 rounded-2xl overflow-hidden">
-                <div className="absolute left-0 inset-y-0 w-1 bg-blue-400 dark:bg-blue-500 rounded-l-2xl" />
+              <div className="relative bg-white/[0.07] backdrop-blur-sm border border-white/[0.10] rounded-2xl overflow-hidden">
+                <div className="absolute left-0 inset-y-0 w-1 bg-white/20 rounded-l-2xl" />
                 <div className="pl-5 pr-4 py-4">
                   <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-white/70 mb-2">Overall Feedback</p>
                   <MathText as="p" className="text-sm text-gray-800 dark:text-gray-100 leading-relaxed">{result.overallFeedback}</MathText>
@@ -1139,7 +1139,7 @@ function AssessmentView({ lesson, curriculum, onBack }) {
               </button>
               <button
                 onClick={onBack}
-                className="w-full py-3 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold transition-colors shadow-sm"
+                className="w-full py-3 rounded-2xl bg-white/[0.10] hover:bg-white/[0.15] border border-white/[0.12] text-white text-sm font-semibold transition-colors"
               >
                 Back to Curriculum
               </button>
@@ -1198,7 +1198,7 @@ function EditCurriculumModal({ curriculum, onClose, onUpdated }) {
       >
         <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
           <div className="flex items-center gap-2">
-            <Wand2 size={14} className="text-blue-500" />
+            <Wand2 size={14} className="text-white/50" />
             <h3 className="text-sm font-semibold text-white">Edit curriculum with AI</h3>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"><X size={16} /></button>
@@ -1212,7 +1212,7 @@ function EditCurriculumModal({ curriculum, onClose, onUpdated }) {
               onChange={e => setInstruction(e.target.value)}
               placeholder={'Examples:\n• Add a unit on functional groups after Unit 2\n• Simplify Unit 1 to 3 lessons\n• Rename "Intro" to "Getting Started" and add a practice lesson\n• Rewrite this to match the AP Chemistry syllabus in the attached PDF'}
               rows={6}
-              className="w-full px-3 py-2 rounded-lg border border-white/10 bg-white/[0.04] text-sm text-white placeholder-gray-400 resize-none outline-none focus:border-blue-500"
+              className="w-full px-3 py-2 rounded-lg border border-white/10 bg-white/[0.04] text-sm text-white placeholder-gray-400 resize-none outline-none focus:border-white/30"
             />
           </div>
 
@@ -1222,7 +1222,7 @@ function EditCurriculumModal({ curriculum, onClose, onUpdated }) {
               onDragOver={e => e.preventDefault()}
               onDrop={onDrop}
               onClick={() => fileInputRef.current?.click()}
-              className="border-2 border-dashed border-white/10 rounded-xl p-4 text-center cursor-pointer hover:border-blue-400"
+              className="border-2 border-dashed border-white/10 rounded-xl p-4 text-center cursor-pointer hover:border-white/30"
             >
               <Upload size={18} className="text-gray-400 mx-auto mb-1" />
               <p className="text-xs text-white/45">Drop PDFs or text files here, or click to pick</p>
@@ -1258,7 +1258,7 @@ function EditCurriculumModal({ curriculum, onClose, onUpdated }) {
           <button
             onClick={submit}
             disabled={!instruction.trim() || submitting}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white/[0.10] hover:bg-white/[0.15] border border-white/[0.12] text-white text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {submitting ? <><InlineProgress active /> Applying…</> : <><Sparkles size={12} /> Apply edit</>}
           </button>
@@ -1287,7 +1287,7 @@ function PausdCatalogView({ catalog, loading, enrollingSlug, onBack, onEnroll })
   if (grouped.science) grouped.science.sort((a, b) => String(a.grade).localeCompare(String(b.grade)));
 
   const SUBJECT_META = {
-    math: { label: 'Mathematics', icon: Sigma, color: 'text-blue-500', bg: 'bg-blue-50 dark:bg-blue-900/20' },
+    math: { label: 'Mathematics', icon: Sigma, color: 'text-white/60', bg: 'bg-white/[0.06]' },
     science: { label: 'Science', icon: Atom, color: 'text-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-900/20' },
   };
 
@@ -1299,7 +1299,7 @@ function PausdCatalogView({ catalog, loading, enrollingSlug, onBack, onEnroll })
 
       <div className="mb-5">
         <div className="flex items-center gap-2 mb-1">
-          <GraduationCap size={20} className="text-purple-500" />
+          <GraduationCap size={20} className="text-white/50" />
           <h2 className="text-lg font-bold text-white">PAUSD Common Core Catalog</h2>
         </div>
         <p className="text-xs text-white/45">

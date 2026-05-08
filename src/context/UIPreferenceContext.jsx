@@ -18,6 +18,8 @@ const DEFAULTS = {
   iconStyle: 'gradient',
   dockPosition: 'bottom',
   uiMode: 'desktop',
+  windowOpacity: 55,
+  titlebarOpacity: 80,
 };
 
 // All UI preferences are persisted server-side under
@@ -38,8 +40,10 @@ export function UIPreferenceProvider({ children }) {
   const theme        = prefs.theme       || DEFAULTS.theme;
   const dockSize     = prefs.dockSize    || DEFAULTS.dockSize;
   const iconStyle    = prefs.iconStyle   || DEFAULTS.iconStyle;
-  const dockPosition = prefs.dockPosition|| DEFAULTS.dockPosition;
-  const uiMode       = prefs.uiMode      || DEFAULTS.uiMode;
+  const dockPosition    = prefs.dockPosition    || DEFAULTS.dockPosition;
+  const uiMode          = prefs.uiMode          || DEFAULTS.uiMode;
+  const windowOpacity       = prefs.windowOpacity       ?? DEFAULTS.windowOpacity;
+  const titlebarOpacity     = prefs.titlebarOpacity     ?? DEFAULTS.titlebarOpacity;
 
   // Apply theme to <html> whenever it changes — covers initial render
   // (server-side load), subsequent setTheme calls, and post-fetchUser
@@ -87,8 +91,10 @@ export function UIPreferenceProvider({ children }) {
   const setWallpaper    = useCallback((v) => setPref('wallpaper', v),    [setPref]);
   const setDockSize     = useCallback((v) => setPref('dockSize', v),     [setPref]);
   const setIconStyle    = useCallback((v) => setPref('iconStyle', v),    [setPref]);
-  const setDockPosition = useCallback((v) => setPref('dockPosition', v), [setPref]);
-  const setUiMode       = useCallback((v) => setPref('uiMode', v),       [setPref]);
+  const setDockPosition    = useCallback((v) => setPref('dockPosition', v),    [setPref]);
+  const setUiMode          = useCallback((v) => setPref('uiMode', v),          [setPref]);
+  const setWindowOpacity       = useCallback((v) => setPref('windowOpacity', v),       [setPref]);
+  const setTitlebarOpacity     = useCallback((v) => setPref('titlebarOpacity', v),     [setPref]);
 
   // Mobile mode is inferred from viewport, not persisted — narrow
   // viewports always get the mobile shell regardless of user pref.
@@ -108,6 +114,8 @@ export function UIPreferenceProvider({ children }) {
       iconStyle, setIconStyle,
       dockPosition, setDockPosition,
       theme, setTheme,
+      windowOpacity, setWindowOpacity,
+      titlebarOpacity, setTitlebarOpacity,
     }}>
       {children}
     </UIPreferenceContext.Provider>

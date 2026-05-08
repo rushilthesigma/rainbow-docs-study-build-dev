@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { X, Minus, Maximize2, Square } from 'lucide-react';
 import { useWindowManager } from '../../context/WindowManagerContext';
+import { useUIPreference } from '../../context/UIPreferenceContext';
 
 // macOS is the only shell now; all the per-OS branching below collapses
 // to the macOS branch via this constant. Kept as a const so the existing
@@ -11,11 +12,16 @@ const STYLE = 'macos';
 // the macOS shell — covers the dock area but stays inside the browser
 // window). For TRUE OS-level fullscreen (taking over the whole monitor),
 // use ⌘⇧P — that calls the browser Fullscreen API.
-function MacTitleBar({ windowId, isMaximized, isActive, title, onDragStart, onDoubleClick }) {
+function MacTitleBar({ windowId, isMaximized, isActive, title, onDragStart, onDoubleClick, titlebarOpacity = 80 }) {
   const { closeWindow, minimizeWindow, maximizeWindow } = useWindowManager();
   const [hovered, setHovered] = useState(false);
+  const isDark = document.documentElement.classList.contains('dark');
+  const a = titlebarOpacity / 100;
+  const barStyle = isDark
+    ? { background: isActive ? `rgba(20,20,20,${a})` : `rgba(28,28,28,${a})` }
+    : { background: isActive ? `rgba(232,232,234,${a})` : `rgba(240,240,240,${a})` };
   return (
-    <div className={`h-8 flex items-center flex-shrink-0 select-none ${isActive ? 'bg-[#e8e8ea]/65 dark:bg-[#18182a]/80 backdrop-blur-md' : 'bg-[#f0f0f0]/55 dark:bg-[#222235]/70 backdrop-blur-md'}`} onPointerDown={onDragStart} onDoubleClick={onDoubleClick} data-titlebar={windowId}>
+    <div className="h-8 flex items-center flex-shrink-0 select-none backdrop-blur-md" style={barStyle} onPointerDown={onDragStart} onDoubleClick={onDoubleClick} data-titlebar={windowId}>
       <div className="flex items-center gap-[7px] px-3" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
         <button onClick={e => { e.stopPropagation(); closeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FF5F57] hover:brightness-90 flex items-center justify-center" title="Close"><X size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#4a0002]" /></button>
         <button onClick={e => { e.stopPropagation(); minimizeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FEBC2E] hover:brightness-90 flex items-center justify-center" title="Minimize"><Minus size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#5a3e00]" /></button>
@@ -60,6 +66,7 @@ function GenericTitleBar({ windowId, isMaximized, isActive, title, onDragStart, 
 
 export default function Window({ win, isActive, children }) {
   const { focusWindow, moveWindow, resizeWindow, removeWindow, maximizeWindow } = useWindowManager();
+  const { windowOpacity, titlebarOpacity } = useUIPreference();
   const windowRef = useRef(null);
   const resizeRef = useRef(null);
   const [animState, setAnimState] = useState('opening');
@@ -244,9 +251,16 @@ export default function Window({ win, isActive, children }) {
       aria-hidden={minimized}
       onPointerDown={() => focusWindow(win.id)}
     >
-      <TitleBar windowId={win.id} isMaximized={maxed} isActive={isActive} title={win.title} onDragStart={handleDragStart} onDoubleClick={() => maximizeWindow(win.id)} onFullscreen={toggleFullscreen} />
+      <TitleBar windowId={win.id} isMaximized={maxed} isActive={isActive} title={win.title} onDragStart={handleDragStart} onDoubleClick={() => maximizeWindow(win.id)} onFullscreen={toggleFullscreen} titlebarOpacity={titlebarOpacity ?? 80} />
 
-      <div className="flex-1 overflow-hidden bg-white/20 dark:bg-black/55">
+      <div
+        className="flex-1 overflow-hidden"
+        style={{
+          background: document.documentElement.classList.contains('dark')
+            ? `rgba(0,0,0,${(windowOpacity ?? 55) / 100})`
+            : `rgba(255,255,255,${(windowOpacity ?? 55) / 100})`
+        }}
+      >
         {children}
       </div>
 

@@ -11,8 +11,8 @@ const TYPE_ICONS = {
 };
 
 const TYPE_COLORS = {
-  lesson: 'text-violet-400',
-  practice: 'text-purple-400',
+  lesson: 'text-white/40',
+  practice: 'text-white/40',
   essay: 'text-amber-400',
   unit_test: 'text-rose-400',
 };
@@ -69,7 +69,7 @@ export default function UnitAccordion({ unit, curriculumId }) {
                   {lesson.isCompleted ? (
                     <CheckCircle2 size={16} className="text-emerald-500 flex-shrink-0" />
                   ) : lesson.chatHistory?.length > 0 ? (
-                    <Circle size={16} className="text-violet-400 flex-shrink-0" />
+                    <Circle size={16} className="text-white/40 flex-shrink-0" />
                   ) : (
                     <TypeIcon size={16} className={`${typeColor} flex-shrink-0`} />
                   )}

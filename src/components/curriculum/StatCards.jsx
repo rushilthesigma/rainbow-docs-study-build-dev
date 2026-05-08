@@ -7,8 +7,8 @@ export default function StatCards({ curriculum }) {
   const generatedLessons = units.reduce((sum, u) => sum + (u.lessons || []).filter(l => l.content).length, 0);
 
   const stats = [
-    { label: 'Units', value: units.length, icon: Layers, iconClass: 'text-purple-500 bg-purple-50 dark:bg-purple-900/20' },
-    { label: 'Lessons', value: totalLessons, icon: BookOpen, iconClass: 'text-blue-500 bg-blue-50 dark:bg-blue-900/20' },
+    { label: 'Units', value: units.length, icon: Layers, iconClass: 'text-white/50 bg-white/[0.06]' },
+    { label: 'Lessons', value: totalLessons, icon: BookOpen, iconClass: 'text-white/50 bg-white/[0.06]' },
     { label: 'Completed', value: completedLessons, icon: CheckCircle2, iconClass: 'text-emerald-500 bg-emerald-50 dark:bg-emerald-900/20' },
     { label: 'Generated', value: generatedLessons, icon: Clock, iconClass: 'text-amber-500 bg-amber-50 dark:bg-amber-900/20' },
   ];

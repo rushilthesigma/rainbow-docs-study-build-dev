@@ -66,9 +66,9 @@ export default function TrailView({ curriculum, onOpenLesson }) {
   return (
     <div className="relative">
       {/* Top banner — progress summary */}
-      <div className="relative mb-6 rounded-2xl overflow-hidden border border-emerald-200 dark:border-emerald-800/60 bg-gradient-to-br from-emerald-50 via-white to-blue-50 dark:from-emerald-950/30 dark:via-[#161622] dark:to-blue-950/20 p-4">
+      <div className="relative mb-6 rounded-2xl overflow-hidden border border-white/[0.08] bg-white/[0.04] p-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-blue-600 flex items-center justify-center text-white shadow-sm">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center text-white shadow-sm">
             <Sparkles size={18} />
           </div>
           <div className="flex-1 min-w-0">
@@ -84,7 +84,7 @@ export default function TrailView({ curriculum, onOpenLesson }) {
         {/* Mini progress bar */}
         <div className="mt-3 h-1.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 overflow-hidden">
           <div
-            className="h-full bg-gradient-to-r from-emerald-500 to-blue-500 transition-all duration-500"
+            className="h-full bg-emerald-500 transition-all duration-500"
             style={{ width: totalNodes > 0 ? `${(completedCount / totalNodes) * 100}%` : '0%' }}
           />
         </div>
@@ -135,7 +135,7 @@ function UnitHeader({ unit }) {
   return (
     <div className="relative flex justify-center my-6 first:mt-0">
       <div className="relative px-3 py-1 bg-white dark:bg-[#0D0D14] z-10">
-        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-blue-600 dark:text-blue-400">
+        <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/60">
           {unit.title}
         </p>
       </div>
@@ -157,10 +157,10 @@ function TrailNode({ lesson, x, prevX, isCompleted, isCurrent, hasStarted, onOpe
     text = 'text-white';
     badgeBg = 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300';
   } else if (isCurrent) {
-    ring = 'ring-blue-500';
-    fill = 'bg-blue-500';
+    ring = 'ring-white/40';
+    fill = 'bg-white/20';
     text = 'text-white';
-    badgeBg = 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300';
+    badgeBg = 'bg-white/10 text-white/70';
   } else if (hasStarted) {
     ring = 'ring-amber-400';
     fill = 'bg-amber-100 dark:bg-amber-900/40';
@@ -203,10 +203,10 @@ function TrailNode({ lesson, x, prevX, isCompleted, isCurrent, hasStarted, onOpe
         onClick={onOpen}
         title={lesson.title}
         style={{ transform: `translateX(${x}px)`, width: size, height: size }}
-        className={`relative rounded-full ${fill} ${text} flex items-center justify-center transition-all hover:scale-105 ring-4 ${ring} ${isCurrent ? 'shadow-lg shadow-blue-500/30' : 'shadow-md'}`}
+        className={`relative rounded-full ${fill} ${text} flex items-center justify-center transition-all hover:scale-105 ring-4 ${ring} ${isCurrent ? 'shadow-lg shadow-white/10' : 'shadow-md'}`}
       >
         {isCurrent && (
-          <span className="absolute inset-0 rounded-full ring-4 ring-blue-400 animate-ping opacity-50" />
+          <span className="absolute inset-0 rounded-full ring-4 ring-white/30 animate-ping opacity-50" />
         )}
         {isCompleted ? (
           <Check size={isMilestone ? 32 : 24} strokeWidth={3} />
@@ -226,7 +226,7 @@ function TrailNode({ lesson, x, prevX, isCompleted, isCurrent, hasStarted, onOpe
         style={{ transform: `translateX(${x}px)` }}
         className="mt-1.5 max-w-[180px] text-center"
       >
-        <p className={`text-[11px] font-semibold leading-tight ${isCompleted ? 'text-gray-400 line-through' : isCurrent ? 'text-blue-600 dark:text-blue-400' : 'text-gray-700 dark:text-gray-200'} truncate`}>
+        <p className={`text-[11px] font-semibold leading-tight ${isCompleted ? 'text-gray-400 line-through' : isCurrent ? 'text-white/90' : 'text-gray-700 dark:text-gray-200'} truncate`}>
           {lesson.title}
         </p>
         <span className={`inline-block mt-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${badgeBg}`}>
