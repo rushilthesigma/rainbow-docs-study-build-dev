@@ -1,5 +1,4 @@
 import CurriculaApp from './apps/CurriculaApp';
-import DevForumApp from './apps/DevForumApp';
 import LessonsApp from './apps/LessonsApp';
 import NotesApp from './apps/NotesApp';
 import SocialApp from './apps/SocialApp';
@@ -22,7 +21,6 @@ const APP_COMPONENTS = {
   social: SocialApp,
   quizbowl: QuizBowlApp,
   admin: AdminApp,
-  devforum: DevForumApp,
   mobilepreview: MobilePreview,
   settings: SettingsPage,
 };
