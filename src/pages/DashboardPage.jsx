@@ -9,7 +9,7 @@ import StreakWidget from '../components/study/StreakWidget';
 import LoadingSpinner from '../components/shared/LoadingSpinner';
 import { useAuth } from '../context/AuthContext';
 
-const card = 'bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40]';
+const card = 'rounded-xl border border-white/[0.07] bg-white/[0.03] backdrop-blur-sm';
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -51,48 +51,67 @@ export default function DashboardPage() {
     <div className="max-w-4xl space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{greeting}, {firstName}</h1>
-          {profile && <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Level {profile.level} · {profile.xp}/{profile.xpToNextLevel} XP</p>}
+          <h1 className="text-[22px] font-bold text-white/90">{greeting}, {firstName}</h1>
+          {profile && <p className="text-[13px] text-white/40 mt-0.5">Level {profile.level} · {profile.xp}/{profile.xpToNextLevel} XP</p>}
         </div>
         <Button onClick={() => navigate('/new')}><Plus size={16} /> New Curriculum</Button>
       </div>
 
+      {/* Study mode quick input */}
       <div className={`${card} p-5`}>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <MessageSquare size={18} className="text-blue-500" />
-            <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">Study Mode</span>
+            <MessageSquare size={16} className="text-white/35" />
+            <span className="text-[13px] font-semibold text-white/75">Study Mode</span>
           </div>
-          <button onClick={() => navigate('/study')} className="flex items-center gap-1 text-xs text-blue-500 hover:text-blue-600">Open <ArrowRight size={12} /></button>
+          <button onClick={() => navigate('/study')} className="inline-flex items-center gap-1 text-[12px] text-white/40 hover:text-white/70 transition-colors">
+            Open <ArrowRight size={11} />
+          </button>
         </div>
         <form onSubmit={handleStudySubmit} className="flex gap-2">
-          <input value={studyInput} onChange={e => setStudyInput(e.target.value)} placeholder="What do you want to study?" className="flex-1 px-3 py-2 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-gray-50 dark:bg-[#0D0D14] text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 outline-none focus:ring-2 focus:ring-blue-500/40" />
-          <button type="submit" className="p-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"><Send size={16} /></button>
+          <input
+            value={studyInput}
+            onChange={e => setStudyInput(e.target.value)}
+            placeholder="What do you want to study?"
+            className="flex-1 px-3.5 py-2.5 rounded-xl border border-white/[0.08] bg-white/[0.04] text-[13px] text-white/85 placeholder:text-white/25 focus:outline-none focus:border-white/[0.20] focus:bg-white/[0.07] transition-colors"
+          />
+          <button
+            type="submit"
+            className="p-2.5 rounded-xl bg-white/[0.08] border border-white/[0.14] text-white/50 hover:bg-white/[0.14] hover:text-white/80 transition-colors"
+          >
+            <Send size={14} />
+          </button>
         </form>
       </div>
 
       <StreakWidget streaks={streaks} />
 
+      {/* Quick nav */}
       <div className="grid grid-cols-3 gap-3">
         {[
-          { to: '/goals', icon: Target, color: 'text-amber-500', label: `${goals.filter(g => g.status === 'active').length} Goals`, sub: 'Active' },
-          { to: '/flashcards', icon: Layers, color: 'text-purple-500', label: 'Flashcards', sub: 'Review due' },
-          { to: '/notes', icon: Brain, color: 'text-emerald-500', label: 'Notes', sub: 'Cornell notes' },
+          { to: '/goals', icon: Target, label: `${goals.filter(g => g.status === 'active').length} Goals`, sub: 'Active' },
+          { to: '/flashcards', icon: Layers, label: 'Flashcards', sub: 'Review due' },
+          { to: '/notes', icon: Brain, label: 'Notes', sub: 'Cornell notes' },
         ].map(item => (
-          <button key={item.to} onClick={() => navigate(item.to)} className={`${card} p-4 text-left hover:border-blue-300 dark:hover:border-blue-700 transition-colors`}>
-            <item.icon size={18} className={`${item.color} mb-2`} />
-            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{item.label}</p>
-            <p className="text-xs text-gray-400">{item.sub}</p>
+          <button
+            key={item.to}
+            onClick={() => navigate(item.to)}
+            className={`${card} p-4 text-left hover:border-white/[0.15] hover:bg-white/[0.06] transition-colors group`}
+          >
+            <item.icon size={17} className="text-white/30 mb-2.5 group-hover:text-white/50 transition-colors" />
+            <p className="text-[13px] font-semibold text-white/75">{item.label}</p>
+            <p className="text-[11px] text-white/30">{item.sub}</p>
           </button>
         ))}
       </div>
 
+      {/* Curricula */}
       <div>
-        <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">My Curricula</h2>
+        <h2 className="text-[13px] font-semibold text-white/55 mb-3">My Curricula</h2>
         {curricula.length === 0 ? (
           <div className={`${card} p-8 text-center`}>
-            <BookOpen size={24} className="text-blue-500 mx-auto mb-3" />
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">No curricula yet</p>
+            <BookOpen size={22} className="text-white/20 mx-auto mb-3" />
+            <p className="text-[13px] text-white/35 mb-4">No curricula yet</p>
             <Button onClick={() => navigate('/new')} size="sm"><Plus size={14} /> Create</Button>
           </div>
         ) : (

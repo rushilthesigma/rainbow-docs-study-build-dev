@@ -78,6 +78,20 @@ function InlineQuiz({ quizJson }) {
   );
 }
 
+function ThinkingDots() {
+  return (
+    <div className="flex items-center gap-[5px] py-0.5">
+      {[0, 160, 320].map(delay => (
+        <span
+          key={delay}
+          className="w-[7px] h-[7px] rounded-full bg-white/50"
+          style={{ animation: `typing-bounce 1.1s ease-in-out ${delay}ms infinite` }}
+        />
+      ))}
+    </div>
+  );
+}
+
 export default function ChatMessage({ message, isStreaming, canEdit = false, onEdit, onUserEdit, onAiInstruct }) {
   const isUser = message.role === 'user';
   const raw = message.content || '';
@@ -269,6 +283,7 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
           : 'bg-white/50 dark:bg-white/[0.08]'
       }`}>
         <div className={isError ? 'text-rose-700 dark:text-rose-200 text-sm' : 'text-gray-900 dark:text-white'}>
+        {isStreaming && !displayContent && <ThinkingDots />}
         {displayContent && (
           <div ref={markdownRef} className="prose prose-sm dark:prose-invert max-w-none prose-p:my-2 prose-headings:my-3 prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-code:bg-gray-200 dark:prose-code:bg-white/[0.08] prose-code:px-1 prose-code:rounded prose-pre:bg-gray-900 dark:prose-pre:bg-black/60 prose-pre:rounded-lg">
             <ReactMarkdown

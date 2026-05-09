@@ -1,4 +1,4 @@
-import { BookOpen, MessageSquare, FileText, Settings, Users, Shield, Zap, Lightbulb, Calculator } from 'lucide-react';
+import { BookOpen, MessageSquare, FileText, Settings, Users, Shield, Zap, Lightbulb, Calculator, Terminal } from 'lucide-react';
 
 // Mobile Preview was removed from the registry once App.jsx wired up
 // width-based mobile rendering — real phones get MobileShell directly,
@@ -16,6 +16,7 @@ const APP_REGISTRY = [
   { id: 'quizbowl', label: 'Quiz Bowl', icon: Zap, color: '#f59e0b', gradient: 'from-amber-400 to-orange-500' },
   // Debate is no longer a top-level app — it's a button inside Study Mode.
   { id: 'admin', label: 'Admin', icon: Shield, color: '#dc2626', gradient: 'from-red-500 to-red-700', adminOnly: true },
+  { id: 'devforum', label: 'Dev Forum', icon: Terminal, color: '#a855f7', gradient: 'from-violet-500 to-purple-700' },
   { id: 'settings', label: 'Settings', icon: Settings, color: '#6b7280', gradient: 'from-gray-400 to-gray-600' },
 ];
 

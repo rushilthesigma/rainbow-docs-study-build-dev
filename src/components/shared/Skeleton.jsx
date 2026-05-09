@@ -6,7 +6,7 @@
 // so the page reads as one synchronized "breathing" surface, not a
 // patchwork of differently-timed loaders.
 
-const baseLight = 'bg-gray-200 dark:bg-[#1e1e2e]';
+const baseLight = 'bg-white/[0.06]';
 
 export function SkeletonLine({ w = '100%', h = 12, className = '' }) {
   return (
@@ -34,7 +34,7 @@ export function SkeletonProse({ lines = 4, className = '' }) {
 // Drop-in for any list-item or card-list loading state.
 export function SkeletonCard({ lines = 2, className = '' }) {
   return (
-    <div className={`rounded-xl border border-gray-200 dark:border-[#2A2A40] p-4 space-y-3 ${className}`}>
+    <div className={`rounded-xl border border-white/[0.07] p-4 space-y-3 ${className}`}>
       <SkeletonLine w="40%" h={14} />
       <div className="space-y-2">
         {Array.from({ length: lines }).map((_, i) => (

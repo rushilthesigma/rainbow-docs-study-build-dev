@@ -97,7 +97,7 @@ export default function ChatContainer({
       {!stick && (
         <button
           onClick={scrollToBottom}
-          className="absolute right-3 bottom-20 z-10 flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-[11px] shadow-lg"
+          className="absolute right-3 bottom-20 z-10 flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/[0.13] hover:bg-white/[0.20] border border-white/[0.24] text-white/80 text-[11px] backdrop-blur-sm shadow-lg"
           title="Jump to latest"
         >
           <ArrowDown size={12} /> New

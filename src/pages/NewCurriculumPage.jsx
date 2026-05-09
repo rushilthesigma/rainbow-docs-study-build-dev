@@ -45,7 +45,6 @@ export default function NewCurriculumPage() {
     });
     navigate('/dashboard');
 
-    // Run generation in background
     try {
       const data = await generateCurriculum(settings);
       if (data.curriculum) {
@@ -54,7 +53,6 @@ export default function NewCurriculumPage() {
           status: 'done',
           onRestore: () => {
             removePanel(panelId);
-            // Use window.location since navigate may not be available
             window.location.href = `/curriculum/${data.curriculum.id}`;
           },
         });
@@ -70,20 +68,20 @@ export default function NewCurriculumPage() {
     <div className="max-w-2xl mx-auto">
       <button
         onClick={() => navigate('/dashboard')}
-        className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 mb-6 transition-colors"
+        className="flex items-center gap-2 text-[13px] text-white/35 hover:text-white/65 mb-6 transition-colors"
       >
         <ArrowLeft size={16} />
         Back to Dashboard
       </button>
 
-      <div className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-6">
+      <div className="rounded-xl border border-white/[0.07] bg-white/[0.03] backdrop-blur-sm p-6">
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-600">
-            <Sparkles size={20} />
+          <div className="w-10 h-10 rounded-lg bg-white/[0.06] border border-white/[0.09] flex items-center justify-center">
+            <Sparkles size={20} className="text-white/40" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-gray-900 dark:text-white">New Curriculum</h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400">AI will generate a structured learning path</p>
+            <h1 className="text-[20px] font-bold text-white/90">New Curriculum</h1>
+            <p className="text-[13px] text-white/40">AI will generate a structured learning path</p>
           </div>
         </div>
 
@@ -100,7 +98,7 @@ export default function NewCurriculumPage() {
           </div>
 
           {error && (
-            <div className="text-sm text-rose-500 bg-rose-50 dark:bg-rose-900/20 rounded-lg px-4 py-3">{error}</div>
+            <div className="text-[13px] text-rose-400 bg-rose-900/20 border border-rose-700/30 rounded-lg px-4 py-3">{error}</div>
           )}
 
           <Button type="submit" loading={loading} className="w-full" size="lg">
@@ -111,10 +109,10 @@ export default function NewCurriculumPage() {
       </div>
 
       <Modal open={showConfirm} onClose={() => setShowConfirm(false)} title="Generate Curriculum?">
-        <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">
-          This will create a full curriculum on <span className="font-semibold">"{settings.topic}"</span> with units, lessons, and assessments.
+        <p className="text-[13px] text-white/65 mb-2">
+          This will create a full curriculum on <span className="font-semibold text-white/85">"{settings.topic}"</span> with units, lessons, and assessments.
         </p>
-        <p className="text-xs text-gray-400 mb-5">
+        <p className="text-[12px] text-white/35 mb-5">
           Generation happens in the background — you can keep browsing while it works. You'll see a notification when it's ready.
         </p>
         <div className="flex gap-2">

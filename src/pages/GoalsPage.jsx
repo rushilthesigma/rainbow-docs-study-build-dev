@@ -9,6 +9,9 @@ import LoadingSpinner from '../components/shared/LoadingSpinner';
 import Modal from '../components/shared/Modal';
 import { InlineProgress } from '../components/shared/ProgressBar';
 
+const card = 'rounded-xl border border-white/[0.07] bg-white/[0.03] backdrop-blur-sm';
+const inputCls = 'w-full px-3 py-2 rounded-lg border border-white/[0.08] bg-white/[0.04] text-[13px] text-white/85 placeholder:text-white/25 outline-none focus:border-white/[0.20] focus:bg-white/[0.07] transition-colors resize-none';
+
 export default function GoalsPage() {
   const [goals, setGoals] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -52,8 +55,6 @@ export default function GoalsPage() {
     } catch (err) { console.error(err); }
   }
 
-  // AI drafts a goal title + description from the user's rough prompt, then
-  // the existing createGoal endpoint generates milestones.
   async function handleAIGenerate() {
     if (!aiPrompt.trim() || aiBusy) return;
     setAiBusy(true); setAiError(null);
@@ -70,7 +71,6 @@ export default function GoalsPage() {
         if (m) { try { parsed = JSON.parse(m[0]); } catch {} }
       }
       if (!parsed?.title) throw new Error('AI did not return a usable goal.');
-      // createGoal already generates milestones server-side.
       const data = await createGoal(parsed.title, parsed.description || '');
       setGoals(prev => [data.goal, ...prev]);
       setShowAI(false);
@@ -87,12 +87,12 @@ export default function GoalsPage() {
     <div className="max-w-3xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-amber-50 dark:bg-amber-900/20 flex items-center justify-center text-amber-500">
-            <Target size={20} />
+          <div className="w-10 h-10 rounded-lg bg-white/[0.06] border border-white/[0.09] flex items-center justify-center">
+            <Target size={20} className="text-white/40" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-gray-900 dark:text-white">Goals</h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400">{goals.filter(g => g.status === 'active').length} active</p>
+            <h1 className="text-[20px] font-bold text-white/90">Goals</h1>
+            <p className="text-[13px] text-white/40">{goals.filter(g => g.status === 'active').length} active</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -108,17 +108,17 @@ export default function GoalsPage() {
       <Modal open={showAI} onClose={() => { setShowAI(false); setAiError(null); }} title="Generate goal with AI">
         <div className="space-y-3">
           <div>
-            <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">What do you want to accomplish?</label>
+            <label className="text-[12px] font-medium text-white/40 mb-1.5 block">What do you want to accomplish?</label>
             <textarea
               value={aiPrompt}
               onChange={e => setAiPrompt(e.target.value)}
               rows={3}
               placeholder="e.g., Get better at calculus before finals in 6 weeks. Focus on integrals and series."
-              className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#0D0D14] text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-500/40 resize-none"
+              className={inputCls}
             />
           </div>
-          <p className="text-[11px] text-gray-400">AI will draft a title + description. Milestones are then generated automatically.</p>
-          {aiError && <p className="text-xs text-rose-500">{aiError}</p>}
+          <p className="text-[11px] text-white/30">AI will draft a title + description. Milestones are then generated automatically.</p>
+          {aiError && <p className="text-[12px] text-rose-400">{aiError}</p>}
           <div className="flex gap-2 justify-end">
             <Button size="sm" variant="ghost" onClick={() => { setShowAI(false); setAiError(null); }}>Cancel</Button>
             <Button size="sm" onClick={handleAIGenerate} disabled={!aiPrompt.trim() || aiBusy}>
@@ -129,55 +129,55 @@ export default function GoalsPage() {
       </Modal>
 
       {showForm && (
-        <form onSubmit={handleCreate} className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-5 mb-4 space-y-3">
+        <form onSubmit={handleCreate} className={`${card} p-5 mb-4 space-y-3`}>
           <Input label="What's your goal?" placeholder="e.g., Master Linear Algebra" value={title} onChange={e => setTitle(e.target.value)} required />
           <Input label="Description (optional)" placeholder="Add context..." value={description} onChange={e => setDescription(e.target.value)} />
           <div className="flex gap-2">
             <Button type="submit" loading={creating} size="sm"><Plus size={14} /> Create Goal</Button>
             <Button type="button" variant="ghost" size="sm" onClick={() => setShowForm(false)}>Cancel</Button>
           </div>
-          {creating && <p className="text-xs text-gray-400">AI is generating milestones...</p>}
+          {creating && <p className="text-[12px] text-white/35">AI is generating milestones...</p>}
         </form>
       )}
 
       {goals.length === 0 && !showForm ? (
-        <div className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-12 text-center">
-          <Target size={32} className="text-amber-500 mx-auto mb-3" />
-          <p className="text-gray-500 dark:text-gray-400 mb-4">No goals yet. Set a learning goal to track your progress.</p>
+        <div className={`${card} p-12 text-center`}>
+          <Target size={28} className="text-white/20 mx-auto mb-3" />
+          <p className="text-[13px] text-white/35 mb-4">No goals yet. Set a learning goal to track your progress.</p>
           <Button onClick={() => setShowForm(true)}><Plus size={16} /> Create Goal</Button>
         </div>
       ) : (
         <div className="space-y-3">
           {goals.map(goal => (
-            <div key={goal.id} className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-5">
+            <div key={goal.id} className={`${card} p-5`}>
               <div className="flex items-start justify-between mb-3">
                 <div>
-                  <h3 className="font-semibold text-gray-900 dark:text-gray-100">{goal.title}</h3>
-                  {goal.description && <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{goal.description}</p>}
+                  <h3 className="text-[14px] font-semibold text-white/85">{goal.title}</h3>
+                  {goal.description && <p className="text-[13px] text-white/45 mt-0.5">{goal.description}</p>}
                 </div>
                 <div className="flex items-center gap-2">
                   {goal.status === 'completed' && (
-                    <span className="text-xs font-medium text-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 rounded-full">Done</span>
+                    <span className="text-[12px] font-medium text-emerald-400 bg-emerald-900/20 px-2 py-0.5 rounded-full">Done</span>
                   )}
-                  <button onClick={() => handleDelete(goal.id)} className="text-gray-300 hover:text-rose-500 transition-colors">
+                  <button onClick={() => handleDelete(goal.id)} className="text-white/20 hover:text-rose-400 transition-colors">
                     <Trash2 size={14} />
                   </button>
                 </div>
               </div>
               <ProgressBar value={goal.progress || 0} max={100} size="sm" className="mb-3" />
-              <div className="space-y-1.5">
+              <div className="space-y-0.5">
                 {(goal.milestones || []).map(m => (
                   <button
                     key={m.id}
                     onClick={() => handleToggleMilestone(goal.id, m.id)}
-                    className="flex items-center gap-2.5 w-full text-left py-1.5 px-2 rounded-lg hover:bg-gray-50 dark:hover:bg-[#1e1e2e] transition-colors"
+                    className="flex items-center gap-2.5 w-full text-left py-1.5 px-2 rounded-lg hover:bg-white/[0.04] transition-colors"
                   >
                     {m.isCompleted ? (
                       <CheckCircle2 size={16} className="text-emerald-500 flex-shrink-0" />
                     ) : (
-                      <Circle size={16} className="text-gray-300 dark:text-gray-600 flex-shrink-0" />
+                      <Circle size={16} className="text-white/25 flex-shrink-0" />
                     )}
-                    <span className={`text-sm ${m.isCompleted ? 'text-gray-400 line-through' : 'text-gray-700 dark:text-gray-200'}`}>
+                    <span className={`text-[13px] ${m.isCompleted ? 'text-white/35 line-through' : 'text-white/75'}`}>
                       {m.title}
                     </span>
                   </button>

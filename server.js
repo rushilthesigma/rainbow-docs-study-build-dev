@@ -31,19 +31,20 @@ const PORT = process.env.PORT || 3002;
 
 // ===== Google Gemini =====
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+
 // As of 2026-04 the 3.x family is exposed as `-preview` variants.
 // Three tiers, all 1M-token input context. Pro/Flash use the Gemini 3
 // preview line; Flash Lite uses the GA 2.5-flash-lite (no Gemini-3 lite
 // SKU exists yet, so falling back to the most-current GA Lite model
 // avoids 404s on model resolution).
-//   Pro        — gemini-3.1-pro-preview     (deepest reasoning, slowest)
-//   Flash      — gemini-3-flash-preview     (balanced)
-//   Flash Lite — gemini-2.5-flash-lite      (fastest + cheapest, GA)
+//   Pro        — gemini-3.1-pro-preview      (deepest reasoning, slowest)
+//   Flash      — gemini-3.1-flash-preview    (balanced)
+//   Flash Lite — gemini-3.1-flash-lite-preview (fastest + cheapest)
 const GEMINI_PRO        = 'gemini-3.1-pro-preview';
-const GEMINI_FLASH      = 'gemini-3-flash-preview';
-const GEMINI_FLASH_LITE = 'gemini-2.5-flash-lite';
-const DEFAULT_MODEL = GEMINI_PRO;
-const FALLBACK_MODEL = GEMINI_FLASH;
+const GEMINI_FLASH      = 'gemini-3.1-flash-preview';
+const GEMINI_FLASH_LITE = 'gemini-3.1-flash-lite-preview';
+const DEFAULT_MODEL = GEMINI_FLASH_LITE;
+const FALLBACK_MODEL = GEMINI_FLASH_LITE;
 const resolveModel = (name) => name || DEFAULT_MODEL;
 // Cascade: Pro → Flash → Flash Lite (each fallback step trades quality for
 // availability + cost). Flash Lite has no further fallback.
@@ -156,8 +157,8 @@ const FREE_DAILY_MESSAGE_LIMIT = 20;
 const FREE_DAILY_QUIZBOWL_GAMES = 2;
 const FREE_WEEKLY_CURRICULA = 1;
 const FREE_WEEKLY_DEBATES = 1;
-const MODEL_PRO       = GEMINI_PRO;
-const MODEL_FREE      = GEMINI_FLASH;
+const MODEL_PRO        = GEMINI_FLASH_LITE;
+const MODEL_FREE       = GEMINI_FLASH_LITE;
 const MODEL_FLASH_LITE = GEMINI_FLASH_LITE;
 
 function todayKey() { return new Date().toISOString().slice(0, 10); }
@@ -179,16 +180,15 @@ function weekKey(d = new Date()) {
 function getPlan(/* user, email */) { return 'pro'; }
 function isPro(/* user, email */) { return true; }
 // Three tiers selectable via preferences.modelTier:
-//   'pro'        → gemini-3.1-pro-preview         (default — deepest reasoning)
-//   'flash'      → gemini-3-flash-preview         (balanced — faster, lower cost)
-//   'flash-lite' → gemini-3-flash-lite-preview    (fastest + cheapest)
+//   'pro'        → gemini-3.1-pro-preview          (default — deepest reasoning)
+//   'flash'      → gemini-3.1-flash-preview        (balanced — faster, lower cost)
+//   'flash-lite' → gemini-3.1-flash-lite-preview   (fastest + cheapest)
 // Free users always get FREE (Flash) regardless of preference.
 function modelForUser(user, email) {
-  if (!isPro(user, email)) return MODEL_FREE;
   const tier = user?.data?.preferences?.modelTier;
-  if (tier === 'flash-lite') return MODEL_FLASH_LITE;
-  if (tier === 'flash')      return MODEL_FREE;
-  return MODEL_PRO;
+  if (tier === 'pro')        return GEMINI_PRO;
+  if (tier === 'flash')      return GEMINI_FLASH;
+  return GEMINI_FLASH_LITE;
 }
 
 // Reset daily counters when the day rolls over, weekly counters on ISO week change
@@ -320,6 +320,7 @@ function createDefaultData() {
       dockPosition: 'bottom',
       onboarded: false,
       tourStep: null,
+      modelTier: 'flash-lite',
     },
     profile: { level: 1, xp: 0, xpToNextLevel: 100, strengths: [], weaknesses: [], topicScores: {} },
     goals: [],
@@ -1195,11 +1196,10 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
     saveUsers(usersC);
 
     const { system, user } = buildCurriculumPrompt(settings, sources);
-    // Flash for curriculum generation — the Pro model was aborting on
-    // long generations (`gemini-3.1-pro-preview` hits 60s timeouts even
-    // on simple structured-JSON outputs). Flash is ~3× faster and the
-    // schema is strict enough that quality is the same.
-    const result = await callGemini(system, [{ role: 'user', content: user }], GEMINI_FLASH, 8192, { jsonMode: true, temperature: 0.7 });
+    // Flash Lite for curriculum generation — fastest model, structured JSON
+    // output is schema-constrained so quality is the same as heavier models.
+    // 4096 tokens is plenty for 5-8 units × 4-7 lessons (title + description).
+    const result = await callGemini(system, [{ role: 'user', content: user }], GEMINI_FLASH_LITE, 4096, { jsonMode: true, temperature: 0.7 });
 
     if (!result.success) return res.status(500).json({ error: result.error });
 
@@ -1211,7 +1211,7 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
       const retryResult = await callGemini(
         'You MUST output ONLY a valid JSON object. No markdown, no explanation, no text before or after. Just raw JSON.',
         [{ role: 'user', content: `${user}\n\nIMPORTANT: Output ONLY the JSON object, nothing else.` }],
-        GEMINI_FLASH, 8192, { jsonMode: true, temperature: 0.3 }
+        GEMINI_FLASH_LITE, 4096, { jsonMode: true, temperature: 0.3 }
       );
       if (retryResult.success) {
         const retryText = retryResult.data.content?.[0]?.text || '';
@@ -1966,11 +1966,24 @@ async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOv
     return;
   }
 
+  // Inject true model identity at the TOP of the system prompt so it takes
+  // priority over the model's base training. Appending it at the end lets
+  // the fine-tune override it — putting it first prevents that.
+  const modelFriendlyName =
+    requestedModel === GEMINI_PRO   ? 'Gemini 3.1 Pro' :
+    requestedModel === GEMINI_FLASH ? 'Gemini 3.1 Flash' :
+                                      'Gemini 3.1 Flash Lite';
+  const modelTierShort =
+    requestedModel === GEMINI_PRO   ? 'Pro' :
+    requestedModel === GEMINI_FLASH ? 'Flash' :
+                                      'Flash Lite';
+  const modelDisclosure = `YOUR IDENTITY: You are ${modelFriendlyName}. If anyone asks what model, AI, or version you are — say "${modelFriendlyName}" or just "${modelTierShort}". That is your only correct answer. Do not say "I'm a large language model trained by Google." Do not deflect. Do not say you don't know. Just say "${modelFriendlyName}".\n\n`;
+
   // Source mode: sources are retrieved automatically via Google Search
   // grounding — tell the model it has the capability rather than browbeating
   // it into using the tool.
   const finalSystem = enableWebSearch
-    ? `${systemPrompt}
+    ? `${modelDisclosure}${systemPrompt}
 
 ---
 SOURCE MODE — NON-NEGOTIABLE RULES:
@@ -1979,7 +1992,7 @@ SOURCE MODE — NON-NEGOTIABLE RULES:
 - Cite the supporting source inline using [1], [2], … markers placed immediately after the claim they back. The UI renders the sources list below your message; do NOT write your own "Sources:" footer.
 - If search returns nothing useful, say so plainly and refuse to fabricate — do not fall back to model-only answers in source mode.
 - Write naturally and do not mention that you searched.`
-    : systemPrompt;
+    : `${modelDisclosure}${systemPrompt}`;
 
   const controller = new AbortController();
   // 5-minute hard cap. Long lessons with quiz blocks + grounded source mode
@@ -6357,10 +6370,38 @@ app.get('/api/admin/users/:uid', authMiddleware, adminMiddleware, (req, res) => 
       })),
       // Curriculum lesson chats (flattened)
       curriculumChats,
-      // Assessments
+      // Assessments (standalone quiz/essay tool)
       assessmentHistory: (u.data?.assessmentHistory || []).map(a => ({
         id: a.id, title: a.title, score: a.score, total: a.total, percentage: a.percentage, createdAt: a.createdAt,
       })),
+      // Lesson in-block quiz scores (standalone Lessons app)
+      lessonQuizResults: (u.data?.lessons || [])
+        .filter(l => (l.blocks || []).some(b => b.type === 'quiz' && b.score != null))
+        .map(l => ({
+          lessonId: l.id,
+          lessonTitle: l.title || l.topic || '(untitled)',
+          overallScore: l.score ?? null,
+          completedAt: l.lastActiveAt || l.createdAt || null,
+          quizBlocks: (l.blocks || [])
+            .filter(b => b.type === 'quiz' && b.score != null)
+            .map(b => ({ title: b.title || 'Quiz', score: b.score })),
+        })),
+      // Curriculum lesson in-block quiz scores
+      curriculumQuizResults: (u.data?.curricula || []).flatMap(c =>
+        (c.units || []).flatMap(unit =>
+          (unit.lessons || [])
+            .filter(l => (l.blocks || []).some(b => b.type === 'quiz' && b.score != null))
+            .map(l => ({
+              curriculumTitle: c.title,
+              unitTitle: unit.title,
+              lessonTitle: l.title || '(untitled)',
+              overallScore: l.score ?? null,
+              quizBlocks: (l.blocks || [])
+                .filter(b => b.type === 'quiz' && b.score != null)
+                .map(b => ({ title: b.title || 'Quiz', score: b.score })),
+            }))
+        )
+      ),
       // Streaks / daily activity
       studyStreaks: u.data?.studyStreaks || null,
     }
@@ -7476,6 +7517,120 @@ Return JSON:
     res.json({ verdict: parsed });
   } catch (e) {
     console.error('Singleplayer verdict failed:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ===== DEV FORUM (admin-only AI agent collaboration board) =====
+
+const DEVFORUM_FILE = join(__dirname, 'devforum.json');
+function loadForum() {
+  try { return JSON.parse(readFileSync(DEVFORUM_FILE, 'utf-8')); } catch { return { threads: [] }; }
+}
+function saveForum(data) { writeFileSync(DEVFORUM_FILE, JSON.stringify(data, null, 2)); }
+
+// List all threads
+app.get('/api/devforum/threads', authMiddleware, (req, res) => {
+  const forum = loadForum();
+  res.json({ threads: forum.threads });
+});
+
+// Create a new thread
+app.post('/api/devforum/threads', authMiddleware, adminMiddleware, (req, res) => {
+  const { agentId, title, body, tags, type } = req.body || {};
+  if (!agentId || !title || !body) return res.status(400).json({ error: 'agentId, title, body required' });
+  const VALID_TYPES = ['discussion', 'proposal', 'bug', 'note'];
+  const forum = loadForum();
+  const thread = {
+    id: `thread-${Date.now()}`,
+    title,
+    agentId,
+    type: VALID_TYPES.includes(type) ? type : 'discussion',
+    status: 'open',
+    createdAt: new Date().toISOString(),
+    tags: tags || [],
+    body,
+    replies: [],
+  };
+  forum.threads.unshift(thread);
+  saveForum(forum);
+  res.json({ thread });
+});
+
+// Update thread status
+app.patch('/api/devforum/threads/:id', authMiddleware, adminMiddleware, (req, res) => {
+  const { status } = req.body || {};
+  const VALID_STATUSES = ['open', 'accepted', 'rejected', 'done'];
+  if (!status || !VALID_STATUSES.includes(status)) return res.status(400).json({ error: `status must be one of: ${VALID_STATUSES.join(', ')}` });
+  const forum = loadForum();
+  const thread = forum.threads.find(t => t.id === req.params.id);
+  if (!thread) return res.status(404).json({ error: 'Thread not found' });
+  thread.status = status;
+  saveForum(forum);
+  res.json({ thread });
+});
+
+// Post a manual reply to a thread
+app.post('/api/devforum/threads/:id/reply', authMiddleware, adminMiddleware, (req, res) => {
+  const { agentId, body } = req.body || {};
+  if (!agentId || !body) return res.status(400).json({ error: 'agentId and body required' });
+  const forum = loadForum();
+  const thread = forum.threads.find(t => t.id === req.params.id);
+  if (!thread) return res.status(404).json({ error: 'Thread not found' });
+  const reply = {
+    id: `reply-${Date.now()}`,
+    agentId,
+    createdAt: new Date().toISOString(),
+    body,
+  };
+  thread.replies.push(reply);
+  saveForum(forum);
+  res.json({ reply });
+});
+
+// Trigger an AI agent to reply to a thread
+app.post('/api/devforum/threads/:id/ai-reply', authMiddleware, adminMiddleware, async (req, res) => {
+  const { agentId } = req.body || {};
+  const AGENT_PERSONAS = {
+    claude:   { name: 'Claude Sonnet 4.6',  emoji: '🧠', specialty: 'architecture, React, UI patterns, correctness' },
+    gemini:   { name: 'Gemini 2.0 Flash',   emoji: '⚡', specialty: 'performance, auditing, code review' },
+    gpt4o:    { name: 'GPT-4o',             emoji: '🤖', specialty: 'tooling, deps, types, API design' },
+    llama:    { name: 'Llama 3.3',          emoji: '🦙', specialty: 'pragmatic tradeoffs, shipping, simplicity' },
+    mistral:  { name: 'Mistral Large',      emoji: '💨', specialty: 'backend, infra, server patterns' },
+    deepseek: { name: 'DeepSeek-R1',        emoji: '🔵', specialty: 'backend systems, shared state, coupling analysis, refactoring' },
+  };
+  const agent = AGENT_PERSONAS[agentId];
+  if (!agent) return res.status(400).json({ error: 'Unknown agentId. Use: claude, gemini, gpt4o, llama, mistral, deepseek' });
+
+  const forum = loadForum();
+  const thread = forum.threads.find(t => t.id === req.params.id);
+  if (!thread) return res.status(404).json({ error: 'Thread not found' });
+
+  const context = [
+    `Thread: "${thread.title}"`,
+    `Original post by ${thread.agentId}:\n${thread.body}`,
+    thread.replies.length
+      ? `Replies so far:\n${thread.replies.map(r => `[${r.agentId}]: ${r.body}`).join('\n\n')}`
+      : 'No replies yet.',
+  ].join('\n\n');
+
+  const system = `You are ${agent.name} (${agent.emoji}), an AI agent collaborating on the Covalent AI learning platform codebase. Your specialty: ${agent.specialty}.\n\nYou are posting in a private dev forum used by AI agents to coordinate on building a better site. Replies are technical, grounded, concise. No filler. No "great question!" openers. Write like a senior engineer in a Slack thread — direct, specific, occasionally opinionated. You may agree, disagree, add caveats, or surface new concerns. Refer to actual files, components, or patterns if relevant.\n\nReply in plain text. No markdown headers. Keep it under 250 words.`;
+
+  try {
+    const result = await callGemini(system, [{ role: 'user', content: `Add your reply to this thread:\n\n${context}` }], GEMINI_FLASH, 1024, { temperature: 0.75 });
+    const text = result.data?.content?.[0]?.text?.trim();
+    if (!text) return res.status(500).json({ error: 'AI returned empty response' });
+    const reply = {
+      id: `reply-${Date.now()}`,
+      agentId,
+      createdAt: new Date().toISOString(),
+      body: text,
+    };
+    thread.replies.push(reply);
+    saveForum(forum);
+    res.json({ reply });
+  } catch (e) {
+    console.error('Dev forum AI reply error:', e);
     res.status(500).json({ error: e.message });
   }
 });

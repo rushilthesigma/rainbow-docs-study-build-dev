@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Shield, ArrowLeft, Ban, Trash2, User, BookOpen, FileText, Target, Layers,
   MessageSquare, Lightbulb, Trophy, CreditCard, Search, Crown, Calendar,
-  RefreshCw, ChevronRight, Zap,
+  RefreshCw, ChevronRight, Zap, ClipboardList,
 } from 'lucide-react';
 import {
   checkAdmin, listUsers, getUser, toggleBan, deleteUser,
@@ -341,6 +341,7 @@ function UserDetail({ user: u, onBack, onBan, onDelete, onGrantPro, onRevokePro,
           ['study',      `Study (${u.studySessions?.length || 0})`,      <MessageSquare size={12} key="s" />],
           ['lessons',    `Lessons (${u.standaloneLessons?.length || 0})`, <Lightbulb size={12} key="l" />],
           ['curriculum', `Curriculum (${u.curriculumChats?.length || 0})`, <BookOpen size={12} key="c" />],
+          ['quizzes',    'Quizzes',    <ClipboardList size={12} key="q" />],
           ['other',      'Other',      <Layers size={12} key="o" />],
           ['billing',    'Billing',    <CreditCard size={12} key="b" />],
         ].map(([k, label, icon]) => (
@@ -360,6 +361,7 @@ function UserDetail({ user: u, onBack, onBan, onDelete, onGrantPro, onRevokePro,
       {tab === 'study' && <StudyTab u={u} onOpen={(sid) => onOpenConv('study', { sid })} />}
       {tab === 'lessons' && <LessonsTab u={u} onOpen={(lid) => onOpenConv('lesson', { lid })} />}
       {tab === 'curriculum' && <CurriculumTab u={u} onOpen={(cid, lid) => onOpenConv('curriculum', { cid, lid })} />}
+      {tab === 'quizzes' && <QuizzesTab u={u} />}
       {tab === 'other' && <OtherTab u={u} />}
       {tab === 'billing' && <BillingTab u={u} />}
     </div>
@@ -385,6 +387,8 @@ function OverviewTab({ u }) {
       <Stat label="Flashcard decks" value={u.flashcardDecks?.length || 0} />
       <Stat label="Goals" value={u.goals?.length || 0} />
       <Stat label="Assessments" value={u.assessmentHistory?.length || 0} />
+      <Stat label="Lesson quizzes" value={u.lessonQuizResults?.length || 0} />
+      <Stat label="Curriculum quizzes" value={u.curriculumQuizResults?.length || 0} />
     </div>
   );
 }
@@ -434,6 +438,125 @@ function CurriculumTab({ u, onOpen }) {
           meta={`${c.curriculumTitle} / ${c.unitTitle} · ${c.messageCount} msgs${c.lastActiveAt ? ' · ' + new Date(c.lastActiveAt).toLocaleString() : ''}`}
         />
       ))}
+    </div>
+  );
+}
+
+function ScoreBadge({ score }) {
+  if (score == null) return <span className="text-white/25 text-[10px]">—</span>;
+  const color = score >= 80 ? 'text-emerald-400' : score >= 60 ? 'text-amber-400' : 'text-rose-400';
+  return <span className={`font-bold tabular-nums text-xs ${color}`}>{score}%</span>;
+}
+
+function QuizzesTab({ u }) {
+  const assessments = u.assessmentHistory || [];
+  const lessonQuizzes = u.lessonQuizResults || [];
+  const curriculumQuizzes = u.curriculumQuizResults || [];
+  const quizBowlGames = u.usage?.quizBowlGames ?? 0;
+
+  const hasAnything = assessments.length || lessonQuizzes.length || curriculumQuizzes.length || quizBowlGames;
+  if (!hasAnything) return <Empty msg="No quiz results yet" />;
+
+  return (
+    <div className="space-y-5">
+
+      {/* Assessment Tool */}
+      {assessments.length > 0 && (
+        <div>
+          <h3 className="text-[11px] font-semibold text-white/40 uppercase tracking-wider mb-2 flex items-center gap-1">
+            <Trophy size={10} /> Assessment Tool <span className="text-white/20 font-normal">({assessments.length})</span>
+          </h3>
+          <div className="space-y-1">
+            {assessments.map((a, i) => (
+              <div key={a.id || i} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.06]">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-white/80 truncate">{a.title}</p>
+                  {a.createdAt && <p className="text-[10px] text-white/30">{new Date(a.createdAt).toLocaleString()}</p>}
+                </div>
+                <div className="text-right flex-shrink-0">
+                  <ScoreBadge score={a.percentage} />
+                  <p className="text-[10px] text-white/30">{a.score}/{a.total}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Standalone lesson quizzes */}
+      {lessonQuizzes.length > 0 && (
+        <div>
+          <h3 className="text-[11px] font-semibold text-white/40 uppercase tracking-wider mb-2 flex items-center gap-1">
+            <Lightbulb size={10} /> Lesson Quizzes <span className="text-white/20 font-normal">({lessonQuizzes.length} lessons)</span>
+          </h3>
+          <div className="space-y-2">
+            {lessonQuizzes.map((l, i) => (
+              <div key={l.lessonId || i} className="rounded-lg bg-white/[0.03] border border-white/[0.06] overflow-hidden">
+                <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.05]">
+                  <p className="flex-1 text-xs font-medium text-white/80 truncate">{l.lessonTitle}</p>
+                  <div className="flex-shrink-0 text-right">
+                    <ScoreBadge score={l.overallScore} />
+                    <p className="text-[10px] text-white/25">overall</p>
+                  </div>
+                </div>
+                <div className="px-3 py-1.5 space-y-1">
+                  {l.quizBlocks.map((b, j) => (
+                    <div key={j} className="flex items-center justify-between text-[11px]">
+                      <span className="text-white/45 truncate">{b.title}</span>
+                      <ScoreBadge score={b.score} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Curriculum lesson quizzes */}
+      {curriculumQuizzes.length > 0 && (
+        <div>
+          <h3 className="text-[11px] font-semibold text-white/40 uppercase tracking-wider mb-2 flex items-center gap-1">
+            <BookOpen size={10} /> Curriculum Quizzes <span className="text-white/20 font-normal">({curriculumQuizzes.length} lessons)</span>
+          </h3>
+          <div className="space-y-2">
+            {curriculumQuizzes.map((l, i) => (
+              <div key={i} className="rounded-lg bg-white/[0.03] border border-white/[0.06] overflow-hidden">
+                <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.05]">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-white/80 truncate">{l.lessonTitle}</p>
+                    <p className="text-[10px] text-white/30 truncate">{l.curriculumTitle} · {l.unitTitle}</p>
+                  </div>
+                  <div className="flex-shrink-0 text-right">
+                    <ScoreBadge score={l.overallScore} />
+                    <p className="text-[10px] text-white/25">overall</p>
+                  </div>
+                </div>
+                <div className="px-3 py-1.5 space-y-1">
+                  {l.quizBlocks.map((b, j) => (
+                    <div key={j} className="flex items-center justify-between text-[11px]">
+                      <span className="text-white/45 truncate">{b.title}</span>
+                      <ScoreBadge score={b.score} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Quiz Bowl */}
+      {quizBowlGames > 0 && (
+        <div>
+          <h3 className="text-[11px] font-semibold text-white/40 uppercase tracking-wider mb-2 flex items-center gap-1">
+            <Zap size={10} /> Quiz Bowl
+          </h3>
+          <div className="px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.06]">
+            <p className="text-xs text-white/75">{quizBowlGames} game{quizBowlGames !== 1 ? 's' : ''} played today</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

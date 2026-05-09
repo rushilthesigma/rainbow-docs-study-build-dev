@@ -12,26 +12,26 @@ export default function MinimizedPills() {
       {minimized.map(panel => (
         <div
           key={panel.id}
-          className="flex items-center gap-2 bg-white dark:bg-[#161622] border border-gray-200 dark:border-[#2A2A40] rounded-xl shadow-lg px-4 py-2.5 cursor-pointer hover:shadow-xl transition-shadow"
+          className="flex items-center gap-2 bg-white/[0.10] border border-white/[0.18] backdrop-blur-xl rounded-xl shadow-[0_4px_24px_rgba(0,0,0,0.3)] px-4 py-2.5 cursor-pointer hover:bg-white/[0.15] transition-colors"
           onClick={() => {
             if (panel.onRestore) panel.onRestore();
             else restorePanel(panel.id);
           }}
         >
           {panel.status === 'loading' ? (
-            <Loader2 size={16} className="text-blue-500 animate-spin" />
+            <Loader2 size={16} className="text-white/50 animate-spin" />
           ) : panel.status === 'done' ? (
-            <CheckCircle2 size={16} className="text-emerald-500" />
+            <CheckCircle2 size={16} className="text-emerald-400" />
           ) : (
-            <Maximize2 size={14} className="text-gray-400" />
+            <Maximize2 size={14} className="text-white/35" />
           )}
-          <span className="text-sm font-medium text-gray-700 dark:text-gray-200">{panel.title}</span>
+          <span className="text-[13px] font-semibold text-white/80">{panel.title}</span>
           {panel.status === 'done' && (
-            <span className="text-xs text-emerald-500 font-medium">Done!</span>
+            <span className="text-[11px] text-emerald-400 font-semibold">Done!</span>
           )}
           <button
             onClick={(e) => { e.stopPropagation(); removePanel(panel.id); }}
-            className="ml-1 text-gray-300 hover:text-gray-500 dark:hover:text-gray-400"
+            className="ml-1 text-white/25 hover:text-white/55 transition-colors"
           >
             <X size={14} />
           </button>
