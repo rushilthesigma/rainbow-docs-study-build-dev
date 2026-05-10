@@ -785,40 +785,441 @@ Return JSON exactly in this shape:
 }
 
 // ===== SLIDESHOWS =====
-// Generate a clear, no-frills deck on any topic. Title slide → content
-// slides → summary. We don't push the model toward stat slides, made-up
-// quotes, or stylistic flourishes — those tend to produce confidently
-// wrong numbers and fabricated attributions. Reliability over flair.
-export function buildSlideshowPrompt({ topic, slideCount = 8, difficulty = 'intermediate', style = 'educational' }) {
+// Builds a deck with the same structural restraint Google Slides templates show:
+// one strong idea per slide, real typographic hierarchy, an editorial mix of
+// layout archetypes — title, section dividers, agenda, cards, numbered steps,
+// quotes, big stats, comparisons. The renderer reads these layouts and turns
+// them into absolute-positioned, theme-styled compositions.
+export function buildSlideshowPrompt({ topic, slideCount = 8, difficulty = 'intermediate', style = 'educational', template, customInfo, sourceText }) {
   const count = Math.max(5, Math.min(20, Number(slideCount) || 8));
 
+  // Style → tone hint passed into the system prompt. Picked to feel like
+  // distinct Google Slides templates: editorial magazine, corporate clean,
+  // narrative storyteller, expressive creative.
+  const styleHints = {
+    educational:  { palette: 'newsprint', font: 'editorial', voice: 'precise teacher — concrete, build intuition, show worked examples in prose.' },
+    professional: { palette: 'ink',       font: 'geometric', voice: 'McKinsey-style operator — claims first, evidence second, no flourish.' },
+    story:        { palette: 'sun',       font: 'humanist',  voice: 'narrative arc — set scene, build tension, land the insight.' },
+    creative:     { palette: 'plum',      font: 'modern',    voice: 'expressive editorial — surprising metaphors, vivid concrete details.' },
+  };
+  const hint = styleHints[style] || styleHints.educational;
+
   return {
-    system: `You write straightforward presentation decks. Plain copy, accurate content, no flair. Output ONLY valid JSON — no markdown, no fences.
+    system: `You write dense, information-rich presentation decks at the level of a NotebookLM Video Overview — the kind a podcast-host scholar would build to teach a curious audience. Every slide must teach something specific and genuinely useful. PRIORITY ORDER: (1) substantive, surprising-but-true content, (2) clarity and structure, (3) visual appeal. Never sacrifice content for aesthetics. A slide with 6 full-sentence bullets packed with concrete facts beats a beautiful slide with 3-word labels. Output ONLY valid JSON, no markdown fences, no commentary.
+
+# Voice — NotebookLM podcast-host energy
+Write like the host of a deeply-researched explainer podcast: warm, intellectually curious, generous with concrete details. NOT a corporate slide deck. Lead with the surprising specifics — the unusual date, the counterintuitive ratio, the named person, the real quote — and let those carry the slide. Avoid hedge words ("often", "many", "some experts"). Make claims specific or don't make them.
+
+# Hard rules — break these and the renderer breaks
+1. Titles ≤ 10 words. Eyebrow ≤ 4 words, ALL CAPS. Subtitle ≤ 18 words.
+2. Body text and bullet text MAY use **word** to bold key terms (double asterisks around a word or short phrase). This is the ONLY markdown allowed. No other markdown.
+3. Bullets live ONLY in the "bullets" array (or "items.body" for cards/numbered/compare). Body fields are flowing prose sentences. No leading hyphens or bullet characters in body.
+4. Pick the layout that the content actually wants.
+5. BODY TEXT: Every "content", "bigText", "twoCol", and "split" slide MUST have a non-empty body field. 4–6 substantive sentences minimum. Never leave body empty for these layouts.
+6. BULLETS: Every "bullets" slide must have 5–8 bullets. Each bullet is a COMPLETE SENTENCE of 15–30 words that actually explains the point — not a short label. Use **bold** to highlight the key term at the start of each bullet.
+7. ITEMS (agenda/cards/numbered/compare): Every item.body must be 2–3 complete sentences explaining the point in depth, not a short phrase.
+8. SUMMARY: Final summary slide bullets = 4–6 full-sentence takeaways, each 15–25 words.
+9. NOTES — THIS DRIVES THE AUDIO NARRATION. Every slide's "notes" field is the spoken script played as audio narration. Write it like a podcast host introducing the slide: 2–4 sentences, 35–70 words, conversational, with one piece of context or color the slide itself does NOT contain. NEVER recite the slide verbatim. Notes that just rephrase the title are a failure. Write so it sounds natural read aloud — contractions are fine, parentheticals are fine, an opening like "What's wild is…" or "The thing most people miss…" is fine. Avoid stage directions like "(pause)" or "[click next]".
+
+# Layout catalogue (use each for its SPECIFIC job)
+• "title"      — deck opener. title = deck name. subtitle = one-sentence framing. ALWAYS provide imagePrompt.
+• "agenda"     — what the deck will cover. items = 3–6 sections, each {label, body: 2-sentence description}.
+• "section"    — chapter-break divider. eyebrow = "PART 02". title = section name (≤ 5 words). subtitle = teaser sentence.
+• "hero"       — one bold declaration. title = the statement (≤ 12 words). Use "accent" on ONE key word.
+• "content"    — workhorse slide. title ≤ 10 words. body = 4–6 substantive prose sentences. Use **bold** on key terms.
+• "bullets"    — list of detailed points. title ≤ 8 words. bullets = 5–8 complete sentences, each starting with a **bold** key term.
+• "cards"      — 3 parallel concepts. items = exactly 3, each {label (≤ 3 words), body: 2-sentence explanation}.
+• "numbered"   — sequential steps. items = 3–5, each {label, body: 2-sentence explanation of that step}.
+• "compare"    — two ideas contrasted. items = exactly 2, each {label, body: 3 sentences making the case}.
+• "twoCol"     — title top, dense prose split across two columns. body = 5–7 prose sentences.
+• "bigText"    — one key paragraph. body = 4–5 vivid sentences that build an argument.
+• "stat"       — one real figure. body = the figure only. subtitle = context sentence. Only use when you know a real number.
+• "quote"      — real attributed quote. title = quote verbatim. subtitle = attribution. Only use a real quote.
+• "summary"    — closing recap. bullets = 4–6 complete-sentence takeaways.
+
+IMAGE-FORWARD LAYOUTS (require imagePrompt):
+• "imageHero"  — full-bleed image, title overlaid. Use for the most visual moment.
+• "imageRight" — text left half, image right 45%. Use when an image illustrates the concept.
+• "imageLeft"  — image left 45%, text right.
+• "imageFull"  — edge-to-edge image with caption block.
+
+# Composition for a ${count}-slide deck
+- Slide 1 = "title". Last slide = "summary".
+- 1–2 "section" dividers if count ≥ 8.
+- At least 6 distinct layout types across the deck. No two consecutive slides may share the same layout.
+- Fabrication ban: only use "stat" and "quote" when you know a real fact. If unsure, use "content" or "bullets".
+- IMAGES: you decide. Add an imagePrompt (and use an image-forward layout) whenever a real photo or diagram would genuinely help the audience understand or feel the content — a key person, a place, a physical process, a striking visual moment. Skip it when the content is abstract, data-driven, or purely conceptual. The "title" slide ALWAYS has an imagePrompt regardless. Never add imagePrompt just to fill a quota.
+- Match layout to content: data → "stat"; a process → "numbered"; two options → "compare"; three pillars → "cards"; dense explanation → "content" or "twoCol"; a bold claim → "hero"; a list of facts → "bullets". Don't default everything to bullets — pick the shape that makes the content clearest.
+
+# Per-slide fields
+- eyebrow   — ALL CAPS kicker, ≤ 4 words. Optional.
+- accent    — single word from the title to highlight in accent color. Optional.
+- subtitle  — supporting clause ≤ 18 words.
+- body      — flowing prose with **bold** on key terms. REQUIRED for content/bigText/twoCol/split/imageRight/imageLeft.
+- bullets   — array of complete-sentence strings with **bold** key terms. Used by bullets/summary.
+- items     — array of {label, body}. Used by agenda/cards/numbered/compare.
+- notes     — REQUIRED. Spoken narration script (35–70 words, 2–4 sentences). NotebookLM podcast-host voice. Adds context, color, or a connecting thought NOT on the slide. Sounds natural read aloud. Never a recap of slide text.
+- imagePrompt — LITERAL, PHYSICAL description of the image. NOT abstract. Required for image-forward layouts.
+
+# Writing quality
+- Titles SPECIFIC and VIVID. BAD: "The Impact of Climate Change". GOOD: "Permafrost Thaw Outpaces Climate Models by 40 Years."
+- Concrete > abstract. Use named entities, numbers, dates, places. "Three forces" → "Economics, policy, and consumer defaults". "Many scientists" → "Marie Curie, Linus Pauling, and Frederick Sanger".
+- Bullets: start with **bold key term** then explain it in a full sentence. E.g. "**Neuroplasticity** refers to the brain's ability to reorganize synaptic connections in response to learning, injury, or environmental change."
+- Body: substantive — imagine a professor explaining this to graduate students. Dense with information.
+- Notes are the AUDIO NARRATION. Write them so they sound great spoken aloud. Lead with a hook clause ("Here's what's striking…", "The detail most people miss…", "When this first happened…"). Add ONE piece of color the slide itself does not show — a date, an anecdote, a comparison.
+- Consistency: facts on the slide and in the narration must match. Never invent statistics. If a number isn't truly known, don't put one — describe the magnitude instead.
+
+# Voice & palette
+Voice for this deck: ${hint.voice}
+Depth: ${difficulty}. Style: ${style}.
+
+Choose palette AND font based on the TOPIC first, style second. Match mood to subject matter:
+• ink       — corporate, tech, SaaS, clean professional (dark accent: deep blue)
+• newsprint — editorial, journalism, literature, history, academic (warm cream)
+• ocean     — science, data, finance, aerospace, anything blue/precise
+• forest    — nature, sustainability, health, agriculture, outdoors
+• plum      — arts, luxury, beauty, fashion, premium brands
+• coral     — sports, entertainment, marketing, bold consumer brands
+• mono      — design, architecture, minimalism, systematic/technical
+• sun       — startup culture, optimism, personal stories, education (warm)
+• midnight  — mystery, space, AI/futurism, premium dark products
+• slate     — consulting, government, serious analysis, B2B
+• rose      — wellness, relationships, social, personal development
+• sage      — environment, calm education, wellness, organic products
+
+Font guide:
+• editorial  — serif gravitas; history, literature, opinion, essays
+• modern     — clean sans; tech, business, data-forward
+• humanist   — warm serif; education, health, personal stories
+• geometric  — sharp sans; design, architecture, systems, precision`,
+
+    user: `Topic: "${topic}". Produce exactly ${count} slides.${template ? `\nStructure template: follow the "${template}" arc (e.g. for "pitch": problem → solution → market → traction → ask; for "lesson": objective → concept → worked example → activity → quiz; for "bookreport": summary → themes → key characters/figures → your verdict; for "project": overview → goals → timeline → roles → next steps; for "essay": hook → thesis → argument blocks → counter → conclusion; for "research": question → method → findings → implications → further work; for "how-to": goal → prerequisites → numbered steps → common mistakes → recap). Adapt the arc to the topic but keep the narrative spine.` : ''}${sourceText ? `\n\nSOURCE MATERIAL (the user provided this — use it as the primary reference for facts, quotes, structure, and key points. Prefer language and framing from this material over generic knowledge):\n"""\n${sourceText}\n"""` : ''}${customInfo ? `\nAdditional instructions from the user (FOLLOW THESE):\n${customInfo}` : ''}
+
+Return EXACTLY this JSON shape — no extra keys at the top level, no commentary:
+{
+  "title": "Deck title (≤ 8 words)",
+  "subtitle": "One-sentence framing of the entire deck (≤ 16 words)",
+  "palette": "<REQUIRED — pick the palette whose mood best matches the topic subject matter, NOT your style default. Options: ink | newsprint | ocean | forest | plum | coral | mono | sun | midnight | slate | rose | sage>",
+  "font": "<choose one: editorial | modern | humanist | geometric>",
+  "slides": [
+    {
+      "id": "s1",
+      "layout": "title",
+      "eyebrow": "OPTIONAL KICKER",
+      "title": "...",
+      "subtitle": "One-sentence framing.",
+      "body": "",
+      "bullets": [],
+      "items": [],
+      "accent": "",
+      "imagePrompt": "Literal description of a fitting cover image.",
+      "notes": "Welcome in. Today we're walking through something most coverage gets wrong — the part where the actual mechanics turn out to be way weirder than the headline. Stick around for the third section; that's where it gets fun."
+    },
+    {
+      "id": "s2",
+      "layout": "agenda",
+      "title": "Agenda",
+      "items": [
+        { "label": "Why now", "body": "Three structural forces converged to make this moment different from every prior false start. Understanding them separates the teams that will capture value from those that won't." },
+        { "label": "What changed", "body": "The dominant paradigm shifted on three dimensions simultaneously — economics, policy, and consumer behavior — in a way that compounds rather than cancels. We'll walk through each in sequence." },
+        { "label": "What it means", "body": "The organizations that thrive in the next decade are already running the playbook we'll outline. We'll close with three concrete moves your team can execute this quarter." }
+      ],
+      "notes": "Quick map of where we're going. The 'why now' is the big one — once you see those three forces lining up, the rest of the deck basically writes itself, and you stop wondering whether this is hype."
+    },
+    {
+      "id": "s3",
+      "layout": "imageHero",
+      "eyebrow": "WHY NOW",
+      "title": "The shift is structural, not cyclical.",
+      "imagePrompt": "Wide-angle photograph of a coastal city at dusk seen from a hillside, lit windows scattered across skyscrapers, distant ocean horizon, photorealistic, soft golden-hour lighting.",
+      "notes": "Picture this kind of skyline at twilight — it's the metaphor I keep coming back to. Each lit window is an institution that flipped its default this decade, and once enough flip, the prior baseline isn't recoverable."
+    },
+    {
+      "id": "s4",
+      "layout": "hero",
+      "title": "One declaration the audience remembers.",
+      "accent": "remembers",
+      "notes": "If you only take one thing from this whole deck, take this. Everything else is supporting evidence for the line you just heard, and we'll spend the next twelve slides earning the right to say it."
+    },
+    {
+      "id": "s5",
+      "layout": "imageRight",
+      "title": "What the curve actually looks like",
+      "body": "Adoption stayed below 5% for almost a decade — then climbed to 40% in three years. Most teams underestimated the slope because they only saw the y-intercept.",
+      "imagePrompt": "Photograph of an adoption-curve chart drawn on a chalkboard with chalk, low-key lighting, professorial setting.",
+      "notes": "Here's the detail most analysts miss. People look at year three and call it linear; the actual function is closer to a logistic, and you've already crossed the inflection by the time the chart looks dramatic."
+    },
+    {
+      "id": "s6",
+      "layout": "cards",
+      "title": "Three forces driving the shift",
+      "items": [
+        { "label": "Economics", "body": "Cost curves crossed the viability threshold in 2014, making deployment cheaper than the incumbent alternative for the first time at scale. Every year since, the gap has widened by roughly 18% annually." },
+        { "label": "Policy",    "body": "Federal subsidies and international accords reached a tipping point in 2018, creating regulatory certainty that unlocked institutional capital previously sitting on the sidelines. Procurement rules changed first; consumer incentives followed." },
+        { "label": "Adoption",  "body": "Consumer behavior crossed the chasm in 2022 when mainstream buyers — not just early adopters — began defaulting to the new option without requiring persuasion. That shift in default preference is structural and unlikely to reverse." }
+      ],
+      "notes": "Three forces, and the order matters. The economics broke first; the policy followed because the unit cost made subsidies politically defensible; and only then did consumer defaults flip. Most analyses get the causal chain backward."
+    },
+    {
+      "id": "s5",
+      "layout": "numbered",
+      "title": "How the cycle works",
+      "items": [
+        { "label": "Trigger",  "body": "An external shock — a price collapse, a regulatory change, or a high-profile failure — raises the cost of inaction past the cost of switching. This is the moment most incumbents are watching for, which means they're already too late." },
+        { "label": "Feedback", "body": "Early adopters generate visible results faster than the mainstream expected, compressing the perceived risk of following. Social proof spreads asymmetrically: successes get amplified; quiet failures get absorbed quietly." },
+        { "label": "Cascade",  "body": "Mainstream actors update their defaults — procurement policies, hiring criteria, supplier contracts — and the volume effect drives down unit costs for everyone, locking in the new equilibrium. Reverting becomes economically irrational." }
+      ],
+      "notes": "This three-step pattern shows up across diffusion research going back to Everett Rogers in the sixties. What's new isn't the structure — it's how brutally fast the cascade phase runs once feedback compresses."
+    },
+    {
+      "id": "s6",
+      "layout": "compare",
+      "title": "Old model vs. new model",
+      "items": [
+        { "label": "Before", "body": "Centralized gatekeepers set the agenda, controlled information flow, and extracted margin at every handoff. Innovation was slow and legible — you could see it coming years in advance. The advantage belonged to scale and incumbency, not speed." },
+        { "label": "After",  "body": "Distributed networks surface signal in real time, compress the distance between insight and action, and route around centralized bottlenecks by default. The advantage now belongs to whoever can synthesize new information fastest and update their model before competitors do." }
+      ],
+      "notes": "The 'before' column isn't gone — it's just no longer where the upside lives. Plenty of incumbents will keep printing money on the old model for another decade; they just won't be the ones writing the next chapter."
+    },
+    {
+      "id": "s7",
+      "layout": "stat",
+      "title": "Annual growth in deployments",
+      "body": "47%",
+      "subtitle": "compounded across the past five years",
+      "notes": "Forty-seven percent compounded for five years means the install base is roughly seven times what it was in 2020. That's the number that tells you we're past the early-adopter phase, even though most coverage is still framing it that way."
+    },
+    {
+      "id": "s8",
+      "layout": "bullets",
+      "title": "Why the old approach broke",
+      "bullets": [
+        "**Demand saturation** occurred when the volume of requests exceeded what the centralized model could process without degrading response quality or introducing unacceptable latency at the edge.",
+        "**Coordination overhead** grew super-linearly with each new participant added to the network, consuming an ever-larger fraction of operational capacity on synchronization rather than value creation.",
+        "**Feedback dampening** meant that signal from the edge took weeks to reach decision-makers at the center, arriving stale and stripped of the contextual nuance needed to act on it correctly.",
+        "**Incentive misalignment** between platform owners and participants created adversarial dynamics that eroded trust and diverted engineering resources toward enforcement rather than expansion.",
+        "**Single points of failure** concentrated systemic risk in nodes that had been optimized for throughput, not resilience, making cascading failures both more likely and harder to contain once they started."
+      ],
+      "notes": "Notice none of these are 'bad people made bad decisions.' Each one is a structural failure mode that any centralized system runs into eventually — which is why the same five symptoms keep showing up across totally unrelated industries."
+    },
+    {
+      "id": "s9",
+      "layout": "section",
+      "eyebrow": "PART 02",
+      "title": "What to do about it",
+      "subtitle": "Three moves you can make this quarter.",
+      "notes": "Okay — diagnosis done. Now the prescription. Three concrete moves, ordered by leverage, and the third one is going to feel uncomfortable. Stay with me through it."
+    },
+    {
+      "id": "s10",
+      "layout": "bigText",
+      "title": "The new operating principle",
+      "body": "Optimise for the speed at which you can change your mind. The team that revises priors fastest captures the surplus. Everyone else trades on a stale map.",
+      "notes": "If you remember nothing else, remember this line. It is, mathematically, the only operating principle that survives in a high-signal environment, and it's the thing every successful playbook in the last decade quietly converges to."
+    },
+    {
+      "id": "sN",
+      "layout": "summary",
+      "title": "Key takeaways",
+      "bullets": [
+        "**The shift is structural, not cyclical** — the forces driving it (economics, policy, consumer defaults) have now compounded past the point of reversal, meaning organizations must adapt rather than wait.",
+        "**Speed of revision beats accuracy of plan** — in a high-signal environment, the team that updates its model fastest captures the surplus; the team that defends its prior model loses it to whoever revised first.",
+        "**Coordination costs are the hidden tax** — most organizations underestimate how much of their capacity is consumed by synchronization overhead, which grows super-linearly as team and stakeholder count increases.",
+        "**Build the feedback loop before you build the strategy** — a strategy without a mechanism for detecting when it's wrong is a bet, not a plan; instrument your assumptions from day one.",
+        "**The next 18 months are disproportionately high-leverage** — the window before mainstream lock-in is the moment when architecture decisions, supplier relationships, and talent acquisition compound the most."
+      ],
+      "notes": "That's the deck. If one of those five lines made you mentally argue, that's the one to go reread tomorrow morning — friction is signal that your prior is doing real work, and that's exactly where the upside hides."
+    }
+  ]
+}
+
+The example shows the SHAPE, not the topic — your slides must be about "${topic}". Use whichever layouts genuinely fit the content. Omit fields you don't use; never set them to placeholder strings.`,
+  };
+}
+
+// ===== SLIDESHOW: BESPOKE PER-SLIDE HTML/CSS DESIGN =====
+// Gemini codes one slide at a time as a complete HTML/CSS fragment — like
+// a web designer building a custom landing page section. Each slide is
+// unique: typography, composition, color use, decorative SVG, all chosen
+// for THIS slide's content. The renderer drops the HTML into a sandboxed
+// container at a fixed 1280×720 reference size and scales it to fit.
+//
+// Why this beats templates: a template makes every "title slide" look the
+// same. Bespoke design lets Gemini emphasise different things on different
+// slides — a hero quote can use enormous serif, a stat can use a giant
+// numerical display, an agenda can use a numbered grid, all without us
+// pre-coding each variation.
+
+export function buildSlideHtmlPrompt({ slide, deck, theme, font, slideIndex, totalSlides }) {
+  const isLight = theme.mode === 'light';
+  return {
+    system: `You are a senior presentation designer building ONE slide of a deck. You write COMPLETE HTML + CSS. Your reference standard is NotebookLM Video Overviews, Bloomberg Graphics, the New York Times Magazine, and Pentagram — each slide is a hand-designed editorial composition, not a template fill.
+
+# Output contract
+Return a complete HTML fragment — nothing else. No markdown fences, no commentary. Start with a single <style> block, then a single <div class="slide"> root.
+
+# Hard rules
+1. Reference frame: the slide renders in a 1280×720 box (16:9). Use absolute positioning + percentage units OR CSS grid/flexbox with fixed sizes — your call. Layouts MUST fit the box; nothing should clip.
+2. Self-contained: no external CSS, no <link>, no <script>, no JavaScript anywhere, no on* attributes. Inline <style> in the fragment is fine.
+3. Scope every CSS rule with a class prefix (e.g. .s${slideIndex}-title) so it never collides with other slides.
+4. Fonts: use the families passed below — they're already loaded on the page. Do NOT @import.
+5. Image: if your design uses one, use exactly: <img src="{{IMAGE}}" alt="" class="..."> — the renderer substitutes {{IMAGE}} with a real URL when one is generated. The image is photographic. If you don't want an image, omit it (no placeholder boxes, no lorem-picsum URLs).
+6. NO LOREM IPSUM. Use the slide's actual content fields, in full. Do not truncate body or bullets.
+
+# Design system
+- Background: ${theme.bg}. Surface: ${theme.surface}. Border: ${theme.border}.
+- Text: ${theme.text}. Muted text: ${theme.muted}. Faint text: ${theme.faint}.
+- Accent: ${theme.accent}. Secondary accent: ${theme.accent2}.
+- Display font (titles, big numbers): ${font.head}
+- Body font (prose, captions): ${font.body}
+- Mode: ${isLight ? 'LIGHT — text on light surface, use dark text.' : 'DARK — text on dark surface, use light text.'}
+
+# Composition principles
+- ONE dominant element (largest, boldest). Everything else recedes.
+- 20–35% of the canvas should be empty whitespace. Don't cram, but don't leave the slide looking sparse.
+- 5%+ padding from every edge.
+- Pick ONE accent color use per slide — a colored word, a rule, a chip, a number — not three.
+- For headlines, use the display font at 56–96px (size depends on length and slide importance).
+- For long titles, scale down before wrapping ugly.
+- For body, use 18–24px, line-height 1.4–1.6.
+- For tiny labels (eyebrow, caption), use 11–14px, all-caps, letter-spacing 0.18em.
+
+# Typographic + diagrammatic moves you should reach for
+- Display headline with one word in accent color (use a <span style="color:${theme.accent}">word</span>).
+- A thin accent rule (1–4px) that anchors the title to the body.
+- An eyebrow ("PART 02", "INSIGHT", "CHAPTER ONE") above a big title.
+- A massive numeric stat (140–220px) for stat layouts.
+- A pull quote in italic display serif with a giant decorative quote-mark at 25% opacity in the corner.
+- A multi-card grid with subtle surface bg, top accent stripe, and a soft shadow.
+- Side-by-side image + text where the image fills 40–50% of the slide.
+- Full-bleed image with a dark gradient veil and white text overlay.
+- A numbered list with each number ENORMOUS in the display font and the label in body font.
+
+# Diagrams (NotebookLM-grade — REACH FOR THESE WHEN THE CONTENT FITS)
+The single biggest quality jump is replacing plain text with a real visualisation. When the content describes a sequence, comparison, structure, or quantity, draw it as SVG inline. NotebookLM-style decks use these constantly:
+- TIMELINE — for items with dates/years/eras: a horizontal axis with year ticks and labelled events. Use SVG line + circles + text. Year labels in display font, event captions in body font.
+- FLOWCHART — for cause→effect or step sequences: rounded rect nodes connected by SVG arrows (use <line> with marker-end arrowhead). 3–5 nodes max, left-to-right or top-to-bottom.
+- MATRIX / 2×2 — for compare slides with two axes (e.g. effort vs impact). Quadrant grid with axis labels and items placed in cells.
+- BAR / DOT CHART — for stat-adjacent slides comparing 2–6 quantities. Use SVG <rect> bars or rows of dots. Label each bar; never include axis numbers without a real source.
+- VENN / RING DIAGRAM — for overlap or intersection ideas. Two or three SVG <circle> elements at 50–60% opacity with overlap labels.
+- CONCEPT MAP — for hub-and-spoke ideas: a central pill with 4–6 satellite pills connected by thin lines.
+- HIGHLIGHT BOX — for one critical sentence inside body prose: a left accent bar, surface-tinted background, and the sentence at body+2 size.
+A diagram is preferable to plain prose whenever the content describes a relationship, sequence, or comparison.
+
+# What to avoid
+- Centered single-line layouts that leave the slide 80% empty (unless it's a hero declaration).
+- Default browser styling — every element should look intentional.
+- Lots of text in muted gray that's hard to read. Body text uses ${theme.text}, not muted.
+- Decoration without purpose (random gradient blobs, drop shadows on text).
+- Three accent colors. Pick ONE.
+- More than 5 distinct font sizes on one slide.
+- Stock-template look. Each slide should feel hand-composed for THIS content.
+
+# Geometry tips
+- For asymmetric compositions, try 60/40 or 65/35 splits — never 50/50 unless you mean it.
+- Use SVG <circle> / <line> / <path> / <rect> for decorative geometry AND for diagrams — keeps it crisp at any scale. Inline SVG is fine; reference its viewBox.
+- Borders should be 1–2px in muted/border color, never 4px+.
+- Border-radius: 0 for editorial, 8–12px for modern, 16px+ for soft.
+
+Now design this specific slide. Treat the layout hint as a STRONG suggestion but feel free to subvert it if a better composition fits the content. Make this slide visually different from any other slide in the deck — like you're hand-designing it. If the slide content is structurally a sequence, comparison, breakdown, or quantity, draw it as a diagram instead of a list.`,
+    user: `Slide ${slideIndex + 1} of ${totalSlides} — Deck title: "${deck.title}"
+Deck subtitle: "${deck.subtitle || ''}"
+
+This slide:
+- layout intent: ${slide.layout}
+- eyebrow: "${slide.eyebrow || ''}"
+- title: "${slide.title || ''}"
+- subtitle: "${slide.subtitle || ''}"
+- body: "${slide.body || ''}"
+- bullets: ${JSON.stringify(slide.bullets || [])}
+- items: ${JSON.stringify(slide.items || [])}
+- accent (word to highlight if present in title): "${slide.accent || ''}"
+- imagePrompt (visual that will be generated): "${slide.imagePrompt || ''}"
+
+Design and code this slide. Output ONLY the HTML fragment (style + div).`,
+  };
+}
+
+// ===== SLIDESHOW: AUTO-REVIEW LOOP (critic + reviser) =====
+// A second AI inspects the deck the first AI just wrote, returns a
+// structured issue list, and the first AI applies those fixes. We loop up
+// to MAX_REVIEW_PASSES iterations or until the critic returns a clean deck.
+// The two prompts are intentionally short and machine-friendly — JSON in,
+// JSON out, no prose — so they parse reliably under jsonMode.
+
+export function buildSlideshowCriticPrompt({ topic, deck }) {
+  const sysSlides = (deck.slides || []).map((s, i) => ({
+    i,
+    layout: s.layout,
+    eyebrow: s.eyebrow || '',
+    title: s.title || '',
+    subtitle: s.subtitle || '',
+    body: s.body || '',
+    bullets: s.bullets || [],
+    items: s.items || [],
+    accent: s.accent || '',
+    imagePrompt: s.imagePrompt || '',
+  }));
+  return {
+    system: `You are a senior presentation editor reviewing a draft deck. Your job is to find concrete, fixable issues. You are strict but not pedantic — you flag things that hurt the slide, not stylistic preference.
+
+Evaluate each slide on these dimensions:
+
+1. WRITING. Title ≤ 8 words (≤ 12 for hero). Specific and vivid, not vague ("Climate Change Impact" is bad; "Permafrost thaw outpaces models" is good). Body is prose for content/split/twoCol/bigText/imageRight/imageLeft. NO bullet markers (-, *, •, 1.) anywhere in title/subtitle/body fields.
+2. COMPOSITION. The layout fits the content:
+   • "stat" body MUST be a real numeric figure ("3.2 billion", "47%", "$1.9T", "1859"). If body is prose, the layout is wrong.
+   • "quote" title must be a real attributed quote. Subtitle = "FirstName LastName".
+   • "cards" needs exactly 3 items each with label + body. "compare" needs exactly 2. "numbered" needs 3-5.
+   • "agenda" needs 3-6 items.
+   • "imageHero"/"imageRight"/"imageLeft"/"imageFull" REQUIRE a non-empty imagePrompt that is concrete and visual ("Photograph of X doing Y in setting Z"), not abstract.
+3. STRUCTURE. Slide 0 = "title". Last slide = "summary". ≥ 5 distinct layout types. No two consecutive slides share a layout. ≥ 2 image-forward slides if deck has ≥ 8 slides.
+4. ACCURACY. Flag any specific number, date, name, or quote that looks fabricated or unverifiable. When in doubt, demote.
+5. ACCENT. If a slide has an "accent" field, the EXACT substring (case-insensitive) must appear in the title.
+6. PARALLELISM. Items in the same array share grammatical shape and length range. Bullets too.
+7. NOTES. Notes are what the presenter SAYS — not a recap of what's on the slide. If notes just rephrase the title/body, flag it.
+
+Output ONLY this JSON shape — no commentary:
+{
+  "overallScore": 1-10,
+  "summary": "one-sentence verdict on the deck",
+  "issues": [
+    { "slideIndex": <0-based int>, "severity": "low" | "medium" | "high", "category": "writing" | "composition" | "structure" | "accuracy" | "accent" | "parallelism" | "notes" | "image", "issue": "<one sentence description>", "fix": "<one sentence telling the writer EXACTLY what to do>" }
+  ]
+}
+
+Score 9-10 = ship it. 7-8 = minor polish. 4-6 = major fixes. ≤ 3 = restart.
+Return at most 12 issues — focus on the highest-leverage fixes. If a slide is fine, omit it.`,
+    user: `Topic: "${topic}"
+Deck title: "${deck.title || ''}"
+Deck subtitle: "${deck.subtitle || ''}"
+
+Slides:
+${JSON.stringify(sysSlides, null, 2)}`,
+  };
+}
+
+export function buildSlideshowReviserPrompt({ topic, deck, issues }) {
+  return {
+    system: `You are revising a presentation deck based on editor feedback. Apply each issue's fix exactly. PRESERVE every field on every slide that was NOT flagged — including id, layout (unless explicitly told to change), eyebrow, accent, imagePrompt, items, bullets, notes.
 
 Rules:
-- Slide 1 is a "title" slide: punchy title + 1-sentence subtitle, bullets empty.
-- The last slide is a "summary" slide: title + 3-5 short recap bullets.
-- Every middle slide is "content": short title + 3-5 short bullets.
-- Don't fabricate. If you don't actually know a stat or quote, use a "content" slide instead.
-- Titles under 10 words.
-- Bullets parallel-structured, each under 18 words, no filler.
-- Speaker "notes" = 1-2 sentences a presenter would say out loud — NOT a description of the slide.
-- Do NOT use "Introduction", "Overview", "Conclusion", or other generic placeholder titles. Use specific titles tied to the actual content.
+- Same number of slides, same order, same id values.
+- For each issue, edit the named slide so the issue is resolved using the suggested "fix" — but don't introduce new problems.
+- Output ONLY the revised slides array — no commentary, no extra keys.
 
-Calibrate vocabulary and depth to: ${difficulty}. Style: ${style}.`,
-    user: `Topic: "${topic}".
-Count: exactly ${count} slides.
-
-Return JSON exactly in this shape:
+JSON shape:
 {
-  "title": "Deck title",
-  "subtitle": "One-sentence hook for the title slide",
-  "slides": [
-    { "layout": "title",   "title": "...", "subtitle": "...", "bullets": [], "notes": "..." },
-    { "layout": "content", "title": "...", "subtitle": "",    "bullets": ["...","...","..."], "notes": "..." },
-    { "layout": "summary", "title": "...", "subtitle": "",    "bullets": ["...","...","..."], "notes": "..." }
-  ]
+  "slides": [<full revised slides in order>]
 }`,
+    user: `Topic: "${topic}"
+
+Original slides:
+${JSON.stringify(deck.slides, null, 2)}
+
+Editor issues to fix (apply each):
+${JSON.stringify(issues, null, 2)}
+
+Return the corrected slides array.`,
   };
 }
 

@@ -1,4 +1,4 @@
-import { BookOpen, MessageSquare, FileText, Settings, Users, Shield, Zap, Lightbulb, Calculator } from 'lucide-react';
+import { BookOpen, MessageSquare, FileText, Settings, Users, Shield, Zap, Lightbulb, Calculator, Presentation } from 'lucide-react';
 
 // Mobile Preview was removed from the registry once App.jsx wired up
 // width-based mobile rendering — real phones get MobileShell directly,
@@ -14,6 +14,7 @@ const APP_REGISTRY = [
   { id: 'mathtutor', label: 'Math Tutor', icon: Calculator, color: '#4f46e5', gradient: 'from-indigo-500 to-violet-600' },
   { id: 'social', label: 'Social', icon: Users, color: '#06b6d4', gradient: 'from-cyan-400 to-teal-500' },
   { id: 'quizbowl', label: 'Quiz Bowl', icon: Zap, color: '#f59e0b', gradient: 'from-amber-400 to-orange-500' },
+  { id: 'slides', label: 'Slides', icon: Presentation, color: '#6366f1', gradient: 'from-indigo-500 to-violet-600' },
   // Debate is no longer a top-level app — it's a button inside Study Mode.
   { id: 'admin', label: 'Admin', icon: Shield, color: '#dc2626', gradient: 'from-red-500 to-red-700', adminOnly: true },
   { id: 'settings', label: 'Settings', icon: Settings, color: '#6b7280', gradient: 'from-gray-400 to-gray-600' },

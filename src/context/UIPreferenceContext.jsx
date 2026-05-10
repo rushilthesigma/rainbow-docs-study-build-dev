@@ -18,8 +18,8 @@ const DEFAULTS = {
   iconStyle: 'gradient',
   dockPosition: 'bottom',
   uiMode: 'desktop',
-  windowOpacity: 55,
-  titlebarOpacity: 80,
+  windowOpacity: 38,
+  titlebarOpacity: 72,
 };
 
 // All UI preferences are persisted server-side under

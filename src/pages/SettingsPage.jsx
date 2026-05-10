@@ -279,6 +279,16 @@ export default function SettingsPage() {
         />
       </Section>
 
+      {/* Slides */}
+      <Section title="Slides">
+        <Toggle
+          label="Auto-generate slide images"
+          description="AI generates a background image for every slide after deck creation (~30s extra per deck)."
+          checked={prefs.slideshowImageGen ?? true}
+          onChange={v => update('slideshowImageGen', v)}
+        />
+      </Section>
+
       {/* Curriculum Defaults */}
       <Section title="Curriculum Defaults">
         <PillGroup label="Default Difficulty" options={DIFFICULTY_OPTIONS} value={prefs.defaultDifficulty} onChange={v => update('defaultDifficulty', v)} />

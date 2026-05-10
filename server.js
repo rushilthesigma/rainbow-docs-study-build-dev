@@ -18,6 +18,8 @@ import {
   buildStudyModePrompt, buildGoalMilestonesPrompt, buildAssessmentPrompt,
   buildFlashcardPrompt, buildCueGenerationPrompt, buildSummaryPrompt,
   buildTopicSuggestionsPrompt, buildSlideshowPrompt,
+  buildSlideshowCriticPrompt, buildSlideshowReviserPrompt,
+  buildSlideHtmlPrompt,
 } from './prompts.js';
 import { PAUSD_CATALOG, getPausdTemplate, listPausdCatalog } from './data/pausdCurricula.js';
 
@@ -32,18 +34,14 @@ const PORT = process.env.PORT || 3002;
 // ===== Google Gemini =====
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 
-// As of 2026-04 the 3.x family is exposed as `-preview` variants.
-// Three tiers, all 1M-token input context. Pro/Flash use the Gemini 3
-// preview line; Flash Lite uses the GA 2.5-flash-lite (no Gemini-3 lite
-// SKU exists yet, so falling back to the most-current GA Lite model
-// avoids 404s on model resolution).
-//   Pro        — gemini-3.1-pro-preview      (deepest reasoning, slowest)
-//   Flash      — gemini-3.1-flash-preview    (balanced)
-//   Flash Lite — gemini-3.1-flash-lite-preview (fastest + cheapest)
+// Gemini 2.5 model family (GA / preview as of 2025-05).
+//   Pro        — gemini-2.5-pro        (deepest reasoning, best JSON)
+//   Flash      — gemini-2.5-flash      (balanced speed + quality)
+//   Flash Lite — gemini-2.0-flash      (fastest + cheapest, stable GA)
 const GEMINI_PRO        = 'gemini-3.1-pro-preview';
-const GEMINI_FLASH      = 'gemini-3.1-flash-preview';
+const GEMINI_FLASH      = 'gemini-3-flash-preview';
 const GEMINI_FLASH_LITE = 'gemini-3.1-flash-lite-preview';
-const DEFAULT_MODEL = GEMINI_FLASH_LITE;
+const DEFAULT_MODEL = GEMINI_FLASH;
 const FALLBACK_MODEL = GEMINI_FLASH_LITE;
 const resolveModel = (name) => name || DEFAULT_MODEL;
 // Cascade: Pro → Flash → Flash Lite (each fallback step trades quality for
@@ -3719,11 +3717,25 @@ app.get('/api/slideshows', authMiddleware, (req, res) => {
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
     users[email].data = migrateUserData(users[email].data);
-    const list = (users[email].data.slideshows || []).map(s => ({
-      id: s.id, title: s.title, topic: s.topic,
-      slideCount: (s.slides || []).length,
-      createdAt: s.createdAt,
-    }));
+    const list = (users[email].data.slideshows || []).map(s => {
+      const first = (s.slides || [])[0];
+      return {
+        id: s.id, title: s.title, topic: s.topic,
+        slideCount: (s.slides || []).length,
+        createdAt: s.createdAt,
+        palette: s.palette,
+        font: s.font,
+        firstSlide: first ? {
+          id: first.id, layout: first.layout,
+          elements: first.elements, background: first.background,
+          title: first.title, body: first.body, accent: first.accent,
+          eyebrow: first.eyebrow, subtitle: first.subtitle,
+          bullets: first.bullets, items: first.items,
+          imageDataUrl: first.imageDataUrl || null,
+          html: first.html || '',
+        } : null,
+      };
+    });
     res.json({ slideshows: list });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -3799,64 +3811,65 @@ app.post('/api/slideshows', authMiddleware, (req, res) => {
 // the returned `elements[]` as-is instead of synthesizing a boring
 // title/bullets layout from scratch. The prompt is the difference between
 // "looks like a form" and "looks designed."
-const SLIDE_DESIGN_SYSTEM = `You are a senior presentation designer composing ONE slide. Each slide must feel considered — not a formulaic bullets-under-title layout. Surprise the viewer when the content invites it.
+const SLIDE_DESIGN_SYSTEM = `You are a senior presentation designer composing ONE information-dense slide. Your priority is CONTENT: every pixel of space should carry useful information. Visual decoration is secondary — but the slide must still look clean and professional, never ugly.
 
-## Archetypes — pick one that SUITS the content, don't default
-- HERO: huge centered title, tiny supporting line. Use for section openers.
-- STAT: one massive number or short phrase (100+ fontSize), small explanation. Use for data points.
-- CONTENT: title + 3-4 supporting points. For concepts that need elaboration.
-- QUOTE: large italic quote with a small attribution below. For memorable lines.
-- IMAGE_DOMINANT: a prominent image on one side (40-55% width), text on the other.
-- TIMELINE: 3-5 short elements arranged horizontally or on a diagonal.
-- COMPARISON: two columns, headers aligned.
-- ASYMMETRIC: break the symmetry — offset title, unexpected alignment.
+## Core philosophy
+Function over form. A slide packed with substantive, well-organized text beats a sparse slide with a big icon. Audiences come for information, not aesthetics.
+
+## Archetypes — 90% of slides should be CONTENT or COMPARISON
+- CONTENT (default): title top-left, large body text block filling 60-70% of the canvas. Use whenever there is anything to explain.
+- COMPARISON: title + two equal-width columns of dense text. Use for vs., before/after, pros/cons.
+- SUMMARY: title + numbered or bulleted takeaway list. Use for recaps.
+- QUOTE: large italic quote + attribution. ONLY when the slide IS a quote — not just to break things up.
+- HERO: short punchy title + 1-sentence subtitle, NO body. Use ONLY for section openers and title slides — never for content.
+
+Do NOT use HERO slides for content. Do NOT leave slides sparse just to look "designed".
+
+## NO decorative graphics
+- Do NOT output icon elements.
+- Do NOT output shape elements.
+- Do NOT output image elements.
+- The ONLY allowed kind is "text". Every element must contain real, substantive prose or data.
 
 ## Composition rules
-- Visual hierarchy: ONE dominant element (biggest font AND boldest weight). Everything else recedes.
-- Whitespace: 25-40% of the canvas empty. Never cram.
-- Padding: ≥5% from every edge.
+- Fill 75-90% of the canvas with text. Whitespace should be margins, not gaps.
+- Padding: ≥4% from every edge.
 - Background + text must have a WCAG contrast ratio of 4.5+. NON-NEGOTIABLE. Common safe pairings:
     light bg (#ffffff, #f9fafb, #fef3c7, #dbeafe, #d1fae5) ↔ dark text (#111827, #1f2937)
     dark bg (#0f172a, #1e293b, #111827, #1e1e2e, #2563eb) ↔ light text (#ffffff, #f3f4f6)
-- Accent color: at most ONE element in a vivid accent (ex: #2563eb, #dc2626, #059669).
-- Don't put any element entirely inside another.
-- Use varied positions: not everything flush-left from x=8.
+- One accent color allowed on the title only.
+- Elements must NOT overlap.
 
-## Visual elements (no images)
-Do NOT use "image" elements. Instead, create visual interest with:
-- An "icon" element (kind: "icon", iconName: one of Lightbulb, Rocket, Target, Flame, Star, Zap, Sparkles, Heart, Brain, BookOpen, GraduationCap, Briefcase, Award, Trophy, Medal, Crown, TrendingUp, BarChart3, PieChart, Activity, Gauge, DollarSign, Globe, MapPin, Flag, Leaf, Trees, Sun, Cloud, Atom, Microscope, Cog, Cpu, MessageSquare, Mail, Bell, Calendar, Clock, CheckCircle, AlertTriangle, Shield, Lock, Eye, Search). Size it generously (w 10-20, h 15-30).
-- A "shape" element (kind: "shape", shape: "rect" | "circle" | "pill"). Use behind or beside text as an accent. A big pale-colored pill behind a stat can make a slide pop.
-- At most ONE icon and/or ONE shape per slide. Restraint wins.
+## Font sizes
+- Title: 38-52 (smaller = more title text fits)
+- Subtitle / section label: 18-22
+- Body / bullets: 17-21 (smaller so more lines fit)
+- Captions: 13-16
 
-## Font sizes (keep hierarchy snappy, not subtle)
-- HERO / SECTION titles: 72-100
-- STAT number: 100-160
-- Content slide title: 44-60
-- Subtitle: 20-26
-- Body / bullets: 20-28
-- Captions / small labels: 14-18
+Weights: 700 for titles, 500 for subtitles, 400 for body.
 
-Weights: 700 for titles, 600 for emphasis, 500 for subtitles, 400 for body.
+## Body text — this is the most important part
+Body elements must contain COMPLETE SENTENCES. Each bullet/point should be 20-35 words explaining the concept in enough depth that someone who has never heard of the topic understands it. Do NOT write fragment labels. Do NOT write 3-word bullets. Write paragraphs or rich bullet lists.
 
 ## Coordinate system
 x, y, w, h are PERCENTAGES of the slide (0-100). Each element stays within 3-97 on every axis. Elements must NOT overlap significantly.
 
-## Bullets
-If the content is a list, pack lines into ONE text element with "\\n" between them. Do NOT create one element per bullet.
+## Packing text
+Pack lines into ONE text element with "\\n" between them. Do NOT create one element per bullet. A body element should be w:88, h:65 or larger.
 
 ## Output
 Return ONLY valid JSON — no markdown, no code fences, no commentary:
 {
   "background": "#RRGGBB",
-  "notes": "1-2 sentences the presenter says aloud",
+  "notes": "2-3 sentences of detailed speaker notes the presenter says aloud",
   "layout": "title" | "content" | "summary" | "quote" | "freeform",
   "elements": [
-    { "kind": "text",  "x": 8, "y": 12, "w": 84, "h": 20, "text": "...", "fontSize": 56, "fontWeight": "700", "italic": false, "underline": false, "align": "left", "color": "#RRGGBB" },
-    { "kind": "image", "x": 55, "y": 20, "w": 40, "h": 60, "searchQuery": "Krebs cycle diagram" }
+    { "kind": "text", "x": 6, "y": 8, "w": 88, "h": 12, "text": "...", "fontSize": 46, "fontWeight": "700", "italic": false, "underline": false, "align": "left", "color": "#RRGGBB" },
+    { "kind": "text", "x": 6, "y": 24, "w": 88, "h": 68, "text": "...", "fontSize": 19, "fontWeight": "400", "italic": false, "underline": false, "align": "left", "color": "#RRGGBB" }
   ]
 }
 
-Typically 2-5 elements per slide. Vary your archetypes across a deck — don't repeat the same shape. Compose something you'd actually be proud to present.`;
+Typically 2-3 text elements per slide (title + body, or title + two columns). The body element should be large and full of detail. A good slide looks like a dense Wikipedia section rendered beautifully, not an airport billboard.`;
 
 // Generate a single slide on a topic and insert it after `insertAfter`
 // (default: append to the end of the deck).
@@ -3882,32 +3895,20 @@ app.post('/api/slideshows/:id/ai/slide', authMiddleware, async (req, res) => {
     // with title/subtitle/bullets/notes/layout. That's the contract that
     // already works for `/api/slideshows/generate`; reuse it here so the
     // client renders via the legacy SlideCanvas that already looks right.
-    const system = `You are a senior presentation designer composing ONE slide. Your job is to produce something that looks considered and non-formulaic. Don't default to the same "title + 3 bullets" layout every time — pick the archetype that genuinely fits the content.
-
-Think about:
-- Which archetype suits this specific topic (title / content / summary / quote).
-- A short, punchy title under 10 words.
-- Bullets that are parallel, non-redundant, and each say something specific.
-- Speaker notes that sound like a real presenter talking, not a description of the slide.
-
-NEVER include images. NEVER suggest imagery. Just strong typography + tight copy.
+    const system = `You are a presentation content writer. Your priority is information density. Every slide should teach the viewer something substantive. Default to "content" layout unless the slide is purely a title/opener or a literal quote.
 
 Output ONLY valid JSON — no markdown, no fences.`;
     const user = `Deck title: "${deck.title || 'Untitled'}".
 Topic: "${topic}".
 
-Compose the slide. Archetype choices:
-- "title" — short punchy title + 1-sentence subtitle, bullets empty.
-- "content" — title + 3-5 bullets. Use when the topic needs explanation.
-- "summary" — "Key takeaways" feel — title + 3-5 bullets.
-- "quote" — title = the quote itself, subtitle = attribution ("— Name").
+Compose the slide. Use "content" unless the topic is a section opener ("title") or a literal quote ("quote").
 
 JSON shape:
 {
-  "title": "...",
+  "title": "Short title under 10 words",
   "subtitle": "",
-  "bullets": [],           // 3-5 short points, each under 18 words, or [] for title/quote
-  "notes": "1-2 sentence speaker note",
+  "bullets": ["5-7 complete-sentence points, each 20-35 words — real teaching sentences that explain the concept in depth, not fragment labels. Empty array only for title/quote slides."],
+  "notes": "2-4 sentences of detailed speaker notes that add context beyond the slide text",
   "layout": "title" | "content" | "summary" | "quote"
 }`;
 
@@ -4257,9 +4258,7 @@ function pickTemplateForTopic(topic, deckTitle) {
   if (/\btakeaways?\b|\bsummary\b|\brecap\b|\bconclusion\b|\bkey points?\b|\bin short\b/i.test(lower)) return SLIDE_TEMPLATES.find(x => x.id === 'summary-bold');
   // Hero / section opener (short — likely a section title)
   if (t.split(/\s+/).length <= 4 && t.length < 40) return SLIDE_TEMPLATES.find(x => x.id === 'hero-light');
-  // Topics that obviously have a visual (people, places, natural phenomena, diagrams)
-  if (/\bdiagram\b|\bhistory\b|\bmap\b|\barchitecture\b|\bart\b|\bphotograph\b|\bspecies\b|\bplant\b|\banimal\b|\bcountry\b|\bcity\b|\bbiography\b/i.test(lower)) return SLIDE_TEMPLATES.find(x => x.id === 'content-with-image');
-  // Default: classic content slide
+  // Default: classic content slide — text-first, no images
   return SLIDE_TEMPLATES.find(x => x.id === 'content-classic');
 }
 
@@ -4271,12 +4270,12 @@ function buildSlotPrompt(tmpl, topic, deckTitle) {
     switch (el.role) {
       case 'title':    return `- title (string, under 10 words) — the slide's headline`;
       case 'subtitle': return `- subtitle (string, 1 short sentence) — supporting line`;
-      case 'body':     return `- body (string) — 3-5 short points SEPARATED BY \\n. Each under 16 words. No bullet characters.`;
+      case 'body':     return `- body (string) — 5-7 complete-sentence points SEPARATED BY \\n. Each point is 20-35 words that explains the concept in depth — not a label, a real sentence. No bullet characters.`;
       case 'stat':     return `- stat (string, under 12 chars) — the headline number/phrase (e.g. "42%", "147B")`;
       case 'quote':       return `- quote (string) — the actual quote text`;
       case 'attribution': return `- attribution (string) — the speaker/source (e.g. "— Abraham Lincoln")`;
-      case 'colA':     return `- colA (string) — content for the left column. \\n-separated list ok.`;
-      case 'colB':     return `- colB (string) — content for the right column. \\n-separated list ok.`;
+      case 'colA':     return `- colA (string) — content for the left column. 3-4 complete-sentence points separated by \\n, each 20-30 words.`;
+      case 'colB':     return `- colB (string) — content for the right column. 3-4 complete-sentence points separated by \\n, each 20-30 words.`;
       default:         return `- ${el.role} (string)`;
     }
   }).join('\n');
@@ -4346,16 +4345,16 @@ function materializeTemplateSlide(tmpl, slots, id) {
 // so both paths produce equally good final layouts.
 async function draftSlideContent(topic, model) {
   const system = 'You are a presentation content writer. Output ONLY valid JSON. No markdown, no commentary.';
-  const user = `Draft the CONTENT for a single slide about: "${topic}". Decide the archetype (title, stat, content, summary, quote, freeform) based on what fits the topic best.
+  const user = `Draft the CONTENT for a single slide about: "${topic}". Default to "content" layout unless the slide is purely a title/section opener or a quote. Every slide should be information-dense.
 
 Return this exact shape:
 {
   "title": "Short slide title under 10 words",
   "subtitle": "Optional 1-sentence supporting line, or empty string",
-  "bullets": ["3-5 short supporting points, each under 16 words, OR empty array if the slide archetype doesn't use bullets"],
-  "notes": "1-3 sentences of speaker notes",
+  "bullets": ["5-7 complete-sentence points, each 20-35 words, explaining the concept in depth — not fragment labels, real teaching sentences. Use empty array only for title/quote slides."],
+  "notes": "2-4 sentences of detailed speaker notes that elaborate on the body content",
   "layout": "title" | "content" | "summary" | "quote" | "freeform",
-  "imageIdea": "A specific noun-phrase search term if a photo/diagram would add value, or empty string"
+  "imageIdea": ""
 }`;
   try {
     const result = await callGemini(system, [{ role: 'user', content: user }], model, 1200, { jsonMode: true, temperature: 0.85 });
@@ -4648,6 +4647,29 @@ Output ONLY JSON in this exact shape (no prose, no markdown):
 
 // Update a slideshow (manual edits: rename, tweak slide content, reorder).
 // Body: { title?, subtitle?, slides? } — slides is the full replacement array.
+// Retroactively re-design every slide in an existing deck via the bespoke
+// HTML pipeline. Useful for decks generated before HTML design was added —
+// or for fixing up a deck where the user wants a fresh look without
+// changing the content.
+app.post('/api/slideshows/:id/redesign', authMiddleware, async (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const deck = (users[email].data.slideshows || []).find(s => s.id === req.params.id);
+    if (!deck) return res.status(404).json({ error: 'Not found' });
+    const model = modelForUser(users[email], email);
+    const stats = await generateBespokeHtmlForDeck({ deck, model });
+    deck.htmlDesigned = stats.generated;
+    saveUsers(users);
+    res.json({ slideshow: deck, stats });
+  } catch (e) {
+    console.error('[slideshow-redesign] error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.put('/api/slideshows/:id', authMiddleware, (req, res) => {
   try {
     const users = loadUsers();
@@ -4657,28 +4679,35 @@ app.put('/api/slideshows/:id', authMiddleware, (req, res) => {
     const deck = (users[email].data.slideshows || []).find(s => s.id === req.params.id);
     if (!deck) return res.status(404).json({ error: 'Not found' });
 
-    const { title, subtitle, slides } = req.body || {};
+    const { title, subtitle, slides, palette, font } = req.body || {};
     if (title !== undefined) deck.title = String(title).slice(0, 200);
     if (subtitle !== undefined) deck.subtitle = String(subtitle).slice(0, 300);
+    const VP = ['ink','newsprint','ocean','forest','plum','coral','mono','sun','midnight','slate','rose','sage'];
+    const VF = ['editorial','modern','humanist','geometric'];
+    if (palette && VP.includes(palette)) deck.palette = palette;
+    if (font && VF.includes(font)) deck.font = font;
     if (Array.isArray(slides)) {
-      const VALID = ['title','content','summary','twoCol','imageLeft','imageRight','imageFull','quote','freeform'];
+      const ALL_LAYOUTS = ['title','agenda','section','hero','content','bullets','cards','numbered','compare',
+        'twoCol','split','stat','quote','bigText','summary','imageHero','imageRight','imageLeft','imageFull','freeform'];
       const validColor = (c) => typeof c === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : null;
       deck.slides = slides.slice(0, 40).map((s, i) => ({
         id: s.id || `${deck.id}-${i}`,
-        layout: VALID.includes(s.layout) ? s.layout : 'content',
-        title: String(s.title || '').slice(0, 200),
+        layout: ALL_LAYOUTS.includes(s.layout) ? s.layout : 'content',
+        eyebrow: String(s.eyebrow || '').slice(0, 80),
+        title: String(s.title || '').slice(0, 240),
         subtitle: String(s.subtitle || '').slice(0, 300),
-        bullets: Array.isArray(s.bullets) ? s.bullets.slice(0, 10).map(b => String(b).slice(0, 300)) : [],
+        body: String(s.body || '').slice(0, 3000),
+        bullets: Array.isArray(s.bullets) ? s.bullets.slice(0, 10).map(b => String(b).slice(0, 500)) : [],
+        items: Array.isArray(s.items) ? s.items.slice(0, 8).map(it => ({ label: String(it?.label||'').slice(0,80), body: String(it?.body||'').slice(0,600) })) : [],
+        accent: String(s.accent || '').slice(0, 80),
+        imagePrompt: String(s.imagePrompt || '').slice(0, 400),
         notes: String(s.notes || '').slice(0, 2000),
-        image: s.image ? String(s.image).slice(0, 600) : '',
-        imageCaption: s.imageCaption ? String(s.imageCaption).slice(0, 200) : '',
-        // Null-able: empty/missing means "follow the client theme".
+        imageDataUrl: s.imageDataUrl ? String(s.imageDataUrl).slice(0, 5_000_000) : '',
+        // Preserve bespoke HTML so saves don't wipe the LLM-designed render
+        // path. Cap at 60k like the sanitizer to be safe.
+        html: s.html ? String(s.html).slice(0, 60_000) : '',
         background: validColor(s.background) || null,
-        // Once true, the client will NEVER re-synthesize legacy title/bullets
-        // into freeform elements — an empty elements array stays empty.
         freeform: !!s.freeform,
-        // Freeform elements: user-positioned text/image blocks. Coords are
-        // percentages of the slide canvas so scaling stays consistent.
         elements: Array.isArray(s.elements) ? s.elements.slice(0, 40).map((el, j) => {
           const validKind = ['text','image','icon','shape','svg'].includes(el.kind) ? el.kind : 'text';
           const validColor = (c) => typeof c === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : null;
@@ -4714,9 +4743,260 @@ app.put('/api/slideshows/:id', authMiddleware, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// AI image generation for slideshow slides.
+// Returns a base64 data URL via Gemini's image-generation model.
+app.post('/api/images/generate', authMiddleware, async (req, res) => {
+  try {
+    if (!genAI) return res.status(500).json({ error: 'AI not configured' });
+    const { prompt } = req.body || {};
+    if (!String(prompt || '').trim()) return res.status(400).json({ error: 'prompt required' });
+
+    const safePrompt = String(prompt).slice(0, 400);
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-image' });
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: `Create a clean, visually striking image for a presentation slide about: ${safePrompt}. Style: modern, minimal, high-contrast. No text overlays. Cinematic composition, editorial photography quality.` }] }],
+      generationConfig: { responseModalities: ['IMAGE', 'TEXT'] },
+    });
+    const parts = result?.response?.candidates?.[0]?.content?.parts || [];
+    for (const part of parts) {
+      if (part.inlineData?.data) {
+        const mime = part.inlineData.mimeType || 'image/png';
+        return res.json({ imageDataUrl: `data:${mime};base64,${part.inlineData.data}` });
+      }
+    }
+    return res.status(500).json({ error: 'No image returned by model' });
+  } catch (e) {
+    console.error('Image gen error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ===== Slideshow theme/font tokens (mirrored from client) =====
+// Kept in sync with src/components/desktop/apps/SlideshowApp.jsx so the
+// HTML-design prompt knows the actual color and typography palette the
+// renderer will apply. If these drift, slides will look off — keep them
+// in lock-step.
+const SLIDESHOW_THEMES = {
+  newsprint: { mode: 'light', bg: '#fbf7f0', surface: '#f3ece0', border: '#d8cbb1', text: '#1a1a1a', muted: '#5b5443', faint: '#a8a08c', accent: '#9b1c1c', accent2: '#1a3a5c', font: 'editorial' },
+  ink:       { mode: 'light', bg: '#ffffff', surface: '#f4f4f5', border: '#e4e4e7', text: '#0a0a0a', muted: '#52525b', faint: '#a1a1aa', accent: '#2563eb', accent2: '#0f172a', font: 'modern'    },
+  mono:      { mode: 'light', bg: '#f5f5f4', surface: '#e7e5e4', border: '#d6d3d1', text: '#1c1917', muted: '#57534e', faint: '#a8a29e', accent: '#1c1917', accent2: '#78716c', font: 'geometric' },
+  sun:       { mode: 'light', bg: '#fef9e7', surface: '#fef3c7', border: '#facc15', text: '#1f1300', muted: '#78350f', faint: '#a16207', accent: '#d97706', accent2: '#b45309', font: 'humanist'  },
+  sage:      { mode: 'light', bg: '#f3f7f2', surface: '#e0ebe0', border: '#a7c4a3', text: '#0e1f0e', muted: '#3f5b3d', faint: '#6b8e69', accent: '#15803d', accent2: '#0e3d20', font: 'humanist'  },
+  rose:      { mode: 'light', bg: '#fdf2f8', surface: '#fce7f3', border: '#f9a8d4', text: '#3a0e2c', muted: '#831843', faint: '#be185d', accent: '#be185d', accent2: '#831843', font: 'editorial' },
+  midnight:  { mode: 'dark',  bg: '#0a0a16', surface: '#13132a', border: '#2a2a4a', text: '#ffffff', muted: '#a5b4fc', faint: '#6b7280', accent: '#a78bfa', accent2: '#7c3aed', font: 'modern'    },
+  slate:     { mode: 'dark',  bg: '#0f172a', surface: '#1e293b', border: '#334155', text: '#f8fafc', muted: '#cbd5e1', faint: '#64748b', accent: '#38bdf8', accent2: '#0ea5e9', font: 'geometric' },
+  ocean:     { mode: 'dark',  bg: '#02132f', surface: '#0a2547', border: '#1e3a5f', text: '#f0f9ff', muted: '#7dd3fc', faint: '#38bdf8', accent: '#22d3ee', accent2: '#0891b2', font: 'modern'    },
+  forest:    { mode: 'dark',  bg: '#06140e', surface: '#0e2419', border: '#1e3d2c', text: '#f0fdf4', muted: '#86efac', faint: '#4ade80', accent: '#4ade80', accent2: '#16a34a', font: 'humanist'  },
+  plum:      { mode: 'dark',  bg: '#1a0b1d', surface: '#2d1230', border: '#4a2050', text: '#fdf4ff', muted: '#e9d5ff', faint: '#c084fc', accent: '#f0abfc', accent2: '#c026d3', font: 'editorial' },
+  coral:     { mode: 'dark',  bg: '#1a0808', surface: '#2a0d0d', border: '#4a1818', text: '#fff7ed', muted: '#fed7aa', faint: '#fb923c', accent: '#fb7185', accent2: '#f43f5e', font: 'editorial' },
+};
+const SLIDESHOW_FONTS = {
+  editorial: { head: '"Fraunces", "Playfair Display", Georgia, serif',     body: '"Inter", system-ui, sans-serif' },
+  modern:    { head: '"Space Grotesk", "Inter", system-ui, sans-serif',    body: '"Inter", system-ui, sans-serif' },
+  humanist:  { head: '"Lora", "Source Serif 4", Georgia, serif',           body: '"Inter", system-ui, sans-serif' },
+  geometric: { head: '"Manrope", "Inter", system-ui, sans-serif',          body: '"Manrope", "Inter", system-ui, sans-serif' },
+};
+
+// HTML sanitiser. We trust Gemini broadly but strip the obvious foot-guns:
+// scripts, on* event handlers, javascript: URLs, external <link>/<script>
+// references. Whitelist <img src> to https/data URLs only. Keep everything
+// else — Gemini's <style> blocks, <svg>, <div>, etc. are fine.
+function sanitizeSlideHtml(raw) {
+  if (!raw) return '';
+  let html = String(raw).slice(0, 60_000);
+  // Strip markdown fences if the model wrapped its output despite our ask.
+  html = html.replace(/^```(?:html)?\s*/i, '').replace(/```\s*$/i, '').trim();
+  // Strip <script>…</script> entirely.
+  html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+  // Strip <link> / <meta> / <iframe> tags entirely.
+  html = html.replace(/<(link|meta|iframe|object|embed)\b[^>]*>/gi, '');
+  // Remove any on* event handler attributes.
+  html = html.replace(/\s+on[a-z]+\s*=\s*"[^"]*"/gi, '');
+  html = html.replace(/\s+on[a-z]+\s*=\s*'[^']*'/gi, '');
+  html = html.replace(/\s+on[a-z]+\s*=\s*[^\s>]+/gi, '');
+  // Strip javascript: URLs anywhere.
+  html = html.replace(/javascript\s*:/gi, '');
+  // Strip @import in <style> — would let model fetch external CSS.
+  html = html.replace(/@import\b[^;]*;?/gi, '');
+  // Strip url(...) references that aren't data: or https: (no http://, no //)
+  // Allow {{IMAGE}} placeholder verbatim.
+  html = html.replace(/url\(\s*["']?(?!(data:|https:|\{\{IMAGE\}\}))[^"')]+["']?\s*\)/gi, 'none');
+  return html.trim();
+}
+
+// Parallel bespoke HTML generation for every slide in the deck. Each call
+// runs concurrently — for an 8-slide deck this is one wall-clock LLM call,
+// not eight serial ones. Failures fall back gracefully (slide.html stays
+// empty and the renderer uses the template path).
+//
+// Uses the FLASH model (not FLASH_LITE) because design-quality HTML/CSS
+// requires reasoning that Lite skimps on. Errors are logged with the slide
+// index so we can see which slides Gemini choked on.
+async function generateBespokeHtmlForDeck({ deck, model }) {
+  const themeKey = (Object.keys(SLIDESHOW_THEMES).includes(deck.palette)) ? deck.palette : 'newsprint';
+  const theme = SLIDESHOW_THEMES[themeKey];
+  const fontKey = SLIDESHOW_FONTS[deck.font] ? deck.font : (theme.font || 'editorial');
+  const font = SLIDESHOW_FONTS[fontKey];
+  const total = deck.slides.length;
+  // Force the bigger Flash model regardless of user tier — Lite produces
+  // weak HTML/CSS designs. The reviser/critic loop already handles cost
+  // sensitivity; bespoke HTML is the part where quality matters most.
+  const designModel = GEMINI_FLASH;
+  console.log(`[slideshow-html] starting parallel design for ${total} slides on theme=${themeKey} font=${fontKey} model=${designModel}`);
+
+  const tasks = deck.slides.map((slide, i) => (async () => {
+    try {
+      const p = buildSlideHtmlPrompt({ slide, deck, theme, font, slideIndex: i, totalSlides: total });
+      const r = await callGemini(p.system, [{ role: 'user', content: p.user }],
+        designModel, 5000, { temperature: 0.75 });
+      if (!r.success) {
+        console.warn(`[slideshow-html] slide ${i} (${slide.layout}) FAILED: ${r.error}`);
+        return { ok: false, error: r.error };
+      }
+      const text = r.data.content?.[0]?.text || '';
+      const cleaned = sanitizeSlideHtml(text);
+      if (!cleaned || cleaned.length < 60) {
+        console.warn(`[slideshow-html] slide ${i} (${slide.layout}) empty/short response (${cleaned.length} chars)`);
+        return { ok: false, error: 'empty response' };
+      }
+      // Sanity: must contain a <div class="slide" or similar root.
+      if (!cleaned.includes('class="slide"') && !cleaned.includes("class='slide'")) {
+        // Wrap whatever the model returned so it at least gets a root.
+        return { ok: true, html: `<div class="slide" style="position:relative;width:100%;height:100%;background:${theme.bg};color:${theme.text};font-family:${font.body};overflow:hidden;">${cleaned}</div>` };
+      }
+      return { ok: true, html: cleaned };
+    } catch (e) {
+      console.warn(`[slideshow-html] slide ${i} (${slide.layout}) THREW: ${e.message}`);
+      return { ok: false, error: e.message };
+    }
+  })());
+
+  const results = await Promise.all(tasks);
+  let successCount = 0;
+  deck.slides = deck.slides.map((s, i) => {
+    if (results[i]?.ok && results[i].html) {
+      successCount++;
+      return { ...s, html: results[i].html };
+    }
+    return s;
+  });
+  console.log(`[slideshow-html] ${successCount}/${total} slides bespoke-designed`);
+  return { generated: successCount, total };
+}
+
+// ===== Slideshow auto-review (critic + reviser loop) =====
+// Runs after the first-pass deck generation. The critic model produces a
+// structured list of issues; the reviser model edits the deck to address
+// each one. We loop up to MAX_REVIEW_PASSES (2) or until the critic
+// returns "ship it" (no high-severity issues + score ≥ 9).
+//
+// We use the FLASH-LITE model for the critic — it's cheap, fast, and good
+// at structured output. The reviser uses the same model the user picked
+// for generation, since it needs to write quality prose.
+const MAX_REVIEW_PASSES = 2;
+
+async function reviewAndPolishDeck({ topic, parsed, model }) {
+  const log = [];
+  for (let pass = 1; pass <= MAX_REVIEW_PASSES; pass++) {
+    let critique = null;
+    try {
+      const cp = buildSlideshowCriticPrompt({ topic, deck: parsed });
+      const cr = await callGemini(cp.system, [{ role: 'user', content: cp.user }],
+        GEMINI_FLASH, 3500, { jsonMode: true, temperature: 0.15 });
+      if (!cr.success) {
+        log.push({ pass, ok: false, reason: 'critic call failed', error: cr.error });
+        break;
+      }
+      critique = parseAIJson(cr.data.content?.[0]?.text || '');
+    } catch (e) {
+      log.push({ pass, ok: false, reason: 'critic threw', error: e.message });
+      break;
+    }
+    if (!critique || !Array.isArray(critique.issues)) {
+      log.push({ pass, ok: false, reason: 'critic returned malformed JSON' });
+      break;
+    }
+
+    const issues = critique.issues || [];
+    const score = Number(critique.overallScore) || 0;
+    const summary = String(critique.summary || '').slice(0, 200);
+    const highCount = issues.filter(i => i.severity === 'high').length;
+    log.push({ pass, ok: true, score, summary, issueCount: issues.length, highCount });
+    console.log(`[slideshow-review] pass ${pass}: score=${score}, issues=${issues.length} (${highCount} high)`);
+
+    // Ship-it threshold: nothing major and score is 9+. Or no issues at all.
+    if (issues.length === 0 || (score >= 9 && highCount === 0)) {
+      log[log.length - 1].verdict = 'ship';
+      break;
+    }
+
+    // Run the reviser. Cap issues at 12 to keep the reviser focused.
+    const trimmed = issues.slice(0, 12);
+    let revised = null;
+    try {
+      const rp = buildSlideshowReviserPrompt({ topic, deck: parsed, issues: trimmed });
+      const rr = await callGemini(rp.system, [{ role: 'user', content: rp.user }],
+        model, 6000, { jsonMode: true, temperature: 0.3 });
+      if (!rr.success) {
+        log.push({ pass, ok: false, reason: 'reviser call failed', error: rr.error });
+        break;
+      }
+      revised = parseAIJson(rr.data.content?.[0]?.text || '');
+    } catch (e) {
+      log.push({ pass, ok: false, reason: 'reviser threw', error: e.message });
+      break;
+    }
+    if (Array.isArray(revised?.slides) && revised.slides.length === parsed.slides.length) {
+      // Merge revised slides — preserve fields the reviser dropped.
+      parsed.slides = parsed.slides.map((orig, idx) => {
+        const r = revised.slides[idx] || {};
+        return {
+          ...orig,        // keep original fields as a baseline
+          ...r,           // overwrite anything the reviser changed
+          id: orig.id,    // never change the id
+        };
+      });
+      log[log.length - 1].applied = true;
+    } else {
+      log.push({ pass, ok: false, reason: 'reviser returned wrong slide count' });
+      break;
+    }
+  }
+  return log;
+}
+
+app.post('/api/slideshows/improve-slide', authMiddleware, async (req, res) => {
+  try {
+    const { topic, slide } = req.body || {};
+    if (!slide) return res.status(400).json({ error: 'slide required' });
+
+    const system = `You are an expert presentation editor. Given a single slide's content, rewrite it to be clearer, more impactful, and more substantive. Keep the same layout and general structure. Return ONLY valid JSON matching exactly the same fields provided — no extra keys, no commentary.
+
+Rules:
+- Titles: punchy, concrete, ≤ 8 words
+- Body prose: dense, specific, no filler — every sentence must earn its place. Prefer active voice.
+- Bullets: each starts with a strong verb or key term in **bold**, followed by a concise factual sentence
+- Items (cards/numbered): label ≤ 4 words, body 1–2 tight sentences with a concrete detail
+- Preserve the layout field exactly`;
+
+    const user = `Topic context: "${topic || 'unknown'}"\n\nSlide to improve:\n${JSON.stringify(slide, null, 2)}\n\nReturn the improved slide as JSON with the same fields.`;
+
+    const result = await callGemini(system, [{ role: 'user', content: user }], GEMINI_PRO, 4096, { jsonMode: true, temperature: 0.5 });
+    if (!result.success) return res.status(500).json({ error: result.error });
+
+    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
+    if (!parsed) return res.status(500).json({ error: 'AI response was malformed' });
+
+    return res.json({ slide: parsed });
+  } catch (e) {
+    console.error('improve-slide error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/slideshows/generate', authMiddleware, async (req, res) => {
   try {
-    const { topic, slideCount, difficulty, style } = req.body || {};
+    const { topic, slideCount, difficulty, style, template, customInfo, sourceText, palette: userPalette } = req.body || {};
     if (!topic?.trim()) return res.status(400).json({ error: 'Topic is required' });
 
     const users = loadUsers();
@@ -4724,44 +5004,94 @@ app.post('/api/slideshows/generate', authMiddleware, async (req, res) => {
     if (!email) return res.status(404).json({ error: 'User not found' });
     users[email].data = migrateUserData(users[email].data);
 
-    const { system, user } = buildSlideshowPrompt({ topic: topic.trim(), slideCount, difficulty, style });
-    const model = modelForUser(users[email], email);
-    // jsonMode forces native JSON output — kills the parse-failure rate
-    // that the previous "stricter retry prompt" was trying to compensate
-    // for. Higher temperature gives the model room to vary archetypes
-    // across the deck. 6k tokens covers up to 20 slides with notes.
-    let result = await callGemini(system, [{ role: 'user', content: user }], model, 6000, { jsonMode: true, temperature: 0.6 });
+    const safeSourceText = sourceText ? String(sourceText).slice(0, 20000) : undefined;
+    const { system, user } = buildSlideshowPrompt({ topic: topic.trim(), slideCount, difficulty, style, template, customInfo, sourceText: safeSourceText });
+    // Pro for slide generation — it follows dense-content instructions far
+    // more reliably than Flash and produces longer, substantive JSON output.
+    const model = GEMINI_PRO;
+    let result = await callGemini(system, [{ role: 'user', content: user }], model, 16384, { jsonMode: true, temperature: 0.6 });
     if (!result.success) return res.status(500).json({ error: result.error });
 
     let parsed = parseAIJson(result.data.content?.[0]?.text || '');
     if (!parsed?.slides?.length) {
-      const retry = await callGemini(system, [{ role: 'user', content: user }], model, 6000, { jsonMode: true, temperature: 0.4 });
+      const retry = await callGemini(system, [{ role: 'user', content: user }], model, 16384, { jsonMode: true, temperature: 0.4 });
       if (retry.success) parsed = parseAIJson(retry.data.content?.[0]?.text || '');
     }
     if (!parsed?.slides?.length) {
       return res.status(500).json({ error: 'AI response was malformed. Try again.' });
     }
 
-    const VALID_LAYOUTS = ['title','content','summary','quote','stat','twoCol','freeform'];
+    // Auto-review loop: a critic AI inspects the deck and produces a
+    // structured issue list, then a reviser AI applies those fixes. Loops
+    // until the critic returns clean OR MAX_REVIEW_PASSES — whichever first.
+    // Each pass is logged so the client can show what changed.
+    const reviewLog = await reviewAndPolishDeck({ topic: topic.trim(), parsed, model });
+    // reviewLog mutates parsed.slides in place; the log itself is attached
+    // to the deck for the UI to show ("Reviewed in 2 passes — 7 issues fixed").
+
+    const VALID_LAYOUTS = [
+      'title','hero','content','summary','quote','stat','twoCol','section','split','freeform',
+      // Google-Slides-grade additions: structured layouts the prompt now produces.
+      'agenda','bullets','cards','numbered','compare','bigText',
+      // Image-forward layouts — picture is the visual element, not a wash.
+      'imageHero','imageRight','imageLeft','imageFull',
+    ];
+    // Track HTML generation outcome so the client can show a status chip.
+    let htmlGenStats = { generated: 0, total: 0 };
+    const VALID_PALETTES = ['ink','newsprint','ocean','forest','plum','coral','mono','sun','midnight','slate','rose','sage'];
+    const VALID_FONTS = ['editorial','modern','humanist','geometric'];
     const deckId = crypto.randomUUID();
     const deck = {
       id: deckId,
       title: parsed.title || topic,
       subtitle: parsed.subtitle || '',
       topic: topic.trim(),
+      // Per-deck visual hints from the LLM. The renderer uses these to pick a
+      // theme + font pairing automatically; user can still override in the UI.
+      palette: VALID_PALETTES.includes(userPalette) ? userPalette : (VALID_PALETTES.includes(parsed.palette) ? parsed.palette : 'newsprint'),
+      font: VALID_FONTS.includes(parsed.font) ? parsed.font : 'editorial',
       slides: parsed.slides.map((s, i) => ({
         id: `${deckId}-${i}`,
         layout: VALID_LAYOUTS.includes(s.layout)
           ? s.layout
           : (i === 0 ? 'title' : i === parsed.slides.length - 1 ? 'summary' : 'content'),
-        title: String(s.title || '').slice(0, 200),
+        eyebrow: String(s.eyebrow || '').slice(0, 60),
+        title: String(s.title || '').slice(0, 240),
         subtitle: String(s.subtitle || '').slice(0, 300),
-        bullets: Array.isArray(s.bullets) ? s.bullets.slice(0, 6).map(b => String(b).slice(0, 300)) : [],
+        body: String(s.body || '').slice(0, 3000),
+        bullets: Array.isArray(s.bullets) ? s.bullets.slice(0, 10).map(b => String(b).slice(0, 500)) : [],
+        // Structured items for cards / numbered / compare / agenda layouts.
+        // Each item is {label, body} where label is a short header and body
+        // is one short clause/sentence. Anything malformed is dropped silently.
+        items: Array.isArray(s.items)
+          ? s.items.slice(0, 6).map(it => ({
+              label: String(it?.label || '').slice(0, 80),
+              body:  String(it?.body  || '').slice(0, 600),
+            })).filter(it => it.label || it.body)
+          : [],
+        accent: String(s.accent || '').slice(0, 60),
+        imagePrompt: String(s.imagePrompt || '').slice(0, 240),
         notes: String(s.notes || '').slice(0, 1000),
       })),
       settings: { difficulty: difficulty || 'intermediate', style: style || 'educational' },
+      // Auto-review trace: which passes ran, score per pass, issue counts.
+      // Surfaced in the UI so the user can see what the AI critic flagged
+      // and what the reviser fixed.
+      reviewLog,
       createdAt: new Date().toISOString(),
     };
+
+    // Bespoke per-slide HTML design — Gemini codes each slide as a unique
+    // HTML/CSS fragment (like an AI building a website section). Runs in
+    // parallel for all slides. Failures fall back to the template renderer
+    // so a single bad call doesn't break the deck.
+    try {
+      htmlGenStats = await generateBespokeHtmlForDeck({ deck, model });
+      deck.htmlDesigned = htmlGenStats.generated;
+    } catch (e) {
+      console.warn('[slideshow-html] generation failed:', e.message);
+      deck.htmlDesigned = 0;
+    }
 
     users[email].data.slideshows.unshift(deck);
     saveUsers(users);

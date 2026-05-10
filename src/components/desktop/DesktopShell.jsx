@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Sparkles } from 'lucide-react';
 import { WindowManagerProvider, useWindowManager } from '../../context/WindowManagerContext';
 import DesktopBackground from './DesktopBackground';
@@ -15,9 +15,34 @@ import ShortcutsHelp from './ShortcutsHelp';
 // alternates were removed — the OS-style picker is gone, and any
 // `cov-desktop-style` value in localStorage is ignored.
 function MacOSContent() {
-  const { state } = useWindowManager();
+  const { state, minimizeWindow, restoreWindow } = useWindowManager();
   const [spotlightOpen, setSpotlightOpen] = useState(false);
   const toggleSpotlight = useCallback(() => setSpotlightOpen(prev => !prev), []);
+
+  // When the slides window is maximized, hide all other windows so the
+  // presentation gets an uncluttered full-screen. When it un-maximizes,
+  // restore exactly the windows that were visible before.
+  const prevSlidesMaxRef = useRef(false);
+  const hiddenForSlidesRef = useRef([]);
+  useEffect(() => {
+    const wins = Object.values(state.windows);
+    const slidesWin = wins.find(w => w.appId === 'slides');
+    const nowMax = !!(slidesWin?.isMaximized && !slidesWin?.isMinimized && !slidesWin?.isClosing);
+    if (nowMax === prevSlidesMaxRef.current) return;
+    const wasMax = prevSlidesMaxRef.current;
+    prevSlidesMaxRef.current = nowMax;
+    if (nowMax && !wasMax) {
+      const toHide = wins
+        .filter(w => w.appId !== 'slides' && !w.isMinimized && !w.isClosing)
+        .map(w => w.id);
+      hiddenForSlidesRef.current = toHide;
+      toHide.forEach(id => minimizeWindow(id));
+    } else if (!nowMax && wasMax) {
+      const toRestore = hiddenForSlidesRef.current;
+      hiddenForSlidesRef.current = [];
+      setTimeout(() => toRestore.forEach(id => { if (state.windows[id]) restoreWindow(id); }), 250);
+    }
+  }, [state.windows, minimizeWindow, restoreWindow]);
 
   useEffect(() => {
     function handleKey(e) {

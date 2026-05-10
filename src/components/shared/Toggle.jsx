@@ -1,7 +1,10 @@
-export default function Toggle({ label, checked, onChange }) {
+export default function Toggle({ label, description, checked, onChange }) {
   return (
     <label className="flex items-center justify-between gap-3 cursor-pointer w-full">
-      <span className="text-[13px] font-medium text-white/75">{label}</span>
+      <span className="flex flex-col gap-0.5">
+        <span className="text-[13px] font-medium text-white/75">{label}</span>
+        {description && <span className="text-[11px] text-white/30 leading-relaxed">{description}</span>}
+      </span>
       <button
         type="button"
         role="switch"
