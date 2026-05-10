@@ -3287,7 +3287,6 @@ function GenerateForm({ onBack, onCreate }) {
   const [progress,   setProgress]  = useState(0);
   const [statusMsg,  setStatusMsg] = useState('');
   const [error,      setError]     = useState('');
-  const timerRef = useRef(null);
   const fileInputRef = useRef(null);
   const [dragOver, setDragOver]   = useState(false);
 
@@ -3308,46 +3307,27 @@ function GenerateForm({ onBack, onCreate }) {
     setSourceFiles(prev => [...prev, ...read].slice(0, 5));
   }
 
-  const PHASE_MSGS = [
-    'Drafting slides…', 'Writing content…', 'AI editor reviewing…',
-    'Applying revisions…', 'Second-pass review…', 'Finalising…',
-  ];
-
-  function startProgress() {
-    let p = 0, phase = 0;
-    setProgress(0); setStatusMsg(PHASE_MSGS[0]);
-    timerRef.current = setInterval(() => {
-      const step = p < 25 ? 3 : p < 50 ? 1.6 : p < 75 ? 0.9 : 0.3;
-      p = Math.min(p + step, 88);
-      setProgress(p);
-      const np = Math.floor((p / 88) * (PHASE_MSGS.length - 1));
-      if (np !== phase) { phase = np; setStatusMsg(PHASE_MSGS[phase]); }
-    }, 600);
-  }
-
-  function finishProgress(cb) {
-    clearInterval(timerRef.current);
-    setProgress(100); setStatusMsg('Done!');
-    setTimeout(cb, 350);
-  }
-
   async function handleGenerate() {
     if (!topic.trim() || loading) return;
-    setLoading(true); setError('');
-    startProgress();
+    setLoading(true); setError(''); setProgress(0); setStatusMsg('Starting…');
     const combinedSource = sourceFiles.map(f => `[${f.name}]\n${f.content}`).join('\n\n---\n\n').trim();
     try {
-      const d = await generateSlideshow({
-        topic: topic.trim(), slideCount, difficulty,
-        template: template !== 'none' ? template : undefined,
-        customInfo: customInfo.trim() || undefined,
-        sourceText: combinedSource || undefined,
-        palette: palette || undefined,
-      });
-      if (d.slideshow) finishProgress(() => onCreate(d.slideshow));
-      else { clearInterval(timerRef.current); setError(d.error || 'Generation failed'); setLoading(false); }
+      await generateSlideshow(
+        {
+          topic: topic.trim(), slideCount, difficulty,
+          template: template !== 'none' ? template : undefined,
+          customInfo: customInfo.trim() || undefined,
+          sourceText: combinedSource || undefined,
+          palette: palette || undefined,
+        },
+        {
+          onProgress: ({ phase, pct }) => { setStatusMsg(phase); setProgress(pct); },
+          onDone: (slideshow) => { setProgress(100); setStatusMsg('Done!'); setTimeout(() => onCreate(slideshow), 350); },
+          onError: (msg) => { setError(msg || 'Generation failed'); setLoading(false); },
+        }
+      );
     } catch (e) {
-      clearInterval(timerRef.current); setError(e.message || 'Generation failed'); setLoading(false);
+      setError(e.message || 'Generation failed'); setLoading(false);
     }
   }
 

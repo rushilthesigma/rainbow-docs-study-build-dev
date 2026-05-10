@@ -514,7 +514,11 @@ function parseAIJson(text) {
 // ===== AUTH ROUTES =====
 
 // Dev login (for testing without Google OAuth configured)
+// Disabled by default. To enable in a local dev shell:
+//   NODE_ENV=development ALLOW_DEV_LOGIN=1 node server.js
+const ALLOW_DEV_LOGIN = process.env.ALLOW_DEV_LOGIN === '1' && process.env.NODE_ENV !== 'production' && !IS_RENDER;
 app.post('/api/auth/dev-login', (req, res) => {
+  if (!ALLOW_DEV_LOGIN) return res.status(404).json({ error: 'Not found' });
   const { name, email } = req.body;
   const devEmail = email || 'dev@covalent.test';
   const devName = name || 'Dev User';
@@ -4995,32 +4999,44 @@ Rules:
 });
 
 app.post('/api/slideshows/generate', authMiddleware, async (req, res) => {
+  // SSE keeps the connection alive past Render's 30s proxy timeout.
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+  const send = (obj) => { try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch {} };
+
   try {
     const { topic, slideCount, difficulty, style, template, customInfo, sourceText, palette: userPalette } = req.body || {};
-    if (!topic?.trim()) return res.status(400).json({ error: 'Topic is required' });
+    if (!topic?.trim()) { send({ type: 'error', error: 'Topic is required' }); return res.end(); }
 
     const users = loadUsers();
     const email = findEmailById(users, req.userId);
-    if (!email) return res.status(404).json({ error: 'User not found' });
+    if (!email) { send({ type: 'error', error: 'User not found' }); return res.end(); }
     users[email].data = migrateUserData(users[email].data);
 
+    send({ type: 'progress', phase: 'Drafting slides…', pct: 10 });
     const safeSourceText = sourceText ? String(sourceText).slice(0, 20000) : undefined;
     const { system, user } = buildSlideshowPrompt({ topic: topic.trim(), slideCount, difficulty, style, template, customInfo, sourceText: safeSourceText });
     // Pro for slide generation — it follows dense-content instructions far
     // more reliably than Flash and produces longer, substantive JSON output.
     const model = GEMINI_PRO;
     let result = await callGemini(system, [{ role: 'user', content: user }], model, 16384, { jsonMode: true, temperature: 0.6 });
-    if (!result.success) return res.status(500).json({ error: result.error });
+    if (!result.success) { send({ type: 'error', error: result.error }); return res.end(); }
 
+    send({ type: 'progress', phase: 'Writing content…', pct: 38 });
     let parsed = parseAIJson(result.data.content?.[0]?.text || '');
     if (!parsed?.slides?.length) {
+      send({ type: 'progress', phase: 'Retrying generation…', pct: 44 });
       const retry = await callGemini(system, [{ role: 'user', content: user }], model, 16384, { jsonMode: true, temperature: 0.4 });
       if (retry.success) parsed = parseAIJson(retry.data.content?.[0]?.text || '');
     }
     if (!parsed?.slides?.length) {
-      return res.status(500).json({ error: 'AI response was malformed. Try again.' });
+      send({ type: 'error', error: 'AI response was malformed. Try again.' }); return res.end();
     }
 
+    send({ type: 'progress', phase: 'Reviewing content…', pct: 55 });
     // Auto-review loop: a critic AI inspects the deck and produces a
     // structured issue list, then a reviser AI applies those fixes. Loops
     // until the critic returns clean OR MAX_REVIEW_PASSES — whichever first.
@@ -5028,6 +5044,7 @@ app.post('/api/slideshows/generate', authMiddleware, async (req, res) => {
     const reviewLog = await reviewAndPolishDeck({ topic: topic.trim(), parsed, model });
     // reviewLog mutates parsed.slides in place; the log itself is attached
     // to the deck for the UI to show ("Reviewed in 2 passes — 7 issues fixed").
+    send({ type: 'progress', phase: 'Applying revisions…', pct: 72 });
 
     const VALID_LAYOUTS = [
       'title','hero','content','summary','quote','stat','twoCol','section','split','freeform',
@@ -5081,6 +5098,7 @@ app.post('/api/slideshows/generate', authMiddleware, async (req, res) => {
       createdAt: new Date().toISOString(),
     };
 
+    send({ type: 'progress', phase: 'Finalising design…', pct: 82 });
     // Bespoke per-slide HTML design — Gemini codes each slide as a unique
     // HTML/CSS fragment (like an AI building a website section). Runs in
     // parallel for all slides. Failures fall back to the template renderer
@@ -5096,10 +5114,12 @@ app.post('/api/slideshows/generate', authMiddleware, async (req, res) => {
     users[email].data.slideshows.unshift(deck);
     saveUsers(users);
 
-    res.json({ slideshow: deck });
+    send({ type: 'done', slideshow: deck });
+    res.end();
   } catch (e) {
     console.error('Slideshow generate error:', e);
-    res.status(500).json({ error: e.message });
+    send({ type: 'error', error: e.message });
+    res.end();
   }
 });
 
@@ -5737,9 +5757,9 @@ Return JSON with this exact shape:
 // ===== ADMIN =====
 
 function isAdmin(userId) {
-  const social = loadSocial();
-  const profile = social.profiles[userId];
-  return profile?.handle === 'goon';
+  const users = loadUsers();
+  const email = findEmailById(users, userId);
+  return isOwner(email);
 }
 
 function adminMiddleware(req, res, next) {
@@ -6433,15 +6453,14 @@ app.post('/api/billing/portal', authMiddleware, async (req, res) => {
 // Webhook handler (mounted as raw body above).
 async function handleStripeWebhook(req, res) {
   if (!stripe) return res.status(500).send('Stripe not configured');
+  if (!STRIPE_WEBHOOK_SECRET) {
+    console.error('Webhook rejected: STRIPE_WEBHOOK_SECRET not set');
+    return res.status(503).send('Webhook not configured');
+  }
   let event;
   try {
-    if (STRIPE_WEBHOOK_SECRET) {
-      const sig = req.headers['stripe-signature'];
-      event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
-    } else {
-      // Fallback for local testing without a webhook secret set
-      event = JSON.parse(req.body.toString('utf-8'));
-    }
+    const sig = req.headers['stripe-signature'];
+    event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
   } catch (err) {
     console.error('Webhook signature check failed:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
