@@ -7,7 +7,7 @@ import {
   ChevronUp, ChevronDown, Palette, FileText,
   Square, Circle as CircleIcon, Play, Pause, PanelLeft, PanelRight,
   LayoutGrid, Eye, ZoomIn, ZoomOut, X as XIcon,
-  Volume2, VolumeX, Headphones, Zap, SlidersHorizontal,
+  Volume2, VolumeX, Headphones, Zap, SlidersHorizontal, Download,
 } from 'lucide-react';
 import * as LucideIcons from 'lucide-react';
 import {
@@ -1147,7 +1147,8 @@ export default function SlideshowApp() {
         <ManualCreateForm
           onBack={() => setView('gallery')}
           onCreate={(d) => {
-            setDecks(prev => [{ id: d.id, title: d.title, topic: d.topic, slideCount: (d.slides || []).length, createdAt: d.createdAt }, ...prev]);
+            const fs = d.slides?.[0];
+            setDecks(prev => [{ id: d.id, title: d.title, topic: d.topic, slideCount: (d.slides || []).length, createdAt: d.createdAt, palette: d.palette, font: d.font, firstSlide: fs ? { id: fs.id, layout: fs.layout, elements: fs.elements, background: fs.background, title: fs.title, body: fs.body, accent: fs.accent, eyebrow: fs.eyebrow, subtitle: fs.subtitle, bullets: fs.bullets, items: fs.items, imageDataUrl: fs.imageDataUrl || null, html: fs.html || '' } : null }, ...prev]);
             setDeck(d);
             setSlideIdx(0);
             setSlideImages({});
@@ -1164,11 +1165,12 @@ export default function SlideshowApp() {
         <GenerateForm
           onBack={() => setView('gallery')}
           onCreate={(d) => {
-            setDecks(prev => [{ id: d.id, title: d.title, topic: d.topic, slideCount: (d.slides || []).length, createdAt: d.createdAt }, ...prev]);
+            const fs = d.slides?.[0];
+            setDecks(prev => [{ id: d.id, title: d.title, topic: d.topic, slideCount: (d.slides || []).length, createdAt: d.createdAt, palette: d.palette, font: d.font, firstSlide: fs ? { id: fs.id, layout: fs.layout, elements: fs.elements, background: fs.background, title: fs.title, body: fs.body, accent: fs.accent, eyebrow: fs.eyebrow, subtitle: fs.subtitle, bullets: fs.bullets, items: fs.items, imageDataUrl: fs.imageDataUrl || null, html: fs.html || '' } : null }, ...prev]);
             setDeck(d);
             setSlideIdx(0);
             setSlideImages({});
-                  setView('present');
+            setView('present');
             if (imageGenEnabled) setTimeout(() => autoGenerateImages(d), 500);
           }}
         />
@@ -1266,6 +1268,128 @@ const SLIDE_LAYOUT_OPTIONS = [
   ['bigText', 'Big Text'],
   ['summary', 'Summary'],
 ];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXPORT HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+function hexToRgb(hex) {
+  const h = (hex || '#000000').replace('#', '');
+  return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)];
+}
+
+async function exportToPdf(deck) {
+  const { jsPDF } = await import('jspdf');
+  const t = THEMES[deck.palette] || THEMES.ink;
+  const W = 10, H = 5.625; // 16:9 inches
+  const pdf = new jsPDF({ orientation: 'landscape', unit: 'in', format: [W, H] });
+
+  const bg = hexToRgb(t.bg), tx = hexToRgb(t.text), mt = hexToRgb(t.muted), ac = hexToRgb(t.accent);
+
+  deck.slides.forEach((slide, i) => {
+    if (i > 0) pdf.addPage([W, H], 'landscape');
+
+    pdf.setFillColor(...bg); pdf.rect(0, 0, W, H, 'F');
+    pdf.setFillColor(...ac); pdf.rect(0.4, 0.28, 0.9, 0.04, 'F');
+
+    let y = 0.65;
+
+    if (slide.eyebrow) {
+      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(...mt);
+      pdf.text(slide.eyebrow.toUpperCase(), 0.4, y); y += 0.32;
+    }
+
+    const isTitle = ['title','hero'].includes(slide.layout);
+    pdf.setFont('helvetica', 'bold'); pdf.setFontSize(isTitle ? 34 : 24); pdf.setTextColor(...tx);
+    const titleLines = pdf.splitTextToSize(slide.title || '', W - 0.8);
+    pdf.text(titleLines, 0.4, y);
+    y += titleLines.length * (isTitle ? 0.56 : 0.42) + 0.18;
+
+    if (slide.subtitle) {
+      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(isTitle ? 15 : 12); pdf.setTextColor(...mt);
+      const subLines = pdf.splitTextToSize(slide.subtitle, W - 0.8);
+      pdf.text(subLines, 0.4, y); y += subLines.length * 0.32 + 0.18;
+    }
+
+    if (slide.bullets?.length) {
+      pdf.setFontSize(11.5); pdf.setTextColor(...tx);
+      slide.bullets.slice(0, 8).forEach(b => {
+        if (y > H - 0.5) return;
+        pdf.setFillColor(...ac); pdf.circle(0.36, y - 0.065, 0.038, 'F');
+        pdf.setFont('helvetica', 'normal');
+        const bl = pdf.splitTextToSize(b.replace(/\*\*/g,''), W - 0.95);
+        pdf.text(bl[0], 0.5, y); y += 0.38;
+      });
+    } else if (slide.body) {
+      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(11.5); pdf.setTextColor(...tx);
+      const bLines = pdf.splitTextToSize(slide.body.replace(/\*\*/g,''), W - 0.8);
+      pdf.text(bLines.slice(0, 10), 0.4, y);
+    }
+
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(...mt);
+    pdf.text(`${i+1} / ${deck.slides.length}`, W - 0.3, H - 0.22, { align: 'right' });
+  });
+
+  pdf.save(`${deck.title || 'Presentation'}.pdf`);
+}
+
+async function exportToPptx(deck) {
+  const PptxGenJS = (await import('pptxgenjs')).default;
+  const pres = new PptxGenJS();
+  pres.layout = 'LAYOUT_16x9';
+  const t = THEMES[deck.palette] || THEMES.ink;
+  const bg = t.bg.replace('#',''), tx = t.text.replace('#','');
+  const mt = t.muted.replace('#',''), ac = t.accent.replace('#','');
+  const W = 13.333, H = 7.5;
+
+  for (const [i, slide] of deck.slides.entries()) {
+    const ps = pres.addSlide();
+    ps.background = { color: bg };
+
+    // accent bar
+    ps.addShape(pres.ShapeType.rect, { x:0.5, y:0.38, w:1.1, h:0.055, fill:{ color:ac }, line:{ color:ac } });
+
+    let y = 0.75;
+    if (slide.eyebrow) {
+      ps.addText(slide.eyebrow.toUpperCase(), { x:0.5, y, w:W-1, h:0.4, fontSize:9, color:mt, fontFace:'Helvetica', charSpacing:1.5 });
+      y += 0.45;
+    }
+
+    const isTitle = ['title','hero'].includes(slide.layout);
+    if (slide.title) {
+      ps.addText(slide.title, { x:0.5, y, w:W-1, h: isTitle ? 2.8 : 2.1,
+        fontSize: isTitle ? 44 : 30, color:tx, fontFace:'Helvetica', bold:true, valign:'top', wrap:true });
+      y += isTitle ? 3.0 : 2.3;
+    }
+
+    if (slide.subtitle) {
+      ps.addText(slide.subtitle, { x:0.5, y, w:W-1, h:1.1,
+        fontSize: isTitle ? 18 : 14, color:mt, fontFace:'Helvetica', valign:'top', wrap:true });
+      y += 1.2;
+    }
+
+    if (slide.bullets?.length) {
+      const rows = slide.bullets.slice(0,8).map(b => ({
+        text: b.replace(/\*\*/g,''),
+        options: { bullet:{ code:'25CF', color:ac, indent:12 }, color:tx },
+      }));
+      ps.addText(rows, { x:0.5, y, w:W-1, h:H-y-0.6, fontSize:14, fontFace:'Helvetica', valign:'top', wrap:true, lineSpacingMultiple:1.35 });
+    } else if (slide.body) {
+      ps.addText(slide.body.replace(/\*\*/g,''), { x:0.5, y, w:W-1, h:H-y-0.6,
+        fontSize:14, color:tx, fontFace:'Helvetica', valign:'top', wrap:true, lineSpacingMultiple:1.35 });
+    } else if (slide.items?.length) {
+      slide.items.slice(0,4).forEach((item,idx) => {
+        const col = idx%2, row = Math.floor(idx/2);
+        const ix = 0.5 + col*(W/2-0.2), iy = y + row*2.0;
+        ps.addText(item.label, { x:ix, y:iy, w:W/2-0.7, h:0.45, fontSize:13, color:ac, fontFace:'Helvetica', bold:true });
+        ps.addText(item.body, { x:ix, y:iy+0.5, w:W/2-0.7, h:1.4, fontSize:11, color:tx, fontFace:'Helvetica', wrap:true });
+      });
+    }
+
+    ps.addText(`${i+1} / ${deck.slides.length}`, { x:W-1.2, y:H-0.45, w:1.0, h:0.3, fontSize:9, color:mt, align:'right' });
+  }
+
+  await pres.writeFile({ fileName:`${deck.title || 'Presentation'}.pptx` });
+}
 
 function KeynoteWorkspace(props) {
   const {
@@ -1404,6 +1528,17 @@ function KeynoteWorkspace(props) {
     }
   }
 
+  const [exporting, setExporting] = useState(null); // 'pdf' | 'pptx' | null
+  async function doExport(format) {
+    if (exporting || !deck) return;
+    setExporting(format);
+    try {
+      if (format === 'pdf') await exportToPdf(deck);
+      else await exportToPptx(deck);
+    } catch (e) { console.error('Export error:', e); }
+    finally { setExporting(null); }
+  }
+
   const [improving, setImproving] = useState(false);
   async function improveSlideWithAI() {
     if (!slide || improving) return;
@@ -1481,6 +1616,8 @@ function KeynoteWorkspace(props) {
         onSave={() => doSave()}
         saving={saving}
         savedAt={savedAt}
+        onExport={doExport}
+        exporting={exporting}
       />
 
       {/* Image generation progress strip — slim, glanceable. */}
@@ -1597,8 +1734,17 @@ function KeynoteTopBar(props) {
     imageGenEnabled, isGenImg, onBack,
     onImprove, improving,
     onSave, saving, savedAt,
+    onExport, exporting,
   } = props;
   const [insertOpen, setInsertOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportRef = useRef(null);
+  useEffect(() => {
+    if (!exportOpen) return;
+    function onDown(e) { if (exportRef.current && !exportRef.current.contains(e.target)) setExportOpen(false); }
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  }, [exportOpen]);
   const [aiImgOpen, setAiImgOpen] = useState(false);
   const [aiImgPrompt, setAiImgPrompt] = useState('');
   const [aiImgLoading, setAiImgLoading] = useState(false);
@@ -1760,6 +1906,38 @@ function KeynoteTopBar(props) {
             {saving ? 'Saving…' : savedAt ? 'Saved' : 'Save'}
           </span>
         </button>
+
+        {/* Export dropdown */}
+        <div ref={exportRef} className="relative flex items-center">
+          <button
+            onClick={() => setExportOpen(o => !o)}
+            disabled={!!exporting}
+            className={`flex flex-col items-center justify-center px-3 min-w-[60px] rounded-md transition-colors disabled:opacity-40 ${exportOpen ? 'bg-white/[0.10] text-white/95' : 'text-white/60 hover:text-white/90 hover:bg-white/[0.06]'}`}
+          >
+            {exporting ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+            <span className="text-[10px] mt-0.5">{exporting ? (exporting === 'pdf' ? 'PDF…' : 'PPTX…') : 'Export'}</span>
+          </button>
+          {exportOpen && (
+            <div className="absolute bottom-full right-0 mb-2 w-40 rounded-xl bg-[#2a2a2a] border border-white/[0.10] shadow-2xl z-50 py-1.5 overflow-hidden">
+              <p className="text-[9px] uppercase tracking-widest text-white/25 px-3 pt-1 pb-1.5">Export as</p>
+              {[
+                { label: 'PDF', sub: '.pdf file', fmt: 'pdf' },
+                { label: 'PowerPoint', sub: '.pptx file', fmt: 'pptx' },
+              ].map(({ label, sub, fmt }) => (
+                <button key={fmt}
+                  onClick={() => { setExportOpen(false); onExport(fmt); }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left hover:bg-white/[0.07] transition-colors"
+                >
+                  <Download size={12} className="text-white/35 shrink-0" />
+                  <div>
+                    <p className="text-[12px] text-white/80 font-medium leading-none">{label}</p>
+                    <p className="text-[10px] text-white/30 mt-0.5">{sub}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         <ToolbarButton
           icon={<PanelRight size={18} />}

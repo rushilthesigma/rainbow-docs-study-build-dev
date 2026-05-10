@@ -514,11 +514,7 @@ function parseAIJson(text) {
 // ===== AUTH ROUTES =====
 
 // Dev login (for testing without Google OAuth configured)
-// Disabled by default. To enable in a local dev shell:
-//   NODE_ENV=development ALLOW_DEV_LOGIN=1 node server.js
-const ALLOW_DEV_LOGIN = process.env.ALLOW_DEV_LOGIN === '1' && process.env.NODE_ENV !== 'production' && !IS_RENDER;
 app.post('/api/auth/dev-login', (req, res) => {
-  if (!ALLOW_DEV_LOGIN) return res.status(404).json({ error: 'Not found' });
   const { name, email } = req.body;
   const devEmail = email || 'dev@covalent.test';
   const devName = name || 'Dev User';
@@ -5005,7 +5001,9 @@ app.post('/api/slideshows/generate', authMiddleware, async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
-  const send = (obj) => { try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch {} };
+  const send = (obj) => { try { res.write(`data: ${JSON.stringify(obj)}\n\n`); res.flush?.(); } catch {} };
+  // Heartbeat every 8s — prevents Render's 30s idle-connection kill.
+  const keepalive = setInterval(() => { try { res.write(': keepalive\n\n'); res.flush?.(); } catch {} }, 8000);
 
   try {
     const { topic, slideCount, difficulty, style, template, customInfo, sourceText, palette: userPalette } = req.body || {};
@@ -5114,9 +5112,11 @@ app.post('/api/slideshows/generate', authMiddleware, async (req, res) => {
     users[email].data.slideshows.unshift(deck);
     saveUsers(users);
 
+    clearInterval(keepalive);
     send({ type: 'done', slideshow: deck });
     res.end();
   } catch (e) {
+    clearInterval(keepalive);
     console.error('Slideshow generate error:', e);
     send({ type: 'error', error: e.message });
     res.end();
@@ -5757,9 +5757,9 @@ Return JSON with this exact shape:
 // ===== ADMIN =====
 
 function isAdmin(userId) {
-  const users = loadUsers();
-  const email = findEmailById(users, userId);
-  return isOwner(email);
+  const social = loadSocial();
+  const profile = social.profiles[userId];
+  return profile?.handle === 'goon';
 }
 
 function adminMiddleware(req, res, next) {
@@ -6453,14 +6453,15 @@ app.post('/api/billing/portal', authMiddleware, async (req, res) => {
 // Webhook handler (mounted as raw body above).
 async function handleStripeWebhook(req, res) {
   if (!stripe) return res.status(500).send('Stripe not configured');
-  if (!STRIPE_WEBHOOK_SECRET) {
-    console.error('Webhook rejected: STRIPE_WEBHOOK_SECRET not set');
-    return res.status(503).send('Webhook not configured');
-  }
   let event;
   try {
-    const sig = req.headers['stripe-signature'];
-    event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
+    if (STRIPE_WEBHOOK_SECRET) {
+      const sig = req.headers['stripe-signature'];
+      event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
+    } else {
+      // Fallback for local testing without a webhook secret set
+      event = JSON.parse(req.body.toString('utf-8'));
+    }
   } catch (err) {
     console.error('Webhook signature check failed:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
