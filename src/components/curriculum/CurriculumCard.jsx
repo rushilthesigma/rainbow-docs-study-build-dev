@@ -30,11 +30,11 @@ export default function CurriculumCard({ curriculum }) {
 
       <div className="flex items-center gap-4 text-xs text-gray-400 dark:text-gray-500">
         <span className="flex items-center gap-1">
-          <BookOpen size={13} />
+          <BookOpen size={13} className="text-blue-400" />
           {unitCount} unit{unitCount !== 1 ? 's' : ''} &middot; {totalLessons} lesson{totalLessons !== 1 ? 's' : ''}
         </span>
         {pct > 0 && (
-          <span className="text-gray-500 dark:text-gray-400 font-medium">{pct}% done</span>
+          <span className="text-blue-400 font-semibold">{pct}% done</span>
         )}
         {timeAgo && (
           <span className="ml-auto flex items-center gap-1">

@@ -100,14 +100,14 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
       {/* Back button */}
       <button
         onClick={onBack}
-        className="inline-flex items-center gap-1.5 text-[12px] font-medium text-white/30 hover:text-white/65 mb-8 transition-colors"
+        className="inline-flex items-center gap-1.5 text-[12px] font-medium text-blue-400/70 hover:text-blue-300 mb-8 transition-colors"
       >
         <ArrowLeft size={13} /> {backLabel}
       </button>
 
       {/* Lesson title */}
       <header className="mb-10">
-        <p className="text-[10px] font-black uppercase tracking-[0.28em] text-white/25 mb-3">Lesson</p>
+        <p className="text-[10px] font-black uppercase tracking-[0.28em] text-blue-400 mb-3">Lesson</p>
         <h1 className="text-[42px] md:text-[52px] font-black tracking-tight text-white leading-[1.0] mb-3">
           {lesson.title}
         </h1>
@@ -143,17 +143,17 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
 
           {allDone ? (
             <div className="rounded-3xl border border-white/[0.10] bg-white/[0.04] backdrop-blur-sm p-12 text-center">
-              <div className="w-14 h-14 rounded-2xl bg-white/[0.08] grid place-items-center mx-auto mb-5">
-                <Trophy size={24} className="text-white/60" />
+              <div className="w-14 h-14 rounded-2xl bg-blue-500/15 ring-1 ring-blue-400/30 grid place-items-center mx-auto mb-5 shadow-[0_0_24px_rgba(59,130,246,0.35)]">
+                <Trophy size={24} className="text-blue-300" />
               </div>
               <h2 className="text-[28px] font-black tracking-tight text-white mb-2">Lesson complete</h2>
               <p className="text-white/45 mb-1 text-[15px]">4 readings and 4 quizzes finished.</p>
               <p className="text-[13px] text-white/30 mb-8">
-                Average quiz score: <span className="font-mono font-bold text-white/55">{avgQuizScore}%</span>
+                Average quiz score: <span className="font-mono font-bold text-blue-400">{avgQuizScore}%</span>
               </p>
               <button
                 onClick={onBack}
-                className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-[14px] text-white/80 bg-white/[0.10] border border-white/[0.16] shadow-[inset_0_1px_0_rgba(255,255,255,0.10)] hover:bg-white/[0.15] transition-colors backdrop-blur-sm"
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-bold text-[14px] text-white bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_16px_rgba(59,130,246,0.40)] transition-all"
               >
                 <ArrowLeft size={14} /> {backLabel}
               </button>

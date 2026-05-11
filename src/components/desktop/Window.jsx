@@ -18,7 +18,10 @@ function MacTitleBar({ windowId, isMaximized, isActive, title, onDragStart, onDo
   const isDark = document.documentElement.classList.contains('dark');
   const a = titlebarOpacity / 100;
   const barStyle = isDark
-    ? { background: isActive ? `rgba(20,20,20,${a})` : `rgba(28,28,28,${a})` }
+    ? {
+        background: isActive ? `rgba(36, 36, 40, ${a})` : `rgba(30, 30, 34, ${a})`,
+        borderBottom: '1px solid rgba(255,255,255,0.06)',
+      }
     : { background: isActive ? `rgba(232,232,234,${a})` : `rgba(240,240,240,${a})` };
   return (
     <div className="h-8 flex items-center flex-shrink-0 select-none backdrop-blur-md" style={barStyle} onPointerDown={onDragStart} onDoubleClick={onDoubleClick} data-titlebar={windowId}>
@@ -27,7 +30,7 @@ function MacTitleBar({ windowId, isMaximized, isActive, title, onDragStart, onDo
         <button onClick={e => { e.stopPropagation(); minimizeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FEBC2E] hover:brightness-90 flex items-center justify-center" title="Minimize"><Minus size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#5a3e00]" /></button>
         {!isMaximized && <button onClick={e => { e.stopPropagation(); maximizeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#28C840] hover:brightness-90 flex items-center justify-center" title="Zoom — fills the desktop. ⌘⇧P for true fullscreen."><Maximize2 size={hovered ? 7 : 0} strokeWidth={2.5} className="text-[#005200]" /></button>}
       </div>
-      <div className="flex-1 text-center text-xs font-medium text-gray-600 dark:text-white/60 truncate pr-12 pointer-events-none">{title}</div>
+      <div className="flex-1 text-center text-xs font-medium text-gray-600 dark:text-white/65 truncate pr-12 pointer-events-none">{title}</div>
     </div>
   );
 }
@@ -257,8 +260,8 @@ export default function Window({ win, isActive, children }) {
         className="flex-1 overflow-hidden"
         style={{
           background: document.documentElement.classList.contains('dark')
-            ? `rgba(0,0,0,${(windowOpacity ?? 55) / 100})`
-            : `rgba(255,255,255,${(windowOpacity ?? 55) / 100})`
+            ? `rgba(24, 24, 24, ${(windowOpacity ?? 100) / 100})`
+            : `rgba(255,255,255,${(windowOpacity ?? 100) / 100})`
         }}
       >
         {children}

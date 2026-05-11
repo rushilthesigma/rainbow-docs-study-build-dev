@@ -22,7 +22,7 @@ function AppShellInner({ children }) {
   }, []);
 
   return (
-    <div className="flex h-screen bg-[#F4F5F7] dark:bg-[#111111]">
+    <div className="flex h-screen bg-[#F4F5F7] dark:bg-[#141414]">
       {isMobile && sidebarOpen && (
         <div className="fixed inset-0 bg-black/40 z-20" onClick={() => setSidebarOpen(false)} />
       )}

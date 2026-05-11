@@ -1,9 +1,9 @@
 import { InlineProgress } from '../shared/ProgressBar';
 
 const variants = {
-  primary: 'bg-white/[0.10] hover:bg-white/[0.15] text-white/80 border border-white/[0.14] shadow-[inset_0_1px_0_rgba(255,255,255,0.10)] backdrop-blur-sm',
-  secondary: 'bg-white/[0.04] border border-white/[0.08] text-white/55 hover:bg-white/[0.08] hover:text-white/70',
-  ghost: 'text-white/45 hover:bg-white/[0.06] hover:text-white/65',
+  primary: 'bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-white border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_16px_rgba(59,130,246,0.35)]',
+  secondary: 'bg-blue-500/[0.08] border border-blue-400/[0.20] text-blue-100 hover:bg-blue-500/[0.14] hover:border-blue-400/[0.35] hover:text-white',
+  ghost: 'text-slate-300 hover:bg-blue-500/[0.10] hover:text-blue-100',
   danger: 'bg-rose-500 hover:bg-rose-600 text-white',
 };
 
@@ -19,7 +19,7 @@ const sizes = {
 export default function Button({ children, variant = 'primary', size = 'md', loading, disabled, className = '', ...props }) {
   return (
     <button
-      className={`inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-white/20 disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
+      className={`inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-all focus:outline-none focus:ring-2 focus:ring-blue-400/50 focus:ring-offset-2 focus:ring-offset-[#141414] disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
       disabled={disabled || loading}
       {...props}
     >

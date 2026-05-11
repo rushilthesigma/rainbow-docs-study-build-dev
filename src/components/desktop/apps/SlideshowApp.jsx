@@ -405,6 +405,7 @@ function slideToElements(slide, themeKey, fontHint, image) {
     // the accent color. Plenty of leading between rows so the eye scans.
     case 'bullets': {
       const items = slide.bullets || [];
+      const bulletsAlign = slide.bulletsAlign || 'left';
       const els = [];
       els.push(T('title', 6, 9, 88, 18, slide.title || '',
         { ...HEAD, fontSize: 44, align: 'left' }));
@@ -415,10 +416,14 @@ function slideToElements(slide, themeKey, fontHint, image) {
       const rowH = (bot - top) / n;
       items.forEach((b, i) => {
         const y = top + i * rowH;
-        // Accent dot
-        els.push(R(`dot-${i}`, 7, y + rowH * 0.32, 1.2, 1.2, t.accent, { shape: 'circle', sharp: false }));
-        els.push(T(`b-${i}`, 11, y, 84, rowH * 0.9, b,
-          { fontFamily: f.body, fontSize: 22, fontWeight: '500', color: t.text, align: 'left', lineHeight: 1.35 }));
+        // Accent dot — left side for left/center, right side for right-align.
+        const dotX = bulletsAlign === 'right' ? 91.5 : 7;
+        els.push(R(`dot-${i}`, dotX, y + rowH * 0.32, 1.2, 1.2, t.accent, { shape: 'circle', sharp: false }));
+        // Text takes the area inside the dot — left-padded, right-padded, or full.
+        const textX = bulletsAlign === 'right' ? 5 : 11;
+        const textW = bulletsAlign === 'right' ? 84 : 84;
+        els.push(T(`b-${i}`, textX, y, textW, rowH * 0.9, b,
+          { fontFamily: f.body, fontSize: 22, fontWeight: '500', color: t.text, align: bulletsAlign, lineHeight: 1.35 }));
       });
       return els;
     }
@@ -915,6 +920,15 @@ export default function SlideshowApp() {
   // Load editorial display fonts the moment the slideshow app mounts.
   useEffect(() => { ensureFontsLoaded(); }, []);
 
+  // Maximize the window as soon as the Slides app opens.
+  useEffect(() => {
+    const id = setTimeout(() => {
+      const win = Object.values(wm.state.windows).find(w => w.appId === 'slides');
+      if (win && !win.isMaximized) wm.maximizeWindow(win.id);
+    }, 50);
+    return () => clearTimeout(id);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     listSlideshows()
       .then(d => setDecks(d.slideshows || []))
@@ -1087,7 +1101,7 @@ export default function SlideshowApp() {
               <div className="px-6 pb-6">
                 <button
                   onClick={() => setBetaAcknowledged(true)}
-                  className="w-full py-3 rounded-xl bg-white/[0.10] hover:bg-white/[0.16] border border-white/[0.14] text-white/85 font-semibold text-[14px] transition-all"
+                  className="w-full py-3 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/40 text-white font-semibold text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_16px_rgba(59,130,246,0.35)] transition-all"
                 >
                   Got it
                 </button>
@@ -1278,7 +1292,8 @@ function hexToRgb(hex) {
 }
 
 async function exportToPdf(deck) {
-  const { jsPDF } = await import('jspdf');
+  const jspdfMod = await import('jspdf');
+  const jsPDF = jspdfMod.jsPDF || jspdfMod.default?.jsPDF || jspdfMod.default;
   const t = THEMES[deck.palette] || THEMES.ink;
   const W = 10, H = 5.625; // 16:9 inches
   const pdf = new jsPDF({ orientation: 'landscape', unit: 'in', format: [W, H] });
@@ -1312,12 +1327,16 @@ async function exportToPdf(deck) {
 
     if (slide.bullets?.length) {
       pdf.setFontSize(11.5); pdf.setTextColor(...tx);
+      const bulletsAlign = slide.bulletsAlign || 'left';
       slide.bullets.slice(0, 8).forEach(b => {
         if (y > H - 0.5) return;
-        pdf.setFillColor(...ac); pdf.circle(0.36, y - 0.065, 0.038, 'F');
+        const dotX = bulletsAlign === 'right' ? W - 0.36 : 0.36;
+        pdf.setFillColor(...ac); pdf.circle(dotX, y - 0.065, 0.038, 'F');
         pdf.setFont('helvetica', 'normal');
         const bl = pdf.splitTextToSize(b.replace(/\*\*/g,''), W - 0.95);
-        pdf.text(bl[0], 0.5, y); y += 0.38;
+        const textX = bulletsAlign === 'right' ? W - 0.5 : bulletsAlign === 'center' ? W / 2 : 0.5;
+        pdf.text(bl[0], textX, y, { align: bulletsAlign });
+        y += 0.38;
       });
     } else if (slide.body) {
       pdf.setFont('helvetica', 'normal'); pdf.setFontSize(11.5); pdf.setTextColor(...tx);
@@ -1333,7 +1352,8 @@ async function exportToPdf(deck) {
 }
 
 async function exportToPptx(deck) {
-  const PptxGenJS = (await import('pptxgenjs')).default;
+  const pptxMod = await import('pptxgenjs');
+  const PptxGenJS = pptxMod.default || pptxMod.PptxGenJS || pptxMod;
   const pres = new PptxGenJS();
   pres.layout = 'LAYOUT_16x9';
   const t = THEMES[deck.palette] || THEMES.ink;
@@ -1368,11 +1388,12 @@ async function exportToPptx(deck) {
     }
 
     if (slide.bullets?.length) {
+      const bulletsAlign = slide.bulletsAlign || 'left';
       const rows = slide.bullets.slice(0,8).map(b => ({
         text: b.replace(/\*\*/g,''),
-        options: { bullet:{ code:'25CF', color:ac, indent:12 }, color:tx },
+        options: { bullet:{ code:'25CF', color:ac, indent:12 }, color:tx, align: bulletsAlign },
       }));
-      ps.addText(rows, { x:0.5, y, w:W-1, h:H-y-0.6, fontSize:14, fontFace:'Helvetica', valign:'top', wrap:true, lineSpacingMultiple:1.35 });
+      ps.addText(rows, { x:0.5, y, w:W-1, h:H-y-0.6, fontSize:14, fontFace:'Helvetica', valign:'top', wrap:true, lineSpacingMultiple:1.35, align: bulletsAlign });
     } else if (slide.body) {
       ps.addText(slide.body.replace(/\*\*/g,''), { x:0.5, y, w:W-1, h:H-y-0.6,
         fontSize:14, color:tx, fontFace:'Helvetica', valign:'top', wrap:true, lineSpacingMultiple:1.35 });
@@ -1540,7 +1561,7 @@ function KeynoteWorkspace(props) {
   }
 
   const [improving, setImproving] = useState(false);
-  async function improveSlideWithAI() {
+  async function improveSlideWithAI(intent = 'sharpen') {
     if (!slide || improving) return;
     setImproving(true);
     try {
@@ -1549,6 +1570,7 @@ function KeynoteWorkspace(props) {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('covalent-token')}` },
         body: JSON.stringify({
           topic: deck?.topic || slide.title,
+          intent,
           slide: { layout: slide.layout, title: slide.title, body: slide.body, bullets: slide.bullets, items: slide.items, eyebrow: slide.eyebrow, subtitle: slide.subtitle },
         }),
       });
@@ -1572,13 +1594,13 @@ function KeynoteWorkspace(props) {
       if (!playMode) return;
       const tag = (e.target?.tagName || '').toLowerCase();
       if (tag === 'input' || tag === 'textarea') return;
-      if (e.key === 'Escape') { setPlayMode(false); return; }
+      if (e.key === 'Escape') { if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {}); setPlayMode(false); return; }
       if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { onNav(1); return; }
       if (e.key === 'ArrowLeft' || e.key === 'PageUp') { onNav(-1); return; }
     }
     function onAddSlide() { addSlide(); }
     function onDuplicate() { duplicateCurrentSlide(); }
-    function onPlay() { setPlayMode(true); }
+    function onPlay() { document.documentElement.requestFullscreen?.().catch(() => {}); setPlayMode(true); }
     window.addEventListener('keydown', onPlayKey);
     window.addEventListener('keynote:addSlide', onAddSlide);
     window.addEventListener('keynote:duplicateSlide', onDuplicate);
@@ -1602,7 +1624,7 @@ function KeynoteWorkspace(props) {
         formatOpen={formatOpen}
         setFormatOpen={setFormatOpen}
         onAddSlide={addSlide}
-        onPlay={() => setPlayMode(true)}
+        onPlay={() => { document.documentElement.requestFullscreen?.().catch(() => {}); setPlayMode(true); }}
         onAddText={addText}
         onAddShape={addShape}
         onAddMedia={onGenerateImageForCurrent}
@@ -1712,7 +1734,7 @@ function KeynoteWorkspace(props) {
           image={currentImage}
           t={t}
           deckTitle={deck?.title}
-          onExit={() => setPlayMode(false)}
+          onExit={() => { if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {}); setPlayMode(false); }}
           onNav={onNav}
           slideKey={slideKey}
           navDir={navDir}
@@ -1745,6 +1767,14 @@ function KeynoteTopBar(props) {
     document.addEventListener('pointerdown', onDown);
     return () => document.removeEventListener('pointerdown', onDown);
   }, [exportOpen]);
+  const [improveOpen, setImproveOpen] = useState(false);
+  const improveRef = useRef(null);
+  useEffect(() => {
+    if (!improveOpen) return;
+    function onDown(e) { if (improveRef.current && !improveRef.current.contains(e.target)) setImproveOpen(false); }
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  }, [improveOpen]);
   const [aiImgOpen, setAiImgOpen] = useState(false);
   const [aiImgPrompt, setAiImgPrompt] = useState('');
   const [aiImgLoading, setAiImgLoading] = useState(false);
@@ -1814,7 +1844,7 @@ function KeynoteTopBar(props) {
         <div ref={insertRef} className="relative flex items-center">
           <button
             onClick={() => setInsertOpen(o => !o)}
-            className={`flex flex-col items-center justify-center px-3 min-w-[60px] rounded-md transition-colors ${insertOpen ? 'bg-white/[0.10] text-white/95' : 'text-white/60 hover:text-white/90 hover:bg-white/[0.06]'}`}
+            className={`flex flex-col items-center justify-center px-3 py-1.5 min-w-[60px] rounded-lg transition-colors focus:outline-none ${insertOpen ? 'text-white ring-2 ring-blue-500' : 'text-white/65 hover:text-white/95 hover:bg-white/[0.05]'}`}
           >
             <Plus size={18} />
             <span className="text-[10px] mt-0.5">Insert</span>
@@ -1858,7 +1888,7 @@ function KeynoteTopBar(props) {
                   <button
                     onClick={handleAIImageGenerate}
                     disabled={aiImgLoading || !aiImgPrompt.trim()}
-                    className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-white/[0.10] hover:bg-white/[0.16] border border-white/[0.12] text-[11px] text-white/80 font-medium transition-all disabled:opacity-40"
+                    className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/40 text-[11px] text-white font-semibold shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_12px_rgba(59,130,246,0.30)] transition-all disabled:opacity-40"
                   >
                     {aiImgLoading ? <><Loader2 size={11} className="animate-spin" /> Generating…</> : <><Sparkles size={11} /> Generate</>}
                   </button>
@@ -1881,14 +1911,40 @@ function KeynoteTopBar(props) {
         <div className="w-px bg-white/10 my-3" />
 
         {/* Improve with AI */}
-        <button
-          onClick={onImprove}
-          disabled={improving}
-          className="flex flex-col items-center justify-center px-3 min-w-[60px] rounded-md transition-colors text-white/60 hover:text-white/90 hover:bg-white/[0.06] disabled:opacity-50"
-        >
-          {improving ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
-          <span className="text-[10px] mt-0.5">{improving ? 'Improving…' : 'Improve'}</span>
-        </button>
+        <div ref={improveRef} className="relative flex items-center">
+          <button
+            onClick={() => { if (!improving) setImproveOpen(o => !o); }}
+            disabled={improving}
+            className={`flex flex-col items-center justify-center px-3 py-1.5 min-w-[60px] rounded-lg transition-colors focus:outline-none disabled:opacity-50 ${improveOpen ? 'text-white ring-2 ring-blue-500' : 'text-white/65 hover:text-white/95 hover:bg-white/[0.05]'}`}
+          >
+            {improving ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
+            <span className="text-[10px] mt-0.5">{improving ? 'Improving…' : 'Improve'}</span>
+          </button>
+          {improveOpen && (
+            <div className="absolute top-full right-0 mt-1 w-56 rounded-xl bg-[#2a2a2a] border border-white/[0.10] shadow-2xl z-50 py-1.5 overflow-hidden">
+              <p className="text-[9px] uppercase tracking-widest text-white/25 px-3 pt-1 pb-1.5">What to improve</p>
+              {[
+                { intent: 'sharpen',  label: 'Sharpen wording',     sub: 'Tighter, punchier copy' },
+                { intent: 'expand',   label: 'Add more detail',     sub: 'Concrete examples & specifics' },
+                { intent: 'engaging', label: 'Make more engaging',  sub: 'Vivid, active voice' },
+                { intent: 'bullets',  label: 'Convert to bullets',  sub: 'Restructure as bullet points' },
+                { intent: 'polish',   label: 'Polish grammar & flow', sub: 'Fix awkward phrasing' },
+                { intent: 'simplify', label: 'Simplify',            sub: 'Plain words, shorter sentences' },
+              ].map(({ intent, label, sub }) => (
+                <button key={intent}
+                  onClick={() => { setImproveOpen(false); onImprove(intent); }}
+                  className="w-full flex items-start gap-2.5 px-3 py-2 text-left hover:bg-white/[0.07] transition-colors"
+                >
+                  <Sparkles size={12} className="text-white/35 shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <p className="text-[12px] text-white/85 font-medium leading-tight">{label}</p>
+                    <p className="text-[10px] text-white/35 mt-0.5">{sub}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
 
         {/* Save button with status indicator */}
@@ -1912,13 +1968,13 @@ function KeynoteTopBar(props) {
           <button
             onClick={() => setExportOpen(o => !o)}
             disabled={!!exporting}
-            className={`flex flex-col items-center justify-center px-3 min-w-[60px] rounded-md transition-colors disabled:opacity-40 ${exportOpen ? 'bg-white/[0.10] text-white/95' : 'text-white/60 hover:text-white/90 hover:bg-white/[0.06]'}`}
+            className={`flex flex-col items-center justify-center px-3 py-1.5 min-w-[60px] rounded-lg transition-colors focus:outline-none disabled:opacity-40 ${exportOpen ? 'text-white ring-2 ring-blue-500' : 'text-white/65 hover:text-white/95 hover:bg-white/[0.05]'}`}
           >
             {exporting ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
             <span className="text-[10px] mt-0.5">{exporting ? (exporting === 'pdf' ? 'PDF…' : 'PPTX…') : 'Export'}</span>
           </button>
           {exportOpen && (
-            <div className="absolute bottom-full right-0 mb-2 w-40 rounded-xl bg-[#2a2a2a] border border-white/[0.10] shadow-2xl z-50 py-1.5 overflow-hidden">
+            <div className="absolute top-full right-0 mt-1 w-40 rounded-xl bg-[#2a2a2a] border border-white/[0.10] shadow-2xl z-50 py-1.5 overflow-hidden">
               <p className="text-[9px] uppercase tracking-widest text-white/25 px-3 pt-1 pb-1.5">Export as</p>
               {[
                 { label: 'PDF', sub: '.pdf file', fmt: 'pdf' },
@@ -2011,7 +2067,7 @@ function SlideThumbnailRail({ deck, slideIdx, onGoto, onDelete, onDeleteAt, onRe
               onDragEnd={handleDragEnd}
               className={`flex items-start gap-2 group transition-opacity ${isDragging ? 'opacity-30' : 'opacity-100'}`}
             >
-              <span className={`text-[10px] tabular-nums w-4 text-right pt-2 flex-shrink-0 ${isActive ? 'text-white/90' : 'text-white/35'}`}>
+              <span className={`text-[10px] tabular-nums w-4 text-right pt-2 flex-shrink-0 ${isActive ? 'text-blue-400 font-semibold' : 'text-white/35'}`}>
                 {i + 1}
               </span>
               <div className={`flex-1 relative rounded-md transition-all ${isDropTarget ? 'ring-2 ring-blue-400 ring-offset-1 ring-offset-[#1f1f1f]' : ''}`}>
@@ -2103,8 +2159,8 @@ function FormatPanel({ slide, theme, setTheme, fontHint, setFontHint, changeLayo
                 key={k}
                 onClick={() => changeLayout(k)}
                 title={label}
-                className={`group flex flex-col items-stretch gap-1 rounded-md p-1 transition-colors ${
-                  isActive ? 'bg-white/[0.10]' : 'hover:bg-white/[0.06]'
+                className={`group flex flex-col items-stretch gap-1 rounded-md p-1 transition-all ${
+                  isActive ? 'bg-blue-500/20 ring-1 ring-blue-400/45' : 'hover:bg-white/[0.06]'
                 }`}
               >
                 <div
@@ -2159,6 +2215,39 @@ function FormatPanel({ slide, theme, setTheme, fontHint, setFontHint, changeLayo
                 rows={2}
                 className="w-full px-2.5 py-2 rounded-lg bg-white/[0.06] border border-white/[0.10] text-[12px] text-white/80 placeholder:text-white/25 outline-none focus:border-blue-500/50 focus:bg-white/[0.08] transition-colors resize-none leading-snug"
               />
+            </div>
+          )}
+          {(slide?.layout === 'bullets' || (Array.isArray(slide?.bullets) && slide.bullets.length > 0)) && (
+            <div>
+              <span className="block text-[9px] text-white/30 mb-1 uppercase tracking-wider">Bullets</span>
+              <textarea
+                value={(slide?.bullets || []).join('\n')}
+                placeholder="One bullet per line"
+                onChange={(e) => updateSlideField('bullets', e.target.value.split('\n').map(s => s.replace(/^\s*[•\-*]\s*/, '')))}
+                rows={5}
+                className="w-full px-2.5 py-2 rounded-lg bg-white/[0.06] border border-white/[0.10] text-[12px] text-white/80 placeholder:text-white/25 outline-none focus:border-blue-500/50 focus:bg-white/[0.08] transition-colors resize-none leading-snug"
+              />
+              <div className="mt-2">
+                <span className="block text-[9px] text-white/30 mb-1 uppercase tracking-wider">Alignment</span>
+                <div className="grid grid-cols-3 gap-1">
+                  {[
+                    { v: 'left',   icon: <AlignLeft size={13} /> },
+                    { v: 'center', icon: <AlignCenter size={13} /> },
+                    { v: 'right',  icon: <AlignRight size={13} /> },
+                  ].map(({ v, icon }) => {
+                    const active = (slide?.bulletsAlign || 'left') === v;
+                    return (
+                      <button key={v}
+                        onClick={() => updateSlideField('bulletsAlign', v)}
+                        title={v}
+                        className={`flex items-center justify-center py-1.5 rounded-lg border transition-colors ${active ? 'bg-white/[0.10] border-white/[0.20] text-white/95' : 'bg-white/[0.03] border-white/[0.07] text-white/50 hover:bg-white/[0.06] hover:text-white/80'}`}
+                      >
+                        {icon}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -2274,9 +2363,6 @@ function LayoutMiniPreview({ layout, t }) {
 // PLAY MODE — fullscreen presentation overlay with slide-only chrome.
 // ─────────────────────────────────────────────────────────────────────────────
 function PlayMode({ slide, slideIdx, totalSlides, elements, image, t, deckTitle, onExit, onNav, slideKey, navDir }) {
-  // Narration state. "Listen" toggles audio on/off. Auto-advance is on by
-  // default once the user enables Listen — the deck plays itself like a
-  // NotebookLM video overview.
   const [listen, setListen] = useState(false);
   const [autoAdvance, setAutoAdvance] = useState(true);
   const isLast = slideIdx === totalSlides - 1;
@@ -3154,35 +3240,22 @@ function MiniSlide({ deck }) {
 
   const themeKey = PALETTE_TO_THEME[deck.palette] || 'midnight';
   const t = THEMES[themeKey] || THEMES.midnight;
-  // Use firstSlide from server, or synthesize a minimal title slide so the
-  // renderer always has something — no glow fallback needed.
   const slide = deck.firstSlide ?? { id: deck.id + '-ph', layout: 'title', title: deck.title };
   const img = slide.imageDataUrl || null;
-  const useBespoke = !!(slide?.html && String(slide.html).length > 50);
+  // Always use the template renderer — bespoke HTML is designed at 1280×720
+  // and looks broken at gallery thumbnail scale (~22%). Template elements
+  // scale cleanly like the slide rail thumbnails.
   const elements = useMemo(
     () => slideToElements(slide, themeKey, deck.font, img),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [deck.id, deck.firstSlide, themeKey, deck.font]
   );
 
-  // Substitute {{IMAGE}} for bespoke thumbnails (or transparent 1px if missing).
-  const TRANSPARENT_PIXEL = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
-  const resolvedHtml = useBespoke
-    ? String(slide.html).replace(/\{\{IMAGE\}\}/g, img || TRANSPARENT_PIXEL)
-    : '';
-
   return (
     <div ref={wrapRef} style={{ aspectRatio: '16/9', background: t.bg, position: 'relative', overflow: 'hidden' }}>
-      {useBespoke ? (
-        <div
-          style={{ width: '1280px', height: '720px', transform: `scale(${(scale * 1000) / 1280})`, transformOrigin: 'top left', position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
-          dangerouslySetInnerHTML={{ __html: resolvedHtml }}
-        />
-      ) : (
-        <div style={{ width: '1000px', height: '562.5px', transform: `scale(${scale})`, transformOrigin: 'top left', position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}>
-          {elements.map(el => <RenderElement key={el.id} el={el} />)}
-        </div>
-      )}
+      <div style={{ width: '1000px', height: '562.5px', transform: `scale(${scale})`, transformOrigin: 'top left', position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}>
+        {elements.map(el => <RenderElement key={el.id} el={el} />)}
+      </div>
     </div>
   );
 }
@@ -3233,11 +3306,11 @@ function Gallery({ decks, loading, onOpen, onDelete, onNew, onManual }) {
         )}
         <div className="ml-auto flex items-center gap-2">
           <button onClick={onManual}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.05] hover:bg-white/[0.10] border border-white/[0.07] text-white/50 hover:text-white/75 text-[11.5px] font-medium transition-colors">
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/[0.10] hover:bg-blue-500/[0.18] border border-blue-400/30 text-blue-100 hover:text-white text-[11.5px] font-medium transition-all">
             <LayoutGrid size={11} /> From template
           </button>
           <button onClick={onNew}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-white/[0.10] hover:bg-white/[0.16] border border-white/[0.12] text-white/80 text-[11.5px] font-semibold transition-colors">
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/40 text-white text-[11.5px] font-semibold shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_12px_rgba(59,130,246,0.35)] transition-all">
             <Sparkles size={11} /> Generate
           </button>
         </div>
@@ -3260,11 +3333,11 @@ function Gallery({ decks, loading, onOpen, onDelete, onNew, onManual }) {
           </p>
           <div className="flex items-center gap-3">
             <button onClick={onManual}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/[0.06] hover:bg-white/[0.11] border border-white/[0.08] text-white/55 text-[12px] font-medium transition-colors">
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500/[0.10] hover:bg-blue-500/[0.18] border border-blue-400/30 text-blue-100 hover:text-white text-[12px] font-medium transition-all">
               <LayoutGrid size={13} /> From template
             </button>
             <button onClick={onNew}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/[0.09] hover:bg-white/[0.15] border border-white/[0.11] text-white/75 text-[12px] font-semibold transition-colors">
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/40 text-white text-[12px] font-semibold shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_12px_rgba(59,130,246,0.35)] transition-all">
               <Sparkles size={13} /> Generate with AI
             </button>
           </div>
@@ -3364,7 +3437,7 @@ function ManualCreateForm({ onBack, onCreate }) {
                 disabled={loading}
                 className={`text-left px-3.5 py-3 rounded-xl border transition-all disabled:opacity-40 ${
                   template === tmpl.id
-                    ? 'bg-white/[0.10] border-white/[0.25] text-white/90'
+                    ? 'bg-blue-500/15 border-blue-400/45 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.15),0_0_14px_rgba(59,130,246,0.22)]'
                     : 'bg-white/[0.03] border-white/[0.07] text-white/55 hover:bg-white/[0.07] hover:border-white/[0.14]'
                 }`}
               >
@@ -3381,7 +3454,7 @@ function ManualCreateForm({ onBack, onCreate }) {
         <button
           onClick={handleCreate}
           disabled={!title.trim() || loading}
-          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-white/[0.10] hover:bg-white/[0.16] border border-white/[0.14] text-white/85 font-semibold text-sm transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/40 text-white font-semibold text-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_16px_rgba(59,130,246,0.35)] transition-all disabled:opacity-30 disabled:cursor-not-allowed"
         >
           {loading ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
           {loading ? 'Creating…' : 'Create Slideshow'}
@@ -3468,6 +3541,20 @@ function GenerateForm({ onBack, onCreate }) {
   const fileInputRef = useRef(null);
   const [dragOver, setDragOver]   = useState(false);
 
+  // Render's proxy buffers SSE so progress events arrive all at once at the
+  // end — run a smooth fake animation instead, capped at 90 so the final
+  // snap to 100 is visible when onDone fires.
+  useEffect(() => {
+    if (!loading) return;
+    const start = Date.now();
+    const id = setInterval(() => {
+      const s = (Date.now() - start) / 1000;
+      const fake = Math.round(90 * (1 - Math.exp(-s / 38)));
+      setProgress(prev => Math.max(prev, fake));
+    }, 600);
+    return () => clearInterval(id);
+  }, [loading]);
+
   function readFileAsText(file) {
     return new Promise((resolve) => {
       const reader = new FileReader();
@@ -3492,7 +3579,7 @@ function GenerateForm({ onBack, onCreate }) {
     try {
       await generateSlideshow(
         {
-          topic: topic.trim(), slideCount, difficulty,
+          topic: topic.trim(), slideCount, difficulty, mode,
           template: template !== 'none' ? template : undefined,
           customInfo: customInfo.trim() || undefined,
           sourceText: combinedSource || undefined,
@@ -3531,7 +3618,7 @@ function GenerateForm({ onBack, onCreate }) {
           <button
             onClick={() => setMode('advanced')}
             disabled={loading}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11.5px] font-semibold transition-all disabled:opacity-40 ${mode === 'advanced' ? 'bg-white/[0.10] text-white/85 border border-white/[0.14]' : 'text-white/35 hover:text-white/60'}`}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11.5px] font-semibold transition-all disabled:opacity-40 ${mode === 'advanced' ? 'bg-blue-500/20 text-blue-100 border border-blue-400/40' : 'text-white/35 hover:text-white/60'}`}
           >
             <SlidersHorizontal size={11} /> Advanced
           </button>
@@ -3586,7 +3673,7 @@ function GenerateForm({ onBack, onCreate }) {
             <div className="grid grid-cols-2 gap-2">
               {GEN_TEMPLATES.map(t => (
                 <button key={t.id} onClick={() => setTemplate(t.id)} disabled={loading}
-                  className={`text-left px-3.5 py-2.5 rounded-xl border transition-all disabled:opacity-40 ${template === t.id ? 'bg-white/[0.10] border-white/[0.22] text-white/92' : 'bg-white/[0.03] border-white/[0.07] text-white/50 hover:bg-white/[0.06] hover:border-white/[0.14]'}`}>
+                  className={`text-left px-3.5 py-2.5 rounded-xl border transition-all disabled:opacity-40 ${template === t.id ? 'bg-blue-500/15 border-blue-400/45 text-white shadow-[0_0_12px_rgba(59,130,246,0.20)]' : 'bg-white/[0.03] border-white/[0.07] text-white/50 hover:bg-white/[0.06] hover:border-white/[0.14]'}`}>
                   <p className="text-[12px] font-semibold leading-none mb-1">{t.label}</p>
                   <p className="text-[10px] text-white/32 leading-snug">{t.desc}</p>
                 </button>
@@ -3601,7 +3688,7 @@ function GenerateForm({ onBack, onCreate }) {
               <div className="flex flex-wrap gap-2">
                 {COUNTS.map(n => (
                   <button key={n} onClick={() => setCount(n)} disabled={loading}
-                    className={`w-10 py-1.5 rounded-lg text-xs font-medium border transition-colors disabled:opacity-40 ${slideCount === n ? 'bg-white/[0.13] border-white/[0.24] text-white/92' : 'bg-white/[0.03] border-white/[0.08] text-white/40 hover:text-white/70 hover:bg-white/[0.07]'}`}>
+                    className={`w-10 py-1.5 rounded-lg text-xs font-medium border transition-colors disabled:opacity-40 ${slideCount === n ? 'bg-blue-500/20 border-blue-400/45 text-white' : 'bg-white/[0.03] border-white/[0.08] text-white/40 hover:text-white/70 hover:bg-white/[0.07]'}`}>
                     {n}
                   </button>
                 ))}
@@ -3612,7 +3699,7 @@ function GenerateForm({ onBack, onCreate }) {
               <div className="flex flex-col gap-1.5">
                 {DIFFS.map(([v, l, desc]) => (
                   <button key={v} onClick={() => setDiff(v)} disabled={loading}
-                    className={`text-left px-3 py-2 rounded-lg border transition-colors disabled:opacity-40 ${difficulty === v ? 'bg-white/[0.10] border-white/[0.22] text-white/92' : 'bg-white/[0.03] border-white/[0.07] text-white/40 hover:text-white/70 hover:bg-white/[0.06]'}`}>
+                    className={`text-left px-3 py-2 rounded-lg border transition-colors disabled:opacity-40 ${difficulty === v ? 'bg-blue-500/15 border-blue-400/45 text-white' : 'bg-white/[0.03] border-white/[0.07] text-white/40 hover:text-white/70 hover:bg-white/[0.06]'}`}>
                     <p className="text-[11px] font-semibold leading-none">{l}</p>
                     <p className="text-[10px] text-white/28 mt-0.5">{desc}</p>
                   </button>
@@ -3678,9 +3765,9 @@ function GenerateForm({ onBack, onCreate }) {
           className={`w-full flex items-center justify-center gap-2.5 py-3.5 rounded-xl font-semibold text-sm transition-all disabled:opacity-35 border ${
             mode === 'flash'
               ? 'bg-yellow-500/15 hover:bg-yellow-500/25 border-yellow-500/30 text-yellow-200 hover:text-yellow-100'
-              : 'bg-white/[0.12] hover:bg-white/[0.18] border-white/[0.20] text-white/90 hover:text-white'
+              : 'bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border-blue-400/40 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]'
           }`}
-          style={{ boxShadow: loading || !topic.trim() ? 'none' : mode === 'flash' ? '0 2px 16px rgba(234,179,8,0.12)' : '0 2px 12px rgba(255,255,255,0.06)' }}>
+          style={{ boxShadow: loading || !topic.trim() ? 'none' : mode === 'flash' ? '0 2px 16px rgba(234,179,8,0.12)' : '0 4px 18px rgba(59,130,246,0.40), inset 0 1px 0 rgba(255,255,255,0.20)' }}>
           {loading
             ? <><Loader2 size={15} className="animate-spin" /> Generating…</>
             : mode === 'flash'
@@ -3696,7 +3783,7 @@ function GenerateForm({ onBack, onCreate }) {
         {loading && (
           <div className="mt-3 space-y-1.5">
             <div className="w-full rounded-full h-[3px] bg-white/[0.07] overflow-hidden">
-              <div className={`h-full rounded-full transition-all duration-700 ease-out ${mode === 'flash' ? 'bg-yellow-400/80' : 'bg-white/80'}`} style={{ width: `${progress}%` }} />
+              <div className={`h-full rounded-full transition-all duration-700 ease-out ${mode === 'flash' ? 'bg-yellow-400/80' : 'bg-gradient-to-r from-blue-500 to-blue-400 shadow-[0_0_8px_rgba(59,130,246,0.55)]'}`} style={{ width: `${progress}%` }} />
             </div>
             <p className="text-center text-[10px] text-white/30">{statusMsg}</p>
           </div>

@@ -360,9 +360,9 @@ export default function MathTutorApp({ seedTopic = null, onBack = null, defaultM
           <button
             onClick={startTutor}
             disabled={!topic.trim()}
-            className="w-full py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-sm font-medium disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors"
+            className="w-full py-2.5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/40 text-white text-sm font-semibold shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_16px_rgba(59,130,246,0.40)] disabled:opacity-30 disabled:cursor-not-allowed disabled:shadow-none flex items-center justify-center gap-2 transition-all"
           >
-            <Sparkles size={13} className="text-[#888]" /> Start
+            <Sparkles size={13} className="text-white" /> Start
           </button>
         </div>
       </div>
@@ -531,21 +531,20 @@ export default function MathTutorApp({ seedTopic = null, onBack = null, defaultM
                 )}
               </div>
               {/* Canvas action strip */}
-              <div className="flex gap-0 border-t border-white/8">
+              <div className="flex gap-2 px-2.5 pb-2.5 pt-1">
                 <button
                   onClick={handleFeedback}
                   disabled={streaming}
-                  className="flex-1 py-2.5 text-white/30 hover:text-white/80 text-[12px] font-medium disabled:opacity-30 flex items-center justify-center gap-1.5 transition-colors hover:bg-white/5"
+                  className="flex-1 py-2 rounded-lg bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-white border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_16px_rgba(59,130,246,0.35)] text-[12px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-all"
                 >
-                  <Check size={11} /> Get feedback
+                  <Check size={12} /> Get feedback
                 </button>
-                <div className="w-px bg-white/8" />
                 <button
                   onClick={handleGrade}
                   disabled={streaming}
-                  className="flex-1 py-2.5 text-white/30 hover:text-white/80 text-[12px] font-medium disabled:opacity-30 flex items-center justify-center gap-1.5 transition-colors hover:bg-white/5"
+                  className="flex-1 py-2 rounded-lg bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-white border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_16px_rgba(59,130,246,0.35)] text-[12px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-all"
                 >
-                  <ClipboardCheck size={11} /> Grade my work
+                  <ClipboardCheck size={12} /> Grade my work
                 </button>
               </div>
             </div>

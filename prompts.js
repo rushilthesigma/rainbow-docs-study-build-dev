@@ -1037,6 +1037,27 @@ The example shows the SHAPE, not the topic — your slides must be about "${topi
   };
 }
 
+// ===== SLIDESHOW: FLASH (fast, minimal prompt) =====
+// Single AI call, short prompt, concise output — targets ~8s generation.
+export function buildFlashSlideshowPrompt({ topic, slideCount = 5 }) {
+  const count = Math.max(4, Math.min(5, Number(slideCount) || 5));
+  return {
+    system: `You create presentation slide decks. Output ONLY valid JSON, no markdown, no commentary.
+
+Layouts: title, content, bullets, stat, quote, hero, cards, numbered, summary.
+- Slide 1 = "title", last = "summary". Use at least 3 different layouts.
+- titles ≤ 8 words. body = 1–2 sentences. bullets = 3–4 items (short phrases).
+- palette: ink|newsprint|ocean|forest|plum|coral|mono|sun|midnight|slate|rose|sage
+- font: editorial|modern|humanist|geometric`,
+    user: `Topic: "${topic}". Exactly ${count} slides.
+
+JSON shape:
+{"title":"...","subtitle":"...","palette":"...","font":"...","slides":[{"id":"s1","layout":"title","title":"...","subtitle":"...","body":"","bullets":[]}]}
+
+Omit unused fields.`,
+  };
+}
+
 // ===== SLIDESHOW: BESPOKE PER-SLIDE HTML/CSS DESIGN =====
 // Gemini codes one slide at a time as a complete HTML/CSS fragment — like
 // a web designer building a custom landing page section. Each slide is

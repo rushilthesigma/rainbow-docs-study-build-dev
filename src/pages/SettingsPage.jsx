@@ -98,7 +98,7 @@ function InterfaceSection() {
               step={5}
               value={titlebarOpacity ?? 80}
               onChange={e => setTitlebarOpacity(Number(e.target.value))}
-              className="w-full accent-white/60 h-1.5 rounded-full cursor-pointer"
+              className="w-full accent-gray-400 h-1.5 rounded-full cursor-pointer"
             />
             <div className="flex justify-between mt-1">
               <span className="text-[10px] text-white/20">Fully glass</span>
@@ -117,7 +117,7 @@ function InterfaceSection() {
               step={5}
               value={opacity}
               onChange={e => setWindowOpacity(Number(e.target.value))}
-              className="w-full accent-white/60 h-1.5 rounded-full cursor-pointer"
+              className="w-full accent-gray-400 h-1.5 rounded-full cursor-pointer"
             />
             <div className="flex justify-between mt-1">
               <span className="text-[10px] text-white/20">Fully glass</span>

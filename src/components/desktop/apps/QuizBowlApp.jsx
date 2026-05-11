@@ -339,7 +339,7 @@ export default function QuizBowlApp() {
             </>
           )}
           {isInfinite && settingsOpen && (
-            <div className="absolute right-2 top-full mt-1 w-72 z-20 rounded-2xl border border-white/10 bg-[#161626]/95 backdrop-blur-xl shadow-2xl p-3.5 space-y-3">
+            <div className="absolute right-2 top-full mt-1 w-72 z-20 rounded-2xl border border-white/15 bg-gradient-to-b from-white/[0.10] to-white/[0.03] backdrop-blur-2xl backdrop-saturate-150 shadow-[inset_0_1px_0_rgba(255,255,255,0.22),inset_0_-1px_0_rgba(255,255,255,0.04),0_12px_40px_rgba(0,0,0,0.5)] p-3.5 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-white/55">Settings</span>
                 <button onClick={() => setSettingsOpen(false)} className="text-white/45 hover:text-white/75"><X size={12} /></button>
@@ -348,7 +348,7 @@ export default function QuizBowlApp() {
                 <div className="grid grid-cols-3 gap-1">
                   {CATEGORIES.map(c => (
                     <button key={c} onClick={() => setCategory(c)}
-                      className={`px-2 py-1 rounded-xl text-[10px] font-semibold transition-colors ${category === c ? 'bg-white/[0.12] text-white/90 border border-white/[0.18]' : 'bg-white/[0.04] text-white/55 hover:bg-white/[0.08] hover:text-white/75'}`}>
+                      className={`px-2 py-1 rounded-xl text-[10px] font-semibold transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400/60 ${category === c ? 'bg-blue-500/20 text-white border border-blue-400/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_0_10px_rgba(59,130,246,0.25)]' : 'bg-white/[0.04] text-white/55 border border-transparent hover:bg-white/[0.08] hover:text-white/75'}`}>
                       {c}
                     </button>
                   ))}
@@ -357,7 +357,7 @@ export default function QuizBowlApp() {
               <div className="grid grid-cols-2 gap-1">
                 {DIFFICULTIES.map(d => (
                   <button key={d} onClick={() => setDifficulty(d)}
-                    className={`px-2 py-1.5 rounded-xl text-[11px] font-semibold transition-colors ${difficulty === d ? 'bg-white/[0.12] text-white/90 border border-white/[0.18]' : 'bg-white/[0.04] text-white/55 hover:bg-white/[0.08] hover:text-white/75'}`}>
+                    className={`px-2 py-1.5 rounded-xl text-[11px] font-semibold transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400/60 ${difficulty === d ? 'bg-blue-500/20 text-white border border-blue-400/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_0_10px_rgba(59,130,246,0.25)]' : 'bg-white/[0.04] text-white/55 border border-transparent hover:bg-white/[0.08] hover:text-white/75'}`}>
                     {d}
                   </button>
                 ))}
@@ -368,7 +368,7 @@ export default function QuizBowlApp() {
                   <span className="text-[10px] font-mono text-white/50">{revealSpeedMs}ms</span>
                 </div>
                 <input type="range" min="60" max="400" step="10" value={revealSpeedMs}
-                  onChange={e => setRevealSpeedMs(Number(e.target.value))} className="w-full accent-white" />
+                  onChange={e => setRevealSpeedMs(Number(e.target.value))} className="w-full accent-blue-400" />
               </div>
             </div>
           )}
@@ -481,7 +481,7 @@ export default function QuizBowlApp() {
               <span className="text-[11px] font-mono text-white/70">{questionCount}</span>
             </div>
             <input type="range" min="5" max="30" step="5" value={questionCount}
-              onChange={e => setQuestionCount(Number(e.target.value))} className="w-full accent-white" />
+              onChange={e => setQuestionCount(Number(e.target.value))} className="w-full accent-blue-400" />
           </div>
         )}
 
@@ -492,7 +492,7 @@ export default function QuizBowlApp() {
             <span className="text-[11px] font-mono text-white/70">{revealSpeedMs}ms</span>
           </div>
           <input type="range" min="60" max="400" step="10" value={revealSpeedMs}
-            onChange={e => setRevealSpeedMs(Number(e.target.value))} className="w-full accent-white" />
+            onChange={e => setRevealSpeedMs(Number(e.target.value))} className="w-full accent-blue-400" />
         </div>
 
         {/* Custom instructions (AI only) */}
@@ -504,7 +504,7 @@ export default function QuizBowlApp() {
 
         {/* Start */}
         <button onClick={handleGenerate} disabled={generating}
-          className="w-full py-3.5 rounded-2xl bg-white/[0.09] hover:bg-white/[0.13] backdrop-blur-sm disabled:opacity-40 text-white/80 text-[14px] font-bold inline-flex items-center justify-center gap-2 transition-colors border border-white/[0.12] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+          className="w-full py-3.5 rounded-2xl bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 backdrop-blur-sm disabled:opacity-40 text-white text-[14px] font-bold inline-flex items-center justify-center gap-2 transition-all border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_18px_rgba(59,130,246,0.40)]">
           {generating
             ? <><InlineProgress active /> {questionSource === 'qbreader' ? 'Loading…' : 'Generating…'}</>
             : <><Play size={15} /> Start</>}
@@ -523,7 +523,7 @@ function GlassTile({ active, icon, label, sub, onClick }) {
     <button onClick={onClick}
       className={`text-left rounded-2xl border p-3 transition-all backdrop-blur-sm ${
         active
-          ? 'border-white/[0.22] bg-white/[0.10] text-white/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]'
+          ? 'border-blue-400/45 bg-blue-500/15 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_14px_rgba(59,130,246,0.25)]'
           : 'border-white/[0.08] bg-white/[0.03] text-white/60 hover:bg-white/[0.07] hover:text-white/80'
       }`}>
       <div className="flex items-center gap-1.5 mb-0.5">
@@ -538,9 +538,9 @@ function GlassTile({ active, icon, label, sub, onClick }) {
 function GlassPill({ active, onClick, children }) {
   return (
     <button onClick={onClick}
-      className={`px-3 py-1.5 rounded-xl text-[11px] font-semibold transition-colors whitespace-nowrap backdrop-blur-sm ${
+      className={`px-3 py-1.5 rounded-xl text-[11px] font-semibold transition-all whitespace-nowrap backdrop-blur-sm ${
         active
-          ? 'bg-white/[0.13] text-white/95 border border-white/[0.22] shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]'
+          ? 'bg-blue-500/20 text-white border border-blue-400/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_12px_rgba(59,130,246,0.28)]'
           : 'bg-white/[0.05] border border-white/[0.08] text-white/55 hover:bg-white/[0.09] hover:text-white/80'
       }`}>
       {children}

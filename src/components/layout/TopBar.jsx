@@ -28,9 +28,9 @@ export default function TopBar({ onToggleSidebar, showHamburger = false }) {
   }, []);
 
   return (
-    <header className="h-14 flex items-center justify-between px-4 md:px-6 border-b border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622]">
+    <header className="h-14 flex items-center justify-between px-4 md:px-6 border-b border-gray-200 dark:border-white/[0.06] bg-white dark:bg-[#1a1a1a]/85 dark:backdrop-blur-xl">
       {showHamburger && (
-        <button onClick={onToggleSidebar} className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-[#1e1e2e] transition-colors">
+        <button onClick={onToggleSidebar} className="p-2 rounded-lg text-gray-500 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-blue-500/[0.10] dark:hover:text-blue-200 transition-colors">
           <Menu size={18} />
         </button>
       )}
@@ -42,8 +42,8 @@ export default function TopBar({ onToggleSidebar, showHamburger = false }) {
             onClick={() => isActive ? closeSplit() : openSplit('study')}
             className={`p-2 rounded-lg transition-colors ${
               isActive
-                ? 'text-blue-600 bg-blue-50 dark:bg-blue-900/20'
-                : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#1e1e2e]'
+                ? 'text-blue-600 dark:text-blue-300 bg-blue-50 dark:bg-blue-500/[0.18] dark:shadow-[0_0_12px_rgba(59,130,246,0.35)]'
+                : 'text-gray-500 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-blue-500/[0.10] dark:hover:text-blue-200'
             }`}
             title={isActive ? 'Close split view' : 'Open Study Mode in split view'}
           >

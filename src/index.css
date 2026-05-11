@@ -20,16 +20,20 @@
 
   --color-surface: #F4F5F7;
   --color-surface-card: #FFFFFF;
-  --color-surface-dark: #111111;
-  --color-surface-card-dark: #1a1a1a;
+  --color-surface-dark: #141414;
+  --color-surface-card-dark: #1c1c1c;
+  --color-surface-elevated-dark: #242424;
 
   --color-text-primary: #111827;
   --color-text-secondary: #6B7280;
-  --color-text-primary-dark: #F0F0F8;
-  --color-text-secondary-dark: #9CA3AF;
+  --color-text-primary-dark: #F0F0F0;
+  --color-text-secondary-dark: #9A9A9A;
 
   --color-border-light: #E5E7EB;
-  --color-border-dark: #2A2A40;
+  --color-border-dark: #2A2A2A;
+
+  --color-accent-dark: #3B82F6;
+  --color-accent-glow-dark: rgba(59, 130, 246, 0.18);
 }
 
 * {
@@ -68,7 +72,10 @@ body {
 }
 
 .dark ::-webkit-scrollbar-thumb {
-  background: #374151;
+  background: #3a3a3a;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #525252;
 }
 
 /* Window animations */
@@ -309,13 +316,13 @@ input[data-spotlight-input]:hover,
   border: 1px solid rgba(255, 255, 255, 0.45) !important;
   box-shadow: 0 2px 20px rgba(0,0,0,0.06), 0 1px 4px rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,0.85);
 }
-/* Dark mode: translucent dark panel — no visible border to avoid edge lines */
+/* Dark mode: translucent neutral panel with subtle inner glow */
 .dark .glass-card {
-  background: rgba(20, 20, 20, 0.15) !important;
-  border-color: transparent !important;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 4px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05) !important;
-  backdrop-filter: blur(40px) saturate(1.4) !important;
-  -webkit-backdrop-filter: blur(40px) saturate(1.4) !important;
+  background: rgba(28, 28, 28, 0.55) !important;
+  border-color: rgba(255, 255, 255, 0.06) !important;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05), 0 4px 32px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+  backdrop-filter: blur(40px) saturate(1.2) !important;
+  -webkit-backdrop-filter: blur(40px) saturate(1.2) !important;
 }
 
 .glass-card-hover:hover {
@@ -324,9 +331,9 @@ input[data-spotlight-input]:hover,
   box-shadow: 0 4px 28px rgba(0,0,0,0.07), inset 0 1px 0 rgba(255,255,255,0.9);
 }
 .dark .glass-card-hover:hover {
-  background: rgba(28, 28, 28, 0.45) !important;
-  border-color: transparent !important;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.09), 0 4px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.07) !important;
+  background: rgba(40, 40, 40, 0.62) !important;
+  border-color: rgba(255, 255, 255, 0.10) !important;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 6px 32px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
 }
 
 /* Light header/footer strip */
@@ -335,12 +342,12 @@ input[data-spotlight-input]:hover,
   backdrop-filter: blur(20px) saturate(1.6);
   -webkit-backdrop-filter: blur(20px) saturate(1.6);
 }
-/* Dark header/footer strip */
+/* Dark header/footer strip — neutral */
 .dark .glass-header {
-  background: rgba(0, 0, 0, 0.14) !important;
-  backdrop-filter: blur(20px) !important;
-  -webkit-backdrop-filter: blur(20px) !important;
-  border-bottom: 1px solid rgba(255,255,255,0.06) !important;
+  background: rgba(20, 20, 20, 0.55) !important;
+  backdrop-filter: blur(20px) saturate(1.2) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(1.2) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
 }
 
 .glass-progress-track {
@@ -380,9 +387,16 @@ input[data-spotlight-input]:hover,
   border: 1px solid rgba(255, 255, 255, 0.55) !important;
   box-shadow: inset 0 1px 3px rgba(0,0,0,0.05) !important;
 }
-/* Dark input — subtle dark well */
+/* Dark input — neutral well, blue accent only on focus */
 .dark .glass-input {
-  background: rgba(255, 255, 255, 0.06) !important;
-  border-color: rgba(255, 255, 255, 0.12) !important;
-  box-shadow: inset 0 1px 3px rgba(0,0,0,0.25) !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  border-color: rgba(255, 255, 255, 0.10) !important;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.30) !important;
+  color: #F0F0F0 !important;
+}
+.dark .glass-input:focus {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(96, 165, 250, 0.45) !important;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.30), 0 0 0 3px rgba(59, 130, 246, 0.18) !important;
+  outline: none !important;
 }

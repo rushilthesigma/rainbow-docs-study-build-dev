@@ -291,7 +291,7 @@ export default function NotesApp() {
       <div className="flex items-center justify-between mb-5">
         <h2 className="text-lg font-bold text-white/90">Notes</h2>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="ghost" onClick={() => setShowAI(true)}>
+          <Button size="sm" variant="secondary" onClick={() => setShowAI(true)}>
             <Wand2 size={14} /> Generate with AI
           </Button>
           <Button size="sm" onClick={() => setShowCreate(true)}><Plus size={14} /> New Note</Button>
@@ -306,13 +306,13 @@ export default function NotesApp() {
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => setAiSource('prompt')}
-                className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs transition-colors backdrop-blur-sm ${aiSource === 'prompt' ? 'border-white/[0.18] bg-white/[0.10] text-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}
+                className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs transition-colors backdrop-blur-sm ${aiSource === 'prompt' ? 'border-blue-400/45 bg-blue-500/15 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_14px_rgba(59,130,246,0.25)]' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}
               >
                 <Wand2 size={12} /> From prompt
               </button>
               <button
                 onClick={() => setAiSource('curriculum')}
-                className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs transition-colors backdrop-blur-sm ${aiSource === 'curriculum' ? 'border-white/[0.18] bg-white/[0.10] text-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}
+                className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs transition-colors backdrop-blur-sm ${aiSource === 'curriculum' ? 'border-blue-400/45 bg-blue-500/15 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_14px_rgba(59,130,246,0.25)]' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}
               >
                 <BookOpen size={12} /> From curriculum
               </button>
@@ -323,10 +323,10 @@ export default function NotesApp() {
           <div>
             <label className="text-xs font-medium text-white/40 mb-1.5 block">Type</label>
             <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => setAiType('regular')} className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs transition-colors backdrop-blur-sm ${aiType === 'regular' ? 'border-white/[0.18] bg-white/[0.10] text-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}>
+              <button onClick={() => setAiType('regular')} className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs transition-colors backdrop-blur-sm ${aiType === 'regular' ? 'border-blue-400/45 bg-blue-500/15 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_14px_rgba(59,130,246,0.25)]' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}>
                 <FileText size={12} /> Regular
               </button>
-              <button onClick={() => setAiType('cornell')} className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs transition-colors backdrop-blur-sm ${aiType === 'cornell' ? 'border-white/[0.18] bg-white/[0.10] text-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}>
+              <button onClick={() => setAiType('cornell')} className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs transition-colors backdrop-blur-sm ${aiType === 'cornell' ? 'border-blue-400/45 bg-blue-500/15 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_14px_rgba(59,130,246,0.25)]' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}>
                 <Layout size={12} /> Cornell
               </button>
             </div>

@@ -37,12 +37,12 @@ export default function ProgressBar({
       {(label || pct >= 0) && (
         <div className={`flex items-center justify-between mb-1.5 ${textCls} text-white/50`}>
           <span className="font-medium">{label}</span>
-          <span className="font-mono tabular-nums text-white/70">{pct}%</span>
+          <span className="font-mono tabular-nums text-blue-400 font-semibold">{pct}%</span>
         </div>
       )}
       <div className={`w-full ${heightCls} rounded-full overflow-hidden bg-white/[0.08]`}>
         <div
-          className="h-full bg-white/50 transition-all duration-200 ease-out rounded-full"
+          className="h-full bg-gradient-to-r from-blue-500 to-blue-400 transition-all duration-200 ease-out rounded-full shadow-[0_0_8px_rgba(59,130,246,0.55)]"
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -79,10 +79,10 @@ export function InlineProgress({ value, active = true, target = 92, duration = 2
   const pct = value !== undefined ? Math.max(0, Math.min(100, value)) : simulated;
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span className="relative w-12 h-1 rounded-full bg-white/30 overflow-hidden">
-        <span className="absolute inset-y-0 left-0 bg-white transition-all duration-200" style={{ width: `${pct}%` }} />
+      <span className="relative w-12 h-1 rounded-full bg-blue-500/20 overflow-hidden">
+        <span className="absolute inset-y-0 left-0 bg-gradient-to-r from-blue-500 to-blue-400 transition-all duration-200" style={{ width: `${pct}%` }} />
       </span>
-      <span className="text-[10px] font-mono tabular-nums">{pct}%</span>
+      <span className="text-[10px] font-mono tabular-nums text-blue-300">{pct}%</span>
       {label && <span className="text-[11px]">{label}</span>}
     </span>
   );

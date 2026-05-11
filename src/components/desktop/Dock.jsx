@@ -34,7 +34,7 @@ function DockIcon({ app, mouseX, iconRef, isOpen, onClick, size, iconStyle }) {
         onMouseEnter={() => setTooltipVisible(true)}
         onMouseLeave={() => setTooltipVisible(false)}
         data-tour={app.id === 'curricula' ? 'curricula-icon' : undefined}
-        className="dock-icon flex items-center justify-center rounded-[13px] shadow-lg transition-transform duration-150 ease-out"
+        className="dock-icon flex items-center justify-center rounded-[13px] shadow-lg transition-transform duration-150 ease-out focus:outline-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/25"
         style={{
           width: size, height: size,
           transform: `scale(${scale})`,
@@ -110,8 +110,8 @@ export default function Dock() {
           // smoked glass in dark mode. Backdrop saturation is inlined
           // since Tailwind's `backdrop-saturate-150` taps out at 1.5×
           // and we want the punchier 1.8×.
-          className="flex items-end gap-1.5 px-3 py-2 rounded-2xl border border-white/[0.10] shadow-[0_8px_40px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.08)] bg-white/[0.06]"
-          style={{ backdropFilter: 'blur(48px) saturate(2)', WebkitBackdropFilter: 'blur(48px) saturate(2)' }}
+          className="flex items-end gap-1.5 px-3 py-2 rounded-2xl bg-white/[0.05] border border-white/[0.10] shadow-[0_8px_28px_rgba(0,0,0,0.15)]"
+          style={{ backdropFilter: 'blur(22px) saturate(160%)', WebkitBackdropFilter: 'blur(22px) saturate(160%)' }}
           onMouseMove={handleMouseMove}
           onMouseLeave={() => setMouseX(null)}
         >

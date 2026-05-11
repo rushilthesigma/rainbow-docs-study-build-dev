@@ -9,7 +9,7 @@ import StreakWidget from '../components/study/StreakWidget';
 import LoadingSpinner from '../components/shared/LoadingSpinner';
 import { useAuth } from '../context/AuthContext';
 
-const card = 'rounded-xl border border-white/[0.07] bg-white/[0.03] backdrop-blur-sm';
+const card = 'rounded-xl border border-white/[0.06] bg-[#1c1c1c]/70 backdrop-blur-sm shadow-[0_1px_0_rgba(255,255,255,0.04)_inset,0_8px_24px_-8px_rgba(0,0,0,0.45)]';
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -51,8 +51,8 @@ export default function DashboardPage() {
     <div className="max-w-4xl space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-[22px] font-bold text-white/90">{greeting}, {firstName}</h1>
-          {profile && <p className="text-[13px] text-white/40 mt-0.5">Level {profile.level} · {profile.xp}/{profile.xpToNextLevel} XP</p>}
+          <h1 className="text-[22px] font-bold text-white tracking-tight">{greeting}, <span className="text-blue-400">{firstName}</span></h1>
+          {profile && <p className="text-[13px] text-white/50 mt-0.5">Level {profile.level} · {profile.xp}/{profile.xpToNextLevel} XP</p>}
         </div>
         <Button onClick={() => navigate('/new')}><Plus size={16} /> New Curriculum</Button>
       </div>
@@ -61,10 +61,10 @@ export default function DashboardPage() {
       <div className={`${card} p-5`}>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <MessageSquare size={16} className="text-white/35" />
-            <span className="text-[13px] font-semibold text-white/75">Study Mode</span>
+            <MessageSquare size={16} className="text-blue-300" />
+            <span className="text-[13px] font-semibold text-blue-100">Study Mode</span>
           </div>
-          <button onClick={() => navigate('/study')} className="inline-flex items-center gap-1 text-[12px] text-white/40 hover:text-white/70 transition-colors">
+          <button onClick={() => navigate('/study')} className="inline-flex items-center gap-1 text-[12px] text-blue-200/60 hover:text-blue-100 transition-colors">
             Open <ArrowRight size={11} />
           </button>
         </div>
@@ -73,11 +73,11 @@ export default function DashboardPage() {
             value={studyInput}
             onChange={e => setStudyInput(e.target.value)}
             placeholder="What do you want to study?"
-            className="flex-1 px-3.5 py-2.5 rounded-xl border border-white/[0.08] bg-white/[0.04] text-[13px] text-white/85 placeholder:text-white/25 focus:outline-none focus:border-white/[0.20] focus:bg-white/[0.07] transition-colors"
+            className="flex-1 px-3.5 py-2.5 rounded-xl border border-blue-400/[0.18] bg-blue-500/[0.06] text-[13px] text-white placeholder:text-blue-200/35 focus:outline-none focus:border-blue-400/[0.50] focus:bg-blue-500/[0.10] focus:ring-2 focus:ring-blue-400/20 transition-colors"
           />
           <button
             type="submit"
-            className="p-2.5 rounded-xl bg-white/[0.08] border border-white/[0.14] text-white/50 hover:bg-white/[0.14] hover:text-white/80 transition-colors"
+            className="p-2.5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/40 text-white shadow-[0_4px_16px_rgba(59,130,246,0.35)] transition-all"
           >
             <Send size={14} />
           </button>
@@ -96,22 +96,22 @@ export default function DashboardPage() {
           <button
             key={item.to}
             onClick={() => navigate(item.to)}
-            className={`${card} p-4 text-left hover:border-white/[0.15] hover:bg-white/[0.06] transition-colors group`}
+            className={`${card} p-4 text-left hover:border-blue-400/[0.30] hover:shadow-[0_0_0_1px_rgba(96,165,250,0.20),0_8px_24px_-8px_rgba(37,99,235,0.30)] transition-all group`}
           >
-            <item.icon size={17} className="text-white/30 mb-2.5 group-hover:text-white/50 transition-colors" />
-            <p className="text-[13px] font-semibold text-white/75">{item.label}</p>
-            <p className="text-[11px] text-white/30">{item.sub}</p>
+            <item.icon size={17} className="text-blue-300/70 mb-2.5 group-hover:text-blue-200 transition-colors" />
+            <p className="text-[13px] font-semibold text-white">{item.label}</p>
+            <p className="text-[11px] text-blue-200/45">{item.sub}</p>
           </button>
         ))}
       </div>
 
       {/* Curricula */}
       <div>
-        <h2 className="text-[13px] font-semibold text-white/55 mb-3">My Curricula</h2>
+        <h2 className="text-[13px] font-semibold text-blue-200/70 mb-3 uppercase tracking-wider">My Curricula</h2>
         {curricula.length === 0 ? (
           <div className={`${card} p-8 text-center`}>
-            <BookOpen size={22} className="text-white/20 mx-auto mb-3" />
-            <p className="text-[13px] text-white/35 mb-4">No curricula yet</p>
+            <BookOpen size={22} className="text-blue-300/40 mx-auto mb-3" />
+            <p className="text-[13px] text-blue-200/55 mb-4">No curricula yet</p>
             <Button onClick={() => navigate('/new')} size="sm"><Plus size={14} /> Create</Button>
           </div>
         ) : (

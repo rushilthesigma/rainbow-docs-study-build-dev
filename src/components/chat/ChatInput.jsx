@@ -249,20 +249,20 @@ export default function ChatInput({
       {/* Composer card */}
       <div
         data-tour="chat-input"
-        className={`rounded-xl bg-white/75 dark:bg-white/[0.04] backdrop-blur-md transition-all overflow-hidden ${
+        className={`rounded-xl bg-white/75 dark:bg-transparent backdrop-blur-md transition-all overflow-hidden ${
           sourceMode
-            ? 'ring-2 ring-white/30 shadow-[0_0_0_4px_rgba(255,255,255,0.05)] bg-white/[0.06] dark:bg-white/[0.06]'
-            : 'ring-1 ring-white/20 dark:ring-white/[0.08] focus-within:ring-2 focus-within:ring-white/35 dark:focus-within:ring-white/20'
+            ? 'ring-2 ring-blue-400/70 shadow-[0_0_0_4px_rgba(59,130,246,0.18),0_0_20px_rgba(59,130,246,0.25)] bg-white/[0.06] dark:bg-blue-500/[0.05]'
+            : 'ring-1 ring-white/20 dark:ring-transparent focus-within:ring-2 focus-within:ring-blue-400/80 dark:focus-within:ring-blue-400/85 dark:focus-within:shadow-[0_0_18px_rgba(59,130,246,0.30)]'
         }`}
       >
         {/* TOP RAIL — tools + mode toggle + char count */}
-        <div className="flex items-center gap-1 px-2 pt-1.5 pb-1 bg-white/20 dark:bg-white/[0.02]">
+        <div className="flex items-center gap-1 px-2 pt-1.5 pb-1 bg-white/20 dark:bg-transparent">
           <button
             type="button"
             onClick={() => fileRef.current?.click()}
             disabled={disabled}
             title="Attach an image, PDF, or text file (you can also drag-and-drop or paste)"
-            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/40 dark:hover:bg-white/[0.07] disabled:opacity-40 transition-colors"
+            className="p-1.5 rounded-lg text-gray-400 dark:text-blue-200/55 hover:text-gray-700 dark:hover:text-blue-100 hover:bg-white/40 dark:hover:bg-blue-500/[0.12] disabled:opacity-40 transition-colors"
           >
             <Paperclip size={13} />
           </button>
@@ -273,8 +273,8 @@ export default function ChatInput({
               title="Search the web and cite sources (⌘⇧A)"
               className={`p-1.5 rounded-lg transition-colors ${
                 sourceMode
-                  ? 'text-white bg-white/15'
-                  : 'text-gray-400 hover:text-white hover:bg-white/40 dark:hover:bg-white/[0.07]'
+                  ? 'text-white bg-blue-500/30 ring-1 ring-blue-400/50'
+                  : 'text-gray-400 dark:text-blue-200/55 hover:text-gray-700 dark:hover:text-blue-100 hover:bg-white/40 dark:hover:bg-blue-500/[0.12]'
               }`}
             >
               <Globe size={13} />
@@ -282,7 +282,7 @@ export default function ChatInput({
           )}
           <span className="flex-1" />
           {text.length > 0 && (
-            <span className={`text-[10px] tabular-nums px-1 ${text.length > 1800 ? 'text-rose-500' : 'text-gray-400'}`}>
+            <span className={`text-[10px] tabular-nums px-1 ${text.length > 1800 ? 'text-rose-500' : 'text-gray-400 dark:text-blue-200/40'}`}>
               {text.length}
             </span>
           )}
@@ -355,7 +355,7 @@ export default function ChatInput({
             placeholder={sourceMode ? 'Ask anything — I\'ll search and cite…' : placeholder}
             disabled={disabled}
             rows={1}
-            className="flex-1 resize-none px-3 py-2.5 bg-transparent text-[14px] text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none max-h-40 overflow-y-auto"
+            className="flex-1 resize-none px-3 py-2.5 bg-transparent text-[14px] text-gray-900 dark:text-blue-50 placeholder-gray-400 dark:placeholder-blue-200/35 focus:outline-none max-h-40 overflow-y-auto"
             style={{ minHeight: '44px', border: 'none', boxShadow: 'none' }}
             onInput={e => { e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 160) + 'px'; }}
           />
@@ -364,10 +364,12 @@ export default function ChatInput({
             type="submit"
             disabled={!canSend}
             title="Send (Enter)"
-            className={`m-1.5 px-3 h-9 rounded-md inline-flex items-center gap-1 text-[12px] font-semibold transition-colors flex-shrink-0 ${
+            className={`m-1.5 px-3 h-9 rounded-md inline-flex items-center gap-1 text-[12px] font-semibold transition-all flex-shrink-0 ${
               canSend
-                ? (sourceMode ? 'bg-white/20 hover:bg-white/30 text-white backdrop-blur-sm border border-white/20' : 'bg-gray-900 hover:bg-gray-800 dark:bg-white/[0.12] dark:hover:bg-white/[0.18] text-white')
-                : 'bg-gray-100 dark:bg-[#1a1a1a] text-gray-400 dark:text-gray-500 cursor-not-allowed'
+                ? (sourceMode
+                    ? 'bg-blue-500/30 hover:bg-blue-500/45 text-white backdrop-blur-sm ring-1 ring-blue-400/50'
+                    : 'bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-white shadow-[0_2px_10px_rgba(59,130,246,0.40),inset_0_1px_0_rgba(255,255,255,0.20)] ring-1 ring-blue-400/40')
+                : 'bg-gray-100 dark:bg-blue-500/[0.06] text-gray-400 dark:text-blue-200/30 cursor-not-allowed ring-1 ring-transparent dark:ring-blue-400/[0.10]'
             }`}
           >
             Send <Send size={11} />

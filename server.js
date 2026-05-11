@@ -17,7 +17,7 @@ import {
   buildStandaloneLessonPrompt, buildMathTutorPrompt,
   buildStudyModePrompt, buildGoalMilestonesPrompt, buildAssessmentPrompt,
   buildFlashcardPrompt, buildCueGenerationPrompt, buildSummaryPrompt,
-  buildTopicSuggestionsPrompt, buildSlideshowPrompt,
+  buildTopicSuggestionsPrompt, buildSlideshowPrompt, buildFlashSlideshowPrompt,
   buildSlideshowCriticPrompt, buildSlideshowReviserPrompt,
   buildSlideHtmlPrompt,
 } from './prompts.js';
@@ -34,13 +34,10 @@ const PORT = process.env.PORT || 3002;
 // ===== Google Gemini =====
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 
-// Gemini 2.5 model family (GA / preview as of 2025-05).
-//   Pro        — gemini-2.5-pro        (deepest reasoning, best JSON)
-//   Flash      — gemini-2.5-flash      (balanced speed + quality)
-//   Flash Lite — gemini-2.0-flash      (fastest + cheapest, stable GA)
-const GEMINI_PRO        = 'gemini-3.1-pro-preview';
+// Gemini 3 model family.
+const GEMINI_PRO        = 'gemini-3-pro-preview';
 const GEMINI_FLASH      = 'gemini-3-flash-preview';
-const GEMINI_FLASH_LITE = 'gemini-3.1-flash-lite-preview';
+const GEMINI_FLASH_LITE = 'gemini-3-flash-preview';
 const DEFAULT_MODEL = GEMINI_FLASH;
 const FALLBACK_MODEL = GEMINI_FLASH_LITE;
 const resolveModel = (name) => name || DEFAULT_MODEL;
@@ -1965,23 +1962,11 @@ async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOv
   }
 
   // Inject true model identity at the TOP of the system prompt so it takes
-  // priority over the model's base training. Appending it at the end lets
-  // the fine-tune override it — putting it first prevents that.
-  const modelFriendlyName =
-    requestedModel === GEMINI_PRO   ? 'Gemini 3.1 Pro' :
-    requestedModel === GEMINI_FLASH ? 'Gemini 3.1 Flash' :
-                                      'Gemini 3.1 Flash Lite';
-  const modelTierShort =
-    requestedModel === GEMINI_PRO   ? 'Pro' :
-    requestedModel === GEMINI_FLASH ? 'Flash' :
-                                      'Flash Lite';
-  const modelDisclosure = `YOUR IDENTITY: You are ${modelFriendlyName}. If anyone asks what model, AI, or version you are — say "${modelFriendlyName}" or just "${modelTierShort}". That is your only correct answer. Do not say "I'm a large language model trained by Google." Do not deflect. Do not say you don't know. Just say "${modelFriendlyName}".\n\n`;
-
   // Source mode: sources are retrieved automatically via Google Search
   // grounding — tell the model it has the capability rather than browbeating
   // it into using the tool.
   const finalSystem = enableWebSearch
-    ? `${modelDisclosure}${systemPrompt}
+    ? `${systemPrompt}
 
 ---
 SOURCE MODE — NON-NEGOTIABLE RULES:
@@ -1990,7 +1975,7 @@ SOURCE MODE — NON-NEGOTIABLE RULES:
 - Cite the supporting source inline using [1], [2], … markers placed immediately after the claim they back. The UI renders the sources list below your message; do NOT write your own "Sources:" footer.
 - If search returns nothing useful, say so plainly and refuse to fabricate — do not fall back to model-only answers in source mode.
 - Write naturally and do not mention that you searched.`
-    : `${modelDisclosure}${systemPrompt}`;
+    : systemPrompt;
 
   const controller = new AbortController();
   // 5-minute hard cap. Long lessons with quiz blocks + grounded source mode
@@ -4967,10 +4952,22 @@ async function reviewAndPolishDeck({ topic, parsed, model }) {
 
 app.post('/api/slideshows/improve-slide', authMiddleware, async (req, res) => {
   try {
-    const { topic, slide } = req.body || {};
+    const { topic, slide, intent } = req.body || {};
     if (!slide) return res.status(400).json({ error: 'slide required' });
 
-    const system = `You are an expert presentation editor. Given a single slide's content, rewrite it to be clearer, more impactful, and more substantive. Keep the same layout and general structure. Return ONLY valid JSON matching exactly the same fields provided — no extra keys, no commentary.
+    const intentGuides = {
+      sharpen: 'Tighten and sharpen — cut filler, prefer punchy, concrete wording. Aim for ~20% fewer words while keeping every fact.',
+      expand: 'Add more substance — bring in concrete examples, numbers, or specifics. Bullets/items can grow up to one more line each. Do not pad with fluff.',
+      engaging: 'Make it more engaging — open with a hook, use vivid concrete language, prefer active voice. Keep the facts; lift the energy.',
+      bullets: 'Restructure into clear bullet points — convert body prose into 4–6 strong bullets, each starting with a key term in **bold**.',
+      polish: 'Polish grammar, flow, and word choice. Fix any awkward phrasing. Do not change meaning or content.',
+      simplify: 'Simplify — write so a smart non-expert gets it on first read. Shorter sentences, plain words, no jargon unless essential.',
+    };
+    const intentLine = intentGuides[intent] || 'Rewrite to be clearer, more impactful, and more substantive.';
+
+    const system = `You are an expert presentation editor. Given a single slide's content, rewrite it according to the user's specific intent below. Keep the same layout and general structure. Return ONLY valid JSON matching exactly the same fields provided — no extra keys, no commentary.
+
+User intent: ${intentLine}
 
 Rules:
 - Titles: punchy, concrete, ≤ 8 words
@@ -4997,7 +4994,7 @@ Rules:
 app.post('/api/slideshows/generate', authMiddleware, async (req, res) => {
   // SSE keeps the connection alive past Render's 30s proxy timeout.
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
@@ -5006,7 +5003,7 @@ app.post('/api/slideshows/generate', authMiddleware, async (req, res) => {
   const keepalive = setInterval(() => { try { res.write(': keepalive\n\n'); res.flush?.(); } catch {} }, 8000);
 
   try {
-    const { topic, slideCount, difficulty, style, template, customInfo, sourceText, palette: userPalette } = req.body || {};
+    const { topic, slideCount, difficulty, style, template, customInfo, sourceText, palette: userPalette, mode: genMode } = req.body || {};
     if (!topic?.trim()) { send({ type: 'error', error: 'Topic is required' }); return res.end(); }
 
     const users = loadUsers();
@@ -5016,33 +5013,34 @@ app.post('/api/slideshows/generate', authMiddleware, async (req, res) => {
 
     send({ type: 'progress', phase: 'Drafting slides…', pct: 10 });
     const safeSourceText = sourceText ? String(sourceText).slice(0, 20000) : undefined;
-    const { system, user } = buildSlideshowPrompt({ topic: topic.trim(), slideCount, difficulty, style, template, customInfo, sourceText: safeSourceText });
-    // Pro for slide generation — it follows dense-content instructions far
-    // more reliably than Flash and produces longer, substantive JSON output.
-    const model = GEMINI_PRO;
-    let result = await callGemini(system, [{ role: 'user', content: user }], model, 16384, { jsonMode: true, temperature: 0.6 });
+    const { system, user } = genMode === 'flash'
+      ? buildFlashSlideshowPrompt({ topic: topic.trim(), slideCount: Math.min(Number(slideCount) || 5, 5) })
+      : buildSlideshowPrompt({ topic: topic.trim(), slideCount, difficulty, style, template, customInfo, sourceText: safeSourceText });
+    // Flash: smallest model + lean prompt = ~8s. Advanced: Pro + full prompt = ~90s.
+    const model = genMode === 'flash' ? GEMINI_FLASH_LITE : GEMINI_PRO;
+    console.log(`[slideshow-generate] mode=${genMode} model=${model}`);
+    const maxTokens = genMode === 'flash' ? 4096 : 16384;
+    let result = await callGemini(system, [{ role: 'user', content: user }], model, maxTokens, { jsonMode: true, temperature: 0.7 });
     if (!result.success) { send({ type: 'error', error: result.error }); return res.end(); }
 
     send({ type: 'progress', phase: 'Writing content…', pct: 38 });
     let parsed = parseAIJson(result.data.content?.[0]?.text || '');
     if (!parsed?.slides?.length) {
       send({ type: 'progress', phase: 'Retrying generation…', pct: 44 });
-      const retry = await callGemini(system, [{ role: 'user', content: user }], model, 16384, { jsonMode: true, temperature: 0.4 });
+      const retry = await callGemini(system, [{ role: 'user', content: user }], model, maxTokens, { jsonMode: true, temperature: 0.4 });
       if (retry.success) parsed = parseAIJson(retry.data.content?.[0]?.text || '');
     }
     if (!parsed?.slides?.length) {
       send({ type: 'error', error: 'AI response was malformed. Try again.' }); return res.end();
     }
 
-    send({ type: 'progress', phase: 'Reviewing content…', pct: 55 });
-    // Auto-review loop: a critic AI inspects the deck and produces a
-    // structured issue list, then a reviser AI applies those fixes. Loops
-    // until the critic returns clean OR MAX_REVIEW_PASSES — whichever first.
-    // Each pass is logged so the client can show what changed.
-    const reviewLog = await reviewAndPolishDeck({ topic: topic.trim(), parsed, model });
-    // reviewLog mutates parsed.slides in place; the log itself is attached
-    // to the deck for the UI to show ("Reviewed in 2 passes — 7 issues fixed").
-    send({ type: 'progress', phase: 'Applying revisions…', pct: 72 });
+    // Flash skips review and bespoke HTML — one AI call, done in ~15s.
+    let reviewLog = [];
+    if (genMode !== 'flash') {
+      send({ type: 'progress', phase: 'Reviewing content…', pct: 55 });
+      reviewLog = await reviewAndPolishDeck({ topic: topic.trim(), parsed, model });
+      send({ type: 'progress', phase: 'Applying revisions…', pct: 72 });
+    }
 
     const VALID_LAYOUTS = [
       'title','hero','content','summary','quote','stat','twoCol','section','split','freeform',
@@ -5096,17 +5094,16 @@ app.post('/api/slideshows/generate', authMiddleware, async (req, res) => {
       createdAt: new Date().toISOString(),
     };
 
-    send({ type: 'progress', phase: 'Finalising design…', pct: 82 });
-    // Bespoke per-slide HTML design — Gemini codes each slide as a unique
-    // HTML/CSS fragment (like an AI building a website section). Runs in
-    // parallel for all slides. Failures fall back to the template renderer
-    // so a single bad call doesn't break the deck.
-    try {
-      htmlGenStats = await generateBespokeHtmlForDeck({ deck, model });
-      deck.htmlDesigned = htmlGenStats.generated;
-    } catch (e) {
-      console.warn('[slideshow-html] generation failed:', e.message);
-      deck.htmlDesigned = 0;
+    // Flash skips bespoke HTML — uses template renderer, saves ~20s.
+    if (genMode !== 'flash') {
+      send({ type: 'progress', phase: 'Finalising design…', pct: 82 });
+      try {
+        htmlGenStats = await generateBespokeHtmlForDeck({ deck, model });
+        deck.htmlDesigned = htmlGenStats.generated;
+      } catch (e) {
+        console.warn('[slideshow-html] generation failed:', e.message);
+        deck.htmlDesigned = 0;
+      }
     }
 
     users[email].data.slideshows.unshift(deck);
