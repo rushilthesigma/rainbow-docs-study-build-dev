@@ -45,11 +45,25 @@ export default function DebatePanel({ onBack }) {
     }
   };
 
+  // Top-bar back behavior:
+  //   - In any sub-mode (single-*, mp-*): step back to the mode menu.
+  //   - On the mode menu:
+  //       · if onBack is provided (e.g., mounted inside StudyMode as a
+  //         sub-view, with a parent that wants to take over) call it.
+  //       · otherwise (mounted as its own top-level app) hide the arrow —
+  //         the window's own close button is the only sensible exit.
+  const onMenu = mode === 'menu';
+  const headerBackTarget = onMenu ? (onBack || null) : () => selectMode('menu');
+
   const header = (
     <div className="flex items-center gap-2 px-4 py-2.5 bg-transparent">
-      <button onClick={onBack} className="p-1 rounded text-white/70 hover:text-white transition-colors">
-        <ArrowLeft size={14} />
-      </button>
+      {headerBackTarget ? (
+        <button onClick={headerBackTarget} className="p-1 rounded text-white/70 hover:text-white transition-colors">
+          <ArrowLeft size={14} />
+        </button>
+      ) : (
+        <span className="w-[22px]" aria-hidden="true" />
+      )}
       <div className="w-7 h-7 rounded-xl bg-white/20 dark:bg-white/10 border border-white/40 dark:border-white/15 flex items-center justify-center text-white/80 flex-shrink-0">
         <Swords size={13} />
       </div>
@@ -97,11 +111,11 @@ export default function DebatePanel({ onBack }) {
 // =========================================================
 function ModeMenu({ onSelect }) {
   return (
-    <div className="p-6 max-w-md mx-auto">
-      <h2 className="text-base font-bold text-gray-900 dark:text-white mb-1 text-center">How do you want to debate?</h2>
-      <p className="text-xs text-gray-500 dark:text-gray-400 text-center mb-5">Solo against the AI, or head-to-head with a friend.</p>
+    <div className="p-6 md:p-10 max-w-md md:max-w-5xl mx-auto">
+      <h2 className="text-base md:text-2xl font-bold text-gray-900 dark:text-white mb-1 text-center">How do you want to debate?</h2>
+      <p className="text-xs md:text-sm text-gray-500 dark:text-gray-400 text-center mb-5 md:mb-8">Solo against the AI, or head-to-head with a friend.</p>
 
-      <div className="grid gap-3">
+      <div className="grid gap-3 md:gap-5 md:grid-cols-3">
         <button
           onClick={() => onSelect('single-setup')}
           className="text-left p-4 rounded-xl border border-blue-500/25 bg-blue-500/[0.04] hover:bg-blue-500/[0.10] hover:border-blue-500/45 transition-colors group"
@@ -248,7 +262,7 @@ function Singleplayer({ mode, setMode, onExit }) {
   // SETUP
   if (mode === 'single-setup') {
     return (
-      <div className="p-6 max-w-md mx-auto">
+      <div className="p-6 md:p-10 max-w-md md:max-w-2xl mx-auto">
         <button onClick={onExit} className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 mb-3 inline-flex items-center gap-1 transition-colors">
           <ArrowLeft size={12} /> Back
         </button>
@@ -290,7 +304,7 @@ function Singleplayer({ mode, setMode, onExit }) {
     const won = verdict.winner === 'student';
     const tie = verdict.winner === 'tie';
     return (
-      <div className="p-6 max-w-lg mx-auto">
+      <div className="p-6 md:p-10 max-w-lg md:max-w-3xl mx-auto">
         <div className="rounded-2xl p-5 mb-4 text-center bg-blue-500/10 border border-blue-500/30">
           <Trophy size={32} className="mx-auto mb-2 text-blue-300" />
           <p className="text-2xl font-black text-gray-900 dark:text-white uppercase tracking-wider">
@@ -577,7 +591,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
   // ===== MENU (Create / Join) =====
   if (mode === 'mp-menu') {
     return (
-      <div className="p-6 max-w-md mx-auto">
+      <div className="p-6 md:p-10 max-w-md md:max-w-2xl mx-auto">
         <button onClick={onExit} className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 mb-3 inline-flex items-center gap-1 transition-colors">
           <ArrowLeft size={12} /> Back
         </button>
@@ -626,7 +640,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
     const opponent = match.players.find(p => (myId ? p.userId !== myId : p.userId !== match.hostId));
     const opponentJoined = match.players.length >= 2;
     return (
-      <div className="p-6 max-w-md mx-auto">
+      <div className="p-6 md:p-10 max-w-md md:max-w-2xl mx-auto">
         <p className="text-[11px] uppercase tracking-[0.18em] text-blue-400/80 dark:text-blue-400/80 mb-1.5">Match code</p>
         <button
           onClick={copyCode}
@@ -824,13 +838,36 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
                     </div>
                   )}
                   {t.content && <p className="text-sm leading-relaxed whitespace-pre-wrap">{t.content}</p>}
-                  <div className={`mt-2 pt-2 border-t flex items-center gap-2 text-[10px] ${isMine ? 'border-white/20 dark:border-gray-800/50 text-white/50 dark:text-gray-600' : 'border-white/20 dark:border-white/[0.06] text-gray-500 dark:text-gray-400'}`}>
-                    <span className="font-bold tabular-nums">{t.score.total}/30</span>
-                    <span>· arg {t.score.argumentation} · ev {t.score.evidence} · rh {t.score.rhetoric}</span>
+                  <div className={`mt-3 pt-2.5 border-t ${isMine ? 'border-white/20' : 'border-blue-500/15 dark:border-white/[0.08]'}`}>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={`inline-flex items-baseline gap-0.5 px-2 py-0.5 rounded-md text-[11px] font-bold tabular-nums ${
+                        isMine
+                          ? 'bg-white/20 text-white border border-white/25'
+                          : 'bg-blue-500/15 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200 border border-blue-500/30'
+                      }`}>
+                        {t.score.total}<span className="opacity-60 text-[9.5px] ml-0.5">/30</span>
+                      </span>
+                      {[
+                        { label: 'ARG', value: t.score.argumentation },
+                        { label: 'EV', value: t.score.evidence },
+                        { label: 'RH', value: t.score.rhetoric },
+                      ].map(s => (
+                        <span key={s.label} className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] tabular-nums ${
+                          isMine
+                            ? 'bg-white/10 text-white/90'
+                            : 'bg-blue-500/[0.08] dark:bg-white/[0.06] text-gray-700 dark:text-gray-200'
+                        }`}>
+                          <span className={`font-semibold tracking-wide ${isMine ? 'text-white/60' : 'text-gray-500 dark:text-gray-400'}`}>{s.label}</span>
+                          <span className="font-bold">{s.value}</span>
+                        </span>
+                      ))}
+                    </div>
+                    {t.feedback && (
+                      <p className={`mt-1.5 text-[11px] leading-snug ${isMine ? 'text-white/85' : 'text-gray-600 dark:text-gray-300'}`}>
+                        {t.feedback}
+                      </p>
+                    )}
                   </div>
-                  {t.feedback && (
-                    <p className={`mt-1 text-[10px] italic ${isMine ? 'text-white/50 dark:text-gray-600' : 'text-gray-500 dark:text-gray-400'}`}>{t.feedback}</p>
-                  )}
                 </div>
               </div>
             );

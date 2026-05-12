@@ -7883,21 +7883,40 @@ Return JSON exactly:
   try {
     const userMsg = { role: 'user', content: usr };
     if (images.length) userMsg.images = images;
-    const aiResp = await callGemini(sys, [userMsg], MODEL_FLASH_LITE, 600, { jsonMode: true, temperature: 0.7 });
+    // maxOutputTokens bumped 600 → 2000. The grader prompt + JSON response
+    // can run close to 600 once the per-axis feedback is included, and a
+    // truncated response makes parseAIJson fail → we'd fall back to the
+    // default 5/5/5 = 15 every time. 2000 is plenty of headroom.
+    const aiResp = await callGemini(sys, [userMsg], MODEL_FLASH_LITE, 2000, { jsonMode: true, temperature: 0.7 });
     let score = { argumentation: 5, evidence: 5, rhetoric: 5, total: 15 };
     let feedback = '';
+    let graded = false;
     if (aiResp.success) {
-      const parsed = parseAIJson(aiResp.data.content?.[0]?.text || '');
-      if (parsed) {
+      const rawText = aiResp.data.content?.[0]?.text || '';
+      const parsed = parseAIJson(rawText);
+      if (parsed && (parsed.argumentation != null || parsed.evidence != null || parsed.rhetoric != null)) {
+        // Use Number.isFinite so a legitimate 0 doesn't get bumped to 5
+        // by the truthy-fallback. Also accept missing axes — they default
+        // to 5 rather than dropping the whole grade.
+        const num = (v, fallback = 5) => {
+          const n = Number(v);
+          return Number.isFinite(n) ? Math.max(0, Math.min(10, n)) : fallback;
+        };
         score = {
-          argumentation: Math.max(1, Math.min(10, Number(parsed.argumentation) || 5)),
-          evidence:      Math.max(1, Math.min(10, Number(parsed.evidence)      || 5)),
-          rhetoric:      Math.max(1, Math.min(10, Number(parsed.rhetoric)      || 5)),
+          argumentation: num(parsed.argumentation),
+          evidence:      num(parsed.evidence),
+          rhetoric:      num(parsed.rhetoric),
         };
         score.total = score.argumentation + score.evidence + score.rhetoric;
         feedback = String(parsed.feedback || '').slice(0, 400);
+        graded = true;
+      } else {
+        console.warn('[debate-grade] parse failed', { len: rawText.length, sample: rawText.slice(0, 200) });
       }
+    } else {
+      console.warn('[debate-grade] call failed', aiResp.error);
     }
+    if (!graded) console.warn('[debate-grade] using fallback 5/5/5 score');
     const turn = {
       userId: req.userId, side: player.side, content: argument,
       // Persist image data URLs so the opponent can render them. Capped
