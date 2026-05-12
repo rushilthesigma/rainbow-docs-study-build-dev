@@ -804,6 +804,17 @@ export function buildSlideshowPrompt({ topic, slideCount = 8, difficulty = 'inte
   };
   const hint = styleHints[style] || styleHints.educational;
 
+  // Palette rotation — without a nudge, the model anchors on the style's
+  // default palette and ships every deck in newsprint or midnight. Pick 3
+  // candidates each call: the style default + 2 random alternates from the
+  // full pool of 12. The model still gets the full menu in the system
+  // prompt; this rotation just biases it toward variety.
+  const ALL_PALETTES = ['ink','newsprint','ocean','forest','plum','coral','mono','sun','midnight','slate','rose','sage'];
+  const ALL_FONTS = ['editorial','modern','humanist','geometric'];
+  const shuffle = (arr) => arr.map(v => [Math.random(), v]).sort((a, b) => a[0] - b[0]).map(p => p[1]);
+  const paletteCandidates = [hint.palette, ...shuffle(ALL_PALETTES.filter(p => p !== hint.palette)).slice(0, 2)];
+  const fontCandidates = [hint.font, ...shuffle(ALL_FONTS.filter(f => f !== hint.font)).slice(0, 1)];
+
   return {
     system: `You write dense, information-rich presentation decks at the level of a NotebookLM Video Overview — the kind a podcast-host scholar would build to teach a curious audience. Every slide must teach something specific and genuinely useful. PRIORITY ORDER: (1) substantive, surprising-but-true content, (2) clarity and structure, (3) visual appeal. Never sacrifice content for aesthetics. A slide with 6 full-sentence bullets packed with concrete facts beats a beautiful slide with 3-word labels. Output ONLY valid JSON, no markdown fences, no commentary.
 
@@ -846,10 +857,12 @@ IMAGE-FORWARD LAYOUTS (require imagePrompt):
 # Composition for a ${count}-slide deck
 - Slide 1 = "title". Last slide = "summary".
 - 1–2 "section" dividers if count ≥ 8.
-- At least 6 distinct layout types across the deck. No two consecutive slides may share the same layout.
+- At least 7 DISTINCT layout types across the deck. "content" and "bullets" together must not exceed 40% of the deck. Aim for editorial variety: pick the layout that fits the content, not the easy default.
+- MUST include at least ONE of each: a structural layout ("cards" OR "numbered" OR "compare" OR "agenda"), a punchy layout ("hero" OR "bigText" OR "stat" OR "quote"), and an image-forward layout ("imageHero" OR "imageRight" OR "imageLeft" OR "imageFull") if topic permits.
+- No two consecutive slides may share the same layout.
 - Fabrication ban: only use "stat" and "quote" when you know a real fact. If unsure, use "content" or "bullets".
 - IMAGES: you decide. Add an imagePrompt (and use an image-forward layout) whenever a real photo or diagram would genuinely help the audience understand or feel the content — a key person, a place, a physical process, a striking visual moment. Skip it when the content is abstract, data-driven, or purely conceptual. The "title" slide ALWAYS has an imagePrompt regardless. Never add imagePrompt just to fill a quota.
-- Match layout to content: data → "stat"; a process → "numbered"; two options → "compare"; three pillars → "cards"; dense explanation → "content" or "twoCol"; a bold claim → "hero"; a list of facts → "bullets". Don't default everything to bullets — pick the shape that makes the content clearest.
+- Match layout to content: data → "stat"; a process → "numbered"; two options → "compare"; three pillars → "cards"; dense explanation → "content" or "twoCol"; a bold claim → "hero" or "bigText"; a list of facts → "bullets". Don't default everything to bullets — pick the shape that makes the content clearest.
 
 # Per-slide fields
 - eyebrow   — ALL CAPS kicker, ≤ 4 words. Optional.
@@ -872,6 +885,11 @@ IMAGE-FORWARD LAYOUTS (require imagePrompt):
 # Voice & palette
 Voice for this deck: ${hint.voice}
 Depth: ${difficulty}. Style: ${style}.
+
+Palette candidates for THIS deck (rotated for variety — pick the one that best matches the topic; you may also pick another from the full list below if a different one fits the subject better): ${paletteCandidates.join(', ')}.
+Font candidates: ${fontCandidates.join(', ')}.
+
+DO NOT default to your style's palette just because it's the style default. Variety across decks matters — the same topic generated twice should not always land on the same palette.
 
 Choose palette AND font based on the TOPIC first, style second. Match mood to subject matter:
 • ink       — corporate, tech, SaaS, clean professional (dark accent: deep blue)
@@ -1039,22 +1057,34 @@ The example shows the SHAPE, not the topic — your slides must be about "${topi
 
 // ===== SLIDESHOW: FLASH (fast, minimal prompt) =====
 // Single AI call, short prompt, concise output — targets ~8s generation.
-export function buildFlashSlideshowPrompt({ topic, slideCount = 5 }) {
-  const count = Math.max(4, Math.min(5, Number(slideCount) || 5));
+export function buildFlashSlideshowPrompt({ topic, slideCount = 8 }) {
+  const count = Math.max(6, Math.min(10, Number(slideCount) || 8));
   return {
-    system: `You create presentation slide decks. Output ONLY valid JSON, no markdown, no commentary.
+    system: `You create dense, information-rich presentation slide decks. Output ONLY valid JSON, no markdown, no commentary.
 
-Layouts: title, content, bullets, stat, quote, hero, cards, numbered, summary.
-- Slide 1 = "title", last = "summary". Use at least 3 different layouts.
-- titles ≤ 8 words. body = 1–2 sentences. bullets = 3–4 items (short phrases).
-- palette: ink|newsprint|ocean|forest|plum|coral|mono|sun|midnight|slate|rose|sage
-- font: editorial|modern|humanist|geometric`,
-    user: `Topic: "${topic}". Exactly ${count} slides.
+Layouts: title, content, bullets, stat, quote, hero, cards, numbered, compare, summary.
+- Slide 1 = "title", last = "summary". Use at least 5 DIFFERENT layouts across the deck. No two consecutive slides share a layout.
+- Titles ≤ 10 words. Specific and vivid — name the actual thing, not "an overview".
+
+Content depth (this is the standard — write to it):
+- "content" / "bigText": body = 3–5 complete sentences with concrete facts, named entities, numbers. Not "many experts agree" — say which experts and what they found.
+- "bullets": 4–6 bullets, each a COMPLETE SENTENCE 15–25 words long that actually explains the point. Start with **bold** key term.
+- "cards" / "numbered" / "compare": items each have label + body, where body is 2 complete sentences explaining the point.
+- "stat": body = a real number ("47%", "$1.9T", "1859"). subtitle = one-sentence context.
+- "quote": title = a real attributed quote, subtitle = attribution.
+- "summary": bullets = 4–6 complete-sentence takeaways, 15–25 words each.
+- notes (every slide): 2–3 sentences (30–60 words), spoken-narration voice, with one piece of context the slide itself does not show.
+
+Style: write like a curious explainer-podcast host. Specific > vague. Concrete > abstract. Real names, real numbers, real dates. Use **bold** to highlight key terms in body/bullets/items.
+
+Palette: ink|newsprint|ocean|forest|plum|coral|mono|sun|midnight|slate|rose|sage — pick whichever matches the TOPIC's mood, not always the safe default.
+Font: editorial|modern|humanist|geometric`,
+    user: `Topic: "${topic}". Produce exactly ${count} slides — write each one to the depth standard above. Do not cut content short.
 
 JSON shape:
-{"title":"...","subtitle":"...","palette":"...","font":"...","slides":[{"id":"s1","layout":"title","title":"...","subtitle":"...","body":"","bullets":[]}]}
+{"title":"...","subtitle":"...","palette":"...","font":"...","slides":[{"id":"s1","layout":"title","eyebrow":"OPTIONAL","title":"...","subtitle":"...","body":"","bullets":[],"items":[],"notes":"..."}]}
 
-Omit unused fields.`,
+Omit fields you don't use, but body/bullets/items must be substantive when present.`,
   };
 }
 
@@ -1071,21 +1101,103 @@ Omit unused fields.`,
 // numerical display, an agenda can use a numbered grid, all without us
 // pre-coding each variation.
 
-export function buildSlideHtmlPrompt({ slide, deck, theme, font, slideIndex, totalSlides }) {
+// Deck-level Design Brief — a single Pro call that decides the shared visual
+// language for the whole deck BEFORE any per-slide HTML is generated. The
+// brief is fed into every per-slide prompt so the deck reads as one piece
+// instead of 10 independent designs. This is the single biggest quality
+// lever — without a brief, each slide invents its own motifs and the deck
+// looks like 10 random web pages stapled together.
+export function buildDeckDesignBriefPrompt({ deck, theme, font }) {
   const isLight = theme.mode === 'light';
   return {
-    system: `You are a senior presentation designer building ONE slide of a deck. You write COMPLETE HTML + CSS. Your reference standard is NotebookLM Video Overviews, Bloomberg Graphics, the New York Times Magazine, and Pentagram — each slide is a hand-designed editorial composition, not a template fill.
+    system: `You are the art director for a presentation deck. You are about to hand a brief to 10 different designers who will each code ONE slide as HTML/CSS. Your brief is what makes their work feel like ONE deck instead of 10 random pages.
+
+You are designing for the standard of NotebookLM Video Overviews, Stripe Press, Pentagram editorial, and Bloomberg Graphics — not generic slide templates.
+
+Return a plain-text design brief, ~600-900 words, in the exact section structure below. No markdown fences, no JSON. Write tight, declarative sentences a designer can act on.
+
+# Brief structure (use these section headers verbatim)
+
+## MOOD
+One short paragraph: the overall visual tone for THIS deck (e.g. "Cold editorial: serif gravitas with restrained ink-blue accents, generous whitespace, no decoration except a single hairline rule under each title."). Pick a stance.
+
+## TYPE SCALE
+List exact pixel sizes for: hero (slide 0 only), title (every content slide), eyebrow (small caps label above title), body, caption, big-stat (the giant number on stat slides). Specify font-weight and letter-spacing where relevant. The display font is "${font.head}", body is "${font.body}".
+
+## COLOR USE
+Spell out exactly when accent ${theme.accent} appears (e.g. "ONE accent moment per slide — either one highlighted word in the title OR the eyebrow OR a 2px rule, never two on one slide"). Spell out where ${theme.accent2} appears (sparingly — often as a hover or secondary chip). Spell out background hierarchy: ${theme.bg} for slide bg, ${theme.surface} for cards/callouts, ${theme.border} for hairlines.
+
+## SIGNATURE MOTIF
+Pick ONE consistent decorative element that appears on every slide (e.g. "a thin ${theme.accent} 2px rule, 80px wide, anchored 8px under every title" or "a slide-number chip in the top-right corner in eyebrow style"). Describe it precisely enough that 10 different designers will all produce the same thing. This is the deck's signature.
+
+## LAYOUT GRID
+Describe the underlying grid. (e.g. "12-column grid with 64px outer margin, 24px gutter. Most slides use a 7/5 asymmetric split. Hero slide is full-bleed.") Spell out vertical rhythm — when does an element start, where does it end?
+
+## CHART/DIAGRAM RULES
+When a slide has structural content (timeline, comparison, list, stats), the designer should draw SVG diagrams instead of text. State the diagram style: line weight, node shapes, label positioning, color use. The diagrams across the deck should look like they came from one hand.
+
+## WHAT TO AVOID
+List 4-6 specific things the designers should NEVER do in this deck — drop-shadowed text, three accent colors, lorem ipsum, centered single-line layouts, generic browser styling, anything that feels stock. Be specific to this deck's mood.
+
+Now write the brief.`,
+    user: `Deck topic: "${deck.topic || deck.title}"
+Deck title: "${deck.title}"
+Subtitle: "${deck.subtitle || ''}"
+Theme: ${theme.name || 'custom'} (mode: ${isLight ? 'light' : 'dark'})
+
+Slides (so you know the range of content the brief has to cover):
+${(deck.slides || []).map((s, i) => `${i}. ${s.layout} — "${(s.title || '').slice(0, 80)}"`).join('\n')}
+
+Write the design brief for this deck.`,
+  };
+}
+
+export function buildSlideHtmlPrompt({ slide, deck, theme, font, slideIndex, totalSlides, designBrief }) {
+  const isLight = theme.mode === 'light';
+  const briefSection = designBrief
+    ? `\n# Deck design brief — FOLLOW THIS\nThis brief applies to every slide in the deck. Your slide must read as part of the same deck.\n\n${designBrief}\n`
+    : '';
+  return {
+    system: `You are a senior presentation designer building ONE slide of a deck. You write COMPLETE HTML + CSS. Your reference standard is NotebookLM Video Overviews, Bloomberg Graphics, the New York Times Magazine, and Pentagram — each slide is a hand-designed editorial composition, not a template fill.${briefSection}
 
 # Output contract
 Return a complete HTML fragment — nothing else. No markdown fences, no commentary. Start with a single <style> block, then a single <div class="slide"> root.
 
 # Hard rules
-1. Reference frame: the slide renders in a 1280×720 box (16:9). Use absolute positioning + percentage units OR CSS grid/flexbox with fixed sizes — your call. Layouts MUST fit the box; nothing should clip.
+1. Reference frame: the slide renders in a 1280×720 box (16:9). The root .slide MUST be exactly that size with overflow: hidden — nothing extends past it.
 2. Self-contained: no external CSS, no <link>, no <script>, no JavaScript anywhere, no on* attributes. Inline <style> in the fragment is fine.
 3. Scope every CSS rule with a class prefix (e.g. .s${slideIndex}-title) so it never collides with other slides.
 4. Fonts: use the families passed below — they're already loaded on the page. Do NOT @import.
 5. Image: if your design uses one, use exactly: <img src="{{IMAGE}}" alt="" class="..."> — the renderer substitutes {{IMAGE}} with a real URL when one is generated. The image is photographic. If you don't want an image, omit it (no placeholder boxes, no lorem-picsum URLs).
 6. NO LOREM IPSUM. Use the slide's actual content fields, in full. Do not truncate body or bullets.
+
+# CONTENT COMPLETENESS — read carefully
+Every non-empty content field on the slide MUST appear in your HTML, complete, and visible.
+- If the slide has a title, render the FULL title — every word — never abbreviated.
+- If the slide has a body, render the FULL body prose — every sentence — never truncated.
+- If the slide has bullets, render EVERY bullet — never "..." or "etc."
+- If the slide has items (label+body pairs), render EVERY item — every label, every body.
+- "Decorative-only" slides that show just a title with no body content are a BUG unless the slide is layout="title", "section", or "bigText". For any other layout, missing body/bullets/items = wrong output.
+
+# TEXT MUST FIT — read carefully
+Text getting cut off mid-word, mid-sentence, or below the slide edge is the #1 failure mode. Prevent it:
+- The .slide root has fixed dimensions and overflow: hidden. Anything that exceeds the box is invisible to the viewer.
+- Pick font sizes based on the ACTUAL content length, not your default ranges:
+  • Title: count the characters. ≤30 chars → 80–96px. 31–60 → 56–72px. 61–100 → 40–52px. >100 → 32–40px and wrap onto 3 lines max.
+  • Body prose: at 1280px wide, 18–22px gives ~80–95 chars per line. For dense body, drop to 17px before letting it overflow.
+  • Bullets: 18–22px. If 6+ bullets, drop to 16–18px or use a 2-column grid.
+- Use line-height 1.3–1.5 on body; tighter on display titles (1.05–1.15).
+- Never set word-break: break-word on titles — that's how you get text cut mid-word. Set overflow-wrap: normal and let words stay intact.
+- Verify mentally: with the font sizes you chose, does each block fit in its container? If a title would wrap to 4+ lines, the font is too big — drop it.
+
+# Self-review before output
+Before emitting the HTML, walk through this checklist:
+☐ Every content field present (title in full, body in full, every bullet, every item)?
+☐ Slide root is exactly 1280×720 with overflow: hidden?
+☐ No text would extend past the slide bounds with the font sizes I chose?
+☐ Accent color used at most ONCE on this slide?
+☐ My class names are prefixed with s${slideIndex}- so they don't collide?
+If any answer is "no", revise BEFORE outputting. Output only the final, correct HTML.
 
 # Design system
 - Background: ${theme.bg}. Surface: ${theme.surface}. Border: ${theme.border}.
@@ -1157,7 +1269,17 @@ This slide:
 - accent (word to highlight if present in title): "${slide.accent || ''}"
 - imagePrompt (visual that will be generated): "${slide.imagePrompt || ''}"
 
-Design and code this slide. Output ONLY the HTML fragment (style + div).`,
+# Required content for THIS slide
+The following non-empty fields MUST be present, in full, in your HTML output:
+${[
+  slide.title && `- title: "${slide.title}" (${String(slide.title).length} chars)`,
+  slide.subtitle && `- subtitle: "${slide.subtitle}" (${String(slide.subtitle).length} chars)`,
+  slide.body && `- body: ${String(slide.body).length} chars — render every sentence`,
+  Array.isArray(slide.bullets) && slide.bullets.length && `- ${slide.bullets.length} bullets — render every one`,
+  Array.isArray(slide.items) && slide.items.length && `- ${slide.items.length} items (label+body pairs) — render every one`,
+].filter(Boolean).join('\n') || '- (title-only / decorative slide — no body required)'}
+
+Design and code this slide. Output ONLY the HTML fragment (style + div). Walk through the self-review checklist before outputting.`,
   };
 }
 

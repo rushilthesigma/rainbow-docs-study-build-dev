@@ -19,7 +19,7 @@ import {
   buildFlashcardPrompt, buildCueGenerationPrompt, buildSummaryPrompt,
   buildTopicSuggestionsPrompt, buildSlideshowPrompt, buildFlashSlideshowPrompt,
   buildSlideshowCriticPrompt, buildSlideshowReviserPrompt,
-  buildSlideHtmlPrompt,
+  buildSlideHtmlPrompt, buildDeckDesignBriefPrompt,
 } from './prompts.js';
 import { PAUSD_CATALOG, getPausdTemplate, listPausdCatalog } from './data/pausdCurricula.js';
 
@@ -743,7 +743,14 @@ async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096,
     const resolved = resolveModel(currentModel);
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 60000);
+      // Pro models on long-form structured outputs (slideshows, 16k tokens)
+      // routinely run 60-180s; flash finishes in 5-15s. A single 60s ceiling
+      // aborted advanced-mode generations roughly half the time, and 240s
+      // still tripped on the bespoke-HTML design phase where Pro is asked
+      // to write rich HTML + SVG.
+      const isProModel = /pro/i.test(String(resolved));
+      const callTimeoutMs = isProModel ? 360_000 : 60_000;
+      const timeout = setTimeout(() => controller.abort(), callTimeoutMs);
 
       const m = genAI.getGenerativeModel({
         model: resolved,
@@ -4809,48 +4816,150 @@ function sanitizeSlideHtml(raw) {
   return html.trim();
 }
 
-// Parallel bespoke HTML generation for every slide in the deck. Each call
-// runs concurrently — for an 8-slide deck this is one wall-clock LLM call,
-// not eight serial ones. Failures fall back gracefully (slide.html stays
-// empty and the renderer uses the template path).
+// Compare the model's HTML output against the source slide content and
+// flag whichever required fields were dropped. Most common failure mode:
+// the model writes a title + decoration and forgets the body/bullets,
+// leaving a near-empty slide.
 //
-// Uses the FLASH model (not FLASH_LITE) because design-quality HTML/CSS
-// requires reasoning that Lite skimps on. Errors are logged with the slide
-// index so we can see which slides Gemini choked on.
-async function generateBespokeHtmlForDeck({ deck, model }) {
+// "Present" is a substring test on visible text (HTML tags stripped, case
+// insensitive). For body we sample the first ~20 chars — covers fragmented
+// rendering like <span>Struct</span>ured knowledge. For bullets/items we
+// require at least the leading word of each to appear.
+function checkSlideContentPresent(html, slide) {
+  if (!html) return { ok: false, missing: ['html'] };
+  // Strip tags, normalise whitespace, lowercase for substring matching.
+  const visible = String(html)
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  const has = (needle) => {
+    const s = String(needle || '').trim().toLowerCase();
+    if (!s) return true;
+    // Match on the first 24 chars (or full string if shorter) — enough to
+    // disambiguate, short enough to survive minor punctuation rewrites.
+    return visible.includes(s.slice(0, Math.min(24, s.length)));
+  };
+  const missing = [];
+  // Title is required on every layout that has one.
+  if (slide.title && !has(slide.title)) missing.push('title');
+  // Layouts where body is the whole point — missing body = empty slide.
+  const bodyRequired = !['title', 'section', 'bigText', 'quote'].includes(slide.layout);
+  if (bodyRequired && slide.body && slide.body.length > 20 && !has(slide.body)) missing.push('body');
+  // Bullets / items: require ≥70% present.
+  if (Array.isArray(slide.bullets) && slide.bullets.length) {
+    const hit = slide.bullets.filter(b => has(b)).length;
+    if (hit / slide.bullets.length < 0.7) missing.push(`bullets (${hit}/${slide.bullets.length})`);
+  }
+  if (Array.isArray(slide.items) && slide.items.length) {
+    const hit = slide.items.filter(it => has(it.label) || has(it.body)).length;
+    if (hit / slide.items.length < 0.7) missing.push(`items (${hit}/${slide.items.length})`);
+  }
+  return { ok: missing.length === 0, missing };
+}
+
+// Pre-pass: one Pro call that writes a deck-wide design brief — shared mood,
+// type scale, motif, accent rules, diagram style. Every per-slide call is
+// then handed this brief so the 10 slides feel like one deck instead of 10
+// random web pages. This is the single biggest visual-quality lever; on its
+// own it noticeably tightens the deck even without changing the per-slide
+// model. Returns null on failure — per-slide calls then run without a brief.
+async function generateDeckDesignBrief({ deck, theme, font }) {
+  try {
+    const p = buildDeckDesignBriefPrompt({ deck, theme, font });
+    const r = await callGemini(p.system, [{ role: 'user', content: p.user }],
+      GEMINI_PRO, 2500, { temperature: 0.6 });
+    if (!r.success) {
+      console.warn(`[slideshow-brief] FAILED: ${r.error}`);
+      return null;
+    }
+    const text = String(r.data.content?.[0]?.text || '').trim();
+    if (text.length < 200) {
+      console.warn(`[slideshow-brief] too short (${text.length} chars), discarding`);
+      return null;
+    }
+    console.log(`[slideshow-brief] generated (${text.length} chars)`);
+    return text;
+  } catch (e) {
+    console.warn(`[slideshow-brief] THREW: ${e.message}`);
+    return null;
+  }
+}
+
+// Parallel bespoke HTML generation for every slide in the deck. Two-stage:
+//   1. One Pro call writes a deck-wide design brief (shared mood, motif,
+//      type scale, accent rules). Without this the deck reads as 10
+//      unrelated designs; with it the deck has visual DNA.
+//   2. Each slide is coded in parallel with the brief as shared context.
+//      Pro model + 10k tokens lets the designer write rich SVG diagrams
+//      and proper editorial layouts, not template fills.
+// Failures fall back gracefully (slide.html stays empty and the renderer
+// uses the template path).
+async function generateBespokeHtmlForDeck({ deck, model, onProgress }) {
   const themeKey = (Object.keys(SLIDESHOW_THEMES).includes(deck.palette)) ? deck.palette : 'newsprint';
   const theme = SLIDESHOW_THEMES[themeKey];
   const fontKey = SLIDESHOW_FONTS[deck.font] ? deck.font : (theme.font || 'editorial');
   const font = SLIDESHOW_FONTS[fontKey];
   const total = deck.slides.length;
-  // Force the bigger Flash model regardless of user tier — Lite produces
-  // weak HTML/CSS designs. The reviser/critic loop already handles cost
-  // sensitivity; bespoke HTML is the part where quality matters most.
+  // Per-slide HTML uses Flash, not Pro. Pro on 10k-token bespoke HTML output
+  // aborted roughly half the time in practice — Pro is too slow for this
+  // exact workload with the 360s ceiling. Flash + a Pro-written design
+  // brief is both faster and far more reliable: the brief carries the
+  // design intelligence, and Flash is plenty capable of implementing it.
   const designModel = GEMINI_FLASH;
-  console.log(`[slideshow-html] starting parallel design for ${total} slides on theme=${themeKey} font=${fontKey} model=${designModel}`);
+  console.log(`[slideshow-html] starting design for ${total} slides on theme=${themeKey} font=${fontKey} model=${designModel}`);
 
+  // Stage 1: deck-wide design brief (~15-30s on Pro).
+  onProgress?.({ phase: 'Drafting design brief…', pct: 82 });
+  const designBrief = await generateDeckDesignBrief({ deck, theme, font });
+  onProgress?.({ phase: `Coding ${total} slides in HTML…`, pct: 86 });
+
+  // Stage 2: per-slide HTML, parallel. Brief is shared context.
+  // Each slide gets up to TWO attempts — if the first attempt drops content
+  // (a real failure mode where the model writes just title + decoration),
+  // we retry once with a more pointed prompt. Beats shipping an empty slide.
+  let completed = 0;
   const tasks = deck.slides.map((slide, i) => (async () => {
-    try {
-      const p = buildSlideHtmlPrompt({ slide, deck, theme, font, slideIndex: i, totalSlides: total });
-      const r = await callGemini(p.system, [{ role: 'user', content: p.user }],
-        designModel, 5000, { temperature: 0.75 });
-      if (!r.success) {
-        console.warn(`[slideshow-html] slide ${i} (${slide.layout}) FAILED: ${r.error}`);
-        return { ok: false, error: r.error };
-      }
+    const tickProgress = () => {
+      completed++;
+      onProgress?.({ phase: `Designed ${completed}/${total} slides…`, pct: 86 + Math.floor((completed / total) * 10) });
+    };
+    const attempt = async (retryNote) => {
+      const p = buildSlideHtmlPrompt({ slide, deck, theme, font, slideIndex: i, totalSlides: total, designBrief });
+      const userMsg = retryNote ? `${p.user}\n\n# Retry note\n${retryNote}` : p.user;
+      const r = await callGemini(p.system, [{ role: 'user', content: userMsg }],
+        designModel, 10000, { temperature: 0.7 });
+      if (!r.success) return { ok: false, error: r.error };
       const text = r.data.content?.[0]?.text || '';
       const cleaned = sanitizeSlideHtml(text);
-      if (!cleaned || cleaned.length < 60) {
-        console.warn(`[slideshow-html] slide ${i} (${slide.layout}) empty/short response (${cleaned.length} chars)`);
-        return { ok: false, error: 'empty response' };
+      if (!cleaned || cleaned.length < 60) return { ok: false, error: 'empty response' };
+      const presence = checkSlideContentPresent(cleaned, slide);
+      if (!presence.ok) return { ok: false, error: 'missing content', cleaned, presence };
+      return { ok: true, html: cleaned };
+    };
+    try {
+      let result = await attempt(null);
+      // Retry once if the model dropped required content (most common
+      // quality regression — title + decoration with no body/bullets).
+      if (!result.ok && result.error === 'missing content') {
+        console.warn(`[slideshow-html] slide ${i} (${slide.layout}) missing content on attempt 1: ${result.presence.missing.join(', ')} — retrying`);
+        result = await attempt(`Your previous attempt dropped these required fields: ${result.presence.missing.join(', ')}. Render them ALL in full. Do not output a title-only slide.`);
       }
+      tickProgress();
+      if (!result.ok) {
+        console.warn(`[slideshow-html] slide ${i} (${slide.layout}) FAILED: ${result.error}${result.presence ? ' (' + result.presence.missing.join(', ') + ')' : ''}`);
+        return { ok: false, error: result.error };
+      }
+      const cleaned = result.html;
       // Sanity: must contain a <div class="slide" or similar root.
       if (!cleaned.includes('class="slide"') && !cleaned.includes("class='slide'")) {
-        // Wrap whatever the model returned so it at least gets a root.
         return { ok: true, html: `<div class="slide" style="position:relative;width:100%;height:100%;background:${theme.bg};color:${theme.text};font-family:${font.body};overflow:hidden;">${cleaned}</div>` };
       }
       return { ok: true, html: cleaned };
     } catch (e) {
+      tickProgress();
       console.warn(`[slideshow-html] slide ${i} (${slide.layout}) THREW: ${e.message}`);
       return { ok: false, error: e.message };
     }
@@ -4865,7 +4974,8 @@ async function generateBespokeHtmlForDeck({ deck, model }) {
     }
     return s;
   });
-  console.log(`[slideshow-html] ${successCount}/${total} slides bespoke-designed`);
+  if (designBrief) deck.designBrief = designBrief;
+  console.log(`[slideshow-html] ${successCount}/${total} slides bespoke-designed (brief=${designBrief ? 'yes' : 'no'})`);
   return { generated: successCount, total };
 }
 
@@ -5014,12 +5124,14 @@ app.post('/api/slideshows/generate', authMiddleware, async (req, res) => {
     send({ type: 'progress', phase: 'Drafting slides…', pct: 10 });
     const safeSourceText = sourceText ? String(sourceText).slice(0, 20000) : undefined;
     const { system, user } = genMode === 'flash'
-      ? buildFlashSlideshowPrompt({ topic: topic.trim(), slideCount: Math.min(Number(slideCount) || 5, 5) })
+      ? buildFlashSlideshowPrompt({ topic: topic.trim(), slideCount: Math.min(Number(slideCount) || 8, 10) })
       : buildSlideshowPrompt({ topic: topic.trim(), slideCount, difficulty, style, template, customInfo, sourceText: safeSourceText });
-    // Flash: smallest model + lean prompt = ~8s. Advanced: Pro + full prompt = ~90s.
-    const model = genMode === 'flash' ? GEMINI_FLASH_LITE : GEMINI_PRO;
+    // Flash: bumped to GEMINI_FLASH (not Lite) + 8k tokens so flash decks
+    // can actually carry substantive bodies/bullets — Lite + 4k was capping
+    // body fields at 1–2 sentences. Advanced: Pro + full prompt = ~90s.
+    const model = genMode === 'flash' ? GEMINI_FLASH : GEMINI_PRO;
     console.log(`[slideshow-generate] mode=${genMode} model=${model}`);
-    const maxTokens = genMode === 'flash' ? 4096 : 16384;
+    const maxTokens = genMode === 'flash' ? 8192 : 16384;
     let result = await callGemini(system, [{ role: 'user', content: user }], model, maxTokens, { jsonMode: true, temperature: 0.7 });
     if (!result.success) { send({ type: 'error', error: result.error }); return res.end(); }
 
@@ -5096,9 +5208,13 @@ app.post('/api/slideshows/generate', authMiddleware, async (req, res) => {
 
     // Flash skips bespoke HTML — uses template renderer, saves ~20s.
     if (genMode !== 'flash') {
-      send({ type: 'progress', phase: 'Finalising design…', pct: 82 });
+      send({ type: 'progress', phase: 'Drafting design brief…', pct: 80 });
       try {
-        htmlGenStats = await generateBespokeHtmlForDeck({ deck, model });
+        htmlGenStats = await generateBespokeHtmlForDeck({
+          deck,
+          model,
+          onProgress: ({ phase, pct }) => send({ type: 'progress', phase, pct }),
+        });
         deck.htmlDesigned = htmlGenStats.generated;
       } catch (e) {
         console.warn('[slideshow-html] generation failed:', e.message);

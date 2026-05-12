@@ -62,6 +62,51 @@ function Dropdown({ label, value, options, onChange }) {
   );
 }
 
+function OpacitySlider({ label, value, onChange, leftHint, rightHint }) {
+  const clamped = Math.max(0, Math.min(100, value ?? 0));
+  const [local, setLocal] = useState(clamped);
+  const draggingRef = useRef(false);
+  // Keep local in sync with the prop whenever the prop changes — but only
+  // when we're not actively dragging. Otherwise an async server roundtrip
+  // would yank the thumb back mid-drag.
+  useEffect(() => {
+    if (!draggingRef.current) setLocal(clamped);
+  }, [clamped]);
+  const v = local;
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <label className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-white/40">{label}</label>
+        <span className="text-[11px] text-white/55 tabular-nums font-medium">{100 - v}%</span>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        step={5}
+        value={v}
+        onPointerDown={() => { draggingRef.current = true; }}
+        onPointerUp={() => { draggingRef.current = false; }}
+        onPointerCancel={() => { draggingRef.current = false; }}
+        onChange={e => {
+          const next = Number(e.target.value);
+          setLocal(next);
+          onChange(next);
+        }}
+        style={{ background: `linear-gradient(to right, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.55) ${v}%, rgba(255,255,255,0.08) ${v}%, rgba(255,255,255,0.08) 100%)` }}
+        className="w-full h-1.5 rounded-full appearance-none cursor-pointer outline-none
+          [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-black/15 [&::-webkit-slider-thumb]:shadow-[0_1px_3px_rgba(0,0,0,0.35)] [&::-webkit-slider-thumb]:transition-transform [&::-webkit-slider-thumb]:hover:scale-110 [&::-webkit-slider-thumb]:cursor-grab [&::-webkit-slider-thumb]:active:cursor-grabbing
+          [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:shadow-[0_1px_3px_rgba(0,0,0,0.35)]
+          [&::-moz-range-track]:bg-transparent"
+      />
+      <div className="flex justify-between mt-1.5">
+        <span className="text-[10px] text-white/25">{leftHint}</span>
+        <span className="text-[10px] text-white/25">{rightHint}</span>
+      </div>
+    </div>
+  );
+}
+
 function Section({ title, children }) {
   return (
     <div className="rounded-2xl border border-white/[0.07] bg-white/[0.03] backdrop-blur-sm p-6 space-y-5">
@@ -86,44 +131,20 @@ function InterfaceSection() {
           <Dropdown label="Wallpaper" value={wallpaper} options={wallpaperOpts} onChange={setWallpaper} />
           <Dropdown label="Dock Size" value={dockSize} options={dockOpts} onChange={setDockSize} />
           <Dropdown label="Icon Style" value={iconStyle} options={iconOpts} onChange={setIconStyle} />
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-white/40">Title Bar Transparency</label>
-              <span className="text-[11px] text-white/30 tabular-nums">{100 - (titlebarOpacity ?? 80)}%</span>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={5}
-              value={titlebarOpacity ?? 80}
-              onChange={e => setTitlebarOpacity(Number(e.target.value))}
-              className="w-full accent-gray-400 h-1.5 rounded-full cursor-pointer"
-            />
-            <div className="flex justify-between mt-1">
-              <span className="text-[10px] text-white/20">Fully glass</span>
-              <span className="text-[10px] text-white/20">Solid</span>
-            </div>
-          </div>
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-white/40">Window Transparency</label>
-              <span className="text-[11px] text-white/30 tabular-nums">{100 - opacity}%</span>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={5}
-              value={opacity}
-              onChange={e => setWindowOpacity(Number(e.target.value))}
-              className="w-full accent-gray-400 h-1.5 rounded-full cursor-pointer"
-            />
-            <div className="flex justify-between mt-1">
-              <span className="text-[10px] text-white/20">Fully glass</span>
-              <span className="text-[10px] text-white/20">Fully solid</span>
-            </div>
-          </div>
+          <OpacitySlider
+            label="Title Bar Transparency"
+            value={titlebarOpacity ?? 80}
+            onChange={setTitlebarOpacity}
+            leftHint="Fully glass"
+            rightHint="Solid"
+          />
+          <OpacitySlider
+            label="Window Transparency"
+            value={opacity}
+            onChange={setWindowOpacity}
+            leftHint="Fully glass"
+            rightHint="Fully solid"
+          />
         </>
       )}
     </Section>

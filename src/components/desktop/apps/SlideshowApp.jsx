@@ -91,6 +91,29 @@ function fitFontSize(text = '', base, threshold = 20) {
   return Math.max(Math.round(base * (threshold / n)), Math.round(base * 0.44));
 }
 
+// ── Body-text fitter: picks the largest fontSize where the prose fits ────
+// in a percentage-defined box on the 1000×562 logical canvas. Slides like
+// `agenda` / `cards` / `numbered` give each body block a fixed area and the
+// generator routinely writes prose longer than the 16px default can hold,
+// which produced the "text fades off the bottom of the card" bug.
+//
+// Inputs are percentage extents (matching the rest of the layout system).
+// Returns a px size between `min` and `base` inclusive. Conservative: uses
+// 0.55 × fontSize as char-width estimate (true for proportional sans),
+// rounds lines up, and stops at the first size that fits.
+function fitBodyFontSize(text, widthPct, heightPct, { base = 16, min = 10, lineHeight = 1.4 } = {}) {
+  const len = String(text || '').length;
+  if (!len) return base;
+  const widthPx = widthPct * 10;          // 1000px logical canvas → 10px per %
+  const heightPx = heightPct * 5.625;     // 562.5px logical canvas → 5.625 per %
+  for (let size = base; size >= min; size--) {
+    const charsPerLine = Math.max(1, Math.floor(widthPx / (0.55 * size)));
+    const lines = Math.ceil(len / charsPerLine);
+    if (lines * lineHeight * size <= heightPx) return size;
+  }
+  return min;
+}
+
 // ── Split body prose into two roughly-equal halves for two-col layout ────
 function splitBody(body = '') {
   const sents = (body.match(/[^.!?]+[.!?]+\s*/g) || [body]).map(s => s.trim()).filter(Boolean);
@@ -322,7 +345,7 @@ function slideToElements(slide, themeKey, fontHint, image) {
           { fontFamily: f.head, fontSize: 22, fontWeight: '600', color: t.text, align: 'left', lineHeight: 1.2 }));
         els.push(T(`body-${i}`, 56, y + rowH * 0.18, 38, rowH * 0.7,
           it.body || '',
-          { ...SUB, fontSize: 16, lineHeight: 1.4 }));
+          { ...SUB, fontSize: fitBodyFontSize(it.body, 38, rowH * 0.7, { base: 16, min: 11 }), lineHeight: 1.4 }));
         if (i < items.length - 1) {
           els.push(R(`sep-${i}`, 6, y + rowH - 0.5, 88, 0.2, t.border));
         }
@@ -396,7 +419,7 @@ function slideToElements(slide, themeKey, fontHint, image) {
       els.push(R('bar', 6, EYEBROW_TEXT ? 35 : 31, 9, 0.6, t.accent));
       els.push(T('body', 6, EYEBROW_TEXT ? 40 : 38, 80, 56,
         slide.body || '',
-        { fontFamily: f.body, fontSize: 22, fontWeight: '400', color: t.text, align: 'left', lineHeight: 1.55 }));
+        { fontFamily: f.body, fontSize: fitBodyFontSize(slide.body, 80, 56, { base: 22, min: 14, lineHeight: 1.55 }), fontWeight: '400', color: t.text, align: 'left', lineHeight: 1.55 }));
       return els;
     }
 
@@ -460,7 +483,7 @@ function slideToElements(slide, themeKey, fontHint, image) {
           { fontFamily: f.head, fontSize: 24, fontWeight: '700', color: t.text, align: 'left', lineHeight: 1.15 }));
         // Body
         els.push(T(`body-${i}`, x + 3, cardsTop + 26, cardW - 6, cardsH - 30, it.body || '',
-          { fontFamily: f.body, fontSize: 16, fontWeight: '400', color: t.muted, align: 'left', lineHeight: 1.5 }));
+          { fontFamily: f.body, fontSize: fitBodyFontSize(it.body, cardW - 6, cardsH - 30, { base: 16, min: 11, lineHeight: 1.5 }), fontWeight: '400', color: t.muted, align: 'left', lineHeight: 1.5 }));
       });
       return els;
     }
@@ -493,7 +516,7 @@ function slideToElements(slide, themeKey, fontHint, image) {
           { fontFamily: f.head, fontSize: 20, fontWeight: '600', color: t.text, align: 'left', lineHeight: 1.2 }));
         // Body
         els.push(T(`body-${i}`, 14, cy + rowH * 0.36, 80, rowH * 0.55, it.body || '',
-          { fontFamily: f.body, fontSize: 15, fontWeight: '400', color: t.muted, align: 'left', lineHeight: 1.4 }));
+          { fontFamily: f.body, fontSize: fitBodyFontSize(it.body, 80, rowH * 0.55, { base: 15, min: 11, lineHeight: 1.4 }), fontWeight: '400', color: t.muted, align: 'left', lineHeight: 1.4 }));
       });
       return els;
     }
@@ -520,7 +543,7 @@ function slideToElements(slide, themeKey, fontHint, image) {
       els.push(T('llabel', gutter + 3, top + 5, w - 6, 8, (items[0]?.label || 'Before').toUpperCase(),
         { fontFamily: f.head, fontSize: 14, fontWeight: '700', color: t.faint, align: 'left', letterSpacing: '0.18em' }));
       els.push(T('lbody', gutter + 3, top + 16, w - 6, h - 20, items[0]?.body || '',
-        { fontFamily: f.body, fontSize: 22, fontWeight: '500', color: t.text, align: 'left', lineHeight: 1.4 }));
+        { fontFamily: f.body, fontSize: fitBodyFontSize(items[0]?.body, w - 6, h - 20, { base: 22, min: 13, lineHeight: 1.4 }), fontWeight: '500', color: t.text, align: 'left', lineHeight: 1.4 }));
       // Right card — accent-tinted bg so it reads as distinct from the left.
       const rx = gutter + w + gap;
       const rCardGradient = `linear-gradient(135deg, ${t.surface} 0%, ${t.accent + (t.mode === 'light' ? '18' : '22')} 100%)`;
@@ -529,7 +552,7 @@ function slideToElements(slide, themeKey, fontHint, image) {
       els.push(T('rlabel', rx + 3, top + 5, w - 6, 8, (items[1]?.label || 'After').toUpperCase(),
         { fontFamily: f.head, fontSize: 14, fontWeight: '700', color: t.accent, align: 'left', letterSpacing: '0.18em' }));
       els.push(T('rbody', rx + 3, top + 16, w - 6, h - 20, items[1]?.body || '',
-        { fontFamily: f.body, fontSize: 22, fontWeight: '600', color: t.text, align: 'left', lineHeight: 1.4 }));
+        { fontFamily: f.body, fontSize: fitBodyFontSize(items[1]?.body, w - 6, h - 20, { base: 22, min: 13, lineHeight: 1.4 }), fontWeight: '600', color: t.text, align: 'left', lineHeight: 1.4 }));
       return els;
     }
 
@@ -761,11 +784,11 @@ function slideToElements(slide, themeKey, fontHint, image) {
             String(i + 1).padStart(2, '0'),
             { fontFamily: f.head, fontSize: 22, fontWeight: '700', color: t.accent, align: 'left', lineHeight: 1.2 }));
           els.push(T(`b-${i}`, 13, y + rowH * 0.18, 81, rowH * 0.7, b,
-            { fontFamily: f.body, fontSize: 19, fontWeight: '500', color: t.text, align: 'left', lineHeight: 1.35 }));
+            { fontFamily: f.body, fontSize: fitBodyFontSize(b, 81, rowH * 0.7, { base: 19, min: 12, lineHeight: 1.35 }), fontWeight: '500', color: t.text, align: 'left', lineHeight: 1.35 }));
         });
       } else {
         els.push(T('body', 6, 42, 88, 50, slide.body || '',
-          { fontFamily: f.body, fontSize: 22, fontWeight: '400', color: t.text, align: 'left', lineHeight: 1.55 }));
+          { fontFamily: f.body, fontSize: fitBodyFontSize(slide.body, 88, 50, { base: 22, min: 14, lineHeight: 1.55 }), fontWeight: '400', color: t.text, align: 'left', lineHeight: 1.55 }));
       }
       return els;
     }
@@ -949,13 +972,54 @@ export default function SlideshowApp() {
   // Build elements map when deck/theme/font/images change. The image map is
   // fed in so layouts that opt-in (title, imageHero, imageRight, etc.) can
   // place the image as a real visual element instead of a background wash.
+  // Recomputing from scratch would wipe user edits (alignment, color, font,
+  // moves) so we merge prior overrides onto the freshly-laid-out elements.
+  // When the theme or fontHint changes, force the fresh color/fontFamily so
+  // text doesn't stay frozen at a previous theme's palette (which produced
+  // dark-text-on-dark-bg when switching from a light to a dark theme).
+  const prevThemeRef = useRef(theme);
+  const prevFontRef = useRef(fontHint);
   useEffect(() => {
     if (!deck) return;
-    const map = {};
-    for (const s of deck.slides || []) {
-      map[s.id] = slideToElements(s, theme, fontHint, slideImages[s.id]);
-    }
-    setSlideElementsMap(map);
+    const themeChanged = prevThemeRef.current !== theme;
+    const fontChanged = prevFontRef.current !== fontHint;
+    setSlideElementsMap(prev => {
+      const next = {};
+      for (const s of deck.slides || []) {
+        const fresh = slideToElements(s, theme, fontHint, slideImages[s.id]);
+        const existing = prev[s.id];
+        if (!existing) { next[s.id] = fresh; continue; }
+        const byId = new Map(existing.map(e => [e.id, e]));
+        next[s.id] = fresh.map(f => {
+          const e = byId.get(f.id);
+          if (!e || e.kind !== f.kind) return f;
+          if (f.kind === 'text') {
+            return {
+              ...f,
+              align:      e.align      !== undefined ? e.align      : f.align,
+              color:      themeChanged                              ? f.color      : (e.color      !== undefined ? e.color      : f.color),
+              fontSize:   e.fontSize   !== undefined ? e.fontSize   : f.fontSize,
+              fontWeight: e.fontWeight !== undefined ? e.fontWeight : f.fontWeight,
+              italic:     e.italic     !== undefined ? e.italic     : f.italic,
+              fontFamily: (themeChanged || fontChanged)             ? f.fontFamily : (e.fontFamily !== undefined ? e.fontFamily : f.fontFamily),
+              parts:      e.parts      !== undefined ? e.parts      : f.parts,
+              // Preserve user-positioned text elements (drag / resize)
+              ...(e._userMoved ? { x: e.x, y: e.y, w: e.w, h: e.h } : null),
+            };
+          }
+          if (f.kind === 'image' || f.kind === 'shape') {
+            return {
+              ...f,
+              ...(e._userMoved ? { x: e.x, y: e.y, w: e.w, h: e.h } : null),
+            };
+          }
+          return f;
+        });
+      }
+      return next;
+    });
+    prevThemeRef.current = theme;
+    prevFontRef.current = fontHint;
   }, [deck, theme, fontHint, slideImages]);
 
   // Bump the slide transition key whenever the visible slide changes.
@@ -1291,125 +1355,122 @@ function hexToRgb(hex) {
   return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)];
 }
 
-async function exportToPdf(deck) {
+// Build an off-screen DOM tree that mirrors the canvas renderer, then snap it
+// to a PNG via html-to-image. This makes PDF/PPTX exports pixel-faithful to
+// what the user sees in the editor — same fonts, layouts, images, and colors.
+async function captureSlidePng(slide, themeKey, fontHint, image, w = 1600, h = 900) {
+  const { toPng } = await import('html-to-image');
+  const t = THEMES[themeKey] || THEMES.ink;
+  const elements = slideToElements(slide, themeKey, fontHint, image);
+  const isLight = t.mode === 'light';
+  const useBespoke = !!(slide?.html && String(slide.html).length > 50);
+  const layoutHasImage = elements.some(el => el.kind === 'image');
+
+  const host = document.createElement('div');
+  host.style.cssText = `position:fixed;left:-99999px;top:0;width:${w}px;height:${h}px;background:${t.bg};overflow:hidden;z-index:-1;`;
+
+  if (useBespoke) {
+    const inner = document.createElement('div');
+    inner.style.cssText = 'position:absolute;inset:0;';
+    inner.innerHTML = slide.html;
+    host.appendChild(inner);
+  } else {
+    if (image && !layoutHasImage) {
+      const bgImg = document.createElement('img');
+      bgImg.src = image;
+      bgImg.crossOrigin = 'anonymous';
+      bgImg.style.cssText = `position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:${isLight ? 0.08 : 0.14};`;
+      host.appendChild(bgImg);
+      const overlay = document.createElement('div');
+      overlay.style.cssText = `position:absolute;inset:0;background:${isLight ? `linear-gradient(105deg, ${t.bg} 55%, ${t.bg}cc 100%)` : `linear-gradient(105deg, ${t.bg} 60%, ${t.bg}e6 100%)`};`;
+      host.appendChild(overlay);
+    }
+    for (const el of elements) {
+      if (el.kind === 'image') {
+        const img = document.createElement('img');
+        img.src = el.src;
+        img.crossOrigin = 'anonymous';
+        img.alt = '';
+        const r = el.radius ? (typeof el.radius === 'number' ? `${el.radius}px` : el.radius) : '0';
+        img.style.cssText = `position:absolute;left:${el.x}%;top:${el.y}%;width:${el.w}%;height:${el.h}%;object-fit:${el.fit || 'cover'};border-radius:${r};opacity:${el.opacity ?? 1};`;
+        host.appendChild(img);
+      } else if (el.kind === 'shape') {
+        let r;
+        if (el.radius != null) r = typeof el.radius === 'number' ? `${el.radius}px` : el.radius;
+        else if (el.sharp) r = '0';
+        else if (el.shape === 'circle') r = '50%';
+        else if (el.shape === 'pill') r = '9999px';
+        else r = '4px';
+        const div = document.createElement('div');
+        div.style.cssText = `position:absolute;left:${el.x}%;top:${el.y}%;width:${el.w}%;height:${el.h}%;background:${el.gradient || el.color || '#ffffff22'};border-radius:${r};`;
+        host.appendChild(div);
+      } else {
+        const div = document.createElement('div');
+        const ls = el.letterSpacing ? `letter-spacing:${el.letterSpacing};` : '';
+        div.style.cssText = `position:absolute;left:${el.x}%;top:${el.y}%;width:${el.w}%;height:${el.h}%;font-family:${el.fontFamily || 'Inter,system-ui,sans-serif'};font-size:${el.fontSize || 24}px;font-weight:${el.fontWeight || 400};font-style:${el.italic ? 'italic' : 'normal'};color:${el.color || '#fff'};text-align:${el.align || 'left'};line-height:${el.lineHeight ?? 1.3};${ls}overflow:hidden;white-space:pre-wrap;`;
+        if (Array.isArray(el.parts) && el.parts.length) {
+          for (const p of el.parts) {
+            const span = document.createElement('span');
+            span.textContent = p.text;
+            if (p.color) span.style.color = p.color;
+            if (p.fontSize) span.style.fontSize = `${p.fontSize}px`;
+            if (p.fontWeight) span.style.fontWeight = p.fontWeight;
+            if (p.italic) span.style.fontStyle = 'italic';
+            div.appendChild(span);
+          }
+        } else {
+          div.textContent = el.text || '';
+        }
+        host.appendChild(div);
+      }
+    }
+  }
+
+  document.body.appendChild(host);
+  try {
+    if (document.fonts?.ready) await document.fonts.ready;
+    const imgs = host.querySelectorAll('img');
+    await Promise.all(Array.from(imgs).map(img =>
+      img.complete && img.naturalWidth > 0
+        ? Promise.resolve()
+        : new Promise(res => { img.onload = () => res(); img.onerror = () => res(); setTimeout(res, 4000); })
+    ));
+    return await toPng(host, { width: w, height: h, pixelRatio: 2, cacheBust: false, skipFonts: true });
+  } finally {
+    document.body.removeChild(host);
+  }
+}
+
+async function exportToPdf(deck, getImage) {
   const jspdfMod = await import('jspdf');
   const jsPDF = jspdfMod.jsPDF || jspdfMod.default?.jsPDF || jspdfMod.default;
-  const t = THEMES[deck.palette] || THEMES.ink;
-  const W = 10, H = 5.625; // 16:9 inches
+  const W = 13.333, H = 7.5; // standard 16:9 PowerPoint dimensions in inches
   const pdf = new jsPDF({ orientation: 'landscape', unit: 'in', format: [W, H] });
 
-  const bg = hexToRgb(t.bg), tx = hexToRgb(t.text), mt = hexToRgb(t.muted), ac = hexToRgb(t.accent);
-
-  deck.slides.forEach((slide, i) => {
+  for (let i = 0; i < deck.slides.length; i++) {
+    const slide = deck.slides[i];
     if (i > 0) pdf.addPage([W, H], 'landscape');
-
-    pdf.setFillColor(...bg); pdf.rect(0, 0, W, H, 'F');
-    pdf.setFillColor(...ac); pdf.rect(0.4, 0.28, 0.9, 0.04, 'F');
-
-    let y = 0.65;
-
-    if (slide.eyebrow) {
-      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(...mt);
-      pdf.text(slide.eyebrow.toUpperCase(), 0.4, y); y += 0.32;
-    }
-
-    const isTitle = ['title','hero'].includes(slide.layout);
-    pdf.setFont('helvetica', 'bold'); pdf.setFontSize(isTitle ? 34 : 24); pdf.setTextColor(...tx);
-    const titleLines = pdf.splitTextToSize(slide.title || '', W - 0.8);
-    pdf.text(titleLines, 0.4, y);
-    y += titleLines.length * (isTitle ? 0.56 : 0.42) + 0.18;
-
-    if (slide.subtitle) {
-      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(isTitle ? 15 : 12); pdf.setTextColor(...mt);
-      const subLines = pdf.splitTextToSize(slide.subtitle, W - 0.8);
-      pdf.text(subLines, 0.4, y); y += subLines.length * 0.32 + 0.18;
-    }
-
-    if (slide.bullets?.length) {
-      pdf.setFontSize(11.5); pdf.setTextColor(...tx);
-      const bulletsAlign = slide.bulletsAlign || 'left';
-      slide.bullets.slice(0, 8).forEach(b => {
-        if (y > H - 0.5) return;
-        const dotX = bulletsAlign === 'right' ? W - 0.36 : 0.36;
-        pdf.setFillColor(...ac); pdf.circle(dotX, y - 0.065, 0.038, 'F');
-        pdf.setFont('helvetica', 'normal');
-        const bl = pdf.splitTextToSize(b.replace(/\*\*/g,''), W - 0.95);
-        const textX = bulletsAlign === 'right' ? W - 0.5 : bulletsAlign === 'center' ? W / 2 : 0.5;
-        pdf.text(bl[0], textX, y, { align: bulletsAlign });
-        y += 0.38;
-      });
-    } else if (slide.body) {
-      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(11.5); pdf.setTextColor(...tx);
-      const bLines = pdf.splitTextToSize(slide.body.replace(/\*\*/g,''), W - 0.8);
-      pdf.text(bLines.slice(0, 10), 0.4, y);
-    }
-
-    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(...mt);
-    pdf.text(`${i+1} / ${deck.slides.length}`, W - 0.3, H - 0.22, { align: 'right' });
-  });
+    const png = await captureSlidePng(slide, deck.palette, deck.font, getImage?.(slide), 1920, 1080);
+    pdf.addImage(png, 'PNG', 0, 0, W, H, undefined, 'FAST');
+  }
 
   pdf.save(`${deck.title || 'Presentation'}.pdf`);
 }
 
-async function exportToPptx(deck) {
+async function exportToPptx(deck, getImage) {
   const pptxMod = await import('pptxgenjs');
   const PptxGenJS = pptxMod.default || pptxMod.PptxGenJS || pptxMod;
   const pres = new PptxGenJS();
   pres.layout = 'LAYOUT_16x9';
-  const t = THEMES[deck.palette] || THEMES.ink;
-  const bg = t.bg.replace('#',''), tx = t.text.replace('#','');
-  const mt = t.muted.replace('#',''), ac = t.accent.replace('#','');
   const W = 13.333, H = 7.5;
 
-  for (const [i, slide] of deck.slides.entries()) {
+  for (const slide of deck.slides) {
     const ps = pres.addSlide();
-    ps.background = { color: bg };
-
-    // accent bar
-    ps.addShape(pres.ShapeType.rect, { x:0.5, y:0.38, w:1.1, h:0.055, fill:{ color:ac }, line:{ color:ac } });
-
-    let y = 0.75;
-    if (slide.eyebrow) {
-      ps.addText(slide.eyebrow.toUpperCase(), { x:0.5, y, w:W-1, h:0.4, fontSize:9, color:mt, fontFace:'Helvetica', charSpacing:1.5 });
-      y += 0.45;
-    }
-
-    const isTitle = ['title','hero'].includes(slide.layout);
-    if (slide.title) {
-      ps.addText(slide.title, { x:0.5, y, w:W-1, h: isTitle ? 2.8 : 2.1,
-        fontSize: isTitle ? 44 : 30, color:tx, fontFace:'Helvetica', bold:true, valign:'top', wrap:true });
-      y += isTitle ? 3.0 : 2.3;
-    }
-
-    if (slide.subtitle) {
-      ps.addText(slide.subtitle, { x:0.5, y, w:W-1, h:1.1,
-        fontSize: isTitle ? 18 : 14, color:mt, fontFace:'Helvetica', valign:'top', wrap:true });
-      y += 1.2;
-    }
-
-    if (slide.bullets?.length) {
-      const bulletsAlign = slide.bulletsAlign || 'left';
-      const rows = slide.bullets.slice(0,8).map(b => ({
-        text: b.replace(/\*\*/g,''),
-        options: { bullet:{ code:'25CF', color:ac, indent:12 }, color:tx, align: bulletsAlign },
-      }));
-      ps.addText(rows, { x:0.5, y, w:W-1, h:H-y-0.6, fontSize:14, fontFace:'Helvetica', valign:'top', wrap:true, lineSpacingMultiple:1.35, align: bulletsAlign });
-    } else if (slide.body) {
-      ps.addText(slide.body.replace(/\*\*/g,''), { x:0.5, y, w:W-1, h:H-y-0.6,
-        fontSize:14, color:tx, fontFace:'Helvetica', valign:'top', wrap:true, lineSpacingMultiple:1.35 });
-    } else if (slide.items?.length) {
-      slide.items.slice(0,4).forEach((item,idx) => {
-        const col = idx%2, row = Math.floor(idx/2);
-        const ix = 0.5 + col*(W/2-0.2), iy = y + row*2.0;
-        ps.addText(item.label, { x:ix, y:iy, w:W/2-0.7, h:0.45, fontSize:13, color:ac, fontFace:'Helvetica', bold:true });
-        ps.addText(item.body, { x:ix, y:iy+0.5, w:W/2-0.7, h:1.4, fontSize:11, color:tx, fontFace:'Helvetica', wrap:true });
-      });
-    }
-
-    ps.addText(`${i+1} / ${deck.slides.length}`, { x:W-1.2, y:H-0.45, w:1.0, h:0.3, fontSize:9, color:mt, align:'right' });
+    const png = await captureSlidePng(slide, deck.palette, deck.font, getImage?.(slide), 1920, 1080);
+    ps.addImage({ data: png, x: 0, y: 0, w: W, h: H });
   }
 
-  await pres.writeFile({ fileName:`${deck.title || 'Presentation'}.pptx` });
+  await pres.writeFile({ fileName: `${deck.title || 'Presentation'}.pptx` });
 }
 
 function KeynoteWorkspace(props) {
@@ -1554,8 +1615,9 @@ function KeynoteWorkspace(props) {
     if (exporting || !deck) return;
     setExporting(format);
     try {
-      if (format === 'pdf') await exportToPdf(deck);
-      else await exportToPptx(deck);
+      const getImage = s => slideImages?.[s.id] || s.imageDataUrl || null;
+      if (format === 'pdf') await exportToPdf(deck, getImage);
+      else await exportToPptx(deck, getImage);
     } catch (e) { console.error('Export error:', e); }
     finally { setExporting(null); }
   }
@@ -1841,13 +1903,17 @@ function KeynoteTopBar(props) {
         <div className="w-px bg-white/10 my-3" />
 
         {/* Insert dropdown */}
-        <div ref={insertRef} className="relative flex items-center">
+        <div ref={insertRef} className="relative flex">
           <button
             onClick={() => setInsertOpen(o => !o)}
-            className={`flex flex-col items-center justify-center px-3 py-1.5 min-w-[60px] rounded-lg transition-colors focus:outline-none ${insertOpen ? 'text-white ring-2 ring-blue-500' : 'text-white/65 hover:text-white/95 hover:bg-white/[0.05]'}`}
+            className={`flex flex-col items-center justify-center px-3 min-w-[60px] rounded-md transition-colors ${
+              insertOpen
+                ? 'bg-white/[0.10] text-white/95'
+                : 'text-white/65 hover:text-white/95 hover:bg-white/[0.05]'
+            }`}
           >
             <Plus size={18} />
-            <span className="text-[10px] mt-0.5">Insert</span>
+            <span className="text-[10px] mt-0.5 leading-none">Insert</span>
           </button>
           {insertOpen && (
             <div className="absolute top-full left-0 mt-1 w-44 rounded-xl bg-[#2a2a2a] border border-white/[0.10] shadow-2xl z-50 py-1.5 overflow-hidden">
@@ -1911,14 +1977,18 @@ function KeynoteTopBar(props) {
         <div className="w-px bg-white/10 my-3" />
 
         {/* Improve with AI */}
-        <div ref={improveRef} className="relative flex items-center">
+        <div ref={improveRef} className="relative flex">
           <button
             onClick={() => { if (!improving) setImproveOpen(o => !o); }}
             disabled={improving}
-            className={`flex flex-col items-center justify-center px-3 py-1.5 min-w-[60px] rounded-lg transition-colors focus:outline-none disabled:opacity-50 ${improveOpen ? 'text-white ring-2 ring-blue-500' : 'text-white/65 hover:text-white/95 hover:bg-white/[0.05]'}`}
+            className={`flex flex-col items-center justify-center px-3 min-w-[60px] rounded-md transition-colors disabled:opacity-30 ${
+              improveOpen || improving
+                ? 'bg-white/[0.10] text-white/95'
+                : 'text-white/65 hover:text-white/95 hover:bg-white/[0.05]'
+            }`}
           >
             {improving ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
-            <span className="text-[10px] mt-0.5">{improving ? 'Improving…' : 'Improve'}</span>
+            <span className="text-[10px] mt-0.5 leading-none">{improving ? 'Improving…' : 'Improve'}</span>
           </button>
           {improveOpen && (
             <div className="absolute top-full right-0 mt-1 w-56 rounded-xl bg-[#2a2a2a] border border-white/[0.10] shadow-2xl z-50 py-1.5 overflow-hidden">
@@ -1951,27 +2021,35 @@ function KeynoteTopBar(props) {
         <button
           onClick={onSave}
           disabled={saving}
-          className="flex flex-col items-center justify-center px-3 min-w-[60px] rounded-md transition-colors text-white/60 hover:text-white/90 hover:bg-white/[0.06] disabled:opacity-50"
+          className={`flex flex-col items-center justify-center px-3 min-w-[60px] rounded-md transition-colors disabled:opacity-30 ${
+            saving || savedAt
+              ? 'bg-white/[0.10] text-white/95'
+              : 'text-white/65 hover:text-white/95 hover:bg-white/[0.05]'
+          }`}
         >
           {saving
             ? <Loader2 size={18} className="animate-spin" />
             : savedAt
               ? <Check size={18} className="text-green-400" />
               : <Save size={18} />}
-          <span className="text-[10px] mt-0.5">
+          <span className="text-[10px] mt-0.5 leading-none">
             {saving ? 'Saving…' : savedAt ? 'Saved' : 'Save'}
           </span>
         </button>
 
         {/* Export dropdown */}
-        <div ref={exportRef} className="relative flex items-center">
+        <div ref={exportRef} className="relative flex">
           <button
             onClick={() => setExportOpen(o => !o)}
             disabled={!!exporting}
-            className={`flex flex-col items-center justify-center px-3 py-1.5 min-w-[60px] rounded-lg transition-colors focus:outline-none disabled:opacity-40 ${exportOpen ? 'text-white ring-2 ring-blue-500' : 'text-white/65 hover:text-white/95 hover:bg-white/[0.05]'}`}
+            className={`flex flex-col items-center justify-center px-3 min-w-[60px] rounded-md transition-colors disabled:opacity-30 ${
+              exportOpen || exporting
+                ? 'bg-white/[0.10] text-white/95'
+                : 'text-white/65 hover:text-white/95 hover:bg-white/[0.05]'
+            }`}
           >
             {exporting ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
-            <span className="text-[10px] mt-0.5">{exporting ? (exporting === 'pdf' ? 'PDF…' : 'PPTX…') : 'Export'}</span>
+            <span className="text-[10px] mt-0.5 leading-none">{exporting ? (exporting === 'pdf' ? 'PDF…' : 'PPTX…') : 'Export'}</span>
           </button>
           {exportOpen && (
             <div className="absolute top-full right-0 mt-1 w-40 rounded-xl bg-[#2a2a2a] border border-white/[0.10] shadow-2xl z-50 py-1.5 overflow-hidden">
@@ -2127,7 +2205,7 @@ function ThumbnailPreview({ elements, image, t }) {
       {image && !layoutHasImage && (
         <>
           <img src={image} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: isLight ? 0.08 : 0.14, pointerEvents: 'none' }} />
-          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: isLight ? `linear-gradient(105deg, ${t.bg} 55%, ${t.bg}cc 100%)` : `linear-gradient(105deg, ${t.bg}f5 50%, ${t.bg}99 100%)` }} />
+          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: isLight ? `linear-gradient(105deg, ${t.bg} 55%, ${t.bg}cc 100%)` : `linear-gradient(105deg, ${t.bg} 60%, ${t.bg}e6 100%)` }} />
         </>
       )}
       <div style={{ width: '1000px', height: `${Math.round(1000 * 9 / 16)}px`, transform: `scale(${scale})`, transformOrigin: 'top left', pointerEvents: 'none' }}>
@@ -2466,22 +2544,115 @@ function BespokeHtmlSlide({ html, image, containerW, t }) {
     if (!html) return '';
     return String(html).replace(/\{\{IMAGE\}\}/g, image || TRANSPARENT_PIXEL);
   }, [html, image]);
-  const scale = containerW / 1280;
+  const hostRef = useRef(null);
+  // Auto-fit: the model often writes content that overflows — either the
+  // whole slide is too tall, or individual cards inside the slide clip
+  // their body text. We handle both: lift internal overflow constraints
+  // so content can flow naturally, then shrink the whole slide uniformly
+  // to fit the 1280×720 reference frame. Keynote/PowerPoint call this
+  // "auto-fit"; cheaper and more reliable than asking the model to
+  // pixel-budget perfectly.
+  const [fit, setFit] = useState(1);
+  useEffect(() => {
+    if (!hostRef.current) return;
+    const host = hostRef.current;
+    const measure = () => {
+      const slide = host.querySelector('.slide') || host.firstElementChild;
+      if (!slide) return;
+      // Pass 1: walk every element with overflow:hidden and a height
+      // constraint that's clipping its content. Lift the height so the
+      // child text can flow naturally — the whole slide will then grow
+      // vertically past 720, and the outer scale brings it back.
+      const touched = [];
+      const all = [slide, ...slide.querySelectorAll('*')];
+      for (const el of all) {
+        if (el.tagName === 'SVG' || el.closest('svg')) continue;
+        const cs = window.getComputedStyle(el);
+        const clipped = (cs.overflow === 'hidden' || cs.overflowY === 'hidden')
+          && el.scrollHeight > el.clientHeight + 2;
+        if (clipped) {
+          touched.push({
+            el,
+            overflow: el.style.overflow,
+            overflowY: el.style.overflowY,
+            height: el.style.height,
+            maxHeight: el.style.maxHeight,
+          });
+          el.style.overflow = 'visible';
+          el.style.overflowY = 'visible';
+          el.style.height = 'auto';
+          el.style.maxHeight = 'none';
+        }
+      }
+      // Pass 2: now measure the slide's natural unconstrained size.
+      const naturalH = slide.scrollHeight || slide.offsetHeight;
+      const naturalW = slide.scrollWidth || slide.offsetWidth;
+      // Pass 3: restore original styles so the final visual matches what
+      // we measured (we'll scale, not reflow).
+      for (const t of touched) {
+        t.el.style.overflow = t.overflow;
+        t.el.style.overflowY = t.overflowY;
+        t.el.style.height = t.height;
+        t.el.style.maxHeight = t.maxHeight;
+      }
+      const ratio = Math.min(
+        naturalH > 720 ? 720 / naturalH : 1,
+        naturalW > 1280 ? 1280 / naturalW : 1,
+        1,
+      );
+      // Clamp shrink to 55% — past that the model wrote a wildly wrong
+      // layout and shrinking further would be illegible. Above 99%, snap
+      // to 1 to avoid sub-pixel jitter.
+      const clamped = ratio >= 0.99 ? 1 : Math.max(0.55, ratio);
+      setFit(clamped);
+      // If we shrink, also lift the .slide root's overflow so the now-
+      // unclipped children stay visible after scaling.
+      if (clamped < 1) {
+        slide.style.overflow = 'visible';
+        // Lift child overflow too so card body text doesn't re-clip after restore.
+        for (const t of touched) {
+          t.el.style.overflow = 'visible';
+          t.el.style.overflowY = 'visible';
+          t.el.style.height = 'auto';
+          t.el.style.maxHeight = 'none';
+        }
+      }
+    };
+    // Measure after layout settles. Two RAFs catches font-swap reflow.
+    let raf1, raf2;
+    raf1 = requestAnimationFrame(() => { raf2 = requestAnimationFrame(measure); });
+    const ro = new ResizeObserver(measure);
+    ro.observe(host);
+    return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2); ro.disconnect(); };
+  }, [resolved]);
+
+  const outerScale = containerW / 1280;
   return (
     <div className="absolute inset-0 overflow-hidden" style={{ background: t.bg }}>
       <div
         style={{
           width: '1280px',
           height: '720px',
-          transform: `scale(${scale})`,
+          transform: `scale(${outerScale})`,
           transformOrigin: 'top left',
           position: 'absolute',
           top: 0,
           left: 0,
           pointerEvents: 'none',
         }}
-        dangerouslySetInnerHTML={{ __html: resolved }}
-      />
+      >
+        <div
+          ref={hostRef}
+          style={{
+            width: '1280px',
+            height: '720px',
+            transform: fit < 1 ? `scale(${fit})` : 'none',
+            transformOrigin: 'top left',
+            overflow: 'hidden',
+          }}
+          dangerouslySetInnerHTML={{ __html: resolved }}
+        />
+      </div>
     </div>
   );
 }
@@ -2533,7 +2704,7 @@ function SlideView({ slide, elements, image, isGenImg, t, slideIdx, totalSlides,
             style={{
               background: isLight
                 ? `linear-gradient(105deg, ${t.bg} 55%, ${t.bg}cc 100%)`
-                : `linear-gradient(105deg, ${t.bg}f5 50%, ${t.bg}99 100%)`,
+                : `linear-gradient(105deg, ${t.bg} 60%, ${t.bg}e6 100%)`,
             }}
           />
         </>
@@ -2589,6 +2760,11 @@ function SlideEditor({ slide, elements, image, isGenImg, t, imageGenEnabled, onC
   const [editing, setEditing] = useState(null);
   const dragRef = useRef(null);
   const lastGestureWasDrag = useRef(false);
+  // Smart alignment: vertical/horizontal guide lines that appear while
+  // dragging or resizing, when the moving element's left/center/right or
+  // top/middle/bottom snaps to another element's edge/center or the canvas
+  // edge/center. Stored as percentages of the 100×100 canvas.
+  const [snapGuides, setSnapGuides] = useState({ vx: null, hy: null });
   const [scale, setScale] = useState(1);
   const activeTextareaRef = useRef(null);
   const [fontMenuOpen, setFontMenuOpen] = useState(false);
@@ -2689,6 +2865,49 @@ function SlideEditor({ slide, elements, image, isGenImg, t, imageGenEnabled, onC
     window.addEventListener('pointerup', onUp);
   }
 
+  // Compute snap targets and the resulting snapped position. Snaps the
+  // dragged element's left/center/right (x-axis) or top/middle/bottom (y-axis)
+  // to (a) the canvas at 0/50/100, and (b) every other element's edges/center.
+  // Returns the corrected x/y and the guide-line positions to render.
+  const SNAP_THRESHOLD = 0.8; // in percent of canvas (0.8% ≈ 8px on a 1000px canvas)
+  function snapPosition(elId, newX, newY, w, h) {
+    const others = elements.filter(e => e.id !== elId);
+    const xTargets = [0, 50, 100];
+    const yTargets = [0, 50, 100];
+    for (const o of others) {
+      xTargets.push(o.x, o.x + o.w / 2, o.x + o.w);
+      yTargets.push(o.y, o.y + o.h / 2, o.y + o.h);
+    }
+    // Reference points on the dragged element for each axis.
+    const refX = [['left', newX], ['center', newX + w / 2], ['right', newX + w]];
+    const refY = [['top', newY], ['middle', newY + h / 2], ['bottom', newY + h]];
+    // Pick the closest x target within threshold (across all three refs).
+    let bestX = null;
+    for (const [, refPos] of refX) {
+      for (const tgt of xTargets) {
+        const delta = tgt - refPos;
+        if (Math.abs(delta) <= SNAP_THRESHOLD && (bestX === null || Math.abs(delta) < Math.abs(bestX.delta))) {
+          bestX = { delta, guide: tgt };
+        }
+      }
+    }
+    let bestY = null;
+    for (const [, refPos] of refY) {
+      for (const tgt of yTargets) {
+        const delta = tgt - refPos;
+        if (Math.abs(delta) <= SNAP_THRESHOLD && (bestY === null || Math.abs(delta) < Math.abs(bestY.delta))) {
+          bestY = { delta, guide: tgt };
+        }
+      }
+    }
+    return {
+      x: bestX ? newX + bestX.delta : newX,
+      y: bestY ? newY + bestY.delta : newY,
+      vx: bestX ? bestX.guide : null,
+      hy: bestY ? bestY.guide : null,
+    };
+  }
+
   const onMove = useCallback((e) => {
     const d = dragRef.current;
     if (!d) return;
@@ -2700,10 +2919,15 @@ function SlideEditor({ slide, elements, image, isGenImg, t, imageGenEnabled, onC
     const pos = pct(e);
     const dx = pos.x - d.sx;
     const dy = pos.y - d.sy;
+    let nextGuides = { vx: null, hy: null };
     onChange(elements.map(el => {
       if (el.id !== d.elId) return el;
       if (d.type === 'move') {
-        return { ...el, x: clamp(d.ex + dx, 0, 97 - el.w), y: clamp(d.ey + dy, 0, 97 - el.h) };
+        const rawX = d.ex + dx;
+        const rawY = d.ey + dy;
+        const snapped = snapPosition(el.id, rawX, rawY, el.w, el.h);
+        nextGuides = { vx: snapped.vx, hy: snapped.hy };
+        return { ...el, x: clamp(snapped.x, 0, 100 - el.w), y: clamp(snapped.y, 0, 100 - el.h) };
       }
       if (d.type === 'resize') {
         let { ex, ey, ew, eh } = d;
@@ -2711,14 +2935,24 @@ function SlideEditor({ slide, elements, image, isGenImg, t, imageGenEnabled, onC
         if (d.handle.includes('s')) eh = clamp(d.eh + dy, 3, 100 - ey);
         if (d.handle.includes('w')) { const nw = clamp(d.ew - dx, 5, 100); ex = d.ex + (d.ew - nw); ew = nw; }
         if (d.handle.includes('n')) { const nh = clamp(d.eh - dy, 3, 100); ey = d.ey + (d.eh - nh); eh = nh; }
+        // Snap the moving edges of the resized box.
+        const snapped = snapPosition(el.id, ex, ey, ew, eh);
+        nextGuides = { vx: snapped.vx, hy: snapped.hy };
+        // Apply the snap only to the edges actually being moved.
+        if (d.handle.includes('w')) { const sx = snapped.x; ew = ew + (ex - sx); ex = sx; }
+        else if (d.handle.includes('e')) { ew = ew + (snapped.x - ex); }
+        if (d.handle.includes('n')) { const sy = snapped.y; eh = eh + (ey - sy); ey = sy; }
+        else if (d.handle.includes('s')) { eh = eh + (snapped.y - ey); }
         return { ...el, x: ex, y: ey, w: ew, h: eh };
       }
       return el;
     }));
+    setSnapGuides(nextGuides);
   }, [elements, onChange]);
 
   const onUp = useCallback(() => {
     dragRef.current = null;
+    setSnapGuides({ vx: null, hy: null });
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', onUp);
   }, [onMove]);
@@ -2959,6 +3193,38 @@ function SlideEditor({ slide, elements, image, isGenImg, t, imageGenEnabled, onC
             <img src={image} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" />
             <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${t.bg}ee 55%, ${t.bg}88 100%)` }} />
           </>
+        )}
+
+        {/* Smart-alignment guides — drawn above the slide content while the
+            user is dragging or resizing an element. Cyan to read against any
+            theme. They disappear the instant the pointer is released. */}
+        {snapGuides.vx !== null && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              bottom: 0,
+              left: `${snapGuides.vx}%`,
+              width: 0,
+              borderLeft: '1px solid #22d3ee',
+              pointerEvents: 'none',
+              zIndex: 50,
+            }}
+          />
+        )}
+        {snapGuides.hy !== null && (
+          <div
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              top: `${snapGuides.hy}%`,
+              height: 0,
+              borderTop: '1px solid #22d3ee',
+              pointerEvents: 'none',
+              zIndex: 50,
+            }}
+          />
         )}
 
         {elements.map(el => (
@@ -3526,7 +3792,10 @@ function ThemeSwatch({ theme, selected, onClick, disabled }) {
 }
 
 function GenerateForm({ onBack, onCreate }) {
-  const [mode,       setMode]      = useState('flash'); // 'flash' | 'advanced'
+  // Flash mode is gone — advanced is the only path. `mode` stays in the
+  // payload so the existing server contract still works (it just always
+  // sees 'advanced' now).
+  const mode = 'advanced';
   const [topic,      setTopic]     = useState('');
   const [slideCount, setCount]     = useState(8);
   const [difficulty, setDiff]      = useState('intermediate');
@@ -3606,52 +3875,13 @@ function GenerateForm({ onBack, onCreate }) {
         <button onClick={onBack} disabled={loading} className="flex items-center gap-1.5 text-[12px] text-white/45 hover:text-white/70 transition-colors disabled:opacity-30">
           <ArrowLeft size={13} /> Back
         </button>
-        {/* Mode tabs */}
-        <div className="mx-auto flex items-center gap-0.5 bg-white/[0.05] rounded-lg p-0.5">
-          <button
-            onClick={() => setMode('flash')}
-            disabled={loading}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11.5px] font-semibold transition-all disabled:opacity-40 ${mode === 'flash' ? 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30' : 'text-white/35 hover:text-white/60'}`}
-          >
-            <Zap size={11} /> Flash
-          </button>
-          <button
-            onClick={() => setMode('advanced')}
-            disabled={loading}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11.5px] font-semibold transition-all disabled:opacity-40 ${mode === 'advanced' ? 'bg-blue-500/20 text-blue-100 border border-blue-400/40' : 'text-white/35 hover:text-white/60'}`}
-          >
-            <SlidersHorizontal size={11} /> Advanced
-          </button>
+        <div className="mx-auto text-[12px] font-semibold text-white/70 inline-flex items-center gap-1.5">
+          <SlidersHorizontal size={12} className="text-blue-300" /> New slideshow
         </div>
         <div className="w-16" />
       </div>
 
-      {/* ── FLASH MODE ─────────────────────────────────────────────────────── */}
-      {mode === 'flash' && (
-        <div className="flex-1 flex flex-col items-center justify-center px-6">
-          <div className="w-full max-w-md">
-            <div className="text-center mb-7">
-              <div className="w-14 h-14 rounded-2xl bg-yellow-500/10 border border-yellow-500/20 grid place-items-center mx-auto mb-4">
-                <Zap size={24} className="text-yellow-400" />
-              </div>
-              <p className="text-[13px] text-white/45 leading-relaxed">Type a topic — AI picks the best structure,<br />length, and style automatically.</p>
-            </div>
-            <input
-              value={topic} onChange={e => setTopic(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleGenerate()}
-              placeholder="e.g. The French Revolution, Photosynthesis, Q3 Sales…"
-              disabled={loading} autoFocus
-              className="w-full px-4 py-3.5 rounded-xl border border-white/[0.12] bg-white/[0.06] text-white/90 placeholder:text-white/22 text-[15px] outline-none focus:border-yellow-500/40 focus:bg-white/[0.08] transition-all disabled:opacity-40"
-            />
-            <div className="flex items-center justify-center gap-3 mt-3 text-[10px] text-white/22">
-              <span>8 slides</span><span>·</span><span>Intermediate depth</span><span>·</span><span>Auto structure</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── ADVANCED MODE ──────────────────────────────────────────────────── */}
-      {mode === 'advanced' && (
+      {/* ── GENERATION FORM ─────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-2xl mx-auto px-6 pt-7 pb-4 space-y-7">
 
@@ -3756,23 +3986,16 @@ function GenerateForm({ onBack, onCreate }) {
 
         </div>
       </div>
-      )} {/* end advanced mode */}
 
       {/* Sticky CTA footer */}
       <div className="shrink-0 border-t border-white/[0.07] bg-[#1a1a1a] px-6 py-4">
         {error && <p className="text-xs text-rose-400 mb-3">{error}</p>}
         <button onClick={handleGenerate} disabled={loading || !topic.trim()}
-          className={`w-full flex items-center justify-center gap-2.5 py-3.5 rounded-xl font-semibold text-sm transition-all disabled:opacity-35 border ${
-            mode === 'flash'
-              ? 'bg-yellow-500/15 hover:bg-yellow-500/25 border-yellow-500/30 text-yellow-200 hover:text-yellow-100'
-              : 'bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border-blue-400/40 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]'
-          }`}
-          style={{ boxShadow: loading || !topic.trim() ? 'none' : mode === 'flash' ? '0 2px 16px rgba(234,179,8,0.12)' : '0 4px 18px rgba(59,130,246,0.40), inset 0 1px 0 rgba(255,255,255,0.20)' }}>
+          className="w-full flex items-center justify-center gap-2.5 py-3.5 rounded-xl font-semibold text-sm transition-all disabled:opacity-35 border bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border-blue-400/40 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]"
+          style={{ boxShadow: loading || !topic.trim() ? 'none' : '0 4px 18px rgba(59,130,246,0.40), inset 0 1px 0 rgba(255,255,255,0.20)' }}>
           {loading
             ? <><Loader2 size={15} className="animate-spin" /> Generating…</>
-            : mode === 'flash'
-              ? <><Zap size={15} /> Flash Generate</>
-              : <><Sparkles size={15} /> Generate Presentation</>
+            : <><Sparkles size={15} /> Generate Presentation</>
           }
         </button>
 
@@ -3783,7 +4006,7 @@ function GenerateForm({ onBack, onCreate }) {
         {loading && (
           <div className="mt-3 space-y-1.5">
             <div className="w-full rounded-full h-[3px] bg-white/[0.07] overflow-hidden">
-              <div className={`h-full rounded-full transition-all duration-700 ease-out ${mode === 'flash' ? 'bg-yellow-400/80' : 'bg-gradient-to-r from-blue-500 to-blue-400 shadow-[0_0_8px_rgba(59,130,246,0.55)]'}`} style={{ width: `${progress}%` }} />
+              <div className="h-full rounded-full transition-all duration-700 ease-out bg-gradient-to-r from-blue-500 to-blue-400 shadow-[0_0_8px_rgba(59,130,246,0.55)]" style={{ width: `${progress}%` }} />
             </div>
             <p className="text-center text-[10px] text-white/30">{statusMsg}</p>
           </div>

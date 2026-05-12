@@ -31,6 +31,22 @@ export async function generateSlideshow(body, { onProgress, onDone, onError } = 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let gotDone = false;
+
+  const processLine = (line) => {
+    if (!line.startsWith('data: ')) return;
+    let event;
+    try {
+      event = JSON.parse(line.slice(6));
+    } catch {
+      // Malformed or truncated payload — skip this line rather than aborting
+      // the whole stream. The next chunk may carry a complete event.
+      return;
+    }
+    if (event.type === 'progress') onProgress?.(event);
+    else if (event.type === 'done') { gotDone = true; onDone?.(event.slideshow); }
+    else if (event.type === 'error') { onError?.(event.error); throw new Error(event.error); }
+  };
 
   while (true) {
     const { done, value } = await reader.read();
@@ -38,16 +54,14 @@ export async function generateSlideshow(body, { onProgress, onDone, onError } = 
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
     buffer = lines.pop();
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      try {
-        const event = JSON.parse(line.slice(6));
-        if (event.type === 'progress') onProgress?.(event);
-        else if (event.type === 'done') onDone?.(event.slideshow);
-        else if (event.type === 'error') { onError?.(event.error); throw new Error(event.error); }
-      } catch (e) {
-        if (e.message && e.message !== 'Unexpected token') throw e;
-      }
-    }
+    for (const line of lines) processLine(line);
+  }
+  // Flush a final unterminated line (server may close without trailing \n\n).
+  if (buffer) processLine(buffer);
+
+  if (!gotDone) {
+    const msg = 'Generation ended before completing — please try again.';
+    onError?.(msg);
+    throw new Error(msg);
   }
 }

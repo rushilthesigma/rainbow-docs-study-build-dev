@@ -227,11 +227,11 @@ function Singleplayer({ mode, setMode, onExit }) {
           value={topic}
           onChange={e => setTopic(e.target.value)}
           placeholder="e.g., Social media is harmful for teens"
-          className="w-full px-3 py-2 rounded-lg border border-white/20 dark:border-white/[0.10] bg-white/50 dark:bg-white/[0.06] text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 outline-none focus:ring-2 focus:ring-white/30 mb-3"
+          className="w-full px-3 py-2 rounded-lg border border-blue-500/30 bg-white/50 dark:bg-white/[0.06] text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/60 mb-3"
         />
         <div className="flex flex-wrap gap-1.5 mb-5">
           {QUICK_TOPICS.map(t => (
-            <button key={t} onClick={() => setTopic(t)} className="px-2.5 py-1 rounded-md bg-white/[0.07] dark:bg-white/[0.04] border border-white/[0.10] dark:border-white/[0.07] text-[11px] font-medium text-gray-600 dark:text-gray-400 hover:border-white/30 dark:hover:border-white/20 transition-colors">
+            <button key={t} onClick={() => setTopic(t)} className="px-2.5 py-1 rounded-md bg-blue-500/10 border border-blue-500/30 text-[11px] font-medium text-blue-300 hover:bg-blue-500/20 hover:border-blue-500/50 hover:text-blue-200 transition-colors">
               {t}
             </button>
           ))}
@@ -240,10 +240,10 @@ function Singleplayer({ mode, setMode, onExit }) {
           <>
             <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">You argue:</p>
             <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => startDebate(topic.trim(), 'for')} className="px-4 py-3 rounded-xl bg-gray-900 dark:bg-white/80 text-white dark:text-gray-900 text-sm font-semibold hover:bg-gray-700 dark:hover:bg-white transition-colors">
+              <button onClick={() => startDebate(topic.trim(), 'for')} className="px-4 py-3 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 transition-all">
                 FOR
               </button>
-              <button onClick={() => startDebate(topic.trim(), 'against')} className="px-4 py-3 rounded-xl bg-white/20 dark:bg-white/[0.10] border border-white/40 dark:border-white/20 text-gray-800 dark:text-white text-sm font-semibold hover:bg-white/30 dark:hover:bg-white/[0.17] transition-colors">
+              <button onClick={() => startDebate(topic.trim(), 'against')} className="px-4 py-3 rounded-xl bg-blue-500/10 border border-blue-500/40 text-blue-200 text-sm font-semibold hover:bg-blue-500/20 hover:border-blue-500/60 hover:text-blue-100 transition-colors">
                 AGAINST
               </button>
             </div>
@@ -260,38 +260,38 @@ function Singleplayer({ mode, setMode, onExit }) {
     const tie = verdict.winner === 'tie';
     return (
       <div className="p-6 max-w-lg mx-auto">
-        <div className="rounded-2xl p-5 mb-4 text-center bg-white/[0.10] dark:bg-white/[0.05] border border-white/30 dark:border-white/[0.10]">
-          <Trophy size={32} className="mx-auto mb-2 text-gray-500 dark:text-gray-300" />
+        <div className="rounded-2xl p-5 mb-4 text-center bg-blue-500/10 border border-blue-500/30">
+          <Trophy size={32} className="mx-auto mb-2 text-blue-300" />
           <p className="text-2xl font-black text-gray-900 dark:text-white uppercase tracking-wider">
             {won ? 'You won' : tie ? 'Tie' : 'AI won'}
           </p>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1.5 tabular-nums">
+          <p className="text-xs text-blue-300/80 mt-1.5 tabular-nums">
             You: <span className="font-bold">{verdict.studentScore}/100</span> · AI: <span className="font-bold">{verdict.aiScore}/100</span>
           </p>
         </div>
-        <div className="bg-white/[0.07] dark:bg-white/[0.04] border border-white/[0.10] dark:border-white/[0.07] rounded-xl p-4 mb-3">
-          <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-gray-500 dark:text-gray-400 mb-1.5">Verdict</p>
+        <div className="bg-white/[0.04] border border-blue-500/20 rounded-xl p-4 mb-3">
+          <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/80 mb-1.5">Verdict</p>
           <p className="text-sm text-gray-800 dark:text-gray-100 leading-relaxed">{verdict.summary}</p>
         </div>
         {verdict.studentStrongest && (
-          <div className="bg-white/[0.07] dark:bg-white/[0.04] border border-white/[0.10] dark:border-white/[0.07] rounded-xl p-3 mb-2">
-            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-gray-500 dark:text-gray-400 mb-1">Your strongest moment</p>
+          <div className="bg-white/[0.04] border border-blue-500/20 rounded-xl p-3 mb-2">
+            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/80 mb-1">Your strongest moment</p>
             <p className="text-xs text-gray-800 dark:text-gray-100 leading-relaxed">{verdict.studentStrongest}</p>
           </div>
         )}
         {verdict.studentWeakest && (
-          <div className="bg-white/[0.07] dark:bg-white/[0.04] border border-white/[0.10] dark:border-white/[0.07] rounded-xl p-3 mb-2">
-            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-gray-500 dark:text-gray-400 mb-1">Your weakest moment</p>
+          <div className="bg-white/[0.04] border border-blue-500/20 rounded-xl p-3 mb-2">
+            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/80 mb-1">Your weakest moment</p>
             <p className="text-xs text-gray-800 dark:text-gray-100 leading-relaxed">{verdict.studentWeakest}</p>
           </div>
         )}
         {verdict.improve && (
-          <div className="bg-white/[0.07] dark:bg-white/[0.04] border border-white/[0.10] dark:border-white/[0.07] rounded-xl p-3 mb-4">
-            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-gray-500 dark:text-gray-400 mb-1">Drill this next</p>
+          <div className="bg-white/[0.04] border border-blue-500/20 rounded-xl p-3 mb-4">
+            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/80 mb-1">Drill this next</p>
             <p className="text-xs text-gray-800 dark:text-gray-100 leading-relaxed">{verdict.improve}</p>
           </div>
         )}
-        <button onClick={onExit} className="w-full py-2.5 rounded-xl bg-gray-900 dark:bg-white/80 text-white dark:text-gray-900 text-sm font-semibold hover:bg-gray-700 dark:hover:bg-white transition-colors">
+        <button onClick={onExit} className="w-full py-2.5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 transition-all">
           Back to Debate menu
         </button>
       </div>
@@ -301,14 +301,14 @@ function Singleplayer({ mode, setMode, onExit }) {
   // ACTIVE DEBATE
   const debateHeader = (
     <div className="flex items-center gap-2 px-3 py-2 bg-transparent">
-      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/20 border border-white/30 text-white">
+      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-500/20 border border-blue-400/40 text-blue-200">
         You · {side === 'for' ? 'FOR' : 'AGAINST'}
       </span>
       <span className="text-[11px] text-white/80 truncate flex-1">{topic}</span>
       <button
         onClick={handleEndDebate}
         disabled={streaming || verdictLoading || messages.length < 2}
-        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-gray-900 dark:bg-white/75 text-white dark:text-gray-900 text-[11px] font-semibold hover:bg-gray-700 dark:hover:bg-white/90 disabled:opacity-40 transition-colors"
+        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-blue-500/20 border border-blue-400/40 text-blue-200 text-[11px] font-semibold hover:bg-blue-500/30 hover:text-blue-100 disabled:opacity-40 transition-colors"
       >
         {verdictLoading ? <><InlineProgress active /> Judging…</> : <><Swords size={11} /> End debate</>}
       </button>
@@ -498,16 +498,16 @@ function Multiplayer({ mode, setMode, onExit }) {
         <button
           onClick={handleCreate}
           disabled={busy}
-          className="w-full py-3 mb-4 rounded-xl bg-gray-900 dark:bg-white/80 text-white dark:text-gray-900 text-sm font-semibold hover:bg-gray-700 dark:hover:bg-white/90 disabled:opacity-40 flex items-center justify-center gap-2 transition-colors"
+          className="w-full py-3 mb-4 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none flex items-center justify-center gap-2 transition-all"
         >
           {busy ? <InlineProgress active /> : <Zap size={14} />}
           Create match
         </button>
 
         <div className="flex items-center gap-2 my-3">
-          <div className="flex-1 border-t border-white/20 dark:border-white/[0.10]" />
-          <span className="text-[10px] uppercase tracking-wider text-gray-400">or</span>
-          <div className="flex-1 border-t border-white/20 dark:border-white/[0.10]" />
+          <div className="flex-1 border-t border-blue-500/20" />
+          <span className="text-[10px] uppercase tracking-wider text-blue-400/70">or</span>
+          <div className="flex-1 border-t border-blue-500/20" />
         </div>
 
         <div className="flex gap-2">
@@ -516,12 +516,12 @@ function Multiplayer({ mode, setMode, onExit }) {
             onChange={e => setJoinInput(e.target.value.toUpperCase().slice(0, 5))}
             onKeyDown={e => { if (e.key === 'Enter') handleJoin(); }}
             placeholder="Code"
-            className="flex-1 px-3 py-2.5 rounded-xl border border-white/20 dark:border-white/[0.10] bg-white/50 dark:bg-white/[0.06] text-sm font-mono uppercase tracking-widest text-gray-900 dark:text-white placeholder-gray-400 outline-none focus:ring-2 focus:ring-white/30"
+            className="flex-1 px-3 py-2.5 rounded-xl border border-blue-500/30 bg-white/50 dark:bg-white/[0.06] text-sm font-mono uppercase tracking-widest text-gray-900 dark:text-white placeholder-gray-400 outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/60"
           />
           <button
             onClick={handleJoin}
             disabled={busy || joinInput.trim().length < 4}
-            className="px-5 py-2.5 rounded-xl bg-gray-900 dark:bg-white/80 text-white dark:text-gray-900 text-sm font-semibold hover:bg-gray-700 dark:hover:bg-white/90 disabled:opacity-40 transition-colors"
+            className="px-5 py-2.5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none transition-all"
           >
             Join
           </button>
@@ -538,34 +538,34 @@ function Multiplayer({ mode, setMode, onExit }) {
     const opponentJoined = match.players.length >= 2;
     return (
       <div className="p-6 max-w-md mx-auto">
-        <p className="text-[11px] uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400 mb-1.5">Match code</p>
+        <p className="text-[11px] uppercase tracking-[0.18em] text-blue-400/80 dark:text-blue-400/80 mb-1.5">Match code</p>
         <button
           onClick={copyCode}
-          className="w-full font-mono text-3xl font-black tabular-nums tracking-[0.2em] text-gray-900 dark:text-white bg-white/[0.10] dark:bg-white/[0.06] border border-white/40 dark:border-white/[0.15] rounded-xl py-4 mb-3 hover:bg-white/[0.18] dark:hover:bg-white/[0.10] transition-colors inline-flex items-center justify-center gap-3"
+          className="w-full font-mono text-3xl font-black tabular-nums tracking-[0.2em] text-gray-900 dark:text-white bg-white/[0.10] dark:bg-white/[0.06] border border-blue-500/40 dark:border-blue-500/30 rounded-xl py-4 mb-3 hover:border-blue-500/60 hover:bg-white/[0.18] dark:hover:bg-white/[0.10] transition-colors inline-flex items-center justify-center gap-3"
         >
           {match.code}
-          {copied ? <Check size={18} className="text-gray-500 dark:text-gray-300" /> : <Copy size={16} className="text-gray-400" />}
+          {copied ? <Check size={18} className="text-blue-400" /> : <Copy size={16} className="text-blue-400/70" />}
         </button>
         <p className="text-[11px] text-gray-500 dark:text-gray-400 text-center mb-5">Share this code with your opponent.</p>
 
         <div className="bg-white/[0.07] dark:bg-white/[0.04] border border-white/[0.10] dark:border-white/[0.07] rounded-xl p-3 mb-5">
-          <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-gray-500 dark:text-gray-400 mb-2">Players</p>
+          <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/80 mb-2">Players</p>
           <div className="space-y-1.5">
             {match.players.map(p => (
               <div key={p.userId} className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-full bg-white/20 dark:bg-white/10 text-gray-600 dark:text-gray-300 flex items-center justify-center text-[10px] font-bold">
+                <div className="w-6 h-6 rounded-full bg-blue-500/15 text-blue-300 flex items-center justify-center text-[10px] font-bold">
                   {p.name.charAt(0).toUpperCase()}
                 </div>
                 <span className="text-sm text-gray-800 dark:text-gray-200">{p.name}</span>
-                {p.userId === match.hostId && <span className="text-[9px] uppercase tracking-wider text-gray-400">Host</span>}
+                {p.userId === match.hostId && <span className="text-[9px] uppercase tracking-wider text-blue-400/80">Host</span>}
                 {p.userId === myId && <span className="text-[9px] uppercase tracking-wider text-gray-400">You</span>}
               </div>
             ))}
             {!opponentJoined && (
-              <div className="flex items-center gap-2 opacity-60">
+              <div className="flex items-center gap-2">
                 <div className="w-6 h-6 rounded-full bg-white/10 dark:bg-white/[0.06] flex items-center justify-center text-[10px] font-bold text-gray-400">?</div>
                 <span className="text-sm text-gray-500 italic">Waiting for opponent…</span>
-                <InlineProgress active />
+                <span className="ml-1 w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
               </div>
             )}
           </div>
@@ -578,11 +578,11 @@ function Multiplayer({ mode, setMode, onExit }) {
               value={topicInput}
               onChange={e => setTopicInput(e.target.value)}
               placeholder="What are we debating?"
-              className="w-full px-3 py-2 mb-2 rounded-lg border border-white/20 dark:border-white/[0.10] bg-white/50 dark:bg-white/[0.06] text-sm text-gray-900 dark:text-white placeholder-gray-400 outline-none focus:ring-2 focus:ring-white/30"
+              className="w-full px-3 py-2 mb-2 rounded-lg border border-white/20 dark:border-white/[0.10] bg-white/50 dark:bg-white/[0.06] text-sm text-gray-900 dark:text-white placeholder-gray-400 outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/40"
             />
             <div className="flex flex-wrap gap-1 mb-3">
               {QUICK_TOPICS.slice(0, 4).map(t => (
-                <button key={t} onClick={() => setTopicInput(t)} className="px-2 py-0.5 rounded text-[10px] font-medium text-gray-600 dark:text-gray-400 bg-white/[0.07] dark:bg-white/[0.04] border border-white/[0.10] dark:border-white/[0.07] hover:border-white/30 transition-colors">
+                <button key={t} onClick={() => setTopicInput(t)} className="px-2 py-0.5 rounded text-[10px] font-medium text-gray-600 dark:text-gray-400 bg-white/[0.07] dark:bg-white/[0.04] border border-white/[0.10] dark:border-white/[0.07] hover:border-blue-500/40 hover:text-blue-300 transition-colors">
                   {t}
                 </button>
               ))}
@@ -591,13 +591,13 @@ function Multiplayer({ mode, setMode, onExit }) {
             <div className="grid grid-cols-2 gap-2 mb-4">
               <button
                 onClick={() => setHostSide('for')}
-                className={`py-2 rounded-lg text-sm font-semibold border transition-colors ${hostSide === 'for' ? 'bg-gray-900 dark:bg-white/80 text-white dark:text-gray-900 border-transparent' : 'border-white/20 dark:border-white/[0.10] text-gray-700 dark:text-gray-300 bg-transparent hover:bg-white/10'}`}
+                className={`py-2 rounded-lg text-sm font-semibold border transition-colors ${hostSide === 'for' ? 'bg-blue-500/20 text-blue-100 border-blue-500/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]' : 'border-white/20 dark:border-white/[0.10] text-gray-700 dark:text-gray-300 bg-transparent hover:bg-white/10'}`}
               >
                 FOR
               </button>
               <button
                 onClick={() => setHostSide('against')}
-                className={`py-2 rounded-lg text-sm font-semibold border transition-colors ${hostSide === 'against' ? 'bg-gray-900 dark:bg-white/80 text-white dark:text-gray-900 border-transparent' : 'border-white/20 dark:border-white/[0.10] text-gray-700 dark:text-gray-300 bg-transparent hover:bg-white/10'}`}
+                className={`py-2 rounded-lg text-sm font-semibold border transition-colors ${hostSide === 'against' ? 'bg-blue-500/20 text-blue-100 border-blue-500/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]' : 'border-white/20 dark:border-white/[0.10] text-gray-700 dark:text-gray-300 bg-transparent hover:bg-white/10'}`}
               >
                 AGAINST
               </button>
@@ -605,7 +605,7 @@ function Multiplayer({ mode, setMode, onExit }) {
             <button
               onClick={handleStart}
               disabled={busy || !topicInput.trim() || !opponentJoined}
-              className="w-full py-3 rounded-xl bg-gray-900 dark:bg-white/80 text-white dark:text-gray-900 text-sm font-semibold hover:bg-gray-700 dark:hover:bg-white/90 disabled:opacity-40 flex items-center justify-center gap-2 transition-colors"
+              className="w-full py-3 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none flex items-center justify-center gap-2 transition-all"
             >
               {busy ? <InlineProgress active /> : <Swords size={14} />}
               {opponentJoined ? 'Start the debate' : 'Waiting for opponent…'}
@@ -646,10 +646,10 @@ function Multiplayer({ mode, setMode, onExit }) {
               title={iVoted ? 'You voted to end. Waiting for opponent.' : oppVoted ? 'Opponent voted to end. Vote yes to finish.' : 'Vote to end the debate. Both must vote.'}
               className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
                 iVoted
-                  ? 'bg-white/20 dark:bg-white/10 text-gray-600 dark:text-gray-300'
+                  ? 'bg-blue-500/15 border border-blue-500/30 text-blue-300/80'
                   : oppVoted
-                    ? 'bg-gray-900 dark:bg-white/80 text-white dark:text-gray-900 animate-pulse'
-                    : 'bg-gray-900 dark:bg-white/75 text-white dark:text-gray-900 hover:bg-gray-700 dark:hover:bg-white/90'
+                    ? 'bg-gradient-to-b from-blue-500 to-blue-600 text-white border border-blue-400/40 animate-pulse'
+                    : 'bg-blue-500/20 border border-blue-400/40 text-blue-200 hover:bg-blue-500/30 hover:text-blue-100'
               }`}
             >
               {voting ? <InlineProgress active /> : iVoted ? 'Waiting…' : oppVoted ? 'Confirm end' : 'Vote to end'}
@@ -668,9 +668,9 @@ function Multiplayer({ mode, setMode, onExit }) {
             const isMine = t.userId === myId;
             return (
               <div key={i} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] rounded-2xl p-3.5 shadow-sm ${isMine ? 'bg-gray-900 dark:bg-white/80 text-white dark:text-gray-900 rounded-tr-md' : 'bg-white/[0.12] dark:bg-white/[0.07] border border-white/20 dark:border-white/[0.06] text-gray-900 dark:text-gray-100 rounded-tl-md'}`}>
+                <div className={`max-w-[85%] rounded-2xl p-3.5 shadow-sm ${isMine ? 'bg-gradient-to-b from-blue-500 to-blue-600 text-white border border-blue-400/40 shadow-[0_4px_18px_rgba(59,130,246,0.25)] rounded-tr-md' : 'bg-white/[0.12] dark:bg-white/[0.07] border border-blue-500/20 text-gray-900 dark:text-gray-100 rounded-tl-md'}`}>
                   <div className="flex items-center gap-2 mb-1.5">
-                    <span className={`text-[9px] font-bold uppercase tracking-wider ${isMine ? 'text-white/60 dark:text-gray-600' : 'text-gray-500 dark:text-gray-400'}`}>
+                    <span className={`text-[9px] font-bold uppercase tracking-wider ${isMine ? 'text-blue-100/80' : 'text-blue-400/80'}`}>
                       {t.side === 'for' ? 'FOR' : 'AGAINST'} · {isMine ? 'you' : opp?.name}
                     </span>
                   </div>
@@ -794,7 +794,7 @@ function Multiplayer({ mode, setMode, onExit }) {
                 placeholder={`Make your argument as ${me?.side?.toUpperCase()}. Drop or paste images for evidence — specifics, attack the opponent's last claim.`}
                 rows={4}
                 disabled={submittingMove}
-                className="w-full p-3 rounded-xl border border-white/20 dark:border-white/[0.10] bg-white/30 dark:bg-white/[0.04] text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 outline-none focus:ring-2 focus:ring-white/30 resize-y"
+                className="w-full p-3 rounded-xl border border-blue-500/25 bg-white/30 dark:bg-white/[0.04] text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/60 resize-y"
               />
               <div className="flex items-center justify-between mt-2 gap-2">
                 <button
@@ -813,7 +813,7 @@ function Multiplayer({ mode, setMode, onExit }) {
                 <button
                   onClick={handleSubmitMove}
                   disabled={submittingMove || (argument.trim().length < 20 && argImages.length === 0)}
-                  className="px-4 py-1.5 rounded-md bg-gray-900 dark:bg-white/80 text-white dark:text-gray-900 text-xs font-semibold hover:bg-gray-700 dark:hover:bg-white/90 disabled:opacity-40 inline-flex items-center gap-1 transition-colors"
+                  className="px-4 py-1.5 rounded-md bg-gradient-to-b from-blue-500 to-blue-600 text-white text-xs font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_12px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none inline-flex items-center gap-1 transition-all"
                 >
                   {submittingMove ? <><InlineProgress active /> Grading…</> : <>Send turn</>}
                 </button>
@@ -835,32 +835,32 @@ function Multiplayer({ mode, setMode, onExit }) {
     const tie = v.winner === 'tie';
     return (
       <div className="p-6 max-w-lg mx-auto">
-        <div className="rounded-2xl p-5 mb-4 text-center bg-white/[0.10] dark:bg-white/[0.05] border border-white/30 dark:border-white/[0.10]">
-          <Trophy size={32} className="mx-auto mb-2 text-gray-500 dark:text-gray-300" />
+        <div className="rounded-2xl p-5 mb-4 text-center bg-blue-500/10 border border-blue-500/30">
+          <Trophy size={32} className="mx-auto mb-2 text-blue-300" />
           <p className="text-2xl font-black uppercase tracking-wider text-gray-900 dark:text-white">
             {tie ? 'Tie' : v.winner === 'for' ? 'FOR side wins' : 'AGAINST side wins'}
           </p>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1.5 tabular-nums">
+          <p className="text-xs text-blue-300/80 mt-1.5 tabular-nums">
             {match.players.map(p => `${p.name} (${p.side?.toUpperCase()}): ${match.scores[p.userId] || 0}`).join(' · ')}
           </p>
         </div>
-        <div className="bg-white/[0.07] dark:bg-white/[0.04] border border-white/[0.10] dark:border-white/[0.07] rounded-xl p-4 mb-3">
-          <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-gray-500 dark:text-gray-400 mb-1.5">Verdict</p>
+        <div className="bg-white/[0.04] border border-blue-500/20 rounded-xl p-4 mb-3">
+          <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/80 mb-1.5">Verdict</p>
           <p className="text-sm text-gray-800 dark:text-gray-100 leading-relaxed">{v.summary}</p>
         </div>
         {v.forStrongest && (
-          <div className="bg-white/[0.07] dark:bg-white/[0.04] border border-white/[0.10] dark:border-white/[0.07] rounded-xl p-3 mb-2">
-            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-gray-500 dark:text-gray-400 mb-1">FOR's strongest moment</p>
+          <div className="bg-white/[0.04] border border-blue-500/20 rounded-xl p-3 mb-2">
+            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/80 mb-1">FOR's strongest moment</p>
             <p className="text-xs text-gray-800 dark:text-gray-100 leading-relaxed">{v.forStrongest}</p>
           </div>
         )}
         {v.againstStrongest && (
-          <div className="bg-white/[0.07] dark:bg-white/[0.04] border border-white/[0.10] dark:border-white/[0.07] rounded-xl p-3 mb-4">
-            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-gray-500 dark:text-gray-400 mb-1">AGAINST's strongest moment</p>
+          <div className="bg-white/[0.04] border border-blue-500/20 rounded-xl p-3 mb-4">
+            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/80 mb-1">AGAINST's strongest moment</p>
             <p className="text-xs text-gray-800 dark:text-gray-100 leading-relaxed">{v.againstStrongest}</p>
           </div>
         )}
-        <button onClick={onExit} className="w-full py-2.5 rounded-xl bg-gray-900 dark:bg-white/80 text-white dark:text-gray-900 text-sm font-semibold hover:bg-gray-700 dark:hover:bg-white/90 transition-colors">
+        <button onClick={onExit} className="w-full py-2.5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 transition-all">
           Back to Debate menu
         </button>
       </div>
