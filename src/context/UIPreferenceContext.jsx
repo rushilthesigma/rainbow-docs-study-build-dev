@@ -53,6 +53,27 @@ export function UIPreferenceProvider({ children }) {
     else document.documentElement.classList.remove('dark');
   }, [theme]);
 
+  // One-time forced migration: every legacy user still pinned to the
+  // light theme gets auto-flipped to dark on their next session. The new
+  // UI was designed dark-first; light leaves blue accents and toggles
+  // rendering on a flat white background without the polish work that
+  // was done in dark, so the experience is meaningfully worse there.
+  // Once migrated, the user can still flip back manually if they really
+  // want — we only force once per session, keyed by user id so a switch
+  // to another account triggers the check again.
+  const migratedRef = useRef(null);
+  useEffect(() => {
+    if (!user) return;
+    if (migratedRef.current === user.id) return;
+    migratedRef.current = user.id;
+    if (prefs.theme === 'light') {
+      // Apply immediately so the page repaints in dark before the
+      // server roundtrip completes.
+      document.documentElement.classList.add('dark');
+      setPref('theme', 'dark').catch(() => {});
+    }
+  }, [user, prefs.theme]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ----- Mutator -----
   //
   // For signed-in users: optimistically write the new pref, fire

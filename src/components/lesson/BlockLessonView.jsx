@@ -100,14 +100,14 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
       {/* Back button */}
       <button
         onClick={onBack}
-        className="inline-flex items-center gap-1.5 text-[12px] font-medium text-blue-400/70 hover:text-blue-300 mb-8 transition-colors"
+        className="inline-flex items-center gap-1.5 text-[12px] font-medium text-white/40 hover:text-white/70 mb-8 transition-colors"
       >
         <ArrowLeft size={13} /> {backLabel}
       </button>
 
       {/* Lesson title */}
       <header className="mb-10">
-        <p className="text-[10px] font-black uppercase tracking-[0.28em] text-blue-400 mb-3">Lesson</p>
+        <p className="text-[10px] font-black uppercase tracking-[0.28em] text-white/35 mb-3">Lesson</p>
         <h1 className="text-[42px] md:text-[52px] font-black tracking-tight text-white leading-[1.0] mb-3">
           {lesson.title}
         </h1>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Swords, RotateCcw, ArrowLeft, Trophy, Users, User, Copy, Check, Loader2, X, Zap, FileText, AlertCircle, Paperclip,
+  Swords, RotateCcw, ArrowLeft, Trophy, Users, User, Copy, Check, Loader2, X, Zap, FileText, AlertCircle, Paperclip, Clock,
 } from 'lucide-react';
 import { apiFetch, getToken } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
@@ -31,6 +31,19 @@ const QUICK_TOPICS = [
 
 export default function DebatePanel({ onBack }) {
   const [mode, setMode] = useState('menu');
+  // Forced-timed flag: set when the user picks "Timed multiplayer" from
+  // the menu so the lobby opens with the timed-mode toggle pre-checked.
+  // Reset when we go back to the menu.
+  const [forceTimed, setForceTimed] = useState(false);
+  const selectMode = (m) => {
+    if (m === 'mp-menu-timed') {
+      setForceTimed(true);
+      setMode('mp-menu');
+    } else {
+      if (m === 'menu') setForceTimed(false);
+      setMode(m);
+    }
+  };
 
   const header = (
     <div className="flex items-center gap-2 px-4 py-2.5 bg-transparent">
@@ -58,19 +71,20 @@ export default function DebatePanel({ onBack }) {
     <div className="h-full flex flex-col glass-card rounded-xl overflow-hidden">
       {header}
       <div className="flex-1 min-h-0 overflow-y-auto">
-        {mode === 'menu' && <ModeMenu onSelect={setMode} />}
+        {mode === 'menu' && <ModeMenu onSelect={selectMode} />}
         {(mode === 'single-setup' || mode === 'single-debate' || mode === 'single-verdict') && (
           <Singleplayer
             mode={mode}
-            setMode={setMode}
-            onExit={() => setMode('menu')}
+            setMode={selectMode}
+            onExit={() => selectMode('menu')}
           />
         )}
         {(mode === 'mp-menu' || mode === 'mp-lobby' || mode === 'mp-game' || mode === 'mp-verdict') && (
           <Multiplayer
             mode={mode}
-            setMode={setMode}
-            onExit={() => setMode('menu')}
+            setMode={selectMode}
+            onExit={() => selectMode('menu')}
+            forceTimed={forceTimed}
           />
         )}
       </div>
@@ -90,10 +104,10 @@ function ModeMenu({ onSelect }) {
       <div className="grid gap-3">
         <button
           onClick={() => onSelect('single-setup')}
-          className="text-left p-4 rounded-xl border border-white/[0.10] dark:border-white/[0.07] bg-white/[0.07] dark:bg-white/[0.04] hover:bg-white/[0.14] dark:hover:bg-white/[0.08] transition-colors group"
+          className="text-left p-4 rounded-xl border border-blue-500/25 bg-blue-500/[0.04] hover:bg-blue-500/[0.10] hover:border-blue-500/45 transition-colors group"
         >
           <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-lg bg-white/20 dark:bg-white/[0.08] text-gray-600 dark:text-gray-300 flex items-center justify-center flex-shrink-0">
+            <div className="w-10 h-10 rounded-lg bg-blue-500/15 text-blue-300 flex items-center justify-center flex-shrink-0">
               <User size={18} />
             </div>
             <div className="flex-1 min-w-0">
@@ -107,16 +121,33 @@ function ModeMenu({ onSelect }) {
 
         <button
           onClick={() => onSelect('mp-menu')}
-          className="text-left p-4 rounded-xl border border-white/[0.10] dark:border-white/[0.07] bg-white/[0.07] dark:bg-white/[0.04] hover:bg-white/[0.14] dark:hover:bg-white/[0.08] transition-colors group"
+          className="text-left p-4 rounded-xl border border-blue-500/25 bg-blue-500/[0.04] hover:bg-blue-500/[0.10] hover:border-blue-500/45 transition-colors group"
         >
           <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-lg bg-white/20 dark:bg-white/[0.08] text-gray-600 dark:text-gray-300 flex items-center justify-center flex-shrink-0">
+            <div className="w-10 h-10 rounded-lg bg-blue-500/15 text-blue-300 flex items-center justify-center flex-shrink-0">
               <Users size={18} />
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-bold text-gray-900 dark:text-white">Head-to-head with a friend</p>
               <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 leading-snug">
                 Game-code lobby. Each turn is graded by AI on argumentation, evidence, and rhetoric. Both players must vote to End — then AI declares a winner.
+              </p>
+            </div>
+          </div>
+        </button>
+
+        <button
+          onClick={() => onSelect('mp-menu-timed')}
+          className="text-left p-4 rounded-xl border border-blue-400/40 bg-gradient-to-b from-blue-500/[0.12] to-blue-600/[0.08] hover:from-blue-500/[0.18] hover:to-blue-600/[0.12] hover:border-blue-400/60 transition-colors group"
+        >
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-lg bg-blue-500 text-white flex items-center justify-center flex-shrink-0 shadow-[0_4px_12px_rgba(59,130,246,0.30)]">
+              <Clock size={18} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-gray-900 dark:text-white inline-flex items-center gap-1.5">Timed multiplayer <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-500/25 text-blue-200 border border-blue-400/40">2:00/turn</span></p>
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 leading-snug">
+                Same lobby + scoring as head-to-head, but every turn is on a 2-minute countdown. Miss the window and that turn scores 0. Opponent can see your draft live as you type.
               </p>
             </div>
           </div>
@@ -335,7 +366,7 @@ function Singleplayer({ mode, setMode, onExit }) {
 // =========================================================
 // MULTIPLAYER
 // =========================================================
-function Multiplayer({ mode, setMode, onExit }) {
+function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
   const { user } = useAuth();
   const myId = user?.id || null;
   const [iAmHost, setIAmHost] = useState(false);
@@ -346,7 +377,7 @@ function Multiplayer({ mode, setMode, onExit }) {
   const [error, setError] = useState(null);
   const [topicInput, setTopicInput] = useState('');
   const [hostSide, setHostSide] = useState('for');
-  const [timedMode, setTimedMode] = useState(false);
+  const [timedMode, setTimedMode] = useState(forceTimed);
   const [argument, setArgument] = useState('');
   const [argImages, setArgImages] = useState([]);
   const [argDragOver, setArgDragOver] = useState(false);
@@ -431,6 +462,23 @@ function Multiplayer({ mode, setMode, onExit }) {
   useEffect(() => {
     timeoutFiredRef.current = null;
   }, [match?.turnStartedAt]);
+
+  // Live-typing broadcast — only in timed mode, only on the active
+  // player's side, debounced ~400ms so we're not hammering the server
+  // with one POST per keystroke. The opponent reads match.draftText
+  // from the SSE stream and renders it inline.
+  useEffect(() => {
+    if (!code) return;
+    if (!match?.timedMode || match.state !== 'playing') return;
+    if (match.turnOf !== myId) return;
+    const handle = setTimeout(() => {
+      apiFetch(`/api/debate/match/${code}/draft`, {
+        method: 'POST',
+        body: JSON.stringify({ text: argument }),
+      }).catch(() => {});
+    }, 400);
+    return () => clearTimeout(handle);
+  }, [argument, code, match?.timedMode, match?.state, match?.turnOf, myId]);
 
   async function handleCreate() {
     setBusy(true); setError(null);
@@ -787,6 +835,27 @@ function Multiplayer({ mode, setMode, onExit }) {
               </div>
             );
           })}
+
+          {/* Live opponent draft — only renders in timed mode while it's
+              the opponent's turn AND they have actually typed something.
+              Visually distinct from a sent turn (lower opacity, dashed
+              border, blinking caret) so it's clearly in-progress. */}
+          {match.timedMode && !myTurn && match.draftBy && match.draftBy !== myId && match.draftText && (
+            <div className="flex justify-start">
+              <div className="max-w-[85%] rounded-2xl p-3.5 border-2 border-dashed border-blue-500/40 bg-blue-500/[0.04] text-gray-900 dark:text-gray-100 rounded-tl-md">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-blue-400/80">
+                    {opp?.side === 'for' ? 'FOR' : 'AGAINST'} · {opp?.name} is typing
+                  </span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                </div>
+                <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                  {match.draftText}
+                  <span className="inline-block w-0.5 h-4 align-middle bg-blue-400 ml-0.5 animate-pulse" />
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Composer */}

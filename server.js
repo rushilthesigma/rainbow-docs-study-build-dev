@@ -7657,6 +7657,11 @@ function publicDebateState(match) {
     timedMode: !!match.timedMode,
     turnLimitMs: match.turnLimitMs || 0,
     turnStartedAt: match.turnStartedAt || 0,
+    // Live-typing state — only meaningful when timedMode is on. Both
+    // players see the field; the active player ignores their own draft
+    // for display purposes.
+    draftText: match.draftText || '',
+    draftBy: match.draftBy || null,
   };
 }
 
@@ -7824,6 +7829,8 @@ app.post('/api/debate/match/:code/move', authMiddleware, async (req, res) => {
     match.scores[req.userId] = (match.scores[req.userId] || 0) + 0;
     match.turnOf = opponent.userId;
     match.turnStartedAt = Date.now();
+    match.draftText = '';
+    match.draftBy = null;
     match.lastActivity = Date.now();
     pushDebateEvent(match, 'turn_added', { turn, scores: match.scores, turnOf: match.turnOf, turnStartedAt: match.turnStartedAt });
     return res.json({ turn, match: publicDebateState(match) });
@@ -7900,9 +7907,12 @@ Return JSON exactly:
     };
     match.turns.push(turn);
     match.scores[req.userId] = (match.scores[req.userId] || 0) + score.total;
-    // Turn passes to opponent. Reset the per-turn clock for timed mode.
+    // Turn passes to opponent. Reset the per-turn clock for timed mode,
+    // and clear any draft text so the opponent's panel resets cleanly.
     match.turnOf = opponent.userId;
     match.turnStartedAt = Date.now();
+    match.draftText = '';
+    match.draftBy = null;
     match.lastActivity = Date.now();
     pushDebateEvent(match, 'turn_added', { turn, scores: match.scores, turnOf: match.turnOf, turnStartedAt: match.turnStartedAt });
     res.json({ turn, match: publicDebateState(match) });
@@ -7910,6 +7920,29 @@ Return JSON exactly:
     console.error('Debate move grading failed:', e);
     res.status(500).json({ error: e.message || 'Grading failed' });
   }
+});
+
+// POST /api/debate/match/:code/draft — live-typing broadcast. The
+// active player POSTs their in-progress argument text every ~500ms
+// while typing; the server forwards via SSE so the opponent can see
+// the draft as it's written. Pure transient state — never persisted,
+// dropped on disconnect, and only honored when timedMode is on (to
+// keep the non-timed mode feeling private).
+app.post('/api/debate/match/:code/draft', authMiddleware, (req, res) => {
+  const match = debateMatches.get(req.params.code);
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+  if (match.state !== 'playing') return res.status(409).json({ error: 'Not in playing state' });
+  if (match.turnOf !== req.userId) return res.status(403).json({ error: 'Not your turn' });
+  if (!match.timedMode) return res.json({ ok: true }); // silently no-op when not timed
+  const text = String(req.body?.text || '').slice(0, 4000);
+  match.lastActivity = Date.now();
+  // Only push if the text actually changed — avoids flooding the
+  // opponent's SSE with no-op events while the client polls.
+  if (match.draftText === text && match.draftBy === req.userId) return res.json({ ok: true });
+  match.draftText = text;
+  match.draftBy = req.userId;
+  pushDebateEvent(match, 'draft', { draftText: text, draftBy: req.userId });
+  res.json({ ok: true });
 });
 
 // POST /api/debate/match/:code/vote-end — vote to end. When both vote,

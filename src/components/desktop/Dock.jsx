@@ -89,10 +89,10 @@ export default function Dock() {
 
   const handleMouseMove = useCallback((e) => { setMouseX(e.clientX); }, []);
 
-  // Social moved to the menu bar (bell icon with unread count) per
-  // user request — pull it out of the dock so we don't duplicate
-  // the entry point.
-  const mainApps = APP_REGISTRY.filter(a => !['settings', 'newcurriculum', 'social'].includes(a.id) && (!a.adminOnly || isAdmin));
+  // Social is a first-class dock app again — the menu-bar bell stays
+  // for notifications/unread count, but Social now also has its own
+  // icon so users can open it directly without going through the bell.
+  const mainApps = APP_REGISTRY.filter(a => !['settings', 'newcurriculum'].includes(a.id) && (!a.adminOnly || isAdmin));
   const utilApps = APP_REGISTRY.filter(a => ['settings'].includes(a.id));
   const openAppIds = new Set(Object.values(state.windows).map(w => w.appId));
 

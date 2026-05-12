@@ -9,6 +9,7 @@ import MathTutorApp from './apps/MathTutorApp';
 import MobilePreview from '../admin/MobilePreview';
 import StudyPage from '../../pages/StudyPage';
 import SettingsPage from '../../pages/SettingsPage';
+import DebatePanel from '../study/DebatePanel';
 
 // The standalone Assessments app was retired — per-curriculum quizzes
 // (CurriculumAssessmentPage) still exist inside lessons; the
@@ -27,6 +28,7 @@ const APP_COMPONENTS = {
   slides: SlideshowApp,
   mobilepreview: MobilePreview,
   settings: SettingsPage,
+  debate: DebatePanel,
 };
 
 // Apps that need flex container without scroll (they manage their own scrolling)

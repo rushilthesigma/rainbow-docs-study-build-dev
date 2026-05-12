@@ -243,13 +243,6 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         {sources.length > 0 && <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-white/80 text-gray-900 text-[8px] font-bold flex items-center justify-center">{sources.length}</span>}
       </button>
       <button
-        onClick={() => setDebateOpen(true)}
-        title="Debate mode"
-        className="p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/[0.15] transition-colors"
-      >
-        <Swords size={14} />
-      </button>
-      <button
         onClick={() => { loadHistory(); setShowHistory(true); }}
         title="History"
         className="p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/[0.15] transition-colors"
