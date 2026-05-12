@@ -7646,12 +7646,17 @@ function publicDebateState(match) {
       userId: t.userId, side: t.side, content: t.content,
       images: Array.isArray(t.images) ? t.images : [],
       score: t.score, feedback: t.feedback, at: t.at,
+      timedOut: !!t.timedOut,
     })),
     turnOf: match.turnOf,
     scores: match.scores,
     endVotes: Array.from(match.endVotes),
     verdict: match.verdict || null,
     createdAt: match.createdAt,
+    // Timed-mode metadata for client countdowns.
+    timedMode: !!match.timedMode,
+    turnLimitMs: match.turnLimitMs || 0,
+    turnStartedAt: match.turnStartedAt || 0,
   };
 }
 
@@ -7766,6 +7771,12 @@ app.post('/api/debate/match/:code/start', authMiddleware, (req, res) => {
   match.state = 'playing';
   // FOR side opens.
   match.turnOf = match.players.find(p => p.side === 'for').userId;
+  // Timed mode: host can enable a per-turn time limit. Default off.
+  // If on, every turn (starting now) has 120s; players who miss the
+  // window get a 0-score turn and play continues.
+  match.timedMode = !!req.body?.timedMode;
+  match.turnLimitMs = match.timedMode ? 120_000 : 0;
+  match.turnStartedAt = Date.now();
   match.lastActivity = Date.now();
   pushDebateEvent(match, 'started', { match: publicDebateState(match) });
   res.json({ match: publicDebateState(match) });
@@ -7786,23 +7797,62 @@ app.post('/api/debate/match/:code/move', authMiddleware, async (req, res) => {
     .filter(im => im && typeof im.dataUrl === 'string' && im.dataUrl.startsWith('data:'))
     .map(im => ({ dataUrl: im.dataUrl, mimeType: im.mimeType || 'image/png' }));
 
+  const player = match.players.find(p => p.userId === req.userId);
+  const opponent = match.players.find(p => p.userId !== req.userId);
+
+  // Timed mode: if the player ran past their 120s window — OR explicitly
+  // submitted a timeout marker (client races the clock and posts when the
+  // countdown hits 0 to advance play) — bypass the AI grader entirely and
+  // score the turn 0/0/0. The opening turn has no prior turnStartedAt so
+  // we treat match.turnStartedAt as the clock reference (set in /start).
+  const explicitTimeout = !!req.body?.timedOut;
+  const elapsedMs = match.turnStartedAt ? Date.now() - match.turnStartedAt : 0;
+  const exceededLimit = match.timedMode && match.turnLimitMs > 0 && elapsedMs > match.turnLimitMs + 2000; // 2s grace for network
+  const isTimeout = explicitTimeout || exceededLimit;
+  if (isTimeout) {
+    const turn = {
+      userId: req.userId,
+      side: player.side,
+      content: argument || '(time expired — no argument submitted)',
+      images: [],
+      score: { argumentation: 0, evidence: 0, rhetoric: 0, total: 0 },
+      feedback: 'Time expired. No argument was made in the allotted 2 minutes.',
+      at: Date.now(),
+      timedOut: true,
+    };
+    match.turns.push(turn);
+    match.scores[req.userId] = (match.scores[req.userId] || 0) + 0;
+    match.turnOf = opponent.userId;
+    match.turnStartedAt = Date.now();
+    match.lastActivity = Date.now();
+    pushDebateEvent(match, 'turn_added', { turn, scores: match.scores, turnOf: match.turnOf, turnStartedAt: match.turnStartedAt });
+    return res.json({ turn, match: publicDebateState(match) });
+  }
+
   // Allow image-only turns (≥1 image), otherwise require ≥20 chars text.
   if (argument.length < 20 && images.length === 0) {
     return res.status(400).json({ error: 'Argument must be at least 20 characters (or attach an image)' });
   }
 
-  const player = match.players.find(p => p.userId === req.userId);
-  const opponent = match.players.find(p => p.userId !== req.userId);
-
   // AI grading. Three 1-10 axes + 1-2 sentence feedback. JSON mode forced.
   const prevTurns = match.turns.slice(-6).map(t =>
     `${t.side.toUpperCase()} (${t.userId === req.userId ? 'this player' : 'opponent'}): ${t.content.slice(0, 600)}`
   ).join('\n\n');
-  const sys = `You are a debate judge. Grade the argument on three axes (1-10 integer each):
+  const sys = `You are a strict, opinionated debate judge. Grade the argument on three axes (1-10 integer each):
 - argumentation (logical structure, claim → reasoning → conclusion)
 - evidence (specific facts, examples, data — penalize hand-waving)
 - rhetoric (clarity, persuasiveness, addressing the opponent's strongest point)
-The argument may include attached images (charts, screenshots, photographs of evidence). Treat them as part of the argument — if the image carries the claim's evidence, weight it under "evidence"; if the user uses it rhetorically, weight it under "rhetoric".
+
+USE THE FULL 1-10 RANGE. Do NOT default everything to 5. Anchor:
+- 1-2: incoherent, nothing supported, off-topic, or a single weak sentence.
+- 3-4: below average — has a claim but support is vague or generic.
+- 5-6: average debate-class output — claim plus a reason or two, not memorable.
+- 7-8: strong — specific evidence, addresses opponent, clean logical structure.
+- 9-10: exceptional — surprising specifics, decisive counter to opponent, quotable.
+You MUST score each axis independently — it is normal for the same argument to score 8 on argumentation and 3 on evidence. Avoid giving 5/5/5; if you find yourself there, push at least one axis up or down based on which way the argument actually leans.
+
+The argument may include attached images (charts, screenshots, photographs of evidence). Treat them as part of the argument — if the image carries the claim's evidence, weight it under "evidence"; if the user uses it rhetorically, weight it under "rhetoric". If the player ran out of time and submitted nothing or near-nothing, all three axes are 1.
+
 Output STRICT JSON only.`;
   const usr = `Topic: "${match.topic}"
 This player is arguing ${player.side.toUpperCase()}.
@@ -7826,7 +7876,7 @@ Return JSON exactly:
   try {
     const userMsg = { role: 'user', content: usr };
     if (images.length) userMsg.images = images;
-    const aiResp = await callGemini(sys, [userMsg], MODEL_FLASH_LITE, 600, { jsonMode: true, temperature: 0.4 });
+    const aiResp = await callGemini(sys, [userMsg], MODEL_FLASH_LITE, 600, { jsonMode: true, temperature: 0.7 });
     let score = { argumentation: 5, evidence: 5, rhetoric: 5, total: 15 };
     let feedback = '';
     if (aiResp.success) {
@@ -7850,10 +7900,11 @@ Return JSON exactly:
     };
     match.turns.push(turn);
     match.scores[req.userId] = (match.scores[req.userId] || 0) + score.total;
-    // Turn passes to opponent.
+    // Turn passes to opponent. Reset the per-turn clock for timed mode.
     match.turnOf = opponent.userId;
+    match.turnStartedAt = Date.now();
     match.lastActivity = Date.now();
-    pushDebateEvent(match, 'turn_added', { turn, scores: match.scores, turnOf: match.turnOf });
+    pushDebateEvent(match, 'turn_added', { turn, scores: match.scores, turnOf: match.turnOf, turnStartedAt: match.turnStartedAt });
     res.json({ turn, match: publicDebateState(match) });
   } catch (e) {
     console.error('Debate move grading failed:', e);

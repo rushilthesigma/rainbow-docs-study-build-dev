@@ -1363,26 +1363,25 @@ async function captureSlidePng(slide, themeKey, fontHint, image, w = 1600, h = 9
   const t = THEMES[themeKey] || THEMES.ink;
   const elements = slideToElements(slide, themeKey, fontHint, image);
   const isLight = t.mode === 'light';
-  const useBespoke = !!(slide?.html && String(slide.html).length > 50);
   const layoutHasImage = elements.some(el => el.kind === 'image');
 
   const host = document.createElement('div');
   host.style.cssText = `position:fixed;left:-99999px;top:0;width:${w}px;height:${h}px;background:${t.bg};overflow:hidden;z-index:-1;`;
 
-  if (useBespoke) {
-    const inner = document.createElement('div');
-    inner.style.cssText = 'position:absolute;inset:0;';
-    inner.innerHTML = slide.html;
-    host.appendChild(inner);
-  } else {
+  // PDF/PPTX export always uses the template path — matches the edit and
+  // present views 1:1. The AI's bespoke HTML in slide.html is intentionally
+  // skipped here: it routinely shipped black-on-dark or white-on-light
+  // body text because the model assumes default browser colors, while the
+  // template path uses theme.text directly and is always readable.
+  {
     if (image && !layoutHasImage) {
       const bgImg = document.createElement('img');
       bgImg.src = image;
       bgImg.crossOrigin = 'anonymous';
-      bgImg.style.cssText = `position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:${isLight ? 0.08 : 0.14};`;
+      bgImg.style.cssText = `position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0.20;`;
       host.appendChild(bgImg);
       const overlay = document.createElement('div');
-      overlay.style.cssText = `position:absolute;inset:0;background:${isLight ? `linear-gradient(105deg, ${t.bg} 55%, ${t.bg}cc 100%)` : `linear-gradient(105deg, ${t.bg} 60%, ${t.bg}e6 100%)`};`;
+      overlay.style.cssText = `position:absolute;inset:0;background:linear-gradient(135deg, ${t.bg}ee 55%, ${t.bg}88 100%);`;
       host.appendChild(overlay);
     }
     for (const el of elements) {

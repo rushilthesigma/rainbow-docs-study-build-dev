@@ -346,6 +346,7 @@ function Multiplayer({ mode, setMode, onExit }) {
   const [error, setError] = useState(null);
   const [topicInput, setTopicInput] = useState('');
   const [hostSide, setHostSide] = useState('for');
+  const [timedMode, setTimedMode] = useState(false);
   const [argument, setArgument] = useState('');
   const [argImages, setArgImages] = useState([]);
   const [argDragOver, setArgDragOver] = useState(false);
@@ -355,6 +356,10 @@ function Multiplayer({ mode, setMode, onExit }) {
   const [voting, setVoting] = useState(false);
   const [copied, setCopied] = useState(false);
   const streamRef = useRef(null);
+  // Tick state for the timed-mode countdown — refreshes once a second.
+  // Computed from match.turnLimitMs - (now - match.turnStartedAt).
+  const [nowTick, setNowTick] = useState(Date.now());
+  const timeoutFiredRef = useRef(null);
 
   function fileToDataUrl(file) {
     return new Promise((resolve, reject) => {
@@ -413,6 +418,20 @@ function Multiplayer({ mode, setMode, onExit }) {
     return () => { try { ctrl.abort(); } catch {} };
   }, [code, mode, setMode]);
 
+  // Tick the countdown when the player is in a timed game. The effect
+  // is a no-op when timed mode is off — no setInterval at all.
+  useEffect(() => {
+    if (!match?.timedMode || match.state !== 'playing') return;
+    const id = setInterval(() => setNowTick(Date.now()), 500);
+    return () => clearInterval(id);
+  }, [match?.timedMode, match?.state, match?.turnStartedAt]);
+
+  // Reset the timeout-fired ref whenever the turn changes — otherwise a
+  // late timeout from the previous turn could no-op the next.
+  useEffect(() => {
+    timeoutFiredRef.current = null;
+  }, [match?.turnStartedAt]);
+
   async function handleCreate() {
     setBusy(true); setError(null);
     try {
@@ -440,7 +459,7 @@ function Multiplayer({ mode, setMode, onExit }) {
     try {
       const r = await apiFetch(`/api/debate/match/${code}/start`, {
         method: 'POST',
-        body: JSON.stringify({ topic: t, hostSide }),
+        body: JSON.stringify({ topic: t, hostSide, timedMode }),
       });
       setMatch(r.match); setMode('mp-game');
     } catch (e) { setError(e.message); }
@@ -467,6 +486,28 @@ function Multiplayer({ mode, setMode, onExit }) {
       setArgImages([]);
     } catch (e) { setError(e.message); }
     setSubmittingMove(false);
+  }
+
+  // Time-expired auto-submit. Sends a 0-score timeout marker so play
+  // advances to the opponent instead of stalling. Idempotent per turn —
+  // a ref keyed by the turn's start time ensures we only fire once.
+  async function handleTimeout() {
+    if (!match || !code) return;
+    const turnKey = match.turnStartedAt || 0;
+    if (timeoutFiredRef.current === turnKey) return;
+    timeoutFiredRef.current = turnKey;
+    try {
+      const r = await apiFetch(`/api/debate/match/${code}/move`, {
+        method: 'POST',
+        body: JSON.stringify({ argument: argument.trim() || '', timedOut: true }),
+      });
+      setMatch(r.match);
+      setArgument('');
+      setArgImages([]);
+    } catch (e) {
+      // Server may reject (already-not-your-turn etc.) — swallow.
+      console.warn('Timeout submit failed:', e?.message);
+    }
   }
 
   async function handleVoteEnd() {
@@ -603,6 +644,23 @@ function Multiplayer({ mode, setMode, onExit }) {
               </button>
             </div>
             <button
+              type="button"
+              onClick={() => setTimedMode(v => !v)}
+              className={`w-full mb-4 flex items-center justify-between px-3.5 py-2.5 rounded-xl border text-[12.5px] transition-colors ${
+                timedMode
+                  ? 'bg-blue-500/15 border-blue-500/50 text-blue-100'
+                  : 'bg-transparent border-blue-500/25 text-blue-300/85 hover:border-blue-500/50 hover:text-blue-200'
+              }`}
+            >
+              <span className="flex items-center gap-2 font-semibold">
+                <span className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${timedMode ? 'bg-blue-500 border-blue-400' : 'border-blue-500/50 bg-transparent'}`}>
+                  {timedMode && <Check size={11} className="text-white" />}
+                </span>
+                Timed mode
+              </span>
+              <span className="text-[10.5px] text-blue-300/70">2 min/turn or you score 0</span>
+            </button>
+            <button
               onClick={handleStart}
               disabled={busy || !topicInput.trim() || !opponentJoined}
               className="w-full py-3 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none flex items-center justify-center gap-2 transition-all"
@@ -630,6 +688,22 @@ function Multiplayer({ mode, setMode, onExit }) {
     const iVoted = match.endVotes.includes(myId);
     const oppVoted = opp && match.endVotes.includes(opp.userId);
 
+    // Timed-mode countdown. remainingMs is the live time the active player
+    // has left to submit; UI ticks every 500ms via nowTick. When it hits 0
+    // and we're the active player, fire a timeout submit once.
+    const remainingMs = match.timedMode && match.turnStartedAt
+      ? Math.max(0, (match.turnLimitMs || 120000) - (nowTick - match.turnStartedAt))
+      : null;
+    if (match.timedMode && myTurn && remainingMs === 0 && !submittingMove) {
+      handleTimeout();
+    }
+    const formatClock = (ms) => {
+      const s = Math.max(0, Math.ceil(ms / 1000));
+      const mm = Math.floor(s / 60);
+      const ss = String(s % 60).padStart(2, '0');
+      return `${mm}:${ss}`;
+    };
+
     return (
       <div className="h-full flex flex-col">
         {/* Topic + scoreboard */}
@@ -639,6 +713,20 @@ function Multiplayer({ mode, setMode, onExit }) {
             <ScorePill name={me?.name || 'You'} side={me?.side} score={myScore} active={myTurn} self />
             <span className="text-gray-300 dark:text-gray-600">vs</span>
             <ScorePill name={opp?.name || 'Opponent'} side={opp?.side} score={oppScore} active={!myTurn} />
+            {remainingMs !== null && (
+              <span
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold tabular-nums border ${
+                  remainingMs <= 15000
+                    ? 'bg-rose-500/15 border-rose-500/45 text-rose-200 animate-pulse'
+                    : remainingMs <= 45000
+                      ? 'bg-amber-500/15 border-amber-500/40 text-amber-200'
+                      : 'bg-blue-500/15 border-blue-500/40 text-blue-200'
+                }`}
+                title={myTurn ? 'Time left on your turn. If it hits 0 you score 0 for this turn.' : `Time left on ${opp?.name || 'opponent'}'s turn.`}
+              >
+                ⏱ {formatClock(remainingMs)}
+              </span>
+            )}
             <span className="flex-1" />
             <button
               onClick={handleVoteEnd}
@@ -806,7 +894,7 @@ function Multiplayer({ mode, setMode, onExit }) {
                 >
                   <Paperclip size={11} /> Image
                 </button>
-                <p className="text-[10px] text-gray-400 tabular-nums flex-1">
+                <p className="text-[10px] text-blue-300/60 tabular-nums flex-1">
                   {argument.split(/\s+/).filter(Boolean).length} words · {argument.length} chars
                   {argImages.length > 0 && <span className="ml-2">· {argImages.length} image{argImages.length === 1 ? '' : 's'}</span>}
                 </p>
