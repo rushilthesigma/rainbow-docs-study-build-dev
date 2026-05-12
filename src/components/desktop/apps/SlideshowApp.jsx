@@ -1656,13 +1656,13 @@ function KeynoteWorkspace(props) {
       if (!playMode) return;
       const tag = (e.target?.tagName || '').toLowerCase();
       if (tag === 'input' || tag === 'textarea') return;
-      if (e.key === 'Escape') { if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {}); setPlayMode(false); return; }
+      if (e.key === 'Escape') { setPlayMode(false); return; }
       if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { onNav(1); return; }
       if (e.key === 'ArrowLeft' || e.key === 'PageUp') { onNav(-1); return; }
     }
     function onAddSlide() { addSlide(); }
     function onDuplicate() { duplicateCurrentSlide(); }
-    function onPlay() { document.documentElement.requestFullscreen?.().catch(() => {}); setPlayMode(true); }
+    function onPlay() { setPlayMode(true); }
     window.addEventListener('keydown', onPlayKey);
     window.addEventListener('keynote:addSlide', onAddSlide);
     window.addEventListener('keynote:duplicateSlide', onDuplicate);
@@ -1686,7 +1686,7 @@ function KeynoteWorkspace(props) {
         formatOpen={formatOpen}
         setFormatOpen={setFormatOpen}
         onAddSlide={addSlide}
-        onPlay={() => { document.documentElement.requestFullscreen?.().catch(() => {}); setPlayMode(true); }}
+        onPlay={() => setPlayMode(true)}
         onAddText={addText}
         onAddShape={addShape}
         onAddMedia={onGenerateImageForCurrent}
@@ -1796,7 +1796,7 @@ function KeynoteWorkspace(props) {
           image={currentImage}
           t={t}
           deckTitle={deck?.title}
-          onExit={() => { if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {}); setPlayMode(false); }}
+          onExit={() => setPlayMode(false)}
           onNav={onNav}
           slideKey={slideKey}
           navDir={navDir}
@@ -2675,7 +2675,6 @@ function SlideView({ slide, elements, image, isGenImg, t, slideIdx, totalSlides,
   }, []);
   const isLight = t.mode === 'light';
   const layoutHasImage = elements.some(el => el.kind === 'image');
-  const useBespoke = !!(slide?.html && String(slide.html).length > 50);
   const initialTransform = navDir >= 0
     ? 'translateX(56px) scale(0.96)'
     : 'translateX(-56px) scale(0.96)';
@@ -2694,30 +2693,28 @@ function SlideView({ slide, elements, image, isGenImg, t, slideIdx, totalSlides,
   };
   return (
     <div ref={wrapRef} className="relative rounded-2xl overflow-hidden w-full" style={wrapperStyle}>
-      {/* Background image only used by template renderer — bespoke HTML
-          handles its own image composition. */}
-      {!useBespoke && image && !layoutHasImage && (
+      {/* Background image — matched 1:1 with SlideEditor so the slide looks
+          identical between edit and present. Opacity, angle, and gradient
+          stops are intentionally the same as the editor canvas. */}
+      {image && !layoutHasImage && (
         <>
-          <img src={image} alt="" className="absolute inset-0 w-full h-full object-cover" style={{ opacity: isLight ? 0.08 : 0.14 }} />
+          <img src={image} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" />
           <div
             className="absolute inset-0"
-            style={{
-              background: isLight
-                ? `linear-gradient(105deg, ${t.bg} 55%, ${t.bg}cc 100%)`
-                : `linear-gradient(105deg, ${t.bg} 60%, ${t.bg}e6 100%)`,
-            }}
+            style={{ background: `linear-gradient(135deg, ${t.bg}ee 55%, ${t.bg}88 100%)` }}
           />
         </>
       )}
-      {useBespoke ? (
-        <BespokeHtmlSlide html={slide.html} image={image} containerW={containerW} t={t} />
-      ) : (
-        <div className="absolute inset-0 overflow-hidden">
-          <div style={{ width: '1000px', height: `${Math.round(1000 * 9 / 16)}px`, transform: `scale(${containerW / 1000})`, transformOrigin: 'top left' }}>
-            {elements.map(el => <RenderElement key={el.id} el={el} />)}
-          </div>
+      {/* Always render via the template path so the presentation is a
+          pixel-faithful copy of what the user sees while editing. The
+          bespoke AI-designed HTML (slide.html) is intentionally ignored
+          here — the editor can't show it, so the presenter shouldn't
+          either. */}
+      <div className="absolute inset-0 overflow-hidden">
+        <div style={{ width: '1000px', height: `${Math.round(1000 * 9 / 16)}px`, transform: `scale(${containerW / 1000})`, transformOrigin: 'top left' }}>
+          {elements.map(el => <RenderElement key={el.id} el={el} />)}
         </div>
-      )}
+      </div>
       {isGenImg && !image && (
         <div className="absolute top-3 right-3 z-20">
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-full" style={{ background: t.surface + 'dd', border: `1px solid ${t.border}` }}>

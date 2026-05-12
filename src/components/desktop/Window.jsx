@@ -12,7 +12,7 @@ const STYLE = 'macos';
 // the macOS shell — covers the dock area but stays inside the browser
 // window). For TRUE OS-level fullscreen (taking over the whole monitor),
 // use ⌘⇧P — that calls the browser Fullscreen API.
-function MacTitleBar({ windowId, isMaximized, isActive, title, onDragStart, onDoubleClick, titlebarOpacity = 80 }) {
+function MacTitleBar({ windowId, appId, isMaximized, isActive, title, onDragStart, onDoubleClick, titlebarOpacity = 80 }) {
   const { closeWindow, minimizeWindow, maximizeWindow } = useWindowManager();
   const [hovered, setHovered] = useState(false);
   const isDark = document.documentElement.classList.contains('dark');
@@ -23,12 +23,19 @@ function MacTitleBar({ windowId, isMaximized, isActive, title, onDragStart, onDo
         borderBottom: '1px solid rgba(255,255,255,0.06)',
       }
     : { background: isActive ? `rgba(232,232,234,${a})` : `rgba(240,240,240,${a})` };
+  // The green "zoom" button is hidden when this app is maximized for the
+  // slideshow only — once a deck is full-bleed there's nothing useful to do
+  // with another zoom toggle, and the slideshow workspace is designed to
+  // own the viewport. Every other app keeps the green button visible when
+  // maximized so the user can click it to restore.
+  const hideGreenWhenMaximized = appId === 'slides';
+  const showGreen = !(isMaximized && hideGreenWhenMaximized);
   return (
     <div className="h-8 flex items-center flex-shrink-0 select-none backdrop-blur-md" style={barStyle} onPointerDown={onDragStart} onDoubleClick={onDoubleClick} data-titlebar={windowId}>
       <div className="flex items-center gap-[7px] px-3" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
         <button onClick={e => { e.stopPropagation(); closeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FF5F57] hover:brightness-90 flex items-center justify-center" title="Close"><X size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#4a0002]" /></button>
         <button onClick={e => { e.stopPropagation(); minimizeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FEBC2E] hover:brightness-90 flex items-center justify-center" title="Minimize"><Minus size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#5a3e00]" /></button>
-        {!isMaximized && <button onClick={e => { e.stopPropagation(); maximizeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#28C840] hover:brightness-90 flex items-center justify-center" title="Zoom — fills the desktop. ⌘⇧P for true fullscreen."><Maximize2 size={hovered ? 7 : 0} strokeWidth={2.5} className="text-[#005200]" /></button>}
+        {showGreen && <button onClick={e => { e.stopPropagation(); maximizeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#28C840] hover:brightness-90 flex items-center justify-center" title={isMaximized ? 'Restore' : 'Zoom — fills the desktop. ⌘⇧P for true fullscreen.'}><Maximize2 size={hovered ? 7 : 0} strokeWidth={2.5} className="text-[#005200]" /></button>}
       </div>
       <div className="flex-1 text-center text-xs font-medium text-gray-600 dark:text-white/65 truncate pr-12 pointer-events-none">{title}</div>
     </div>
@@ -254,7 +261,7 @@ export default function Window({ win, isActive, children }) {
       aria-hidden={minimized}
       onPointerDown={() => focusWindow(win.id)}
     >
-      <TitleBar windowId={win.id} isMaximized={maxed} isActive={isActive} title={win.title} onDragStart={handleDragStart} onDoubleClick={maxed ? undefined : () => maximizeWindow(win.id)} onFullscreen={toggleFullscreen} titlebarOpacity={titlebarOpacity ?? 80} />
+      <TitleBar windowId={win.id} appId={win.appId} isMaximized={maxed} isActive={isActive} title={win.title} onDragStart={handleDragStart} onDoubleClick={maxed ? undefined : () => maximizeWindow(win.id)} onFullscreen={toggleFullscreen} titlebarOpacity={titlebarOpacity ?? 80} />
 
       <div
         className="flex-1 overflow-hidden"

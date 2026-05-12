@@ -739,9 +739,9 @@ function Multiplayer({ mode, setMode, onExit }) {
           )}
 
           {!myTurn ? (
-            <p className="text-xs text-gray-500 dark:text-gray-400 text-center py-2.5">
-              <InlineProgress active />
-              Waiting for {opp?.name || 'opponent'} to make their argument…
+            <p className="text-xs text-blue-300/70 text-center py-2.5 italic flex items-center justify-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+              {opp?.name || 'Opponent'}'s turn
             </p>
           ) : (
             <>
