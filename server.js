@@ -7805,20 +7805,22 @@ app.post('/api/debate/match/:code/move', authMiddleware, async (req, res) => {
   const player = match.players.find(p => p.userId === req.userId);
   const opponent = match.players.find(p => p.userId !== req.userId);
 
-  // Timed mode: if the player ran past their 120s window — OR explicitly
-  // submitted a timeout marker (client races the clock and posts when the
-  // countdown hits 0 to advance play) — bypass the AI grader entirely and
-  // score the turn 0/0/0. The opening turn has no prior turnStartedAt so
-  // we treat match.turnStartedAt as the clock reference (set in /start).
+  // Timed mode: detect timeouts either from an explicit client marker
+  // (client auto-submits when its countdown hits 0) or from a server-side
+  // check that the player blew past the per-turn window. Generous 5s
+  // grace covers the auto-submit POST's network round trip.
   const explicitTimeout = !!req.body?.timedOut;
   const elapsedMs = match.turnStartedAt ? Date.now() - match.turnStartedAt : 0;
-  const exceededLimit = match.timedMode && match.turnLimitMs > 0 && elapsedMs > match.turnLimitMs + 2000; // 2s grace for network
+  const exceededLimit = match.timedMode && match.turnLimitMs > 0 && elapsedMs > match.turnLimitMs + 5000;
   const isTimeout = explicitTimeout || exceededLimit;
-  if (isTimeout) {
+  const hasContent = argument.trim().length > 0 || images.length > 0;
+
+  // Empty timeout: nothing to grade, instant 0/0/0 and advance play.
+  if (isTimeout && !hasContent) {
     const turn = {
       userId: req.userId,
       side: player.side,
-      content: argument || '(time expired — no argument submitted)',
+      content: '(time expired — no argument submitted)',
       images: [],
       score: { argumentation: 0, evidence: 0, rhetoric: 0, total: 0 },
       feedback: 'Time expired. No argument was made in the allotted 2 minutes.',
@@ -7836,8 +7838,9 @@ app.post('/api/debate/match/:code/move', authMiddleware, async (req, res) => {
     return res.json({ turn, match: publicDebateState(match) });
   }
 
-  // Allow image-only turns (≥1 image), otherwise require ≥20 chars text.
-  if (argument.length < 20 && images.length === 0) {
+  // Normal-submit minimum-length gate. Timeouts with content bypass it —
+  // even a couple of sentences is worth grading rather than zeroing out.
+  if (!isTimeout && argument.length < 20 && images.length === 0) {
     return res.status(400).json({ error: 'Argument must be at least 20 characters (or attach an image)' });
   }
 
@@ -7923,6 +7926,9 @@ Return JSON exactly:
       // by the slice above (≤4 per turn).
       images: images.map(im => ({ dataUrl: im.dataUrl, mimeType: im.mimeType })),
       score, feedback, at: Date.now(),
+      // Flag auto-submitted-on-timeout turns so the client can show a
+      // small "auto-submitted" hint next to the score.
+      timedOut: isTimeout,
     };
     match.turns.push(turn);
     match.scores[req.userId] = (match.scores[req.userId] || 0) + score.total;
@@ -8036,12 +8042,24 @@ Return JSON exactly:
   }
 });
 
-// POST /api/debate/match/:code/leave — graceful exit (clears stream).
+// POST /api/debate/match/:code/leave — graceful exit. Notifies the
+// remaining player via SSE so they can show a "your opponent left"
+// modal instead of staring at a frozen scoreboard, and marks the match
+// abandoned so subsequent move/vote calls won't 500.
 app.post('/api/debate/match/:code/leave', authMiddleware, (req, res) => {
   const match = debateMatches.get(req.params.code);
   if (!match) return res.json({ ok: true });
-  const p = match.players.find(x => x.userId === req.userId);
-  if (p && p.stream) { try { p.stream.end(); } catch {} p.stream = null; }
+  const leaver = match.players.find(x => x.userId === req.userId);
+  if (!leaver) return res.json({ ok: true });
+  pushDebateEvent(match, 'player_left', {
+    leaverId: leaver.userId,
+    leaverName: leaver.name || 'Opponent',
+  });
+  if (match.state === 'playing' || match.state === 'waiting') {
+    match.state = 'abandoned';
+    match.lastActivity = Date.now();
+  }
+  if (leaver.stream) { try { leaver.stream.end(); } catch {} leaver.stream = null; }
   res.json({ ok: true });
 });
 

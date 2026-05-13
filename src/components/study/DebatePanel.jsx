@@ -159,7 +159,13 @@ function ModeMenu({ onSelect }) {
               <Clock size={18} />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-gray-900 dark:text-white inline-flex items-center gap-1.5">Timed multiplayer <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-500/25 text-blue-200 border border-blue-400/40">2:00/turn</span></p>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <p className="text-sm font-bold text-gray-900 dark:text-white">Timed multiplayer</p>
+                <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-500 text-white border border-blue-400/60 tabular-nums">
+                  <Clock size={9} strokeWidth={3} />
+                  2:00
+                </span>
+              </div>
               <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 leading-snug">
                 Same lobby + scoring as head-to-head, but every turn is on a 2-minute countdown. Miss the window and that turn scores 0. Opponent can see your draft live as you type.
               </p>
@@ -405,6 +411,12 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
   // Computed from match.turnLimitMs - (now - match.turnStartedAt).
   const [nowTick, setNowTick] = useState(Date.now());
   const timeoutFiredRef = useRef(null);
+  // Leave-debate UI state. confirmLeave shows the "Are you sure?" modal
+  // when the player clicks Leave; opponentLeft is set from a server SSE
+  // event when the other player abandons the match.
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  const [opponentLeft, setOpponentLeft] = useState(null);
 
   function fileToDataUrl(file) {
     return new Promise((resolve, reject) => {
@@ -454,6 +466,9 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
               if (ev.match) setMatch(ev.match);
               if (ev.type === 'started') setMode('mp-game');
               if (ev.type === 'finished') setMode('mp-verdict');
+              if (ev.type === 'player_left' && ev.leaverId && ev.leaverId !== myId) {
+                setOpponentLeft({ name: ev.leaverName || 'Opponent' });
+              }
             } catch {}
           }
         }
@@ -461,7 +476,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
     })();
     streamRef.current = ctrl;
     return () => { try { ctrl.abort(); } catch {} };
-  }, [code, mode, setMode]);
+  }, [code, mode, setMode, myId]);
 
   // Tick the countdown when the player is in a timed game. The effect
   // is a no-op when timed mode is off — no setInterval at all.
@@ -550,9 +565,10 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
     setSubmittingMove(false);
   }
 
-  // Time-expired auto-submit. Sends a 0-score timeout marker so play
-  // advances to the opponent instead of stalling. Idempotent per turn —
-  // a ref keyed by the turn's start time ensures we only fire once.
+  // Time-expired auto-submit. Sends whatever's in the textbox (plus any
+  // attached images) with a timedOut marker so the server can grade what
+  // they had instead of stalling — empty drafts still fall back to 0/0/0.
+  // Idempotent per turn via a ref keyed on the turn's start time.
   async function handleTimeout() {
     if (!match || !code) return;
     const turnKey = match.turnStartedAt || 0;
@@ -561,7 +577,11 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
     try {
       const r = await apiFetch(`/api/debate/match/${code}/move`, {
         method: 'POST',
-        body: JSON.stringify({ argument: argument.trim() || '', timedOut: true }),
+        body: JSON.stringify({
+          argument: argument.trim() || '',
+          images: argImages.map(im => ({ dataUrl: im.dataUrl, mimeType: im.mimeType })),
+          timedOut: true,
+        }),
       });
       setMatch(r.match);
       setArgument('');
@@ -570,6 +590,20 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
       // Server may reject (already-not-your-turn etc.) — swallow.
       console.warn('Timeout submit failed:', e?.message);
     }
+  }
+
+  // Explicit leave. Fires the /leave endpoint so the opponent gets a
+  // `player_left` SSE push and the match transitions out of "playing"
+  // state instead of just leaving them staring at a stalled clock.
+  async function handleLeave() {
+    if (!code) { onExit(); return; }
+    setLeaving(true);
+    try {
+      await apiFetch(`/api/debate/match/${code}/leave`, { method: 'POST' });
+    } catch {} // best effort — UI exits either way
+    setLeaving(false);
+    setConfirmLeave(false);
+    onExit();
   }
 
   async function handleVoteEnd() {
@@ -767,7 +801,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
     };
 
     return (
-      <div className="h-full flex flex-col">
+      <div className="h-full flex flex-col relative">
         {/* Topic + scoreboard */}
         <div className="px-4 py-2 bg-transparent">
           <p className="text-xs text-white/80 font-medium truncate">{match.topic}</p>
@@ -775,21 +809,14 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
             <ScorePill name={me?.name || 'You'} side={me?.side} score={myScore} active={myTurn} self />
             <span className="text-gray-300 dark:text-gray-600">vs</span>
             <ScorePill name={opp?.name || 'Opponent'} side={opp?.side} score={oppScore} active={!myTurn} />
-            {remainingMs !== null && (
-              <span
-                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold tabular-nums border ${
-                  remainingMs <= 15000
-                    ? 'bg-rose-500/15 border-rose-500/45 text-rose-200 animate-pulse'
-                    : remainingMs <= 45000
-                      ? 'bg-amber-500/15 border-amber-500/40 text-amber-200'
-                      : 'bg-blue-500/15 border-blue-500/40 text-blue-200'
-                }`}
-                title={myTurn ? 'Time left on your turn. If it hits 0 you score 0 for this turn.' : `Time left on ${opp?.name || 'opponent'}'s turn.`}
-              >
-                ⏱ {formatClock(remainingMs)}
-              </span>
-            )}
             <span className="flex-1" />
+            <button
+              onClick={() => setConfirmLeave(true)}
+              title="Leave the debate. Your opponent will be notified."
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-rose-500/10 border border-rose-500/30 text-rose-300 hover:bg-rose-500/20 hover:border-rose-500/50 hover:text-rose-200 transition-colors"
+            >
+              <X size={11} /> Leave
+            </button>
             <button
               onClick={handleVoteEnd}
               disabled={voting || iVoted}
@@ -805,6 +832,28 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
               {voting ? <InlineProgress active /> : iVoted ? 'Waiting…' : oppVoted ? 'Confirm end' : 'Vote to end'}
             </button>
           </div>
+          {remainingMs !== null && (
+            <div className="mt-2 flex items-center justify-center gap-2">
+              <span className={`text-[10px] uppercase tracking-[0.18em] font-bold ${
+                remainingMs <= 15000 ? 'text-rose-300' : myTurn ? 'text-blue-300' : 'text-white/40'
+              }`}>
+                {myTurn ? 'Your turn' : `${opp?.name || 'Opponent'}'s turn`}
+              </span>
+              <span
+                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg font-mono text-base font-bold tabular-nums border-2 shadow-[0_2px_14px_rgba(0,0,0,0.25)] transition-colors ${
+                  remainingMs <= 15000
+                    ? 'bg-rose-500/25 border-rose-500/70 text-rose-100 animate-pulse shadow-rose-500/30'
+                    : remainingMs <= 45000
+                      ? 'bg-amber-500/20 border-amber-500/60 text-amber-100'
+                      : 'bg-blue-500/20 border-blue-500/55 text-blue-100'
+                }`}
+                title={myTurn ? 'Time left on your turn. When it hits 0 your draft is auto-submitted.' : `Time left on ${opp?.name || 'opponent'}'s turn.`}
+              >
+                <Clock size={14} strokeWidth={2.5} />
+                {formatClock(remainingMs)}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Turn list */}
@@ -823,6 +872,14 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
                     <span className={`text-[9px] font-bold uppercase tracking-wider ${isMine ? 'text-blue-100/80' : 'text-blue-400/80'}`}>
                       {t.side === 'for' ? 'FOR' : 'AGAINST'} · {isMine ? 'you' : opp?.name}
                     </span>
+                    {t.timedOut && (
+                      <span className={`inline-flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                        isMine ? 'bg-white/15 text-white/75' : 'bg-amber-500/15 text-amber-300 dark:text-amber-200 border border-amber-500/30'
+                      }`}>
+                        <Clock size={8} strokeWidth={3} />
+                        Auto-submitted
+                      </span>
+                    )}
                   </div>
                   {Array.isArray(t.images) && t.images.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 mb-2">
@@ -1017,6 +1074,69 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
         </div>
 
         {error && <p className="mx-3 mb-2 text-xs text-gray-600 dark:text-gray-300 bg-white/[0.08] dark:bg-white/[0.04] border border-white/20 dark:border-white/[0.07] rounded-lg px-3 py-1.5">{error}</p>}
+
+        {/* Confirm-leave modal — guards against accidental clicks since
+            leaving notifies the opponent and forfeits the match. */}
+        {confirmLeave && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/55 backdrop-blur-sm p-6">
+            <div className="w-full max-w-sm rounded-2xl border border-rose-500/30 bg-gradient-to-b from-[#0b1220] to-[#0e1426] shadow-[0_18px_48px_rgba(0,0,0,0.55)] p-5">
+              <div className="flex items-start gap-3 mb-3">
+                <div className="w-9 h-9 rounded-xl bg-rose-500/15 border border-rose-500/35 flex items-center justify-center flex-shrink-0">
+                  <AlertCircle size={18} className="text-rose-300" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[14px] font-bold text-white">Leave this debate?</p>
+                  <p className="text-[11.5px] text-white/55 mt-0.5 leading-snug">
+                    Your opponent will be notified, and the match will end. Your current draft will not be submitted.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2 mt-4">
+                <button
+                  onClick={() => setConfirmLeave(false)}
+                  disabled={leaving}
+                  className="flex-1 py-2 rounded-lg text-[12px] font-semibold text-blue-200 bg-blue-500/10 border border-blue-500/30 hover:bg-blue-500/20 hover:border-blue-500/50 hover:text-blue-100 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleLeave}
+                  disabled={leaving}
+                  className="flex-1 py-2 rounded-lg text-[12px] font-semibold text-white bg-gradient-to-b from-rose-500 to-rose-600 border border-rose-400/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_12px_rgba(244,63,94,0.30)] hover:from-rose-400 hover:to-rose-500 disabled:opacity-50 transition-all inline-flex items-center justify-center gap-1.5"
+                >
+                  {leaving ? <InlineProgress active /> : <X size={12} />}
+                  Leave debate
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Opponent-left notification — shown when the other player calls
+            /leave and the server broadcasts a player_left SSE event. */}
+        {opponentLeft && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/55 backdrop-blur-sm p-6">
+            <div className="w-full max-w-sm rounded-2xl border border-blue-500/30 bg-gradient-to-b from-[#0b1220] to-[#0e1426] shadow-[0_18px_48px_rgba(0,0,0,0.55)] p-5">
+              <div className="flex items-start gap-3 mb-3">
+                <div className="w-9 h-9 rounded-xl bg-blue-500/15 border border-blue-400/35 flex items-center justify-center flex-shrink-0">
+                  <Users size={18} className="text-blue-200" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[14px] font-bold text-white">{opponentLeft.name} left the debate</p>
+                  <p className="text-[11.5px] text-white/55 mt-0.5 leading-snug">
+                    The match has been abandoned by your opponent. Your scores so far are preserved — you can exit when ready.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => { setOpponentLeft(null); onExit(); }}
+                className="w-full mt-4 py-2 rounded-lg text-[12px] font-semibold text-white bg-gradient-to-b from-blue-500 to-blue-600 border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_12px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 transition-all"
+              >
+                Exit to menu
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
