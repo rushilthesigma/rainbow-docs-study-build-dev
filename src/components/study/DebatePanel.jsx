@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Swords, RotateCcw, ArrowLeft, Trophy, Users, User, Copy, Check, Loader2, X, Zap, FileText, AlertCircle, Paperclip, Clock,
+  Swords, RotateCcw, ArrowLeft, ArrowRight, Trophy, Users, User, Copy, Check, Loader2, X, Zap, FileText, AlertCircle, Paperclip, Clock, Camera, Download,
 } from 'lucide-react';
 import { apiFetch, getToken } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
@@ -53,7 +53,11 @@ export default function DebatePanel({ onBack }) {
   //       · otherwise (mounted as its own top-level app) hide the arrow —
   //         the window's own close button is the only sensible exit.
   const onMenu = mode === 'menu';
-  const headerBackTarget = onMenu ? (onBack || null) : () => selectMode('menu');
+  // Lock the header back arrow during active games — leaving must go
+  // through the in-match Leave flow so the opponent gets notified and
+  // the match state advances correctly.
+  const isActiveGame = mode === 'mp-game' || mode === 'single-debate';
+  const headerBackTarget = onMenu ? (onBack || null) : (isActiveGame ? null : () => selectMode('menu'));
 
   const header = (
     <div className="flex items-center gap-2 px-4 py-2.5 bg-transparent">
@@ -70,6 +74,7 @@ export default function DebatePanel({ onBack }) {
       <span className="text-[13px] font-bold text-white">Debate</span>
       <span className="text-[10px] font-semibold uppercase tracking-wider text-white/50">
         {mode === 'menu' && 'Pick a mode'}
+        {mode === 'history' && 'History'}
         {mode === 'single-setup' && 'Solo · Setup'}
         {mode === 'single-debate' && 'Solo · Live'}
         {mode === 'single-verdict' && 'Solo · Verdict'}
@@ -77,6 +82,7 @@ export default function DebatePanel({ onBack }) {
         {mode === 'mp-lobby' && 'Multiplayer · Lobby'}
         {mode === 'mp-game' && 'Multiplayer · Live'}
         {mode === 'mp-verdict' && 'Multiplayer · Verdict'}
+        {(mode === 'tour-menu' || mode === 'tour-lobby' || mode === 'tour-bracket') && 'Tournament'}
       </span>
     </div>
   );
@@ -86,6 +92,10 @@ export default function DebatePanel({ onBack }) {
       {header}
       <div className="flex-1 min-h-0 overflow-y-auto">
         {mode === 'menu' && <ModeMenu onSelect={selectMode} />}
+        {mode === 'history' && <HistoryView onExit={() => selectMode('menu')} />}
+        {(mode === 'tour-menu' || mode === 'tour-lobby' || mode === 'tour-bracket') && (
+          <Tournament mode={mode} setMode={selectMode} onExit={() => selectMode('menu')} />
+        )}
         {(mode === 'single-setup' || mode === 'single-debate' || mode === 'single-verdict') && (
           <Singleplayer
             mode={mode}
@@ -110,69 +120,231 @@ export default function DebatePanel({ onBack }) {
 // MENU
 // =========================================================
 function ModeMenu({ onSelect }) {
+  const card = 'flex flex-col items-center justify-center gap-2.5 p-6 rounded-xl border transition-colors group';
   return (
-    <div className="p-6 md:p-10 max-w-md md:max-w-5xl mx-auto">
-      <h2 className="text-base md:text-2xl font-bold text-gray-900 dark:text-white mb-1 text-center">How do you want to debate?</h2>
-      <p className="text-xs md:text-sm text-gray-500 dark:text-gray-400 text-center mb-5 md:mb-8">Solo against the AI, or head-to-head with a friend.</p>
-
-      <div className="grid gap-3 md:gap-5 md:grid-cols-3">
+    <div className="p-6 md:p-10 max-w-md md:max-w-3xl mx-auto">
+      <div className="flex items-center justify-between mb-5">
+        <h2 className="text-base md:text-xl font-bold text-gray-900 dark:text-white">Pick a mode</h2>
+        <button
+          onClick={() => onSelect('history')}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-blue-200 bg-blue-500/10 border border-blue-500/25 hover:bg-blue-500/20 hover:border-blue-500/45 hover:text-blue-100 transition-colors"
+        >
+          <Trophy size={11} className="text-blue-300" /> History
+        </button>
+      </div>
+      <div className="grid gap-3 md:gap-4 md:grid-cols-3 mb-3 md:mb-4">
         <button
           onClick={() => onSelect('single-setup')}
-          className="text-left p-4 rounded-xl border border-blue-500/25 bg-blue-500/[0.04] hover:bg-blue-500/[0.10] hover:border-blue-500/45 transition-colors group"
+          className={`${card} border-blue-500/25 bg-blue-500/[0.04] hover:bg-blue-500/[0.10] hover:border-blue-500/45`}
         >
-          <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-lg bg-blue-500/15 text-blue-300 flex items-center justify-center flex-shrink-0">
-              <User size={18} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-gray-900 dark:text-white">Solo vs AI</p>
-              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 leading-snug">
-                The AI argues the opposite side, openly adversarial — it pushes back hard. Hit End Debate when you're done and it gives you a real verdict.
-              </p>
-            </div>
-          </div>
+          <div className="w-12 h-12 rounded-xl bg-blue-500/15 text-blue-300 flex items-center justify-center"><User size={22} /></div>
+          <p className="text-sm font-semibold text-gray-900 dark:text-white">Solo</p>
+          <p className="text-[11px] text-blue-300/55">vs AI</p>
         </button>
 
         <button
           onClick={() => onSelect('mp-menu')}
-          className="text-left p-4 rounded-xl border border-blue-500/25 bg-blue-500/[0.04] hover:bg-blue-500/[0.10] hover:border-blue-500/45 transition-colors group"
+          className={`${card} border-blue-500/25 bg-blue-500/[0.04] hover:bg-blue-500/[0.10] hover:border-blue-500/45`}
         >
-          <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-lg bg-blue-500/15 text-blue-300 flex items-center justify-center flex-shrink-0">
-              <Users size={18} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-gray-900 dark:text-white">Head-to-head with a friend</p>
-              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 leading-snug">
-                Game-code lobby. Each turn is graded by AI on argumentation, evidence, and rhetoric. Both players must vote to End — then AI declares a winner.
-              </p>
-            </div>
-          </div>
+          <div className="w-12 h-12 rounded-xl bg-blue-500/15 text-blue-300 flex items-center justify-center"><Users size={22} /></div>
+          <p className="text-sm font-semibold text-gray-900 dark:text-white">1v1</p>
+          <p className="text-[11px] text-blue-300/55">with a friend</p>
         </button>
 
         <button
           onClick={() => onSelect('mp-menu-timed')}
-          className="text-left p-4 rounded-xl border border-blue-400/40 bg-gradient-to-b from-blue-500/[0.12] to-blue-600/[0.08] hover:from-blue-500/[0.18] hover:to-blue-600/[0.12] hover:border-blue-400/60 transition-colors group"
+          className={`${card} border-blue-400/40 bg-gradient-to-b from-blue-500/[0.12] to-blue-600/[0.08] hover:from-blue-500/[0.18] hover:to-blue-600/[0.12] hover:border-blue-400/60 relative`}
         >
-          <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-lg bg-blue-500 text-white flex items-center justify-center flex-shrink-0 shadow-[0_4px_12px_rgba(59,130,246,0.30)]">
-              <Clock size={18} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <p className="text-sm font-bold text-gray-900 dark:text-white">Timed multiplayer</p>
-                <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-500 text-white border border-blue-400/60 tabular-nums">
-                  <Clock size={9} strokeWidth={3} />
-                  2:00
-                </span>
-              </div>
-              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 leading-snug">
-                Same lobby + scoring as head-to-head, but every turn is on a 2-minute countdown. Miss the window and that turn scores 0. Opponent can see your draft live as you type.
-              </p>
-            </div>
-          </div>
+          <span className="absolute top-2.5 right-2.5 inline-flex items-center gap-0.5 text-[10px] font-semibold tabular-nums px-1.5 py-0.5 rounded bg-blue-500 text-white border border-blue-400/60">
+            <Clock size={9} strokeWidth={3} /> 2:00
+          </span>
+          <div className="w-12 h-12 rounded-xl bg-blue-500 text-white flex items-center justify-center shadow-[0_4px_12px_rgba(59,130,246,0.30)]"><Clock size={22} /></div>
+          <p className="text-sm font-semibold text-gray-900 dark:text-white">Timed 1v1</p>
+          <p className="text-[11px] text-blue-100/75">2 min per turn</p>
         </button>
       </div>
+
+      <button
+        onClick={() => onSelect('tour-menu')}
+        className="w-full flex items-center gap-4 p-5 rounded-xl border border-blue-400/40 bg-gradient-to-b from-blue-500/[0.12] to-blue-600/[0.08] hover:from-blue-500/[0.18] hover:to-blue-600/[0.12] hover:border-blue-400/60 transition-colors text-left"
+      >
+        <div className="w-12 h-12 rounded-xl bg-blue-500 text-white flex items-center justify-center shadow-[0_4px_12px_rgba(59,130,246,0.30)] flex-shrink-0"><Trophy size={22} /></div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-gray-900 dark:text-white">Tournament</p>
+          <p className="text-[11px] text-blue-100/75 mt-0.5">Single-elimination bracket · 4, 8, or 16 players</p>
+        </div>
+        <ArrowRight size={16} className="text-blue-200/70 flex-shrink-0" />
+      </button>
+    </div>
+  );
+}
+
+// =========================================================
+// HISTORY
+// =========================================================
+function HistoryView({ onExit }) {
+  const [loading, setLoading] = useState(true);
+  const [history, setHistory] = useState([]);
+  const [stats, setStats] = useState({ total: 0, wins: 0, losses: 0, ties: 0 });
+  const [error, setError] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [selectedLoading, setSelectedLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await apiFetch('/api/debate/history');
+        if (cancelled) return;
+        setHistory(r.history || []);
+        setStats(r.stats || { total: 0, wins: 0, losses: 0, ties: 0 });
+      } catch (e) {
+        if (!cancelled) setError(e.message || 'Failed to load history');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  async function openMatch(finishedAt) {
+    setSelectedLoading(true);
+    try {
+      const r = await apiFetch(`/api/debate/history/${finishedAt}`);
+      setSelected(r.entry);
+    } catch (e) {
+      setError(e.message || 'Failed to load match');
+    } finally {
+      setSelectedLoading(false);
+    }
+  }
+
+  if (selected) {
+    return <HistoryDetail entry={selected} onBack={() => setSelected(null)} />;
+  }
+
+  return (
+    <div className="p-6 md:p-10 max-w-md md:max-w-2xl mx-auto">
+      <button onClick={onExit} className="text-xs text-blue-300/60 hover:text-blue-200 mb-4 inline-flex items-center gap-1 transition-colors">
+        <ArrowLeft size={12} /> Back
+      </button>
+
+      <div className="grid grid-cols-4 gap-2 mb-5">
+        <div className="rounded-xl border border-blue-500/20 bg-blue-500/[0.06] p-3 text-center">
+          <p className="text-[10px] uppercase tracking-wider text-blue-400/70">Total</p>
+          <p className="text-lg font-black tabular-nums text-white mt-0.5">{stats.total}</p>
+        </div>
+        <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] p-3 text-center">
+          <p className="text-[10px] uppercase tracking-wider text-emerald-400/80">Wins</p>
+          <p className="text-lg font-black tabular-nums text-emerald-200 mt-0.5">{stats.wins}</p>
+        </div>
+        <div className="rounded-xl border border-rose-500/20 bg-rose-500/[0.06] p-3 text-center">
+          <p className="text-[10px] uppercase tracking-wider text-rose-400/80">Losses</p>
+          <p className="text-lg font-black tabular-nums text-rose-200 mt-0.5">{stats.losses}</p>
+        </div>
+        <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-3 text-center">
+          <p className="text-[10px] uppercase tracking-wider text-amber-400/80">Ties</p>
+          <p className="text-lg font-black tabular-nums text-amber-200 mt-0.5">{stats.ties}</p>
+        </div>
+      </div>
+
+      {loading && <p className="text-xs text-blue-300/50 text-center py-8">Loading…</p>}
+      {!loading && error && <p className="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/25 rounded-lg px-3 py-2">{error}</p>}
+      {!loading && !error && history.length === 0 && (
+        <div className="flex flex-col items-center gap-2 py-10 text-blue-300/45">
+          <Trophy size={20} />
+          <p className="text-[12px]">No debates yet</p>
+        </div>
+      )}
+      {!loading && !error && history.length > 0 && (
+        <div className="space-y-1.5">
+          {history.map(h => (
+            <button
+              key={h.finishedAt}
+              onClick={() => openMatch(h.finishedAt)}
+              disabled={selectedLoading}
+              className="w-full text-left flex items-center gap-3 px-3.5 py-3 rounded-xl border border-blue-500/15 bg-blue-500/[0.04] hover:bg-blue-500/[0.10] hover:border-blue-500/40 transition-colors disabled:opacity-50"
+            >
+              <span className={`w-1 h-10 rounded-full flex-shrink-0 ${
+                h.result === 'win' ? 'bg-emerald-400' : h.result === 'loss' ? 'bg-rose-400' : 'bg-amber-400'
+              }`} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <span className={`text-[9px] font-bold uppercase tracking-wider ${
+                    h.result === 'win' ? 'text-emerald-300' : h.result === 'loss' ? 'text-rose-300' : 'text-amber-300'
+                  }`}>{h.result}</span>
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-blue-300/60">·</span>
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-blue-300/70">
+                    {h.mode === 'solo' ? 'vs AI' : (h.opponent?.name || 'opp')}
+                  </span>
+                  {h.timedMode && <Clock size={9} className="text-blue-300/60" />}
+                </div>
+                <p className="text-[13px] text-white/85 truncate">{h.topic}</p>
+                <p className="text-[10.5px] text-blue-300/55 tabular-nums">
+                  {h.mySide?.toUpperCase()} {h.myScore} · {h.opponent?.side?.toUpperCase()} {h.opponentScore} · {new Date(h.finishedAt).toLocaleDateString()}
+                </p>
+              </div>
+              <ArrowRight size={13} className="text-blue-300/40 flex-shrink-0" />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HistoryDetail({ entry, onBack }) {
+  const me = { side: entry.mySide, score: entry.myScore };
+  const opp = entry.opponent || { name: 'AI', side: entry.mySide === 'for' ? 'against' : 'for' };
+  const v = entry.verdict || {};
+  return (
+    <div className="p-6 md:p-10 max-w-md md:max-w-2xl mx-auto">
+      <button onClick={onBack} className="text-xs text-blue-300/60 hover:text-blue-200 mb-3 inline-flex items-center gap-1 transition-colors">
+        <ArrowLeft size={12} /> History
+      </button>
+      <p className="text-xs text-blue-300/55 mb-1">{new Date(entry.finishedAt).toLocaleString()}</p>
+      <h2 className="text-base font-bold text-gray-900 dark:text-white mb-4">{entry.topic}</h2>
+      <div className={`rounded-2xl p-4 mb-4 text-center border ${
+        entry.result === 'win' ? 'bg-emerald-500/10 border-emerald-500/30' :
+        entry.result === 'loss' ? 'bg-rose-500/10 border-rose-500/30' :
+        'bg-amber-500/10 border-amber-500/30'
+      }`}>
+        <Trophy size={24} className={`mx-auto mb-1.5 ${
+          entry.result === 'win' ? 'text-emerald-300' : entry.result === 'loss' ? 'text-rose-300' : 'text-amber-300'
+        }`} />
+        <p className="text-base font-black uppercase tracking-wider text-white">
+          {entry.result === 'win' ? 'You won' : entry.result === 'loss' ? 'You lost' : 'Tie'}
+        </p>
+        <p className="text-[11px] text-blue-300/75 mt-1 tabular-nums">
+          You ({me.side?.toUpperCase()}): {me.score} · {opp.name} ({opp.side?.toUpperCase()}): {entry.opponentScore}
+        </p>
+      </div>
+      {v.summary && (
+        <div className="bg-white/[0.04] border border-blue-500/20 rounded-xl p-3 mb-3">
+          <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/80 mb-1.5">Verdict</p>
+          <p className="text-xs text-gray-800 dark:text-gray-100 leading-relaxed">{v.summary}</p>
+        </div>
+      )}
+      {Array.isArray(entry.turns) && entry.turns.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/80">Transcript</p>
+          {entry.turns.map((t, i) => {
+            const isMe = t.side === me.side;
+            return (
+              <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[85%] rounded-2xl p-3 ${
+                  isMe ? 'bg-blue-500/15 border border-blue-500/30 text-gray-900 dark:text-white' : 'bg-white/[0.05] border border-white/[0.08] text-gray-800 dark:text-gray-100'
+                }`}>
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-blue-400/80 mb-1">
+                    {t.side?.toUpperCase()} {t.score?.total != null ? `· ${t.score.total}/30` : ''}
+                  </p>
+                  <p className="text-xs leading-relaxed whitespace-pre-wrap">{t.content}</p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -197,6 +369,805 @@ What you do NOT do:
 - Don't volunteer to end the debate; the user has an "End Debate" button for that.
 
 Format: GitHub-flavored markdown. **Bold** key claims, use - bullets for evidence lists, $math$ if relevant.`;
+}
+
+// =========================================================
+// TOURNAMENT — single-elimination bracket of 4/8/16 players.
+// Handles create/join, lobby (waiting for players), and the live bracket
+// view. When the user has a live match they're routed inline into the
+// existing Multiplayer game UI via the presetCode + tournamentCode path.
+// =========================================================
+function Tournament({ mode, setMode, onExit }) {
+  const { user } = useAuth();
+  const myId = user?.id || null;
+  const [code, setCode] = useState('');
+  const [iAmHost, setIAmHost] = useState(false);
+  const [tournament, setTournament] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  // Setup form state.
+  const [size, setSize] = useState(4);
+  const [topicInput, setTopicInput] = useState('');
+  const [timedMode, setTimedMode] = useState(false);
+  const [maxRounds, setMaxRounds] = useState(5);
+  const [joinInput, setJoinInput] = useState('');
+  // Per-round topics. Off by default — same topic everywhere. When on,
+  // host can specify the semi/final etc. their own topic; any empty
+  // round falls back to the main topic on the server.
+  const [perRoundTopics, setPerRoundTopics] = useState(false);
+  const [roundTopics, setRoundTopics] = useState({}); // { [roundNum]: string }
+  // In-match mode: switch the panel from the bracket view to the
+  // Multiplayer game view scoped to the user's current bracket match.
+  const [activeMatchCode, setActiveMatchCode] = useState(null);
+  // Local "in-match" mode for Multiplayer's controlled state — it doesn't
+  // need to share with the parent setMode because the user never goes back
+  // to mp-menu from a tournament match.
+  const [matchMode, setMatchMode] = useState('mp-game');
+  const streamRef = useRef(null);
+  // Host-only snapshot modal — exports the full bracket state as a PNG
+  // and a copy-pasteable text summary.
+  const [showSnapshot, setShowSnapshot] = useState(false);
+  const [copiedSnap, setCopiedSnap] = useState(false);
+  const [downloadingPng, setDownloadingPng] = useState(false);
+  const snapshotRef = useRef(null);
+
+  // SSE stream — same shape as the match stream, just hits the tournament
+  // endpoint. Every event carries `tournament` and we just setTournament.
+  useEffect(() => {
+    if (!code) return;
+    const tok = getToken();
+    if (!tok) return;
+    const ctrl = new AbortController();
+    (async () => {
+      try {
+        const res = await fetch(`/api/debate/tournament/${code}/stream`, {
+          headers: { Authorization: `Bearer ${tok}` },
+          signal: ctrl.signal,
+        });
+        if (!res.ok) return;
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop();
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const ev = JSON.parse(line.slice(6));
+              if (ev.tournament) setTournament(ev.tournament);
+              if (ev.type === 'started' || ev.type === 'round_advanced') setMode('tour-bracket');
+              if (ev.type === 'kicked') {
+                setError('You were removed from the tournament.');
+                setCode('');
+                setTournament(null);
+                setMode('tour-menu');
+              }
+              if (ev.type === 'cancelled') {
+                setError('The host cancelled this tournament.');
+                setCode('');
+                setTournament(null);
+                setMode('tour-menu');
+              }
+            } catch {}
+          }
+        }
+      } catch {}
+    })();
+    streamRef.current = ctrl;
+    return () => { try { ctrl.abort(); } catch {} };
+  }, [code, setMode]);
+
+  async function handleCreate() {
+    if (!topicInput.trim()) { setError('Topic required'); return; }
+    setBusy(true); setError(null);
+    try {
+      const r = await apiFetch('/api/debate/tournament', {
+        method: 'POST',
+        body: JSON.stringify({
+          size,
+          topic: topicInput.trim(),
+          timedMode,
+          maxRounds,
+          // Only send filled-in per-round topics; server fills the rest
+          // with the main topic.
+          roundTopics: perRoundTopics
+            ? Object.fromEntries(Object.entries(roundTopics).filter(([, v]) => (v || '').trim()).map(([k, v]) => [k, v.trim()]))
+            : {},
+        }),
+      });
+      setCode(r.code);
+      setTournament(r.tournament);
+      setIAmHost(true);
+      setMode('tour-lobby');
+    } catch (e) { setError(e.message); }
+    setBusy(false);
+  }
+
+  async function handleJoin() {
+    const c = joinInput.trim().toUpperCase();
+    if (c.length < 4) return;
+    setBusy(true); setError(null);
+    try {
+      const r = await apiFetch(`/api/debate/tournament/${c}/join`, { method: 'POST' });
+      setCode(c);
+      setTournament(r.tournament);
+      setIAmHost(r.tournament?.hostId === myId);
+      setMode(r.tournament?.state === 'playing' ? 'tour-bracket' : 'tour-lobby');
+    } catch (e) { setError(e.message); }
+    setBusy(false);
+  }
+
+  async function handleStart() {
+    setBusy(true); setError(null);
+    try {
+      const r = await apiFetch(`/api/debate/tournament/${code}/start`, { method: 'POST' });
+      setTournament(r.tournament);
+      setMode('tour-bracket');
+    } catch (e) { setError(e.message); }
+    setBusy(false);
+  }
+
+  async function handleLeaveTournament() {
+    if (!code) { onExit(); return; }
+    try { await apiFetch(`/api/debate/tournament/${code}/leave`, { method: 'POST' }); }
+    catch {}
+    setCode('');
+    setTournament(null);
+    onExit();
+  }
+
+  async function handleKick(userId) {
+    if (!code || !userId) return;
+    setError(null);
+    try {
+      const r = await apiFetch(`/api/debate/tournament/${code}/kick`, {
+        method: 'POST',
+        body: JSON.stringify({ userId }),
+      });
+      setTournament(r.tournament);
+    } catch (e) { setError(e.message); }
+  }
+
+  function copyCode() {
+    if (!code) return;
+    try { navigator.clipboard.writeText(code); } catch {}
+  }
+
+  // ===== ACTIVE BRACKET MATCH =====
+  if (activeMatchCode) {
+    return (
+      <Multiplayer
+        mode={matchMode}
+        setMode={setMatchMode}
+        onExit={() => { setActiveMatchCode(null); setMatchMode('mp-game'); }}
+        presetCode={activeMatchCode}
+        tournamentCode={code}
+      />
+    );
+  }
+
+  // ===== MENU =====
+  if (mode === 'tour-menu') {
+    return (
+      <div className="p-6 md:p-10 max-w-md md:max-w-2xl mx-auto">
+        <button onClick={onExit} className="text-xs text-blue-300/60 hover:text-blue-200 mb-3 inline-flex items-center gap-1 transition-colors">
+          <ArrowLeft size={12} /> Back
+        </button>
+        <h2 className="text-base font-bold text-gray-900 dark:text-white mb-1">Tournament</h2>
+        <p className="text-xs text-blue-300/55 mb-5">Single elimination · winner takes all</p>
+
+        {/* Create */}
+        <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2">Size</p>
+        <div className="grid grid-cols-3 gap-2 mb-3">
+          {[4, 8, 16].map(n => (
+            <button
+              key={n}
+              onClick={() => setSize(n)}
+              className={`py-2 rounded-lg text-sm font-bold tabular-nums border transition-colors ${
+                size === n
+                  ? 'bg-blue-500/20 text-blue-100 border-blue-500/50'
+                  : 'border-blue-500/20 text-blue-300/70 bg-transparent hover:bg-blue-500/10 hover:text-blue-200'
+              }`}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+        <input
+          value={topicInput}
+          onChange={e => setTopicInput(e.target.value)}
+          placeholder={perRoundTopics ? 'Default topic (used when a round is blank)' : 'Topic for the whole bracket'}
+          className="w-full px-3 py-2 mb-2 rounded-lg border border-blue-500/25 bg-white/50 dark:bg-white/[0.06] text-sm text-gray-900 dark:text-white placeholder-gray-400 outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/45"
+        />
+        {/* Per-round topic toggle + inputs. When on, host can give each
+            round its own topic (Quarter / Semi / Final). Empty rounds
+            inherit the main topic above. */}
+        <button
+          type="button"
+          onClick={() => setPerRoundTopics(v => !v)}
+          className={`w-full mb-2 flex items-center justify-between px-3 py-2 rounded-lg border text-[12px] transition-colors ${
+            perRoundTopics ? 'bg-blue-500/15 border-blue-500/45 text-blue-100' : 'border-blue-500/20 text-blue-300/70 hover:bg-blue-500/10 hover:text-blue-200'
+          }`}
+        >
+          <span className="inline-flex items-center gap-2 font-semibold">
+            <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center transition-colors ${perRoundTopics ? 'bg-blue-500 border-blue-400' : 'border-blue-500/50 bg-transparent'}`}>
+              {perRoundTopics && <Check size={10} className="text-white" />}
+            </span>
+            Different topic per round
+          </span>
+        </button>
+        {perRoundTopics && (() => {
+          const total = Math.log2(size);
+          const label = (n) => {
+            const fromEnd = total - n;
+            if (fromEnd === 0) return 'Final';
+            if (fromEnd === 1) return 'Semifinal';
+            if (fromEnd === 2) return 'Quarterfinal';
+            return `Round ${n}`;
+          };
+          return (
+            <div className="space-y-1.5 mb-3">
+              {Array.from({ length: total }).map((_, idx) => {
+                const r = idx + 1;
+                return (
+                  <div key={r} className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-blue-400/70 w-[100px] flex-shrink-0 whitespace-nowrap">{label(r)}</span>
+                    <input
+                      value={roundTopics[r] || ''}
+                      onChange={e => setRoundTopics(prev => ({ ...prev, [r]: e.target.value }))}
+                      placeholder={`Topic for ${label(r).toLowerCase()} (optional)`}
+                      className="flex-1 min-w-0 px-3 py-1.5 rounded-lg border border-blue-500/20 bg-white/40 dark:bg-white/[0.04] text-[13px] text-gray-900 dark:text-white placeholder-gray-400/70 outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500/45"
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
+        <div className="grid grid-cols-2 gap-2 mb-3">
+          <button
+            onClick={() => setTimedMode(v => !v)}
+            className={`px-3 py-2 rounded-lg text-[12px] font-semibold border inline-flex items-center justify-center gap-1.5 transition-colors ${
+              timedMode ? 'bg-blue-500/15 border-blue-500/50 text-blue-100' : 'border-blue-500/20 text-blue-300/70 hover:bg-blue-500/10'
+            }`}
+          >
+            <Clock size={12} /> Timed {timedMode && '· 2:00'}
+          </button>
+          <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-blue-500/20">
+            <span className="text-[11px] text-blue-300/70">Rounds/match</span>
+            <input
+              type="number"
+              min="3" max="10"
+              value={maxRounds}
+              onChange={e => setMaxRounds(Math.max(3, Math.min(10, Number(e.target.value) || 5)))}
+              className="w-12 bg-transparent text-sm font-bold tabular-nums text-blue-100 outline-none text-right"
+            />
+          </div>
+        </div>
+        <button
+          onClick={handleCreate}
+          disabled={busy || !topicInput.trim()}
+          className="w-full py-3 mb-5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none flex items-center justify-center gap-2 transition-all"
+        >
+          {busy ? <InlineProgress active /> : <Trophy size={14} />}
+          Create tournament
+        </button>
+
+        <div className="flex items-center gap-2 my-3">
+          <div className="flex-1 border-t border-blue-500/20" />
+          <span className="text-[10px] uppercase tracking-wider text-blue-400/70">or join</span>
+          <div className="flex-1 border-t border-blue-500/20" />
+        </div>
+
+        <div className="flex gap-2">
+          <input
+            value={joinInput}
+            onChange={e => setJoinInput(e.target.value.toUpperCase().slice(0, 5))}
+            onKeyDown={e => { if (e.key === 'Enter') handleJoin(); }}
+            placeholder="CODE"
+            className="flex-1 px-3 py-2.5 rounded-xl border border-blue-500/30 bg-white/50 dark:bg-white/[0.06] text-sm font-mono uppercase tracking-widest text-gray-900 dark:text-white placeholder-gray-400 outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/60"
+          />
+          <button
+            onClick={handleJoin}
+            disabled={busy || joinInput.trim().length < 4}
+            className="px-5 py-2.5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 transition-all"
+          >
+            Join
+          </button>
+        </div>
+
+        {error && <p className="mt-3 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/25 rounded-lg px-3 py-2">{error}</p>}
+      </div>
+    );
+  }
+
+  // ===== LOBBY (waiting for players) =====
+  if (mode === 'tour-lobby' && tournament) {
+    const filled = tournament.players.length;
+    const isFull = filled >= tournament.size;
+    return (
+      <div className="p-6 md:p-10 max-w-md md:max-w-2xl mx-auto">
+        <p className="text-[11px] uppercase tracking-[0.18em] text-blue-400/70 mb-1.5">Tournament code</p>
+        <button
+          onClick={copyCode}
+          title="Copy"
+          className="w-full font-mono text-3xl font-black tabular-nums tracking-[0.2em] text-gray-900 dark:text-white bg-white/[0.10] dark:bg-white/[0.06] border border-blue-500/40 dark:border-blue-500/30 rounded-xl py-4 mb-3 hover:border-blue-500/60 transition-colors inline-flex items-center justify-center gap-3"
+        >
+          {tournament.code}
+          <Copy size={16} className="text-blue-400/70" />
+        </button>
+        <p className="text-[11px] text-blue-300/50 text-center mb-1">Share with players</p>
+        <p className="text-[12px] text-white/75 text-center mb-5 truncate">"{tournament.topic}"</p>
+
+        <div className="rounded-xl border border-blue-500/[0.15] bg-blue-500/[0.04] p-3 mb-5">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70">Players</p>
+            <span className="text-[11px] font-bold tabular-nums text-blue-200">{filled}/{tournament.size}</span>
+          </div>
+          <div className="space-y-1.5">
+            {tournament.players.map(p => (
+              <div key={p.userId} className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-full bg-blue-500/15 text-blue-300 flex items-center justify-center text-[10px] font-bold">
+                  {p.name.charAt(0).toUpperCase()}
+                </div>
+                <span className="text-sm text-gray-800 dark:text-gray-200 flex-1 truncate">{p.name}</span>
+                {p.userId === tournament.hostId && <span title="Host" className="inline-flex items-center gap-0.5 text-[9px] uppercase tracking-wider text-blue-400/80"><Trophy size={9} /> host</span>}
+                {p.userId === myId && <span className="text-[9px] uppercase tracking-wider text-blue-300/55">you</span>}
+                {iAmHost && p.userId !== myId && (
+                  <button
+                    onClick={() => handleKick(p.userId)}
+                    title={`Kick ${p.name}`}
+                    className="inline-flex items-center justify-center w-6 h-6 rounded text-rose-300/70 hover:text-rose-200 hover:bg-rose-500/10 transition-colors"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+            ))}
+            {Array.from({ length: tournament.size - filled }).map((_, i) => (
+              <div key={`empty-${i}`} className="flex items-center gap-2 opacity-50">
+                <div className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-[10px] font-bold text-gray-400">?</div>
+                <span className="text-sm text-gray-500 italic">Waiting…</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {iAmHost ? (
+          <button
+            onClick={handleStart}
+            disabled={busy || !isFull}
+            className="w-full py-3 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none flex items-center justify-center gap-2 transition-all"
+          >
+            {busy ? <InlineProgress active /> : <Swords size={14} />}
+            {isFull ? 'Start tournament' : `Waiting for ${tournament.size - filled} more…`}
+          </button>
+        ) : (
+          <p className="text-xs text-blue-300/50 text-center italic py-4">Waiting for host to start…</p>
+        )}
+
+        <button
+          onClick={handleLeaveTournament}
+          className="w-full mt-2 py-2 rounded-xl text-[12px] text-rose-300/80 hover:text-rose-200 transition-colors"
+        >
+          {iAmHost ? 'Cancel tournament' : 'Leave'}
+        </button>
+
+        {error && <p className="mt-3 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/25 rounded-lg px-3 py-2">{error}</p>}
+      </div>
+    );
+  }
+
+  // ===== BRACKET (live or finished) =====
+  if (mode === 'tour-bracket' && tournament) {
+    const finished = tournament.state === 'finished';
+    const champion = finished && tournament.champion
+      ? tournament.players.find(p => p.userId === tournament.champion)
+      : null;
+    const myLiveMatch = tournament.bracket.find(
+      b => b.state === 'playing' && b.players.includes(myId)
+    );
+    const me = tournament.players.find(p => p.userId === myId);
+    const iAmEliminated = !!me?.eliminated;
+
+    // Group bracket by round for the column layout.
+    const roundsMap = {};
+    for (const b of tournament.bracket) {
+      if (!roundsMap[b.round]) roundsMap[b.round] = [];
+      roundsMap[b.round].push(b);
+    }
+    const roundNumbers = Object.keys(roundsMap).map(Number).sort((a, b) => a - b);
+    const totalRounds = Math.log2(tournament.size);
+    const roundLabel = (n) => {
+      const fromEnd = totalRounds - n;
+      if (fromEnd === 0) return 'Final';
+      if (fromEnd === 1) return 'Semifinal';
+      if (fromEnd === 2) return 'Quarterfinal';
+      return `Round ${n}`;
+    };
+
+    return (
+      <div className="p-4 md:p-6 max-w-md md:max-w-4xl mx-auto">
+        {/* Header */}
+        <div className="mb-4 flex items-start gap-3">
+          <div className="flex-1 min-w-0">
+            <p className="text-[11px] text-blue-300/55 truncate">"{tournament.topic}"</p>
+            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-blue-300/70">
+                <Users size={10} /> {tournament.size}
+              </span>
+              {tournament.timedMode && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-blue-300/70">
+                  <Clock size={10} /> 2:00
+                </span>
+              )}
+              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-300/70">
+                best-of-{tournament.maxRounds || '?'}
+              </span>
+            </div>
+          </div>
+          {tournament.hostId === myId && (
+            <button
+              onClick={() => setShowSnapshot(true)}
+              title="Snapshot — export bracket state"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-blue-200 bg-blue-500/10 border border-blue-500/25 hover:bg-blue-500/20 hover:border-blue-500/45 hover:text-blue-100 transition-colors flex-shrink-0"
+            >
+              <Camera size={11} /> Snapshot
+            </button>
+          )}
+        </div>
+
+        {/* Champion banner */}
+        {finished && champion && (
+          <div className="rounded-2xl p-4 mb-4 text-center bg-gradient-to-b from-blue-500/20 to-blue-600/10 border border-blue-400/40">
+            <Trophy size={28} className="mx-auto mb-1.5 text-blue-200" />
+            <p className="text-[10px] uppercase tracking-[0.2em] text-blue-300/80">Champion</p>
+            <p className="text-lg font-black text-white">{champion.name}</p>
+            {champion.userId === myId && <p className="text-[11px] text-emerald-300 font-semibold mt-0.5">that's you</p>}
+          </div>
+        )}
+
+        {/* Your status / CTA */}
+        {!finished && myLiveMatch && (
+          <button
+            onClick={() => setActiveMatchCode(myLiveMatch.code)}
+            className="w-full mb-4 rounded-xl p-3.5 bg-gradient-to-b from-blue-500/25 to-blue-600/15 border border-blue-400/45 hover:from-blue-500/30 hover:to-blue-600/20 hover:border-blue-400/65 transition-colors text-left inline-flex items-center gap-3"
+          >
+            <div className="w-9 h-9 rounded-xl bg-blue-500 text-white flex items-center justify-center shadow-[0_4px_12px_rgba(59,130,246,0.35)] flex-shrink-0">
+              <Swords size={16} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[13px] font-bold text-white">Your match is ready</p>
+              <p className="text-[11px] text-blue-100/75">
+                {roundLabel(myLiveMatch.round)} · vs {tournament.players.find(p => p.userId === myLiveMatch.players.find(id => id !== myId))?.name || 'opponent'}
+              </p>
+            </div>
+            <ArrowRight size={14} className="text-blue-100 flex-shrink-0" />
+          </button>
+        )}
+        {!finished && !myLiveMatch && iAmEliminated && (
+          <p className="text-[12px] text-rose-300/70 text-center py-2 mb-2">You were eliminated in round {me?.eliminatedInRound || '?'}. Watching the bracket.</p>
+        )}
+        {!finished && !myLiveMatch && !iAmEliminated && (
+          <p className="text-[12px] text-blue-300/55 text-center py-2 mb-2 italic">Waiting for the next round…</p>
+        )}
+
+        {/* Bracket columns */}
+        <div className="flex gap-3 overflow-x-auto pb-2">
+          {roundNumbers.map(rn => {
+            const rTopic = tournament.roundTopics?.[rn];
+            const hasOwnTopic = rTopic && rTopic !== tournament.topic;
+            return (
+            <div key={rn} className="flex-1 min-w-[180px]">
+              <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-1">{roundLabel(rn)}</p>
+              {hasOwnTopic && (
+                <p className="text-[10.5px] text-blue-200/80 italic truncate mb-1.5" title={rTopic}>"{rTopic}"</p>
+              )}
+              <div className="space-y-2">
+                {roundsMap[rn].sort((a, b) => a.matchIndex - b.matchIndex).map(b => {
+                  const p1 = tournament.players.find(p => p.userId === b.players[0]);
+                  const p2 = tournament.players.find(p => p.userId === b.players[1]);
+                  const winnerId = b.winnerId;
+                  const isMyMatch = b.players.includes(myId);
+                  return (
+                    <div
+                      key={b.code}
+                      className={`rounded-lg border p-2 ${
+                        isMyMatch && b.state === 'playing'
+                          ? 'border-blue-400/55 bg-blue-500/[0.12] shadow-[0_0_0_2px_rgba(96,165,250,0.18)]'
+                          : b.state === 'finished'
+                            ? 'border-blue-500/20 bg-blue-500/[0.04]'
+                            : 'border-blue-500/[0.18] bg-blue-500/[0.03]'
+                      }`}
+                    >
+                      <PlayerRow player={p1} score={b.scores?.[p1?.userId]} won={winnerId === p1?.userId} matchFinished={b.state === 'finished'} self={p1?.userId === myId} />
+                      <div className="my-0.5 h-px bg-blue-500/[0.12]" />
+                      <PlayerRow player={p2} score={b.scores?.[p2?.userId]} won={winnerId === p2?.userId} matchFinished={b.state === 'finished'} self={p2?.userId === myId} />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            );
+          })}
+        </div>
+
+        <button
+          onClick={handleLeaveTournament}
+          className="w-full mt-4 py-2 rounded-xl text-[12px] text-rose-300/80 hover:text-rose-200 transition-colors inline-flex items-center justify-center gap-1.5"
+        >
+          {finished ? <><ArrowLeft size={12} /> Back to menu</> : <><X size={12} /> {iAmEliminated ? 'Exit' : 'Leave (forfeit)'}</>}
+        </button>
+
+        {error && <p className="mt-3 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/25 rounded-lg px-3 py-2">{error}</p>}
+
+        {showSnapshot && (
+          <TournamentSnapshotModal
+            tournament={tournament}
+            roundsMap={roundsMap}
+            roundNumbers={roundNumbers}
+            roundLabel={roundLabel}
+            snapshotRef={snapshotRef}
+            onClose={() => setShowSnapshot(false)}
+            copiedSnap={copiedSnap}
+            setCopiedSnap={setCopiedSnap}
+            downloadingPng={downloadingPng}
+            setDownloadingPng={setDownloadingPng}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // Fallback — no tournament loaded yet.
+  return (
+    <div className="p-6 text-center">
+      <Loader2 size={20} className="mx-auto text-blue-300/40 animate-spin" />
+    </div>
+  );
+}
+
+function PlayerRow({ player, score, won, matchFinished, self }) {
+  if (!player) {
+    return (
+      <div className="flex items-center gap-2 px-1 py-1 opacity-50">
+        <span className="text-[11px] text-blue-300/40">—</span>
+      </div>
+    );
+  }
+  const eliminatedHere = matchFinished && !won;
+  return (
+    <div className={`flex items-center gap-2 px-1 py-1 ${eliminatedHere ? 'opacity-50' : ''}`}>
+      <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold flex-shrink-0 ${
+        won ? 'bg-blue-500 text-white' : 'bg-blue-500/15 text-blue-300'
+      }`}>
+        {player.name.charAt(0).toUpperCase()}
+      </div>
+      <span className={`text-[11.5px] truncate flex-1 ${won ? 'font-bold text-white' : 'text-white/75'} ${eliminatedHere ? 'line-through' : ''}`}>
+        {player.name}{self ? ' · you' : ''}
+      </span>
+      {typeof score === 'number' && (
+        <span className="text-[10px] font-bold tabular-nums text-blue-300/70">{score}</span>
+      )}
+      {won && <Check size={11} className="text-blue-300 flex-shrink-0" />}
+    </div>
+  );
+}
+
+// =========================================================
+// TOURNAMENT SNAPSHOT — host-only export. Renders a full, printable view
+// of the bracket state and offers Copy (text summary) and Download PNG.
+// =========================================================
+function TournamentSnapshotModal({ tournament, roundsMap, roundNumbers, roundLabel, snapshotRef, onClose, copiedSnap, setCopiedSnap, downloadingPng, setDownloadingPng }) {
+  const finished = tournament.state === 'finished';
+  const champion = finished && tournament.champion
+    ? tournament.players.find(p => p.userId === tournament.champion)
+    : null;
+
+  function buildTextSummary() {
+    const lines = [];
+    lines.push(`TOURNAMENT · ${tournament.code}`);
+    lines.push(`Topic: ${tournament.topic}`);
+    lines.push(`Size: ${tournament.size} · Best-of-${tournament.maxRounds || '?'} per match${tournament.timedMode ? ' · 2:00 per turn' : ''}`);
+    lines.push(`State: ${tournament.state}`);
+    if (champion) lines.push(`Champion: ${champion.name}`);
+    lines.push('');
+    lines.push('PLAYERS');
+    for (const p of tournament.players) {
+      lines.push(`  - ${p.name}${p.eliminated ? ` (eliminated R${p.eliminatedInRound || '?'})` : ''}`);
+    }
+    lines.push('');
+    lines.push('BRACKET');
+    for (const rn of roundNumbers) {
+      lines.push(`  ${roundLabel(rn)}${tournament.roundTopics?.[rn] && tournament.roundTopics[rn] !== tournament.topic ? ` — "${tournament.roundTopics[rn]}"` : ''}`);
+      for (const m of roundsMap[rn].sort((a, b) => a.matchIndex - b.matchIndex)) {
+        const p1 = tournament.players.find(p => p.userId === m.players[0]);
+        const p2 = tournament.players.find(p => p.userId === m.players[1]);
+        const s1 = m.scores?.[p1?.userId];
+        const s2 = m.scores?.[p2?.userId];
+        const winId = m.winnerId;
+        const fmt = (p, s) => p ? `${p.name}${typeof s === 'number' ? ` (${s})` : ''}${winId === p.userId ? ' ✓' : ''}` : '—';
+        lines.push(`    ${fmt(p1, s1)} vs ${fmt(p2, s2)}${m.state === 'finished' ? '' : '  [in progress]'}`);
+      }
+    }
+    lines.push('');
+    lines.push(`Generated: ${new Date().toLocaleString()}`);
+    return lines.join('\n');
+  }
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(buildTextSummary());
+      setCopiedSnap(true);
+      setTimeout(() => setCopiedSnap(false), 1500);
+    } catch {}
+  }
+
+  async function handleDownload() {
+    if (!snapshotRef.current) return;
+    setDownloadingPng(true);
+    try {
+      const { toPng } = await import('html-to-image');
+      const dataUrl = await toPng(snapshotRef.current, { pixelRatio: 2, cacheBust: true, skipFonts: true, backgroundColor: '#0b1220' });
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `tournament-${tournament.code}-${new Date().toISOString().slice(0, 10)}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (e) {
+      console.warn('Snapshot PNG export failed:', e);
+    }
+    setDownloadingPng(false);
+  }
+
+  return (
+    <div className="absolute inset-0 z-30 flex items-start justify-center bg-black/65 backdrop-blur-sm p-4 overflow-y-auto">
+      <div className="w-full max-w-3xl my-4 rounded-2xl border border-blue-500/30 bg-gradient-to-b from-[#0b1220] to-[#0e1426] shadow-[0_18px_48px_rgba(0,0,0,0.55)] overflow-hidden">
+        {/* Toolbar */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-blue-500/15">
+          <div className="flex items-center gap-2">
+            <Camera size={14} className="text-blue-300" />
+            <p className="text-[13px] font-bold text-white">Tournament snapshot</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleCopy}
+              title="Copy text summary"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold text-blue-200 bg-blue-500/10 border border-blue-500/25 hover:bg-blue-500/20 hover:border-blue-500/45 hover:text-blue-100 transition-colors"
+            >
+              {copiedSnap ? <Check size={11} /> : <Copy size={11} />}
+              {copiedSnap ? 'Copied' : 'Copy text'}
+            </button>
+            <button
+              onClick={handleDownload}
+              disabled={downloadingPng}
+              title="Download bracket as PNG"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold text-white bg-gradient-to-b from-blue-500 to-blue-600 border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-50 transition-all"
+            >
+              {downloadingPng ? <InlineProgress active /> : <Download size={11} />}
+              PNG
+            </button>
+            <button
+              onClick={onClose}
+              title="Close"
+              className="inline-flex items-center justify-center w-7 h-7 rounded-md text-white/55 hover:text-white hover:bg-white/[0.06] transition-colors"
+            >
+              <X size={13} />
+            </button>
+          </div>
+        </div>
+
+        {/* Capture target — what gets exported to PNG */}
+        <div ref={snapshotRef} className="p-6 bg-gradient-to-b from-[#0b1220] to-[#0e1426]">
+          <div className="flex items-start justify-between gap-4 mb-4">
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.18em] text-blue-400/70">Tournament</p>
+              <p className="font-mono text-2xl font-black tabular-nums tracking-[0.18em] text-white">{tournament.code}</p>
+              <p className="text-[12px] text-blue-200/85 mt-1.5 max-w-[440px]">"{tournament.topic}"</p>
+              <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-blue-300/70"><Users size={10} /> {tournament.size}</span>
+                {tournament.timedMode && <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-blue-300/70"><Clock size={10} /> 2:00</span>}
+                <span className="text-[10px] font-bold uppercase tracking-wider text-blue-300/70">best-of-{tournament.maxRounds || '?'}</span>
+                <span className={`text-[10px] font-bold uppercase tracking-wider ${
+                  tournament.state === 'finished' ? 'text-emerald-300' : 'text-blue-300/70'
+                }`}>{tournament.state}</span>
+              </div>
+            </div>
+            {champion && (
+              <div className="rounded-xl border border-blue-400/45 bg-gradient-to-b from-blue-500/25 to-blue-600/10 px-3 py-2 text-center flex-shrink-0">
+                <Trophy size={18} className="mx-auto text-blue-200 mb-0.5" />
+                <p className="text-[9px] uppercase tracking-[0.2em] text-blue-300/80">Champion</p>
+                <p className="text-[13px] font-black text-white">{champion.name}</p>
+              </div>
+            )}
+          </div>
+
+          {/* Players strip */}
+          <div className="rounded-xl border border-blue-500/15 bg-blue-500/[0.04] p-3 mb-4">
+            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2">Players</p>
+            <div className="flex flex-wrap gap-1.5">
+              {tournament.players.map(p => (
+                <span
+                  key={p.userId}
+                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] ${
+                    p.eliminated
+                      ? 'bg-rose-500/10 border border-rose-500/25 text-rose-200/65 line-through decoration-rose-300/60'
+                      : 'bg-blue-500/15 border border-blue-500/30 text-blue-100'
+                  }`}
+                >
+                  <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold ${
+                    p.eliminated ? 'bg-rose-500/20 text-rose-200/70' : 'bg-blue-500/30 text-blue-100'
+                  }`}>{p.name.charAt(0).toUpperCase()}</span>
+                  {p.name}
+                  {p.eliminated && <span className="text-[8.5px] uppercase tracking-wider">R{p.eliminatedInRound || '?'}</span>}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Bracket columns — same layout as the live bracket */}
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            {roundNumbers.map(rn => {
+              const rTopic = tournament.roundTopics?.[rn];
+              const hasOwnTopic = rTopic && rTopic !== tournament.topic;
+              return (
+                <div key={rn} className="flex-1 min-w-[170px]">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/80 mb-1">{roundLabel(rn)}</p>
+                  {hasOwnTopic && <p className="text-[10px] text-blue-200/75 italic truncate mb-1.5" title={rTopic}>"{rTopic}"</p>}
+                  <div className="space-y-2">
+                    {roundsMap[rn].sort((a, b) => a.matchIndex - b.matchIndex).map(m => {
+                      const p1 = tournament.players.find(p => p.userId === m.players[0]);
+                      const p2 = tournament.players.find(p => p.userId === m.players[1]);
+                      const winnerId = m.winnerId;
+                      return (
+                        <div key={m.code} className={`rounded-lg border p-2 ${
+                          m.state === 'finished'
+                            ? 'border-blue-500/25 bg-blue-500/[0.05]'
+                            : 'border-blue-500/[0.18] bg-blue-500/[0.03]'
+                        }`}>
+                          <SnapshotPlayerRow player={p1} score={m.scores?.[p1?.userId]} won={winnerId === p1?.userId} matchFinished={m.state === 'finished'} />
+                          <div className="my-0.5 h-px bg-blue-500/[0.12]" />
+                          <SnapshotPlayerRow player={p2} score={m.scores?.[p2?.userId]} won={winnerId === p2?.userId} matchFinished={m.state === 'finished'} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <p className="text-[9.5px] text-blue-300/40 mt-3 text-right">Generated {new Date().toLocaleString()}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SnapshotPlayerRow({ player, score, won, matchFinished }) {
+  if (!player) return <div className="flex items-center gap-2 px-1 py-1 opacity-50"><span className="text-[11px] text-blue-300/40">—</span></div>;
+  const eliminated = matchFinished && !won;
+  return (
+    <div className={`flex items-center gap-2 px-1 py-1 ${eliminated ? 'opacity-50' : ''}`}>
+      <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold flex-shrink-0 ${
+        won ? 'bg-blue-500 text-white' : 'bg-blue-500/15 text-blue-300'
+      }`}>
+        {player.name.charAt(0).toUpperCase()}
+      </div>
+      <span className={`text-[11.5px] truncate flex-1 ${won ? 'font-bold text-white' : 'text-white/75'} ${eliminated ? 'line-through' : ''}`}>
+        {player.name}
+      </span>
+      {typeof score === 'number' && (
+        <span className="text-[10px] font-bold tabular-nums text-blue-300/70">{score}</span>
+      )}
+      {won && <Check size={11} className="text-blue-300 flex-shrink-0" />}
+    </div>
+  );
 }
 
 function Singleplayer({ mode, setMode, onExit }) {
@@ -269,15 +1240,14 @@ function Singleplayer({ mode, setMode, onExit }) {
   if (mode === 'single-setup') {
     return (
       <div className="p-6 md:p-10 max-w-md md:max-w-2xl mx-auto">
-        <button onClick={onExit} className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 mb-3 inline-flex items-center gap-1 transition-colors">
+        <button onClick={onExit} className="text-xs text-blue-300/60 hover:text-blue-200 mb-3 inline-flex items-center gap-1 transition-colors">
           <ArrowLeft size={12} /> Back
         </button>
-        <h2 className="text-base font-bold text-gray-900 dark:text-white mb-1">Pick a topic</h2>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Anything debatable. The AI will argue the opposite side.</p>
+        <h2 className="text-base font-bold text-gray-900 dark:text-white mb-3">Pick a topic</h2>
         <input
           value={topic}
           onChange={e => setTopic(e.target.value)}
-          placeholder="e.g., Social media is harmful for teens"
+          placeholder="What do you want to debate?"
           className="w-full px-3 py-2 rounded-lg border border-blue-500/30 bg-white/50 dark:bg-white/[0.06] text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/60 mb-3"
         />
         <div className="flex flex-wrap gap-1.5 mb-5">
@@ -289,7 +1259,7 @@ function Singleplayer({ mode, setMode, onExit }) {
         </div>
         {topic.trim() && (
           <>
-            <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">You argue:</p>
+            <p className="text-[11px] font-semibold text-blue-400/70 uppercase tracking-wider mb-2">Your side</p>
             <div className="grid grid-cols-2 gap-2">
               <button onClick={() => startDebate(topic.trim(), 'for')} className="px-4 py-3 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 transition-all">
                 FOR
@@ -300,7 +1270,7 @@ function Singleplayer({ mode, setMode, onExit }) {
             </div>
           </>
         )}
-        {error && <p className="mt-3 text-xs text-gray-600 dark:text-gray-300 bg-white/[0.08] dark:bg-white/[0.04] border border-white/20 dark:border-white/[0.07] rounded-lg px-3 py-2">{error}</p>}
+        {error && <p className="mt-3 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/25 rounded-lg px-3 py-2">{error}</p>}
       </div>
     );
   }
@@ -326,24 +1296,24 @@ function Singleplayer({ mode, setMode, onExit }) {
         </div>
         {verdict.studentStrongest && (
           <div className="bg-white/[0.04] border border-blue-500/20 rounded-xl p-3 mb-2">
-            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/80 mb-1">Your strongest moment</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/80 mb-1">★ Your strongest</p>
             <p className="text-xs text-gray-800 dark:text-gray-100 leading-relaxed">{verdict.studentStrongest}</p>
           </div>
         )}
         {verdict.studentWeakest && (
           <div className="bg-white/[0.04] border border-blue-500/20 rounded-xl p-3 mb-2">
-            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/80 mb-1">Your weakest moment</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/80 mb-1">△ Your weakest</p>
             <p className="text-xs text-gray-800 dark:text-gray-100 leading-relaxed">{verdict.studentWeakest}</p>
           </div>
         )}
         {verdict.improve && (
           <div className="bg-white/[0.04] border border-blue-500/20 rounded-xl p-3 mb-4">
-            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/80 mb-1">Drill this next</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/80 mb-1">→ Drill next</p>
             <p className="text-xs text-gray-800 dark:text-gray-100 leading-relaxed">{verdict.improve}</p>
           </div>
         )}
-        <button onClick={onExit} className="w-full py-2.5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 transition-all">
-          Back to Debate menu
+        <button onClick={onExit} className="w-full py-2.5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 transition-all inline-flex items-center justify-center gap-2">
+          <ArrowLeft size={14} /> Back to menu
         </button>
       </div>
     );
@@ -368,13 +1338,13 @@ function Singleplayer({ mode, setMode, onExit }) {
 
   return (
     <div className="h-full flex flex-col">
-      {error && <p className="px-4 py-2 text-xs text-gray-600 dark:text-gray-300 bg-white/[0.08] dark:bg-white/[0.04] border-b border-white/10">{error}</p>}
+      {error && <p className="px-4 py-2 text-xs text-rose-300 bg-rose-500/10 border-b border-rose-500/20">{error}</p>}
       <ChatContainer
         messages={messages}
         streamingContent={streamingContent}
         onSend={(t) => !streaming && doSend(t)}
         disabled={streaming}
-        placeholder={streaming ? 'AI is countering…' : 'Make your argument…'}
+        placeholder={streaming ? 'AI is countering…' : 'Your argument'}
         header={debateHeader}
         className="h-full"
         flush
@@ -386,7 +1356,7 @@ function Singleplayer({ mode, setMode, onExit }) {
 // =========================================================
 // MULTIPLAYER
 // =========================================================
-function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
+function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = null, tournamentCode = null }) {
   const { user } = useAuth();
   const myId = user?.id || null;
   const [iAmHost, setIAmHost] = useState(false);
@@ -396,6 +1366,8 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [topicInput, setTopicInput] = useState('');
+  // Per-side round cap. 0 = infinite (match only ends on vote-end).
+  const [maxRounds, setMaxRounds] = useState(0);
   const [hostSide, setHostSide] = useState('for');
   const [timedMode, setTimedMode] = useState(forceTimed);
   const [argument, setArgument] = useState('');
@@ -437,6 +1409,25 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
     }
     if (added.length) setArgImages(prev => [...prev, ...added]);
   }
+
+  // Tournament entry path: when a presetCode is passed in, idempotently
+  // join the match (server treats already-a-player as a no-op) and load
+  // its current state so the user lands directly in the game view without
+  // touching the create/join flow.
+  useEffect(() => {
+    if (!presetCode || code) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await apiFetch(`/api/debate/match/${presetCode}/join`, { method: 'POST' });
+        if (cancelled) return;
+        setMatch(r.match);
+        setCode(presetCode);
+        setMode(r.match?.state === 'finished' ? 'mp-verdict' : 'mp-game');
+      } catch (e) { if (!cancelled) setError(e.message); }
+    })();
+    return () => { cancelled = true; };
+  }, [presetCode, code, setMode]);
 
   useEffect(() => {
     if (!code || mode === 'mp-menu') return;
@@ -536,7 +1527,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
     try {
       const r = await apiFetch(`/api/debate/match/${code}/start`, {
         method: 'POST',
-        body: JSON.stringify({ topic: t, hostSide, timedMode }),
+        body: JSON.stringify({ topic: t, hostSide, timedMode, maxRounds }),
       });
       setMatch(r.match); setMode('mp-game');
     } catch (e) { setError(e.message); }
@@ -599,11 +1590,30 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
     if (!code) { onExit(); return; }
     setLeaving(true);
     try {
-      await apiFetch(`/api/debate/match/${code}/leave`, { method: 'POST' });
+      // In tournament context, leaving forfeits the bracket match — the
+      // tournament endpoint synthesizes a verdict and advances the bracket
+      // for us. Outside tournaments, plain match leave is fine.
+      const path = tournamentCode
+        ? `/api/debate/tournament/${tournamentCode}/leave`
+        : `/api/debate/match/${code}/leave`;
+      await apiFetch(path, { method: 'POST' });
     } catch {} // best effort — UI exits either way
     setLeaving(false);
     setConfirmLeave(false);
     onExit();
+  }
+
+  // Lobby ready toggle. Sends desired ready state; server emits a
+  // ready_changed SSE event so both players' lists update instantly.
+  async function handleToggleReady(next) {
+    if (!code) return;
+    try {
+      const r = await apiFetch(`/api/debate/match/${code}/ready`, {
+        method: 'POST',
+        body: JSON.stringify({ ready: !!next }),
+      });
+      setMatch(r.match);
+    } catch (e) { setError(e.message); }
   }
 
   async function handleVoteEnd() {
@@ -626,11 +1636,10 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
   if (mode === 'mp-menu') {
     return (
       <div className="p-6 md:p-10 max-w-md md:max-w-2xl mx-auto">
-        <button onClick={onExit} className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 mb-3 inline-flex items-center gap-1 transition-colors">
+        <button onClick={onExit} className="text-xs text-blue-300/60 hover:text-blue-200 mb-3 inline-flex items-center gap-1 transition-colors">
           <ArrowLeft size={12} /> Back
         </button>
-        <h2 className="text-base font-bold text-gray-900 dark:text-white mb-1">Head-to-head debate</h2>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mb-5">Create a match and share the code, or join one.</p>
+        <h2 className="text-base font-bold text-gray-900 dark:text-white mb-3">Match</h2>
 
         <button
           onClick={handleCreate}
@@ -638,12 +1647,12 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
           className="w-full py-3 mb-4 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none flex items-center justify-center gap-2 transition-all"
         >
           {busy ? <InlineProgress active /> : <Zap size={14} />}
-          Create match
+          Create new
         </button>
 
         <div className="flex items-center gap-2 my-3">
           <div className="flex-1 border-t border-blue-500/20" />
-          <span className="text-[10px] uppercase tracking-wider text-blue-400/70">or</span>
+          <span className="text-[10px] uppercase tracking-wider text-blue-400/70">or join</span>
           <div className="flex-1 border-t border-blue-500/20" />
         </div>
 
@@ -652,7 +1661,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
             value={joinInput}
             onChange={e => setJoinInput(e.target.value.toUpperCase().slice(0, 5))}
             onKeyDown={e => { if (e.key === 'Enter') handleJoin(); }}
-            placeholder="Code"
+            placeholder="CODE"
             className="flex-1 px-3 py-2.5 rounded-xl border border-blue-500/30 bg-white/50 dark:bg-white/[0.06] text-sm font-mono uppercase tracking-widest text-gray-900 dark:text-white placeholder-gray-400 outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/60"
           />
           <button
@@ -663,7 +1672,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
             Join
           </button>
         </div>
-        {error && <p className="mt-3 text-xs text-gray-600 dark:text-gray-300 bg-white/[0.08] dark:bg-white/[0.04] border border-white/20 dark:border-white/[0.07] rounded-lg px-3 py-2">{error}</p>}
+        {error && <p className="mt-3 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/25 rounded-lg px-3 py-2">{error}</p>}
       </div>
     );
   }
@@ -673,68 +1682,101 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
     const isHost = iAmHost || (myId && match.hostId === myId);
     const opponent = match.players.find(p => (myId ? p.userId !== myId : p.userId !== match.hostId));
     const opponentJoined = match.players.length >= 2;
+    const readySet = new Set(match.readyUserIds || []);
+    const iAmReady = readySet.has(myId);
+    const allReady = opponentJoined && match.players.every(p => readySet.has(p.userId));
     return (
       <div className="p-6 md:p-10 max-w-md md:max-w-2xl mx-auto">
-        <p className="text-[11px] uppercase tracking-[0.18em] text-blue-400/80 dark:text-blue-400/80 mb-1.5">Match code</p>
+        <p className="text-[11px] uppercase tracking-[0.18em] text-blue-400/70 mb-1.5">Match code</p>
         <button
           onClick={copyCode}
+          title="Copy"
           className="w-full font-mono text-3xl font-black tabular-nums tracking-[0.2em] text-gray-900 dark:text-white bg-white/[0.10] dark:bg-white/[0.06] border border-blue-500/40 dark:border-blue-500/30 rounded-xl py-4 mb-3 hover:border-blue-500/60 hover:bg-white/[0.18] dark:hover:bg-white/[0.10] transition-colors inline-flex items-center justify-center gap-3"
         >
           {match.code}
           {copied ? <Check size={18} className="text-blue-400" /> : <Copy size={16} className="text-blue-400/70" />}
         </button>
-        <p className="text-[11px] text-gray-500 dark:text-gray-400 text-center mb-5">Share this code with your opponent.</p>
+        <p className="text-[11px] text-blue-300/50 text-center mb-5">Share with your opponent</p>
 
-        <div className="bg-white/[0.07] dark:bg-white/[0.04] border border-white/[0.10] dark:border-white/[0.07] rounded-xl p-3 mb-5">
-          <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/80 mb-2">Players</p>
+        <div className="bg-white/[0.07] dark:bg-white/[0.04] border border-blue-500/[0.12] rounded-xl p-3 mb-5">
+          <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2">Players</p>
           <div className="space-y-1.5">
-            {match.players.map(p => (
-              <div key={p.userId} className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-full bg-blue-500/15 text-blue-300 flex items-center justify-center text-[10px] font-bold">
-                  {p.name.charAt(0).toUpperCase()}
+            {match.players.map(p => {
+              const pReady = readySet.has(p.userId);
+              return (
+                <div key={p.userId} className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full bg-blue-500/15 text-blue-300 flex items-center justify-center text-[10px] font-bold">
+                    {p.name.charAt(0).toUpperCase()}
+                  </div>
+                  <span className="text-sm text-gray-800 dark:text-gray-200 flex-1 truncate">{p.name}</span>
+                  {p.userId === match.hostId && <span title="Host" className="inline-flex items-center gap-0.5 text-[9px] uppercase tracking-wider text-blue-400/80"><Trophy size={9} /> host</span>}
+                  {p.userId === myId && <span className="text-[9px] uppercase tracking-wider text-blue-300/55">you</span>}
+                  <span
+                    title={pReady ? 'Ready' : 'Not ready'}
+                    className={`inline-flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                      pReady ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30' : 'bg-white/[0.04] text-white/40 border border-white/[0.10]'
+                    }`}
+                  >
+                    {pReady ? <Check size={9} /> : null} {pReady ? 'ready' : 'not ready'}
+                  </span>
                 </div>
-                <span className="text-sm text-gray-800 dark:text-gray-200">{p.name}</span>
-                {p.userId === match.hostId && <span className="text-[9px] uppercase tracking-wider text-blue-400/80">Host</span>}
-                {p.userId === myId && <span className="text-[9px] uppercase tracking-wider text-gray-400">You</span>}
-              </div>
-            ))}
+              );
+            })}
             {!opponentJoined && (
               <div className="flex items-center gap-2">
                 <div className="w-6 h-6 rounded-full bg-white/10 dark:bg-white/[0.06] flex items-center justify-center text-[10px] font-bold text-gray-400">?</div>
-                <span className="text-sm text-gray-500 italic">Waiting for opponent…</span>
-                <span className="ml-1 w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                <span className="text-[12px] text-blue-300/50 italic">Waiting…</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
               </div>
             )}
           </div>
         </div>
 
+        {/* Ready toggle — visible to both players. Host's Start button
+            is gated below until both check in. */}
+        <button
+          type="button"
+          onClick={() => handleToggleReady(!iAmReady)}
+          disabled={!opponentJoined}
+          className={`w-full mb-3 flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl border text-[12.5px] font-semibold transition-colors ${
+            iAmReady
+              ? 'bg-emerald-500/15 border-emerald-500/45 text-emerald-200 hover:bg-emerald-500/20'
+              : 'bg-blue-500/10 border-blue-500/30 text-blue-200 hover:bg-blue-500/20 hover:border-blue-500/50 disabled:opacity-40'
+          }`}
+        >
+          <span className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${iAmReady ? 'bg-emerald-500 border-emerald-400' : 'border-blue-500/50 bg-transparent'}`}>
+            {iAmReady && <Check size={11} className="text-white" />}
+          </span>
+          {iAmReady ? "I'm ready" : 'Click to ready up'}
+        </button>
+
         {isHost ? (
           <>
-            <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">Topic</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2">Topic</p>
             <input
               value={topicInput}
               onChange={e => setTopicInput(e.target.value)}
               placeholder="What are we debating?"
-              className="w-full px-3 py-2 mb-2 rounded-lg border border-white/20 dark:border-white/[0.10] bg-white/50 dark:bg-white/[0.06] text-sm text-gray-900 dark:text-white placeholder-gray-400 outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/40"
+              className="w-full px-3 py-2 mb-2 rounded-lg border border-blue-500/25 bg-white/50 dark:bg-white/[0.06] text-sm text-gray-900 dark:text-white placeholder-gray-400 outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/45"
             />
-            <div className="flex flex-wrap gap-1 mb-3">
+            <div className="flex flex-wrap gap-1 mb-4">
               {QUICK_TOPICS.slice(0, 4).map(t => (
-                <button key={t} onClick={() => setTopicInput(t)} className="px-2 py-0.5 rounded text-[10px] font-medium text-gray-600 dark:text-gray-400 bg-white/[0.07] dark:bg-white/[0.04] border border-white/[0.10] dark:border-white/[0.07] hover:border-blue-500/40 hover:text-blue-300 transition-colors">
+                <button key={t} onClick={() => setTopicInput(t)} className="px-2 py-0.5 rounded text-[10px] font-medium text-blue-300/70 bg-blue-500/[0.06] border border-blue-500/[0.15] hover:border-blue-500/40 hover:text-blue-200 transition-colors">
                   {t}
                 </button>
               ))}
             </div>
-            <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">You will argue</p>
-            <div className="grid grid-cols-2 gap-2 mb-4">
+            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2">Your side</p>
+            <div className="grid grid-cols-2 gap-2 mb-3">
               <button
                 onClick={() => setHostSide('for')}
-                className={`py-2 rounded-lg text-sm font-semibold border transition-colors ${hostSide === 'for' ? 'bg-blue-500/20 text-blue-100 border-blue-500/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]' : 'border-white/20 dark:border-white/[0.10] text-gray-700 dark:text-gray-300 bg-transparent hover:bg-white/10'}`}
+                className={`py-2 rounded-lg text-sm font-semibold border transition-colors ${hostSide === 'for' ? 'bg-blue-500/20 text-blue-100 border-blue-500/50' : 'border-blue-500/20 text-gray-700 dark:text-gray-300 bg-transparent hover:bg-blue-500/10'}`}
               >
                 FOR
               </button>
               <button
                 onClick={() => setHostSide('against')}
-                className={`py-2 rounded-lg text-sm font-semibold border transition-colors ${hostSide === 'against' ? 'bg-blue-500/20 text-blue-100 border-blue-500/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]' : 'border-white/20 dark:border-white/[0.10] text-gray-700 dark:text-gray-300 bg-transparent hover:bg-white/10'}`}
+                className={`py-2 rounded-lg text-sm font-semibold border transition-colors ${hostSide === 'against' ? 'bg-blue-500/20 text-blue-100 border-blue-500/50' : 'border-blue-500/20 text-gray-700 dark:text-gray-300 bg-transparent hover:bg-blue-500/10'}`}
               >
                 AGAINST
               </button>
@@ -742,7 +1784,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
             <button
               type="button"
               onClick={() => setTimedMode(v => !v)}
-              className={`w-full mb-4 flex items-center justify-between px-3.5 py-2.5 rounded-xl border text-[12.5px] transition-colors ${
+              className={`w-full mb-2 flex items-center justify-between px-3.5 py-2.5 rounded-xl border text-[12.5px] transition-colors ${
                 timedMode
                   ? 'bg-blue-500/15 border-blue-500/50 text-blue-100'
                   : 'bg-transparent border-blue-500/25 text-blue-300/85 hover:border-blue-500/50 hover:text-blue-200'
@@ -752,24 +1794,49 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
                 <span className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${timedMode ? 'bg-blue-500 border-blue-400' : 'border-blue-500/50 bg-transparent'}`}>
                   {timedMode && <Check size={11} className="text-white" />}
                 </span>
-                Timed mode
+                <Clock size={12} /> Timed
               </span>
-              <span className="text-[10.5px] text-blue-300/70">2 min/turn or you score 0</span>
+              <span className="text-[10.5px] tabular-nums text-blue-300/70">2:00 / turn</span>
             </button>
+            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2 mt-3">Rounds / side</p>
+            <div className="grid grid-cols-5 gap-1.5 mb-4">
+              {[
+                { v: 3, label: '3' },
+                { v: 5, label: '5' },
+                { v: 7, label: '7' },
+                { v: 10, label: '10' },
+                { v: 0, label: '∞' },
+              ].map(opt => (
+                <button
+                  key={opt.label}
+                  onClick={() => setMaxRounds(opt.v)}
+                  title={opt.v === 0 ? 'Infinite — ends on vote' : `${opt.v} arguments per side, then auto-finalize`}
+                  className={`py-2 rounded-lg text-[12.5px] font-bold tabular-nums border transition-colors ${
+                    maxRounds === opt.v
+                      ? 'bg-blue-500/20 text-blue-100 border-blue-500/50'
+                      : 'border-blue-500/20 text-blue-300/70 bg-transparent hover:bg-blue-500/10 hover:text-blue-200'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
             <button
               onClick={handleStart}
-              disabled={busy || !topicInput.trim() || !opponentJoined}
+              disabled={busy || !topicInput.trim() || !opponentJoined || !allReady}
               className="w-full py-3 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none flex items-center justify-center gap-2 transition-all"
             >
               {busy ? <InlineProgress active /> : <Swords size={14} />}
-              {opponentJoined ? 'Start the debate' : 'Waiting for opponent…'}
+              {!opponentJoined ? 'Waiting for opponent…' : !allReady ? 'Waiting for ready up…' : 'Start'}
             </button>
           </>
         ) : (
-          <p className="text-xs text-gray-500 dark:text-gray-400 text-center italic">Waiting for the host to set the topic and start…</p>
+          <p className="text-xs text-blue-300/50 text-center italic py-4">
+            {!allReady ? 'Ready up to start…' : 'Waiting for the host to start…'}
+          </p>
         )}
 
-        {error && <p className="mt-3 text-xs text-gray-600 dark:text-gray-300 bg-white/[0.08] dark:bg-white/[0.04] border border-white/20 dark:border-white/[0.07] rounded-lg px-3 py-2">{error}</p>}
+        {error && <p className="mt-3 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/25 rounded-lg px-3 py-2">{error}</p>}
       </div>
     );
   }
@@ -800,6 +1867,15 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
       return `${mm}:${ss}`;
     };
 
+    // Per-side round count. Used for the round badge — clamped to maxRounds
+    // so the display reads "5/5" once the cap hits even if a stray turn
+    // lands while finalization is in flight.
+    const myTurnsUsed = match.turns.filter(t => t.userId === myId).length;
+    const oppTurnsUsed = opp ? match.turns.filter(t => t.userId === opp.userId).length : 0;
+    const roundsDisplay = match.maxRounds > 0
+      ? `${Math.min(Math.max(myTurnsUsed, oppTurnsUsed), match.maxRounds)}/${match.maxRounds}`
+      : `${Math.max(myTurnsUsed, oppTurnsUsed)} · ∞`;
+
     return (
       <div className="h-full flex flex-col relative">
         {/* Topic + scoreboard */}
@@ -809,10 +1885,16 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
             <ScorePill name={me?.name || 'You'} side={me?.side} score={myScore} active={myTurn} self />
             <span className="text-gray-300 dark:text-gray-600">vs</span>
             <ScorePill name={opp?.name || 'Opponent'} side={opp?.side} score={oppScore} active={!myTurn} />
+            <span
+              title={match.maxRounds > 0 ? `Rounds used / cap per side. Match auto-ends when both sides hit ${match.maxRounds}.` : 'Infinite rounds — ends on vote'}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10.5px] font-semibold tabular-nums bg-blue-500/10 border border-blue-500/25 text-blue-300/85"
+            >
+              <Swords size={10} /> {roundsDisplay}
+            </span>
             <span className="flex-1" />
             <button
               onClick={() => setConfirmLeave(true)}
-              title="Leave the debate. Your opponent will be notified."
+              title="Leave debate"
               className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-rose-500/10 border border-rose-500/30 text-rose-300 hover:bg-rose-500/20 hover:border-rose-500/50 hover:text-rose-200 transition-colors"
             >
               <X size={11} /> Leave
@@ -820,7 +1902,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
             <button
               onClick={handleVoteEnd}
               disabled={voting || iVoted}
-              title={iVoted ? 'You voted to end. Waiting for opponent.' : oppVoted ? 'Opponent voted to end. Vote yes to finish.' : 'Vote to end the debate. Both must vote.'}
+              title={iVoted ? 'Waiting for opponent to vote' : oppVoted ? 'Opponent voted — confirm to end' : 'Vote to end'}
               className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
                 iVoted
                   ? 'bg-blue-500/15 border border-blue-500/30 text-blue-300/80'
@@ -829,7 +1911,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
                     : 'bg-blue-500/20 border border-blue-400/40 text-blue-200 hover:bg-blue-500/30 hover:text-blue-100'
               }`}
             >
-              {voting ? <InlineProgress active /> : iVoted ? 'Waiting…' : oppVoted ? 'Confirm end' : 'Vote to end'}
+              {voting ? <InlineProgress active /> : iVoted ? <><Check size={11} /> Waiting</> : oppVoted ? <><Trophy size={11} /> Confirm end</> : <><Trophy size={11} /> End</>}
             </button>
           </div>
           {remainingMs !== null && (
@@ -859,9 +1941,16 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
         {/* Turn list */}
         <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
           {match.turns.length === 0 && (
-            <p className="text-xs text-gray-400 text-center py-8">
-              {myTurn ? 'You have the opening statement. Lay out your strongest argument first.' : 'Waiting for opponent\'s opening statement…'}
-            </p>
+            <div className="flex flex-col items-center gap-2 py-10 text-blue-300/45">
+              {myTurn ? <Zap size={18} /> : (
+                <div className="inline-flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" style={{animationDelay: '0.15s'}} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" style={{animationDelay: '0.3s'}} />
+                </div>
+              )}
+              <p className="text-[11px]">{myTurn ? 'Your opening statement' : `Waiting for ${opp?.name || 'opponent'}…`}</p>
+            </div>
           )}
           {match.turns.map((t, i) => {
             const isMine = t.userId === myId;
@@ -1042,7 +2131,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
                     await addImageFiles(files);
                   }
                 }}
-                placeholder={`Make your argument as ${me?.side?.toUpperCase()}. Drop or paste images for evidence — specifics, attack the opponent's last claim.`}
+                placeholder={`Argue as ${me?.side?.toUpperCase()}…`}
                 rows={4}
                 disabled={submittingMove}
                 className="w-full p-3 rounded-xl border border-blue-500/25 bg-white/30 dark:bg-white/[0.04] text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/60 resize-y"
@@ -1052,46 +2141,38 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
                   type="button"
                   onClick={() => argFileRef.current?.click()}
                   disabled={submittingMove || argImages.length >= 4}
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] text-gray-500 hover:text-gray-800 dark:hover:text-white hover:bg-white/20 dark:hover:bg-white/10 disabled:opacity-40 transition-colors"
-                  title="Attach image (you can also paste or drag-and-drop)"
+                  title="Attach image (paste or drag also works)"
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] text-blue-300/65 hover:text-blue-200 hover:bg-blue-500/10 disabled:opacity-40 transition-colors"
                 >
                   <Paperclip size={11} /> Image
                 </button>
-                <p className="text-[10px] text-blue-300/60 tabular-nums flex-1">
-                  {argument.split(/\s+/).filter(Boolean).length} words · {argument.length} chars
-                  {argImages.length > 0 && <span className="ml-2">· {argImages.length} image{argImages.length === 1 ? '' : 's'}</span>}
+                <p className="text-[10px] text-blue-300/55 tabular-nums flex-1">
+                  {argument.length} chars
+                  {argImages.length > 0 && <span className="ml-1.5">· {argImages.length} image{argImages.length === 1 ? '' : 's'}</span>}
                 </p>
                 <button
                   onClick={handleSubmitMove}
                   disabled={submittingMove || (argument.trim().length < 20 && argImages.length === 0)}
                   className="px-4 py-1.5 rounded-md bg-gradient-to-b from-blue-500 to-blue-600 text-white text-xs font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_12px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none inline-flex items-center gap-1 transition-all"
                 >
-                  {submittingMove ? <><InlineProgress active /> Grading…</> : <>Send turn</>}
+                  {submittingMove ? <><InlineProgress active /> Grading…</> : <><Zap size={12} /> Send</>}
                 </button>
               </div>
             </>
           )}
         </div>
 
-        {error && <p className="mx-3 mb-2 text-xs text-gray-600 dark:text-gray-300 bg-white/[0.08] dark:bg-white/[0.04] border border-white/20 dark:border-white/[0.07] rounded-lg px-3 py-1.5">{error}</p>}
+        {error && <p className="mx-3 mb-2 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/25 rounded-lg px-3 py-1.5">{error}</p>}
 
-        {/* Confirm-leave modal — guards against accidental clicks since
-            leaving notifies the opponent and forfeits the match. */}
         {confirmLeave && (
           <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/55 backdrop-blur-sm p-6">
-            <div className="w-full max-w-sm rounded-2xl border border-rose-500/30 bg-gradient-to-b from-[#0b1220] to-[#0e1426] shadow-[0_18px_48px_rgba(0,0,0,0.55)] p-5">
-              <div className="flex items-start gap-3 mb-3">
-                <div className="w-9 h-9 rounded-xl bg-rose-500/15 border border-rose-500/35 flex items-center justify-center flex-shrink-0">
-                  <AlertCircle size={18} className="text-rose-300" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[14px] font-bold text-white">Leave this debate?</p>
-                  <p className="text-[11.5px] text-white/55 mt-0.5 leading-snug">
-                    Your opponent will be notified, and the match will end. Your current draft will not be submitted.
-                  </p>
-                </div>
+            <div className="w-full max-w-xs rounded-2xl border border-rose-500/30 bg-gradient-to-b from-[#0b1220] to-[#0e1426] shadow-[0_18px_48px_rgba(0,0,0,0.55)] p-5 text-center">
+              <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-rose-500/15 border border-rose-500/35 flex items-center justify-center">
+                <AlertCircle size={22} className="text-rose-300" />
               </div>
-              <div className="flex gap-2 mt-4">
+              <p className="text-[14px] font-bold text-white mb-1">Leave debate?</p>
+              <p className="text-[11.5px] text-white/55 mb-4">Your opponent will be notified.</p>
+              <div className="flex gap-2">
                 <button
                   onClick={() => setConfirmLeave(false)}
                   disabled={leaving}
@@ -1105,34 +2186,26 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
                   className="flex-1 py-2 rounded-lg text-[12px] font-semibold text-white bg-gradient-to-b from-rose-500 to-rose-600 border border-rose-400/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_12px_rgba(244,63,94,0.30)] hover:from-rose-400 hover:to-rose-500 disabled:opacity-50 transition-all inline-flex items-center justify-center gap-1.5"
                 >
                   {leaving ? <InlineProgress active /> : <X size={12} />}
-                  Leave debate
+                  Leave
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* Opponent-left notification — shown when the other player calls
-            /leave and the server broadcasts a player_left SSE event. */}
         {opponentLeft && (
           <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/55 backdrop-blur-sm p-6">
-            <div className="w-full max-w-sm rounded-2xl border border-blue-500/30 bg-gradient-to-b from-[#0b1220] to-[#0e1426] shadow-[0_18px_48px_rgba(0,0,0,0.55)] p-5">
-              <div className="flex items-start gap-3 mb-3">
-                <div className="w-9 h-9 rounded-xl bg-blue-500/15 border border-blue-400/35 flex items-center justify-center flex-shrink-0">
-                  <Users size={18} className="text-blue-200" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[14px] font-bold text-white">{opponentLeft.name} left the debate</p>
-                  <p className="text-[11.5px] text-white/55 mt-0.5 leading-snug">
-                    The match has been abandoned by your opponent. Your scores so far are preserved — you can exit when ready.
-                  </p>
-                </div>
+            <div className="w-full max-w-xs rounded-2xl border border-blue-500/30 bg-gradient-to-b from-[#0b1220] to-[#0e1426] shadow-[0_18px_48px_rgba(0,0,0,0.55)] p-5 text-center">
+              <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-blue-500/15 border border-blue-400/35 flex items-center justify-center">
+                <Users size={22} className="text-blue-200" />
               </div>
+              <p className="text-[14px] font-bold text-white mb-0.5">{opponentLeft.name} left</p>
+              <p className="text-[11.5px] text-white/55 mb-4">The match has ended.</p>
               <button
                 onClick={() => { setOpponentLeft(null); onExit(); }}
-                className="w-full mt-4 py-2 rounded-lg text-[12px] font-semibold text-white bg-gradient-to-b from-blue-500 to-blue-600 border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_12px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 transition-all"
+                className="w-full py-2 rounded-lg text-[12px] font-semibold text-white bg-gradient-to-b from-blue-500 to-blue-600 border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_12px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 transition-all inline-flex items-center justify-center gap-1.5"
               >
-                Exit to menu
+                <ArrowLeft size={13} /> Back to menu
               </button>
             </div>
           </div>
@@ -1152,10 +2225,10 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
         <div className="rounded-2xl p-5 mb-4 text-center bg-blue-500/10 border border-blue-500/30">
           <Trophy size={32} className="mx-auto mb-2 text-blue-300" />
           <p className="text-2xl font-black uppercase tracking-wider text-gray-900 dark:text-white">
-            {tie ? 'Tie' : v.winner === 'for' ? 'FOR side wins' : 'AGAINST side wins'}
+            {tie ? 'Tie' : v.winner === 'for' ? 'FOR' : 'AGAINST'}
           </p>
           <p className="text-xs text-blue-300/80 mt-1.5 tabular-nums">
-            {match.players.map(p => `${p.name} (${p.side?.toUpperCase()}): ${match.scores[p.userId] || 0}`).join(' · ')}
+            {match.players.map(p => `${p.side?.toUpperCase()} ${match.scores[p.userId] || 0}`).join(' · ')}
           </p>
         </div>
         <div className="bg-white/[0.04] border border-blue-500/20 rounded-xl p-4 mb-3">
@@ -1164,18 +2237,18 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
         </div>
         {v.forStrongest && (
           <div className="bg-white/[0.04] border border-blue-500/20 rounded-xl p-3 mb-2">
-            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/80 mb-1">FOR's strongest moment</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/80 mb-1">★ FOR's best</p>
             <p className="text-xs text-gray-800 dark:text-gray-100 leading-relaxed">{v.forStrongest}</p>
           </div>
         )}
         {v.againstStrongest && (
           <div className="bg-white/[0.04] border border-blue-500/20 rounded-xl p-3 mb-4">
-            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/80 mb-1">AGAINST's strongest moment</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/80 mb-1">★ AGAINST's best</p>
             <p className="text-xs text-gray-800 dark:text-gray-100 leading-relaxed">{v.againstStrongest}</p>
           </div>
         )}
-        <button onClick={onExit} className="w-full py-2.5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 transition-all">
-          Back to Debate menu
+        <button onClick={onExit} className="w-full py-2.5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 transition-all inline-flex items-center justify-center gap-2">
+          <ArrowLeft size={14} /> {tournamentCode ? 'Back to bracket' : 'Back to menu'}
         </button>
       </div>
     );
@@ -1183,9 +2256,8 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false }) {
 
   // Fallback
   return (
-    <div className="p-6 text-center text-sm text-gray-500">
-      <AlertCircle size={20} className="mx-auto mb-2 text-gray-400" />
-      Loading…
+    <div className="p-6 text-center">
+      <AlertCircle size={20} className="mx-auto text-blue-300/40" />
     </div>
   );
 }

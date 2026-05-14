@@ -35,45 +35,36 @@ function ProfileSetup({ onDone }) {
   }
 
   return (
-    <div className="flex flex-col items-center justify-center h-full p-6 gap-5">
+    <div className="flex flex-col items-center justify-center h-full p-6 gap-4">
       <div className="w-14 h-14 rounded-2xl bg-gradient-to-b from-blue-500/25 to-blue-600/15 border border-blue-400/35 flex items-center justify-center shadow-[0_4px_18px_rgba(59,130,246,0.20)]">
         <Users size={22} className="text-blue-200" />
       </div>
-      <div className="text-center">
-        <h2 className="text-[17px] font-bold text-white/90 mb-1">Set Up Your Profile</h2>
-        <p className="text-[13px] text-white/40 max-w-xs">Choose a handle and display name to connect with others.</p>
-      </div>
+      <h2 className="text-[15px] font-bold text-white/90">Your profile</h2>
       {error && <p className="text-[12px] text-rose-400 px-4 py-2 rounded-xl bg-rose-500/10 border border-rose-500/20">{error}</p>}
       <form onSubmit={handleSubmit} className="w-full max-w-xs flex flex-col gap-3">
-        <div>
-          <label className="block text-[10px] font-black uppercase tracking-[0.18em] text-blue-400/70 mb-2">Handle</label>
-          <div className="flex items-center gap-1 px-3.5 py-2.5 rounded-xl border border-blue-500/15 bg-blue-500/[0.04] focus-within:border-blue-500/45 focus-within:bg-blue-500/[0.08] focus-within:ring-2 focus-within:ring-blue-500/20 transition-colors">
-            <span className="text-[13px] text-blue-300/60">@</span>
-            <input
-              value={handle}
-              onChange={e => setHandle(e.target.value.replace(/[^a-zA-Z0-9_]/g, ''))}
-              placeholder="yourhandle"
-              className="flex-1 bg-transparent text-[13px] text-white/85 placeholder:text-white/30 outline-none"
-              maxLength={20}
-            />
-          </div>
-        </div>
-        <div>
-          <label className="block text-[10px] font-black uppercase tracking-[0.18em] text-blue-400/70 mb-2">Display Name</label>
+        <div className="flex items-center gap-1 px-3.5 py-2.5 rounded-xl border border-blue-500/15 bg-blue-500/[0.04] focus-within:border-blue-500/45 focus-within:bg-blue-500/[0.08] focus-within:ring-2 focus-within:ring-blue-500/20 transition-colors">
+          <span className="text-[13px] text-blue-300/60">@</span>
           <input
-            value={displayName}
-            onChange={e => setDisplayName(e.target.value)}
-            placeholder="Your Name"
-            className="w-full px-3.5 py-2.5 rounded-xl border border-blue-500/15 bg-blue-500/[0.04] text-[13px] text-white/85 placeholder:text-white/30 focus:outline-none focus:border-blue-500/45 focus:bg-blue-500/[0.08] focus:ring-2 focus:ring-blue-500/20 transition-colors"
+            value={handle}
+            onChange={e => setHandle(e.target.value.replace(/[^a-zA-Z0-9_]/g, ''))}
+            placeholder="handle"
+            className="flex-1 bg-transparent text-[13px] text-white/85 placeholder:text-white/30 outline-none"
+            maxLength={20}
           />
         </div>
+        <input
+          value={displayName}
+          onChange={e => setDisplayName(e.target.value)}
+          placeholder="Display name"
+          className="w-full px-3.5 py-2.5 rounded-xl border border-blue-500/15 bg-blue-500/[0.04] text-[13px] text-white/85 placeholder:text-white/30 focus:outline-none focus:border-blue-500/45 focus:bg-blue-500/[0.08] focus:ring-2 focus:ring-blue-500/20 transition-colors"
+        />
         <button
           type="submit"
           disabled={saving || !handle.trim() || !displayName.trim()}
-          className="w-full py-2.5 rounded-2xl font-bold text-[13px] text-white bg-gradient-to-b from-blue-500 to-blue-600 border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none transition-all flex items-center justify-center gap-2"
+          className="w-full py-2.5 rounded-2xl font-bold text-[13px] text-white bg-gradient-to-b from-blue-500 to-blue-600 border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none transition-all flex items-center justify-center gap-1.5"
         >
-          {saving && <Loader2 size={13} className="animate-spin" />}
-          Save Profile
+          {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={14} />}
+          Save
         </button>
       </form>
     </div>
@@ -102,7 +93,12 @@ function ChatView({ messages, profiles, myId, onSend, title, onBack }) {
         <span className="text-[14px] font-semibold text-white/85 truncate">{title}</span>
       </div>
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
-        {messages.length === 0 && <p className="text-[12px] text-white/30 text-center py-8">No messages yet</p>}
+        {messages.length === 0 && (
+          <div className="flex flex-col items-center gap-2 py-8 text-blue-300/40">
+            <MessageCircle size={20} />
+            <p className="text-[12px]">No messages yet</p>
+          </div>
+        )}
         {messages.map(msg => {
           const isMine = msg.from === myId;
           const sender = profiles?.[msg.from];
@@ -263,11 +259,18 @@ export default function SocialApp() {
     return (
       <div className="flex flex-col h-full">
         <div className="flex items-center gap-2 px-4 py-3 border-b border-blue-500/[0.12] flex-shrink-0">
-          <button onClick={() => setView('home')} className="text-blue-300/60 hover:text-blue-200 transition-colors"><ArrowLeft size={15} /></button>
-          <span className="text-[14px] font-semibold text-white/85">Friends ({friends.length})</span>
+          <button onClick={() => setView('home')} title="Back" className="text-blue-300/60 hover:text-blue-200 transition-colors"><ArrowLeft size={15} /></button>
+          <Users size={14} className="text-blue-300" />
+          <span className="text-[14px] font-semibold text-white/85">Friends</span>
+          <span className="text-[11px] text-blue-300/55 tabular-nums">· {friends.length}</span>
         </div>
         <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-1">
-          {friends.length === 0 && <p className="text-[12px] text-white/30 text-center py-8">No friends yet. Search to add people.</p>}
+          {friends.length === 0 && (
+            <div className="flex flex-col items-center gap-2 py-8 text-blue-300/40">
+              <Users size={20} />
+              <p className="text-[12px]">No friends yet</p>
+            </div>
+          )}
           {friends.map(f => (
             <div key={f.userId} className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-blue-500/[0.08] transition-colors">
               <Avatar name={f.displayName} />
@@ -288,11 +291,12 @@ export default function SocialApp() {
     return (
       <div className="flex flex-col h-full">
         <div className="flex items-center gap-2 px-4 py-3 border-b border-blue-500/[0.12] flex-shrink-0">
-          <button onClick={() => setView('home')} className="text-blue-300/60 hover:text-blue-200 transition-colors"><ArrowLeft size={15} /></button>
-          <span className="text-[14px] font-semibold text-white/85">Find People</span>
+          <button onClick={() => setView('home')} title="Back" className="text-blue-300/60 hover:text-blue-200 transition-colors"><ArrowLeft size={15} /></button>
+          <Search size={14} className="text-blue-300" />
+          <span className="text-[14px] font-semibold text-white/85">Find people</span>
         </div>
         <div className="px-3 py-2.5 flex gap-2">
-          <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSearch()} placeholder="Search by handle or name…" className={inputCls} />
+          <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSearch()} placeholder="@handle or name" className={inputCls} />
           <button onClick={handleSearch} disabled={searching} className="p-2.5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_12px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none transition-all">
             {searching ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
           </button>
@@ -309,23 +313,27 @@ export default function SocialApp() {
                   <p className="text-[10px] text-blue-300/50">@{u.handle}</p>
                 </div>
                 {(isFriend || s === 'accepted' || s === 'already_friends') ? (
-                  <span className="text-[10px] text-emerald-400 font-semibold">Friends</span>
+                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-400"><Check size={11} /> Friends</span>
                 ) : (s === 'sent' || s === 'already_sent') ? (
-                  <span className="text-[10px] text-blue-300/60 font-medium px-2 py-1">Requested</span>
+                  <span className="text-[10px] font-medium text-blue-300/60 px-1.5 py-1">Requested</span>
                 ) : (
                   <button
                     onClick={() => handleSendRequest(u.userId)}
                     disabled={s === 'pending'}
                     className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-blue-200 bg-blue-500/20 border border-blue-400/40 hover:bg-blue-500/30 hover:text-blue-100 disabled:opacity-50 transition-colors"
                   >
-                    <UserPlus size={11} /> {s === 'pending' ? 'Adding…' : 'Add'}
+                    {s === 'pending' ? <Loader2 size={11} className="animate-spin" /> : <UserPlus size={11} />}
+                    Add
                   </button>
                 )}
               </div>
             );
           })}
           {searchResults.length === 0 && searchQuery && !searching && (
-            <p className="text-[12px] text-white/30 text-center py-4">No results</p>
+            <div className="flex flex-col items-center gap-2 py-4 text-blue-300/40">
+              <Search size={16} />
+              <p className="text-[12px]">No results</p>
+            </div>
           )}
         </div>
       </div>
@@ -336,21 +344,19 @@ export default function SocialApp() {
     return (
       <div className="flex flex-col h-full">
         <div className="flex items-center gap-2 px-4 py-3 border-b border-blue-500/[0.12] flex-shrink-0">
-          <button onClick={() => setView('home')} className="text-blue-300/60 hover:text-blue-200 transition-colors"><ArrowLeft size={15} /></button>
-          <span className="text-[14px] font-semibold text-white/85">New Group</span>
+          <button onClick={() => setView('home')} title="Back" className="text-blue-300/60 hover:text-blue-200 transition-colors"><ArrowLeft size={15} /></button>
+          <Hash size={14} className="text-blue-300" />
+          <span className="text-[14px] font-semibold text-white/85">New group</span>
         </div>
         <div className="p-4 flex flex-col gap-4">
+          <input
+            value={newGroupName}
+            onChange={e => setNewGroupName(e.target.value)}
+            placeholder="Group name"
+            className="w-full px-3.5 py-2.5 rounded-xl border border-blue-500/15 bg-blue-500/[0.04] text-[13px] text-white/85 placeholder:text-white/30 focus:outline-none focus:border-blue-500/45 focus:bg-blue-500/[0.08] focus:ring-2 focus:ring-blue-500/20 transition-colors"
+          />
           <div>
-            <label className="block text-[10px] font-black uppercase tracking-[0.18em] text-blue-400/70 mb-2">Group Name</label>
-            <input
-              value={newGroupName}
-              onChange={e => setNewGroupName(e.target.value)}
-              placeholder="e.g., Study Group"
-              className="w-full px-3.5 py-2.5 rounded-xl border border-blue-500/15 bg-blue-500/[0.04] text-[13px] text-white/85 placeholder:text-white/30 focus:outline-none focus:border-blue-500/45 focus:bg-blue-500/[0.08] focus:ring-2 focus:ring-blue-500/20 transition-colors"
-            />
-          </div>
-          <div>
-            <label className="block text-[10px] font-black uppercase tracking-[0.18em] text-blue-400/70 mb-2">Add Friends</label>
+            <p className={sectionLabel}>Members</p>
             <div className="flex flex-col gap-1">
               {friends.map(f => {
                 const selected = newGroupMembers.includes(f.userId);
@@ -362,19 +368,21 @@ export default function SocialApp() {
                   >
                     <Avatar name={f.displayName} size={6} />
                     <span className="text-[13px] text-white/85 flex-1">{f.displayName}</span>
-                    {selected && <span className="text-[10px] text-blue-200 font-semibold">Added</span>}
+                    {selected && <Check size={13} className="text-blue-200" />}
                   </button>
                 );
               })}
-              {friends.length === 0 && <p className="text-[12px] text-white/30 py-2">Add friends first</p>}
+              {friends.length === 0 && (
+                <p className="text-[12px] text-blue-300/40 py-2">Add friends first</p>
+              )}
             </div>
           </div>
           <button
             onClick={handleCreateGroup}
             disabled={!newGroupName.trim()}
-            className="py-2.5 rounded-2xl font-bold text-[13px] text-white bg-gradient-to-b from-blue-500 to-blue-600 border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none transition-all"
+            className="py-2.5 rounded-2xl font-bold text-[13px] text-white bg-gradient-to-b from-blue-500 to-blue-600 border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none transition-all inline-flex items-center justify-center gap-1.5"
           >
-            Create Group
+            <Plus size={14} /> Create
           </button>
         </div>
       </div>
@@ -395,21 +403,21 @@ export default function SocialApp() {
 
       {/* Nav actions */}
       <div className="flex gap-2 px-4 py-2.5 border-b border-blue-500/[0.10] flex-shrink-0">
-        {[
-          { label: `Friends (${friends.length})`, icon: Users, action: () => setView('friends') },
-          { label: 'Add People', icon: UserPlus, action: () => setView('search') },
-          { label: 'New Group', icon: Plus, action: () => setView('newGroup') },
-        ].map(({ label, icon: Icon, action }) => (
-          <button key={label} onClick={action} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-blue-200 bg-blue-500/10 border border-blue-500/25 hover:bg-blue-500/20 hover:border-blue-500/45 hover:text-blue-100 transition-colors">
-            <Icon size={11} className="text-blue-300" /> {label}
-          </button>
-        ))}
+        <button onClick={() => setView('friends')} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-blue-200 bg-blue-500/10 border border-blue-500/25 hover:bg-blue-500/20 hover:border-blue-500/45 hover:text-blue-100 transition-colors">
+          <Users size={12} className="text-blue-300" /> Friends <span className="tabular-nums text-blue-300/70">{friends.length}</span>
+        </button>
+        <button onClick={() => setView('search')} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-blue-200 bg-blue-500/10 border border-blue-500/25 hover:bg-blue-500/20 hover:border-blue-500/45 hover:text-blue-100 transition-colors">
+          <UserPlus size={12} className="text-blue-300" /> Add
+        </button>
+        <button onClick={() => setView('newGroup')} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-blue-200 bg-blue-500/10 border border-blue-500/25 hover:bg-blue-500/20 hover:border-blue-500/45 hover:text-blue-100 transition-colors">
+          <Plus size={12} className="text-blue-300" /> Group
+        </button>
       </div>
 
       {/* Friend requests */}
       {friendRequests.length > 0 && (
         <div className="px-4 py-2.5 border-b border-blue-500/[0.10] flex-shrink-0">
-          <p className={sectionLabel}><Bell size={9} className="inline mr-1" />Requests ({friendRequests.length})</p>
+          <p className={sectionLabel}><Bell size={9} className="inline mr-1" />Requests · {friendRequests.length}</p>
           {friendRequests.map(r => (
             <div key={r.id} className="flex items-center gap-3 px-2 py-1.5 rounded-xl">
               <Avatar name={r.fromProfile?.displayName} size={7} />
@@ -435,7 +443,10 @@ export default function SocialApp() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-[13px] font-medium text-white/85 truncate">{g.name}</p>
-                  <p className="text-[10px] text-blue-300/50">{g.memberCount} members{g.lastMessage ? ` · ${g.lastMessage.content?.slice(0, 25)}` : ''}</p>
+                  <p className="text-[10px] text-blue-300/50 inline-flex items-center gap-1">
+                    <Users size={9} />{g.memberCount}
+                    {g.lastMessage ? <span className="text-white/40">· {g.lastMessage.content?.slice(0, 25)}</span> : null}
+                  </p>
                 </div>
               </button>
             ))}
@@ -445,7 +456,10 @@ export default function SocialApp() {
         <div className="px-4 pt-3 pb-3">
           <p className={sectionLabel}>Messages</p>
           {conversations.length === 0 && friends.length === 0 && (
-            <p className="text-[12px] text-blue-300/40 py-4 text-center">Search for people to start chatting!</p>
+            <div className="flex flex-col items-center gap-2 py-6 text-blue-300/40">
+              <Search size={18} />
+              <p className="text-[12px]">Find someone to chat</p>
+            </div>
           )}
           {conversations.map(c => (
             <button key={c.peerId} onClick={() => openDM(c.peer)} className={rowHover}>
@@ -462,8 +476,9 @@ export default function SocialApp() {
               <Avatar name={f.displayName} />
               <div className="flex-1 min-w-0">
                 <p className="text-[13px] text-white/65 truncate">{f.displayName}</p>
-                <p className="text-[10px] text-blue-300/40">Start a conversation</p>
+                <p className="text-[10px] text-blue-300/40">Say hi</p>
               </div>
+              <MessageCircle size={12} className="text-blue-300/40" />
             </button>
           ))}
         </div>

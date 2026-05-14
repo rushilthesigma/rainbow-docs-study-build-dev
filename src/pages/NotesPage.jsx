@@ -39,27 +39,26 @@ export default function NotesPage() {
           <h1 className="text-[20px] font-bold text-white/90">Notes</h1>
           <p className="text-[13px] text-white/35">{notes.length} note{notes.length !== 1 ? 's' : ''}</p>
         </div>
-        <Button onClick={() => setShowCreate(true)} size="sm"><Plus size={16} /> New Note</Button>
+        <Button onClick={() => setShowCreate(true)} size="sm"><Plus size={16} /> New</Button>
       </div>
 
-      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="New Note">
-        <p className="text-[13px] text-white/45 mb-4">Choose a note type:</p>
+      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="New note">
         <div className="grid grid-cols-2 gap-3">
           <button
             onClick={() => handleCreate('regular')}
             className="flex flex-col items-center gap-2 p-5 rounded-xl border border-white/[0.08] bg-white/[0.04] hover:border-white/[0.18] hover:bg-white/[0.08] transition-colors text-center"
           >
             <FileText size={22} className="text-white/40" />
-            <span className="text-[13px] font-semibold text-white/80">Regular Note</span>
-            <span className="text-[11px] text-white/35">Freeform writing</span>
+            <span className="text-[13px] font-semibold text-white/80">Regular</span>
+            <span className="text-[11px] text-white/35">Freeform</span>
           </button>
           <button
             onClick={() => handleCreate('cornell')}
             className="flex flex-col items-center gap-2 p-5 rounded-xl border border-white/[0.08] bg-white/[0.04] hover:border-white/[0.18] hover:bg-white/[0.08] transition-colors text-center"
           >
             <Layout size={22} className="text-white/40" />
-            <span className="text-[13px] font-semibold text-white/80">Cornell Note</span>
-            <span className="text-[11px] text-white/35">Cues, notes, summary</span>
+            <span className="text-[13px] font-semibold text-white/80">Cornell</span>
+            <span className="text-[11px] text-white/35">Cues + summary</span>
           </button>
         </div>
       </Modal>
@@ -68,7 +67,7 @@ export default function NotesPage() {
         <div className="rounded-xl border border-white/[0.07] bg-white/[0.03] p-12 text-center">
           <FileText size={26} className="text-white/20 mx-auto mb-3" />
           <p className="text-[13px] text-white/35 mb-4">No notes yet</p>
-          <Button onClick={() => setShowCreate(true)} size="sm"><Plus size={16} /> Create Note</Button>
+          <Button onClick={() => setShowCreate(true)} size="sm"><Plus size={16} /> New note</Button>
         </div>
       ) : (
         <div className="flex flex-col gap-2">

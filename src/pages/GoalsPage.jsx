@@ -97,27 +97,23 @@ export default function GoalsPage() {
         </div>
         <div className="flex items-center gap-2">
           <Button onClick={() => setShowAI(true)} size="sm" variant="ghost">
-            <Wand2 size={14} /> Generate with AI
+            <Wand2 size={14} /> AI
           </Button>
           <Button onClick={() => setShowForm(!showForm)} size="sm">
-            <Plus size={16} /> New Goal
+            <Plus size={16} /> New
           </Button>
         </div>
       </div>
 
-      <Modal open={showAI} onClose={() => { setShowAI(false); setAiError(null); }} title="Generate goal with AI">
+      <Modal open={showAI} onClose={() => { setShowAI(false); setAiError(null); }} title="Goal from AI">
         <div className="space-y-3">
-          <div>
-            <label className="text-[12px] font-medium text-white/40 mb-1.5 block">What do you want to accomplish?</label>
-            <textarea
-              value={aiPrompt}
-              onChange={e => setAiPrompt(e.target.value)}
-              rows={3}
-              placeholder="e.g., Get better at calculus before finals in 6 weeks. Focus on integrals and series."
-              className={inputCls}
-            />
-          </div>
-          <p className="text-[11px] text-white/30">AI will draft a title + description. Milestones are then generated automatically.</p>
+          <textarea
+            value={aiPrompt}
+            onChange={e => setAiPrompt(e.target.value)}
+            rows={3}
+            placeholder="What do you want to accomplish?"
+            className={inputCls}
+          />
           {aiError && <p className="text-[12px] text-rose-400">{aiError}</p>}
           <div className="flex gap-2 justify-end">
             <Button size="sm" variant="ghost" onClick={() => { setShowAI(false); setAiError(null); }}>Cancel</Button>
@@ -130,21 +126,21 @@ export default function GoalsPage() {
 
       {showForm && (
         <form onSubmit={handleCreate} className={`${card} p-5 mb-4 space-y-3`}>
-          <Input label="What's your goal?" placeholder="e.g., Master Linear Algebra" value={title} onChange={e => setTitle(e.target.value)} required />
-          <Input label="Description (optional)" placeholder="Add context..." value={description} onChange={e => setDescription(e.target.value)} />
+          <Input label="Goal" placeholder="e.g., Master Linear Algebra" value={title} onChange={e => setTitle(e.target.value)} required />
+          <Input label="Notes (optional)" placeholder="Context…" value={description} onChange={e => setDescription(e.target.value)} />
           <div className="flex gap-2">
-            <Button type="submit" loading={creating} size="sm"><Plus size={14} /> Create Goal</Button>
+            <Button type="submit" loading={creating} size="sm"><Plus size={14} /> Create</Button>
             <Button type="button" variant="ghost" size="sm" onClick={() => setShowForm(false)}>Cancel</Button>
           </div>
-          {creating && <p className="text-[12px] text-white/35">AI is generating milestones...</p>}
+          {creating && <p className="text-[12px] text-white/35">Generating milestones…</p>}
         </form>
       )}
 
       {goals.length === 0 && !showForm ? (
         <div className={`${card} p-12 text-center`}>
           <Target size={28} className="text-white/20 mx-auto mb-3" />
-          <p className="text-[13px] text-white/35 mb-4">No goals yet. Set a learning goal to track your progress.</p>
-          <Button onClick={() => setShowForm(true)}><Plus size={16} /> Create Goal</Button>
+          <p className="text-[13px] text-white/35 mb-4">No goals yet</p>
+          <Button onClick={() => setShowForm(true)}><Plus size={16} /> New goal</Button>
         </div>
       ) : (
         <div className="space-y-3">

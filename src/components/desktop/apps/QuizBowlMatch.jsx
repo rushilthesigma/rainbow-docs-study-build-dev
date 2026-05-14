@@ -61,6 +61,7 @@ export default function QuizBowlMatch({ user, onExit }) {
   const [revealSpeedMs, setRevealSpeedMs] = useState(140);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [copied, setCopied] = useState(false);
   const [match, setMatch] = useState(null);
 
   const [question, setQuestion] = useState(null);
@@ -207,42 +208,45 @@ export default function QuizBowlMatch({ user, onExit }) {
   if (view === 'menu') {
     return (
       <div className="h-full overflow-y-auto bg-transparent">
-        <div className="p-5 space-y-4">
-          {/* Back */}
-          <button onClick={onExit}
-            className="flex items-center gap-1.5 text-[12px] text-white/35 hover:text-white/60 transition-colors">
-            <ArrowLeft size={13} /> Back
+        <div className="p-6 md:p-10 max-w-md md:max-w-2xl mx-auto">
+          <button onClick={onExit} className="text-xs text-blue-300/60 hover:text-blue-200 mb-3 inline-flex items-center gap-1 transition-colors">
+            <ArrowLeft size={12} /> Back
+          </button>
+          <h2 className="text-base font-bold text-gray-900 dark:text-white mb-3">Match</h2>
+
+          <button
+            onClick={handleCreate}
+            disabled={busy}
+            className="w-full py-3 mb-4 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none flex items-center justify-center gap-2 transition-all"
+          >
+            {busy ? <InlineProgress active /> : <Zap size={14} />}
+            Create new
           </button>
 
-          {error && <p className="text-[11px] text-rose-400 px-3 py-2 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-center">{error}</p>}
-
-          <button onClick={handleCreate} disabled={busy}
-            className="w-full py-3 rounded-2xl border border-white/[0.08] bg-white/[0.04] hover:bg-white/[0.07] text-white/70 hover:text-white/90 text-[13px] font-semibold disabled:opacity-40 inline-flex items-center justify-center gap-2 transition-colors backdrop-blur-sm">
-            {busy ? <><InlineProgress active /> Creating…</> : <><Play size={13} /> Create invite code</>}
-          </button>
-
-          <div className="flex items-center gap-3">
-            <div className="flex-1 h-px bg-white/[0.04]" />
-            <span className="text-[10px] text-white/20 uppercase tracking-wider">or</span>
-            <div className="flex-1 h-px bg-white/[0.04]" />
+          <div className="flex items-center gap-2 my-3">
+            <div className="flex-1 border-t border-blue-500/20" />
+            <span className="text-[10px] uppercase tracking-wider text-blue-400/70">or join</span>
+            <div className="flex-1 border-t border-blue-500/20" />
           </div>
 
-          <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] backdrop-blur-sm p-4 space-y-3">
-            <div className="flex gap-2">
-              <input
-                value={joinCodeInput}
-                onChange={e => setJoinCodeInput(e.target.value.toUpperCase())}
-                placeholder="6-LETTER CODE"
-                maxLength={6}
-                onKeyDown={e => e.key === 'Enter' && handleJoin()}
-                className="flex-1 px-3 py-2.5 rounded-2xl border border-white/[0.06] bg-white/[0.03] text-[13px] font-mono tracking-[0.2em] text-center text-white/80 placeholder-white/20 outline-none focus:border-white/15 transition-colors"
-              />
-              <button onClick={handleJoin} disabled={!joinCodeInput.trim() || busy}
-                className="px-4 py-2.5 rounded-2xl border border-white/[0.08] bg-white/[0.05] hover:bg-white/[0.09] text-white/60 hover:text-white/80 text-[13px] font-semibold disabled:opacity-30 transition-colors backdrop-blur-sm">
-                Join
-              </button>
-            </div>
+          <div className="flex gap-2">
+            <input
+              value={joinCodeInput}
+              onChange={e => setJoinCodeInput(e.target.value.toUpperCase().slice(0, 6))}
+              onKeyDown={e => { if (e.key === 'Enter') handleJoin(); }}
+              placeholder="CODE"
+              className="flex-1 px-3 py-2.5 rounded-xl border border-blue-500/30 bg-white/50 dark:bg-white/[0.06] text-sm font-mono uppercase tracking-widest text-gray-900 dark:text-white placeholder-gray-400 outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/60"
+            />
+            <button
+              onClick={handleJoin}
+              disabled={busy || joinCodeInput.trim().length < 4}
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none transition-all"
+            >
+              Join
+            </button>
           </div>
+
+          {error && <p className="mt-3 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/25 rounded-lg px-3 py-2">{error}</p>}
         </div>
       </div>
     );
@@ -252,102 +256,106 @@ export default function QuizBowlMatch({ user, onExit }) {
   if (view === 'lobby') {
     const playerCount = match?.players?.length || 0;
     const waiting = playerCount < 2;
+    function copyCode() {
+      if (!code) return;
+      try { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
+    }
     return (
       <div className="h-full overflow-y-auto bg-transparent">
-        <div className="p-5 space-y-3">
-          {/* Back */}
-          <button onClick={handleLeave}
-            className="flex items-center gap-1.5 text-[12px] text-white/35 hover:text-white/60 transition-colors">
-            <ArrowLeft size={13} /> Back
+        <div className="p-6 md:p-10 max-w-md md:max-w-2xl mx-auto">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-blue-400/70 mb-1.5">Match code</p>
+          <button
+            onClick={copyCode}
+            title="Copy"
+            className="w-full font-mono text-3xl font-black tabular-nums tracking-[0.2em] text-gray-900 dark:text-white bg-white/[0.10] dark:bg-white/[0.06] border border-blue-500/40 dark:border-blue-500/30 rounded-xl py-4 mb-3 hover:border-blue-500/60 hover:bg-white/[0.18] dark:hover:bg-white/[0.10] transition-colors inline-flex items-center justify-center gap-3"
+          >
+            {code}
+            {copied ? <Check size={18} className="text-blue-400" /> : <Copy size={16} className="text-blue-400/70" />}
           </button>
-
-          <p className="text-[13px] font-semibold text-white/60 text-center">
-            {waiting ? 'Waiting for opponent…' : isHost ? 'Configure match' : 'Waiting for host'}
+          <p className="text-[11px] text-blue-300/50 text-center mb-5">
+            {waiting ? 'Share with your opponent' : 'Opponent joined'}
           </p>
 
-          {error && <p className="text-[11px] text-rose-400 px-3 py-2 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-center">{error}</p>}
-
-          {/* Invite code */}
-          <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] backdrop-blur-sm p-4 text-center">
-            <div className="flex items-center justify-center gap-2">
-              <p className="text-[28px] font-mono font-bold tracking-[0.3em] text-white/70">{code}</p>
-              <button onClick={() => navigator.clipboard.writeText(code)}
-                className="p-1.5 rounded-xl text-white/25 hover:text-white/50 hover:bg-white/[0.05] transition-colors" title="Copy">
-                <Copy size={13} />
-              </button>
-            </div>
-            <p className="text-[10px] text-white/25 mt-1">
-              {waiting ? 'Share with a friend' : 'Opponent joined'}
-            </p>
-          </div>
-
-          {/* Players */}
-          <div className="space-y-1.5">
-            {(match?.players || []).map(p => (
-              <div key={p.userId} className="flex items-center gap-2 px-3 py-2 rounded-2xl border border-white/[0.05] bg-white/[0.02]">
-                <div className="w-6 h-6 rounded-full bg-white/[0.08] text-white/50 flex items-center justify-center text-[11px] font-bold">
-                  {(p.name || '?')[0]?.toUpperCase()}
+          <div className="bg-white/[0.07] dark:bg-white/[0.04] border border-blue-500/[0.12] rounded-xl p-3 mb-5">
+            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2">Players</p>
+            <div className="space-y-1.5">
+              {(match?.players || []).map(p => (
+                <div key={p.userId} className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full bg-blue-500/15 text-blue-300 flex items-center justify-center text-[10px] font-bold">
+                    {(p.name || '?')[0]?.toUpperCase()}
+                  </div>
+                  <span className="text-sm text-gray-800 dark:text-gray-200 flex-1 truncate">{p.name}</span>
+                  {p.userId === match?.hostId && <span title="Host" className="inline-flex items-center gap-0.5 text-[9px] uppercase tracking-wider text-blue-400/80"><Trophy size={9} /> host</span>}
+                  {p.userId === myId && <span className="text-[9px] uppercase tracking-wider text-blue-300/55">you</span>}
                 </div>
-                <span className="text-[13px] font-medium text-white/70">{p.name}</span>
-                {p.userId === match?.hostId && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white/[0.06] text-white/30">HOST</span>}
-                {p.userId === myId && <span className="text-[9px] text-white/20 ml-auto">you</span>}
-              </div>
-            ))}
-            {waiting && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-2xl border border-dashed border-white/[0.06] text-[11px] text-white/25 italic">
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full rounded-full bg-white/30 animate-ping" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-white/25" />
-                </span>
-                Waiting for player 2…
-              </div>
-            )}
+              ))}
+              {waiting && (
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full bg-white/10 dark:bg-white/[0.06] flex items-center justify-center text-[10px] font-bold text-gray-400">?</div>
+                  <span className="text-[12px] text-blue-300/50 italic">Waiting…</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Settings — host only, both players present */}
           {!waiting && isHost && (
-            <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] backdrop-blur-sm p-4 space-y-3">
-              <MatchSelector label="Category" value={category} onChange={setCategory}
-                options={['Science','History','Literature','Geography','Math','Art','Music','Philosophy','Pop Culture','Mixed']} />
-              <MatchSelector label="Difficulty" value={difficulty} onChange={setDifficulty}
-                options={['Easy','Medium','Hard','Tournament']} grid="grid-cols-4" />
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] text-white/30 uppercase tracking-wider">Questions</span>
-                  <span className="text-[11px] font-mono text-white/35">{questionCount}</span>
-                </div>
-                <input type="range" min="5" max="20" step="5" value={questionCount}
-                  onChange={e => setQuestionCount(Number(e.target.value))} className="w-full" />
+            <>
+              <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2">Category</p>
+              <div className="mb-3">
+                <MatchSelector value={category} onChange={setCategory}
+                  options={['Science','History','Literature','Geography','Math','Art','Music','Philosophy','Pop Culture','Mixed']} />
               </div>
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] text-white/30 uppercase tracking-wider">Speed</span>
-                  <span className="text-[11px] font-mono text-white/35">{revealSpeedMs}ms</span>
-                </div>
-                <input type="range" min="60" max="300" step="10" value={revealSpeedMs}
-                  onChange={e => setRevealSpeedMs(Number(e.target.value))} className="w-full" />
+              <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2">Difficulty</p>
+              <div className="mb-3">
+                <MatchSelector value={difficulty} onChange={setDifficulty}
+                  options={['Easy','Medium','Hard','Tournament']} grid="grid-cols-4" />
               </div>
-            </div>
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                <div className="rounded-xl border border-blue-500/20 bg-blue-500/[0.04] p-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70">Questions</span>
+                    <span className="text-[11px] font-mono font-bold tabular-nums text-blue-100">{questionCount}</span>
+                  </div>
+                  <input type="range" min="5" max="20" step="5" value={questionCount}
+                    onChange={e => setQuestionCount(Number(e.target.value))} className="w-full accent-blue-500" />
+                </div>
+                <div className="rounded-xl border border-blue-500/20 bg-blue-500/[0.04] p-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70">Speed</span>
+                    <span className="text-[11px] font-mono font-bold tabular-nums text-blue-100">{revealSpeedMs}ms</span>
+                  </div>
+                  <input type="range" min="60" max="300" step="10" value={revealSpeedMs}
+                    onChange={e => setRevealSpeedMs(Number(e.target.value))} className="w-full accent-blue-500" />
+                </div>
+              </div>
+            </>
           )}
 
           {!waiting && !isHost && (
-            <div className="rounded-2xl border border-white/[0.05] bg-white/[0.02] p-3 text-center text-[11px] text-white/30">
-              Host is configuring. Questions coming soon…
-            </div>
+            <p className="text-xs text-blue-300/50 text-center italic py-4 mb-2">Waiting for the host to start…</p>
           )}
 
-          <div className="flex gap-2">
-            <button onClick={handleLeave}
-              className="flex-1 py-2.5 rounded-2xl border border-white/[0.06] bg-white/[0.02] text-[12px] font-medium text-white/40 hover:text-white/60 inline-flex items-center justify-center gap-1.5 transition-colors">
-              <LogOut size={12} /> Leave
+          {isHost && (
+            <button
+              onClick={handleStart}
+              disabled={waiting}
+              className="w-full py-3 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none flex items-center justify-center gap-2 transition-all"
+            >
+              <Play size={14} />
+              {waiting ? 'Waiting for opponent…' : 'Start'}
             </button>
-            {isHost && (
-              <button onClick={handleStart} disabled={waiting}
-                className="flex-1 py-2.5 rounded-2xl bg-white/[0.08] hover:bg-white/[0.12] backdrop-blur-sm disabled:opacity-30 text-white/65 text-[12px] font-semibold inline-flex items-center justify-center gap-1.5 transition-colors border border-white/[0.08]">
-                <Play size={12} /> Start
-              </button>
-            )}
-          </div>
+          )}
+
+          <button
+            onClick={handleLeave}
+            className="w-full mt-2 py-2 rounded-xl text-[12px] text-rose-300/80 hover:text-rose-200 transition-colors inline-flex items-center justify-center gap-1.5"
+          >
+            <LogOut size={12} /> Leave
+          </button>
+
+          {error && <p className="mt-3 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/25 rounded-lg px-3 py-2">{error}</p>}
         </div>
       </div>
     );
@@ -572,11 +580,11 @@ function AutoAdvanceCountdown({ deadline, isHost, onNext }) {
 function MatchSelector({ label, options, value, onChange, grid }) {
   return (
     <div>
-      <span className="text-[10px] text-white/30 uppercase tracking-wider block mb-1.5">{label}</span>
+      {label && <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 block mb-1.5">{label}</span>}
       <div className={grid ? `grid ${grid} gap-1.5` : 'flex flex-wrap gap-1.5'}>
         {options.map(o => (
           <button key={o} onClick={() => onChange(o)}
-            className={`px-2.5 py-1 rounded-xl text-[11px] font-semibold backdrop-blur-sm transition-colors ${value === o ? 'bg-white/[0.10] text-white/80 border border-white/[0.18] shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]' : 'bg-white/[0.04] border border-white/[0.04] text-white/35 hover:bg-white/[0.07] hover:text-white/55'}`}>
+            className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${value === o ? 'bg-blue-500/20 text-blue-100 border border-blue-500/50' : 'bg-blue-500/[0.06] border border-blue-500/20 text-blue-300/75 hover:bg-blue-500/15 hover:text-blue-200'}`}>
             {o}
           </button>
         ))}

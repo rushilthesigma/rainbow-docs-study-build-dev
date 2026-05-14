@@ -241,10 +241,7 @@ export default function SettingsPage() {
         <div className="w-11 h-11 rounded-2xl bg-white/[0.08] border border-white/[0.10] flex items-center justify-center text-white/55">
           <Settings size={20} />
         </div>
-        <div>
-          <h1 className="text-[20px] font-bold text-white/90 tracking-tight">Settings</h1>
-          <p className="text-[12px] text-white/35">Customize your learning experience</p>
-        </div>
+        <h1 className="text-[20px] font-bold text-white/90 tracking-tight">Settings</h1>
       </div>
 
       {/* Desktop / Interface */}
@@ -280,7 +277,7 @@ export default function SettingsPage() {
                 onChange={setTier}
               />
               <p className="text-[10px] text-white/25 mt-2 leading-relaxed">
-                All three tiers share the same 1M-token context. Pro is best for proofs; Flash is the balanced default; Flash Lite is fastest for short Q&amp;A.
+                All share 1M context. Pro for proofs, Flash for default, Flash Lite for short Q&amp;A.
               </p>
             </div>
           );
@@ -292,8 +289,8 @@ export default function SettingsPage() {
         <PillGroup label="Lesson Tempo" options={TEMPO_OPTIONS} value={prefs.lessonTempo} onChange={v => update('lessonTempo', v)} />
 
         <Textarea
-          label="Custom Instructions"
-          placeholder="e.g., Always relate concepts to real-world examples. I'm a visual learner..."
+          label="Custom instructions"
+          placeholder="How should the AI behave for you?"
           value={prefs.customInstructions || ''}
           onChange={e => update('customInstructions', e.target.value)}
           rows={3}
@@ -304,7 +301,7 @@ export default function SettingsPage() {
       <Section title="Slides">
         <Toggle
           label="Auto-generate slide images"
-          description="AI generates a background image for every slide after deck creation (~30s extra per deck)."
+          description="~30s extra per deck."
           checked={prefs.slideshowImageGen ?? true}
           onChange={v => update('slideshowImageGen', v)}
         />

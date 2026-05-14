@@ -289,29 +289,20 @@ export default function FlashcardsApp() {
     <div className="flex flex-col h-full min-h-0">
       {/* Header */}
       <div className="flex items-center justify-between mb-6 shrink-0">
-        <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/30 mb-1">Spaced Repetition</p>
-          <h1 className="text-[22px] font-black text-white/90 leading-tight">Flashcards</h1>
-        </div>
+        <h1 className="text-[22px] font-black text-white/90 leading-tight">Flashcards</h1>
         <button
           onClick={() => setShowForm(!showForm)}
           className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl font-bold text-[13px] text-white/85 bg-white/[0.10] border border-white/[0.18] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] hover:bg-white/[0.16] hover:text-white transition-colors"
         >
-          <Plus size={14} /> New Deck
+          <Plus size={14} /> New deck
         </button>
       </div>
 
       {/* Create form */}
       {showForm && (
         <form onSubmit={handleCreate} className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4 mb-4 flex flex-col gap-3 shrink-0">
-          <div>
-            <label className="block text-[10px] font-black uppercase tracking-[0.18em] text-white/35 mb-2">Topic <span className="normal-case font-normal tracking-normal text-white/20">(AI generates cards)</span></label>
-            <input className={inputCls} placeholder="e.g., Spanish vocabulary, photosynthesis…" value={topic} onChange={e => setTopic(e.target.value)} />
-          </div>
-          <div>
-            <label className="block text-[10px] font-black uppercase tracking-[0.18em] text-white/35 mb-2">Deck title <span className="normal-case font-normal tracking-normal text-white/20">(optional)</span></label>
-            <input className={inputCls} placeholder="Custom name…" value={deckTitle} onChange={e => setDeckTitle(e.target.value)} />
-          </div>
+          <input className={inputCls} placeholder="Topic — AI generates cards" value={topic} onChange={e => setTopic(e.target.value)} />
+          <input className={inputCls} placeholder="Deck title (optional)" value={deckTitle} onChange={e => setDeckTitle(e.target.value)} />
           <div className="flex gap-2">
             <button
               type="submit"
@@ -337,7 +328,7 @@ export default function FlashcardsApp() {
             onClick={() => setShowForm(true)}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-[12px] font-bold text-white/70 bg-white/[0.07] border border-white/[0.12] hover:bg-white/[0.12] transition-colors"
           >
-            <Plus size={12} /> Create Deck
+            <Plus size={12} /> New deck
           </button>
         </div>
       ) : (

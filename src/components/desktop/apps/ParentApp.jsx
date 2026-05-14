@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Users, ArrowLeft, Plus, BookOpen, X, Loader2 } from 'lucide-react';
+import { Users, ArrowLeft, ArrowRight, Plus, BookOpen, X, Loader2 } from 'lucide-react';
 import { getParentStatus, getStudent, assignCurriculum, unassignCurriculum, addStudyTopic, addStudent } from '../../../api/parent';
 import { listCurricula } from '../../../api/curriculum';
 import LoadingSpinner from '../../shared/LoadingSpinner';
@@ -190,28 +190,19 @@ export default function ParentApp() {
   return (
     <div className="flex flex-col gap-5">
       <div className="flex items-center justify-between">
-        <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/30 mb-1">Parent View</p>
-          <h1 className="text-[22px] font-black text-white/90 leading-tight">Students</h1>
-        </div>
+        <h1 className="text-[22px] font-black text-white/90 leading-tight">Students</h1>
         <button
           onClick={() => setAddingStudent(true)}
           className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl font-bold text-[13px] text-white/85 bg-white/[0.10] border border-white/[0.18] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] hover:bg-white/[0.16] hover:text-white transition-colors"
         >
-          <Plus size={14} /> Add Student
+          <Plus size={14} /> Add
         </button>
       </div>
 
       {addingStudent && (
         <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4 flex flex-col gap-3">
-          <div>
-            <label className="block text-[10px] font-black uppercase tracking-[0.18em] text-white/35 mb-2">Student Name</label>
-            <input className={inputCls} placeholder="Name" value={newStudentName} onChange={e => setNewStudentName(e.target.value)} />
-          </div>
-          <div>
-            <label className="block text-[10px] font-black uppercase tracking-[0.18em] text-white/35 mb-2">Parent PIN</label>
-            <input className={inputCls} type="password" placeholder="Enter PIN to confirm" value={pinForAdd} onChange={e => setPinForAdd(e.target.value)} />
-          </div>
+          <input className={inputCls} placeholder="Student name" value={newStudentName} onChange={e => setNewStudentName(e.target.value)} />
+          <input className={inputCls} type="password" placeholder="Parent PIN" value={pinForAdd} onChange={e => setPinForAdd(e.target.value)} />
           <div className="flex gap-2">
             <button
               onClick={handleAddStudent}
@@ -238,8 +229,8 @@ export default function ParentApp() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-[14px] font-semibold text-white/80 group-hover:text-white/90 truncate">{s.name}</p>
-              <p className="text-[11px] text-white/30">View profile and assignments</p>
             </div>
+            <ArrowRight size={13} className="text-white/25 flex-shrink-0 group-hover:text-white/45 transition-colors" />
           </button>
         ))}
       </div>

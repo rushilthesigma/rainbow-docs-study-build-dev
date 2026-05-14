@@ -323,14 +323,12 @@ export default function MathTutorApp({ seedTopic = null, onBack = null, defaultM
 
           {/* Topic */}
           <div>
-            <label className="text-[11px] font-medium text-[#555] uppercase tracking-widest block mb-2">
-              What do you need help on?
-            </label>
+            <label className="text-[11px] font-medium text-[#555] uppercase tracking-widest block mb-2">Topic</label>
             <input
               value={topic}
               onChange={e => setTopic(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && topic.trim() && startTutor()}
-              placeholder="e.g. Quadratic equations, Definite integrals, Long division"
+              placeholder="Quadratic equations, integrals, etc."
               className="w-full px-3 py-2.5 rounded-xl border border-white/10 bg-white/10 backdrop-blur-sm text-sm text-white outline-none focus:border-white/25 placeholder:text-white/25 transition-colors"
               autoFocus
             />
@@ -343,14 +341,14 @@ export default function MathTutorApp({ seedTopic = null, onBack = null, defaultM
               className="flex items-center gap-1.5 text-[11px] font-medium text-[#484848] hover:text-[#888] uppercase tracking-widest transition-colors"
             >
               <Settings size={11} />
-              {showSettings ? 'Hide' : 'Custom instructions (optional)'}
+              {showSettings ? 'Hide' : 'Custom instructions'}
             </button>
             {showSettings && (
               <textarea
                 value={customInstructions}
                 onChange={e => setCustomInstructions(e.target.value)}
                 rows={3}
-                placeholder="e.g. Prep me for AP Calc BC. Use real exam-style problems. Don't give me answers — only hints."
+                placeholder="How should the tutor teach you?"
                 className="mt-2 w-full px-3 py-2.5 rounded-xl border border-white/10 bg-white/10 backdrop-blur-sm text-sm text-white outline-none focus:border-white/25 resize-none placeholder:text-white/25 transition-colors"
               />
             )}
@@ -509,7 +507,7 @@ export default function MathTutorApp({ seedTopic = null, onBack = null, defaultM
                   value={input}
                   onChange={e => setInput(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(input); } }}
-                  placeholder={streaming ? 'Thinking…' : 'Message...'}
+                  placeholder={streaming ? 'Thinking…' : 'Ask…'}
                   disabled={streaming}
                   className="flex-1 bg-transparent border-none outline-none text-white text-[14px] placeholder:text-white/25"
                 />

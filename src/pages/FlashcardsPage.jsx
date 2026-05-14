@@ -47,26 +47,26 @@ export default function FlashcardsPage() {
             <p className="text-[13px] text-white/40">{decks.length} deck{decks.length !== 1 ? 's' : ''}</p>
           </div>
         </div>
-        <Button onClick={() => setShowForm(!showForm)} size="sm"><Plus size={16} /> New Deck</Button>
+        <Button onClick={() => setShowForm(!showForm)} size="sm"><Plus size={16} /> New</Button>
       </div>
 
       {showForm && (
         <form onSubmit={handleCreate} className={`${card} p-5 mb-4 space-y-3`}>
-          <Input label="Topic (AI will generate cards)" placeholder="e.g., Spanish vocabulary, Biology terms..." value={topic} onChange={e => setTopic(e.target.value)} />
-          <Input label="Deck title (optional)" placeholder="Custom name for the deck" value={deckTitle} onChange={e => setDeckTitle(e.target.value)} />
+          <Input label="Topic" placeholder="AI generates cards from this" value={topic} onChange={e => setTopic(e.target.value)} />
+          <Input label="Title (optional)" placeholder="Custom name" value={deckTitle} onChange={e => setDeckTitle(e.target.value)} />
           <div className="flex gap-2">
-            <Button type="submit" loading={creating} size="sm"><Plus size={14} /> {topic ? 'Generate Cards' : 'Create Empty Deck'}</Button>
+            <Button type="submit" loading={creating} size="sm"><Plus size={14} /> {topic ? 'Generate' : 'Create empty'}</Button>
             <Button type="button" variant="ghost" size="sm" onClick={() => setShowForm(false)}>Cancel</Button>
           </div>
-          {creating && <p className="text-[12px] text-white/35">AI is generating flashcards...</p>}
+          {creating && <p className="text-[12px] text-white/35">Generating…</p>}
         </form>
       )}
 
       {decks.length === 0 && !showForm ? (
         <div className={`${card} p-12 text-center`}>
           <Layers size={28} className="text-white/20 mx-auto mb-3" />
-          <p className="text-[13px] text-white/35 mb-4">No flashcard decks yet. Create one to start studying.</p>
-          <Button onClick={() => setShowForm(true)}><Plus size={16} /> Create Deck</Button>
+          <p className="text-[13px] text-white/35 mb-4">No decks yet</p>
+          <Button onClick={() => setShowForm(true)}><Plus size={16} /> New deck</Button>
         </div>
       ) : (
         <div className="space-y-2">

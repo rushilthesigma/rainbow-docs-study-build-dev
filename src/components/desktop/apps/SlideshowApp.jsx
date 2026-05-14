@@ -1157,9 +1157,9 @@ export default function SlideshowApp() {
                 <div className="flex items-center gap-2 mb-4">
                   <span className="text-[9px] font-bold tracking-widest uppercase text-white/55 bg-white/[0.08] border border-white/[0.14] px-2 py-0.5 rounded-full">Beta</span>
                 </div>
-                <h2 className="text-[17px] font-semibold text-white/90 leading-snug mb-2">Slideshows is in early beta</h2>
+                <h2 className="text-[17px] font-semibold text-white/90 leading-snug mb-2">Early beta</h2>
                 <p className="text-[13px] text-white/45 leading-relaxed">
-                  Expect bugs, missing features, and rough edges. Things may break or behave unexpectedly. We're actively improving it — thanks for testing.
+                  Expect bugs and rough edges. Thanks for testing.
                 </p>
               </div>
               <div className="px-6 pb-6">
@@ -3887,7 +3887,7 @@ function GenerateForm({ onBack, onCreate }) {
             <input
               value={topic} onChange={e => setTopic(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleGenerate()}
-              placeholder="e.g. The French Revolution, Photosynthesis, Q3 Sales Review…"
+              placeholder="Topic — e.g., French Revolution, Q3 Sales"
               disabled={loading} autoFocus
               className="w-full px-4 py-3 rounded-xl border border-white/[0.10] bg-white/[0.05] text-white/90 placeholder:text-white/20 text-[15px] outline-none focus:border-white/[0.25] focus:bg-white/[0.07] transition-all disabled:opacity-40"
             />
@@ -3974,7 +3974,7 @@ function GenerateForm({ onBack, onCreate }) {
             </label>
             <textarea
               value={customInfo} onChange={e => setCustomInfo(e.target.value)}
-              placeholder="Audience, key points to cover, things to avoid, tone, specific examples…"
+              placeholder="Audience, key points, tone, examples…"
               disabled={loading} rows={3}
               className="w-full px-3.5 py-2.5 rounded-xl border border-white/[0.09] bg-white/[0.04] text-white/88 placeholder:text-white/18 text-sm outline-none focus:border-white/[0.20] transition-colors disabled:opacity-40 resize-none leading-relaxed"
             />

@@ -7651,12 +7651,17 @@ function publicDebateState(match) {
     turnOf: match.turnOf,
     scores: match.scores,
     endVotes: Array.from(match.endVotes),
+    // Per-player ready check-ins. Host can only call /start when every
+    // current player is in this list.
+    readyUserIds: Array.from(match.readyUserIds || []),
     verdict: match.verdict || null,
     createdAt: match.createdAt,
     // Timed-mode metadata for client countdowns.
     timedMode: !!match.timedMode,
     turnLimitMs: match.turnLimitMs || 0,
     turnStartedAt: match.turnStartedAt || 0,
+    // Round cap (per side). 0 = infinite — match ends only on vote-end.
+    maxRounds: match.maxRounds || 0,
     // Live-typing state — only meaningful when timedMode is on. Both
     // players see the field; the active player ignores their own draft
     // for display purposes.
@@ -7699,6 +7704,8 @@ app.post('/api/debate/match', authMiddleware, (req, res) => {
       turnOf: null, // userId of player whose turn it is
       scores: { [req.userId]: 0 },
       endVotes: new Set(),
+      // Each player must check in before the host can start the match.
+      readyUserIds: new Set(),
       verdict: null,
       createdAt: Date.now(),
       lastActivity: Date.now(),
@@ -7758,6 +7765,22 @@ app.get('/api/debate/match/:code/stream', authMiddleware, (req, res) => {
   });
 });
 
+// POST /api/debate/match/:code/ready — toggle the caller's ready check-in.
+// Body: { ready: bool }. Defaults to true (set ready) when omitted.
+app.post('/api/debate/match/:code/ready', authMiddleware, (req, res) => {
+  const match = debateMatches.get(req.params.code);
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+  if (match.state !== 'waiting') return res.status(409).json({ error: 'Match already started' });
+  if (!match.players.some(p => p.userId === req.userId)) return res.status(403).json({ error: 'Not a player' });
+  if (!match.readyUserIds) match.readyUserIds = new Set();
+  const wantReady = req.body?.ready !== false;
+  if (wantReady) match.readyUserIds.add(req.userId);
+  else match.readyUserIds.delete(req.userId);
+  match.lastActivity = Date.now();
+  pushDebateEvent(match, 'ready_changed', { match: publicDebateState(match) });
+  res.json({ match: publicDebateState(match) });
+});
+
 // POST /api/debate/match/:code/start — host configures topic + sides.
 app.post('/api/debate/match/:code/start', authMiddleware, (req, res) => {
   const match = debateMatches.get(req.params.code);
@@ -7765,6 +7788,11 @@ app.post('/api/debate/match/:code/start', authMiddleware, (req, res) => {
   if (match.hostId !== req.userId) return res.status(403).json({ error: 'Only host can start' });
   if (match.players.length < 2) return res.status(409).json({ error: 'Waiting for opponent' });
   if (match.state !== 'waiting') return res.status(409).json({ error: 'Already started' });
+  // Every player must have checked in via /ready before the host can start.
+  if (!match.readyUserIds) match.readyUserIds = new Set();
+  if (match.players.some(p => !match.readyUserIds.has(p.userId))) {
+    return res.status(409).json({ error: 'Both players must ready up before starting' });
+  }
 
   const topic = String(req.body?.topic || '').trim();
   const hostSide = req.body?.hostSide === 'against' ? 'against' : 'for';
@@ -7781,6 +7809,9 @@ app.post('/api/debate/match/:code/start', authMiddleware, (req, res) => {
   // window get a 0-score turn and play continues.
   match.timedMode = !!req.body?.timedMode;
   match.turnLimitMs = match.timedMode ? 120_000 : 0;
+  // Round cap (per side). Clamp to [0, 20]; 0 = infinite.
+  const rawRounds = Number(req.body?.maxRounds);
+  match.maxRounds = Number.isFinite(rawRounds) && rawRounds > 0 ? Math.min(20, Math.floor(rawRounds)) : 0;
   match.turnStartedAt = Date.now();
   match.lastActivity = Date.now();
   pushDebateEvent(match, 'started', { match: publicDebateState(match) });
@@ -7835,6 +7866,10 @@ app.post('/api/debate/match/:code/move', authMiddleware, async (req, res) => {
     match.draftBy = null;
     match.lastActivity = Date.now();
     pushDebateEvent(match, 'turn_added', { turn, scores: match.scores, turnOf: match.turnOf, turnStartedAt: match.turnStartedAt });
+    // Auto-finalize if every player has now hit the per-side cap.
+    if (match.maxRounds > 0 && match.players.every(p => match.turns.filter(t => t.userId === p.userId).length >= match.maxRounds)) {
+      try { await finalizeDebateMatch(match); } catch (e) { console.error('Auto-finalize failed:', e); }
+    }
     return res.json({ turn, match: publicDebateState(match) });
   }
 
@@ -7940,6 +7975,10 @@ Return JSON exactly:
     match.draftBy = null;
     match.lastActivity = Date.now();
     pushDebateEvent(match, 'turn_added', { turn, scores: match.scores, turnOf: match.turnOf, turnStartedAt: match.turnStartedAt });
+    // Auto-finalize if every player has now hit the per-side cap.
+    if (match.maxRounds > 0 && match.players.every(p => match.turns.filter(t => t.userId === p.userId).length >= match.maxRounds)) {
+      try { await finalizeDebateMatch(match); } catch (e) { console.error('Auto-finalize failed:', e); }
+    }
     res.json({ turn, match: publicDebateState(match) });
   } catch (e) {
     console.error('Debate move grading failed:', e);
@@ -7972,25 +8011,26 @@ app.post('/api/debate/match/:code/draft', authMiddleware, (req, res) => {
 
 // POST /api/debate/match/:code/vote-end — vote to end. When both vote,
 // AI generates final verdict and the match flips to 'finished'.
-app.post('/api/debate/match/:code/vote-end', authMiddleware, async (req, res) => {
-  const match = debateMatches.get(req.params.code);
-  if (!match) return res.status(404).json({ error: 'Match not found' });
-  if (match.state !== 'playing') return res.status(409).json({ error: 'Match not in playing state' });
-  if (!match.players.some(p => p.userId === req.userId)) return res.status(403).json({ error: 'Not a player' });
+// Per-user debate history. Stored on the user record in users.json so
+// finished matches survive server restarts and show up under Debate ▸
+// History for each player.
+function recordDebateHistoryEntry(userId, entry) {
+  if (!userId) return;
+  const users = loadUsers();
+  const u = users[userId];
+  if (!u) return;
+  if (!Array.isArray(u.debateHistory)) u.debateHistory = [];
+  u.debateHistory.unshift(entry);
+  // Cap at 100 most-recent matches per user to keep users.json from
+  // growing unbounded with transcripts.
+  if (u.debateHistory.length > 100) u.debateHistory.length = 100;
+  saveUsers(users);
+}
 
-  match.endVotes.add(req.userId);
-  const allVoted = match.players.every(p => match.endVotes.has(p.userId));
-  match.lastActivity = Date.now();
-
-  if (!allVoted) {
-    pushDebateEvent(match, 'end_voted', {
-      userId: req.userId,
-      endVotes: Array.from(match.endVotes),
-    });
-    return res.json({ match: publicDebateState(match), finished: false });
-  }
-
-  // Both voted → AI generates final verdict.
+// Shared verdict-generation path. Used by /vote-end (both players agreed)
+// and by /move when a round cap is hit (auto-finalize). Mutates the match
+// in place — sets verdict + state='finished' and pushes the SSE event.
+async function finalizeDebateMatch(match) {
   const transcript = match.turns.map((t, i) =>
     `Turn ${i + 1} — ${t.side.toUpperCase()} (score ${t.score.total}/30): ${t.content.slice(0, 800)}`
   ).join('\n\n') || '(no turns played)';
@@ -8014,27 +8054,83 @@ Return JSON exactly:
   "forStrongest": "1 sentence — strongest moment from the FOR side",
   "againstStrongest": "1 sentence — strongest moment from the AGAINST side"
 }`;
-  try {
-    const aiResp = await callGemini(sys, [{ role: 'user', content: usr }], DEFAULT_MODEL, 1500, { jsonMode: true, temperature: 0.3 });
-    let verdict = {
-      winner: (match.scores[forPlayer.userId] || 0) >= (match.scores[againstPlayer.userId] || 0) ? 'for' : 'against',
-      summary: 'Both sides argued. Verdict generation failed; using raw scores as the tiebreak.',
-      forStrongest: '', againstStrongest: '',
-    };
-    if (aiResp.success) {
-      const parsed = parseAIJson(aiResp.data.content?.[0]?.text || '');
-      if (parsed && ['for', 'against', 'tie'].includes(parsed.winner)) {
-        verdict = {
-          winner: parsed.winner,
-          summary: String(parsed.summary || '').slice(0, 1200),
-          forStrongest: String(parsed.forStrongest || '').slice(0, 400),
-          againstStrongest: String(parsed.againstStrongest || '').slice(0, 400),
-        };
-      }
+
+  const aiResp = await callGemini(sys, [{ role: 'user', content: usr }], DEFAULT_MODEL, 1500, { jsonMode: true, temperature: 0.3 });
+  let verdict = {
+    winner: (match.scores[forPlayer.userId] || 0) >= (match.scores[againstPlayer.userId] || 0) ? 'for' : 'against',
+    summary: 'Verdict generation failed; using raw scores as the tiebreak.',
+    forStrongest: '', againstStrongest: '',
+  };
+  if (aiResp.success) {
+    const parsed = parseAIJson(aiResp.data.content?.[0]?.text || '');
+    if (parsed && ['for', 'against', 'tie'].includes(parsed.winner)) {
+      verdict = {
+        winner: parsed.winner,
+        summary: String(parsed.summary || '').slice(0, 1200),
+        forStrongest: String(parsed.forStrongest || '').slice(0, 400),
+        againstStrongest: String(parsed.againstStrongest || '').slice(0, 400),
+      };
     }
-    match.verdict = verdict;
-    match.state = 'finished';
-    pushDebateEvent(match, 'finished', { match: publicDebateState(match) });
+  }
+  match.verdict = verdict;
+  match.state = 'finished';
+  pushDebateEvent(match, 'finished', { match: publicDebateState(match) });
+
+  // If this match is part of a tournament bracket, advance it.
+  if (match.tournamentCode) {
+    try { advanceTournamentBracket(match.tournamentCode, match.code); }
+    catch (e) { console.error('Tournament advance failed:', e); }
+  }
+
+  // Persist a per-player history record. We store the public turn list
+  // (content + score + side) so the history view can show full transcripts
+  // without keeping the live match object around indefinitely.
+  const finishedAt = Date.now();
+  const publicTurns = match.turns.map(t => ({
+    userId: t.userId, side: t.side, content: t.content,
+    score: t.score, feedback: t.feedback, at: t.at, timedOut: !!t.timedOut,
+  }));
+  for (const p of match.players) {
+    const oppPlayer = match.players.find(x => x.userId !== p.userId);
+    recordDebateHistoryEntry(p.userId, {
+      mode: 'multiplayer',
+      code: match.code,
+      topic: match.topic,
+      finishedAt,
+      mySide: p.side,
+      myScore: match.scores[p.userId] || 0,
+      opponent: oppPlayer ? { userId: oppPlayer.userId, name: oppPlayer.name, side: oppPlayer.side } : null,
+      opponentScore: oppPlayer ? (match.scores[oppPlayer.userId] || 0) : 0,
+      verdict,
+      result: verdict.winner === 'tie' ? 'tie' : (verdict.winner === p.side ? 'win' : 'loss'),
+      timedMode: !!match.timedMode,
+      maxRounds: match.maxRounds || 0,
+      turns: publicTurns,
+    });
+  }
+  return verdict;
+}
+
+app.post('/api/debate/match/:code/vote-end', authMiddleware, async (req, res) => {
+  const match = debateMatches.get(req.params.code);
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+  if (match.state !== 'playing') return res.status(409).json({ error: 'Match not in playing state' });
+  if (!match.players.some(p => p.userId === req.userId)) return res.status(403).json({ error: 'Not a player' });
+
+  match.endVotes.add(req.userId);
+  const allVoted = match.players.every(p => match.endVotes.has(p.userId));
+  match.lastActivity = Date.now();
+
+  if (!allVoted) {
+    pushDebateEvent(match, 'end_voted', {
+      userId: req.userId,
+      endVotes: Array.from(match.endVotes),
+    });
+    return res.json({ match: publicDebateState(match), finished: false });
+  }
+
+  try {
+    await finalizeDebateMatch(match);
     res.json({ match: publicDebateState(match), finished: true });
   } catch (e) {
     console.error('Debate verdict generation failed:', e);
@@ -8098,11 +8194,460 @@ Return JSON:
     if (!aiResp.success) return res.status(500).json({ error: aiResp.error });
     const parsed = parseAIJson(aiResp.data.content?.[0]?.text || '');
     if (!parsed) return res.status(500).json({ error: 'Failed to parse verdict' });
+
+    // Save to history.
+    const aiSide = userSide === 'for' ? 'against' : 'for';
+    recordDebateHistoryEntry(req.userId, {
+      mode: 'solo',
+      topic,
+      finishedAt: Date.now(),
+      mySide: userSide,
+      myScore: Number(parsed.studentScore) || 0,
+      opponent: { userId: null, name: 'AI', side: aiSide },
+      opponentScore: Number(parsed.aiScore) || 0,
+      verdict: {
+        winner: parsed.winner,
+        summary: String(parsed.summary || '').slice(0, 1200),
+        studentStrongest: String(parsed.studentStrongest || '').slice(0, 400),
+        studentWeakest: String(parsed.studentWeakest || '').slice(0, 400),
+        improve: String(parsed.improve || '').slice(0, 400),
+      },
+      result: parsed.winner === 'tie' ? 'tie' : (parsed.winner === 'student' ? 'win' : 'loss'),
+      turns: (transcript || []).map(m => ({
+        side: m.role === 'user' ? userSide : aiSide,
+        content: (m.content || '').slice(0, 4000),
+      })),
+    });
     res.json({ verdict: parsed });
   } catch (e) {
     console.error('Singleplayer verdict failed:', e);
     res.status(500).json({ error: e.message });
   }
+});
+
+// =========================================================
+// TOURNAMENTS — single-elimination brackets of 4/8/16 players.
+// Players join a tournament code, host starts when full, server pairs
+// players randomly and spawns standard debate matches for each pairing.
+// When each match finishes (via finalizeDebateMatch), the bracket
+// advances; once one winner remains the tournament is finished.
+// =========================================================
+const tournaments = new Map();
+
+function newTournamentCode() {
+  const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  for (let attempt = 0; attempt < 12; attempt++) {
+    let c = '';
+    for (let i = 0; i < 5; i++) c += alphabet[Math.floor(Math.random() * alphabet.length)];
+    if (!tournaments.has(c)) return c;
+  }
+  return 'T' + Date.now().toString(36).toUpperCase().slice(-4);
+}
+
+function publicTournamentState(t) {
+  return {
+    code: t.code,
+    state: t.state,
+    size: t.size,
+    topic: t.topic,
+    roundTopics: t.roundTopics || {},
+    timedMode: !!t.timedMode,
+    maxRounds: t.maxRounds || 0,
+    hostId: t.hostId,
+    players: t.players.map(p => ({
+      userId: p.userId, name: p.name,
+      eliminated: !!p.eliminated, eliminatedAt: p.eliminatedAt || null,
+      eliminatedInRound: p.eliminatedInRound || null,
+    })),
+    bracket: t.bracket.map(b => ({
+      round: b.round, matchIndex: b.matchIndex,
+      code: b.code, players: b.players, winnerId: b.winnerId,
+      state: b.state,
+      // Snapshot of in-match scores so the bracket view can show live progress.
+      scores: (() => {
+        const m = debateMatches.get(b.code);
+        if (!m) return null;
+        return b.players.reduce((acc, uid) => { acc[uid] = m.scores[uid] || 0; return acc; }, {});
+      })(),
+    })),
+    champion: t.champion || null,
+    createdAt: t.createdAt,
+  };
+}
+
+function pushTournamentEvent(t, type, payload = {}) {
+  t.lastActivity = Date.now();
+  const body = { type, tournament: publicTournamentState(t), ...payload };
+  for (const p of t.players) {
+    const stream = p.stream;
+    if (!stream || stream.writableEnded) continue;
+    try { stream.write(`data: ${JSON.stringify(body)}\n\n`); stream.flush?.(); }
+    catch {}
+  }
+}
+
+// Fisher-Yates so opening pairings are random.
+function shuffleInPlace(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+// Spawn the matches for one round of the bracket. `playerIds` must be a
+// power-of-2 list ordered such that adjacent pairs play each other.
+function createTournamentRound(t, roundNum, playerIds) {
+  for (let i = 0; i < playerIds.length; i += 2) {
+    const a = playerIds[i];
+    const b = playerIds[i + 1];
+    const pa = t.players.find(p => p.userId === a);
+    const pb = t.players.find(p => p.userId === b);
+    if (!pa || !pb) continue;
+    // Random side assignment — coin flip per match.
+    const aIsFor = Math.random() < 0.5;
+    const code = newDebateCode();
+    // Per-round topic if host set one for this round, otherwise the main
+    // tournament topic.
+    const roundTopic = (t.roundTopics && t.roundTopics[roundNum]) || t.topic;
+    const match = {
+      code,
+      state: 'playing',
+      topic: roundTopic,
+      hostId: a,
+      players: [
+        { userId: pa.userId, name: pa.name, side: aIsFor ? 'for' : 'against', stream: null },
+        { userId: pb.userId, name: pb.name, side: aIsFor ? 'against' : 'for', stream: null },
+      ],
+      turns: [],
+      turnOf: aIsFor ? pa.userId : pb.userId, // FOR side opens
+      scores: { [pa.userId]: 0, [pb.userId]: 0 },
+      endVotes: new Set(),
+      verdict: null,
+      timedMode: !!t.timedMode,
+      turnLimitMs: t.timedMode ? 120_000 : 0,
+      turnStartedAt: Date.now(),
+      maxRounds: t.maxRounds || 0,
+      tournamentCode: t.code,
+      tournamentRound: roundNum,
+      createdAt: Date.now(),
+      lastActivity: Date.now(),
+      draftText: '',
+      draftBy: null,
+    };
+    debateMatches.set(code, match);
+    t.bracket.push({
+      round: roundNum,
+      matchIndex: i / 2,
+      code,
+      players: [a, b],
+      winnerId: null,
+      state: 'playing',
+    });
+  }
+}
+
+// Called from finalizeDebateMatch when a tournament-linked match ends.
+// Records the winner, eliminates the loser, and either starts the next
+// round (carrying winners forward in bracket order) or marks the
+// tournament finished if this was the final.
+function advanceTournamentBracket(tournamentCode, finishedMatchCode) {
+  const t = tournaments.get(tournamentCode);
+  if (!t || t.state !== 'playing') return;
+  const entry = t.bracket.find(b => b.code === finishedMatchCode);
+  if (!entry || entry.state === 'finished') return;
+  const match = debateMatches.get(finishedMatchCode);
+  if (!match || !match.verdict) return;
+
+  let winnerId = null;
+  if (match.verdict.winner === 'tie') {
+    // Score tiebreak — higher total wins; if still tied, FOR side wins.
+    const forP = match.players.find(p => p.side === 'for');
+    const againstP = match.players.find(p => p.side === 'against');
+    const forScore = match.scores[forP.userId] || 0;
+    const againstScore = match.scores[againstP.userId] || 0;
+    winnerId = forScore >= againstScore ? forP.userId : againstP.userId;
+  } else {
+    const winnerP = match.players.find(p => p.side === match.verdict.winner);
+    winnerId = winnerP?.userId || null;
+  }
+  entry.winnerId = winnerId;
+  entry.state = 'finished';
+
+  // Mark loser eliminated.
+  for (const p of match.players) {
+    if (p.userId === winnerId) continue;
+    const tp = t.players.find(x => x.userId === p.userId);
+    if (tp && !tp.eliminated) {
+      tp.eliminated = true;
+      tp.eliminatedAt = Date.now();
+      tp.eliminatedInRound = entry.round;
+    }
+  }
+
+  // Round complete?
+  const roundEntries = t.bracket.filter(b => b.round === entry.round).sort((a, b) => a.matchIndex - b.matchIndex);
+  const allDone = roundEntries.every(b => b.state === 'finished');
+  if (!allDone) {
+    pushTournamentEvent(t, 'match_finished', { tournament: publicTournamentState(t) });
+    return;
+  }
+  const winners = roundEntries.map(b => b.winnerId).filter(Boolean);
+  if (winners.length <= 1) {
+    t.state = 'finished';
+    t.champion = winners[0] || null;
+    t.finishedAt = Date.now();
+    pushTournamentEvent(t, 'finished', { tournament: publicTournamentState(t) });
+    return;
+  }
+  createTournamentRound(t, entry.round + 1, winners);
+  pushTournamentEvent(t, 'round_advanced', { tournament: publicTournamentState(t) });
+}
+
+// POST /api/debate/tournament — create empty tournament; host joins.
+app.post('/api/debate/tournament', authMiddleware, (req, res) => {
+  try {
+    const size = [4, 8, 16].includes(Number(req.body?.size)) ? Number(req.body.size) : 8;
+    const topic = String(req.body?.topic || '').trim();
+    const timedMode = !!req.body?.timedMode;
+    const rawRounds = Number(req.body?.maxRounds);
+    // Tournaments need finite per-match round caps so the bracket can
+    // actually advance. Default to 5, clamp to [3, 10].
+    const maxRounds = Number.isFinite(rawRounds) && rawRounds >= 3 ? Math.min(10, Math.floor(rawRounds)) : 5;
+    if (!topic) return res.status(400).json({ error: 'Topic required' });
+
+    // Optional per-round topics. Host can give the semi / final etc. its
+    // own topic; any round missing here falls back to the main topic.
+    // Body shape: { roundTopics: { "1": "...", "2": "...", ... } }
+    const totalRounds = Math.log2(size);
+    const roundTopics = {};
+    const incoming = req.body?.roundTopics;
+    if (incoming && typeof incoming === 'object') {
+      for (let r = 1; r <= totalRounds; r++) {
+        const v = incoming[r] ?? incoming[String(r)];
+        if (typeof v === 'string' && v.trim()) {
+          roundTopics[r] = v.trim().slice(0, 300);
+        }
+      }
+    }
+
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+
+    const code = newTournamentCode();
+    const t = {
+      code,
+      state: 'waiting',
+      size,
+      topic,
+      roundTopics,
+      timedMode,
+      maxRounds,
+      hostId: req.userId,
+      players: [{ userId: req.userId, name: users[email].name || email.split('@')[0], stream: null }],
+      bracket: [],
+      champion: null,
+      createdAt: Date.now(),
+      lastActivity: Date.now(),
+    };
+    tournaments.set(code, t);
+    res.json({ code, tournament: publicTournamentState(t) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/debate/tournament/:code/join — add a player to the lobby.
+app.post('/api/debate/tournament/:code/join', authMiddleware, (req, res) => {
+  const t = tournaments.get(req.params.code);
+  if (!t) return res.status(404).json({ error: 'Tournament not found' });
+  if (t.state !== 'waiting') return res.status(409).json({ error: 'Tournament already started' });
+  if (t.players.some(p => p.userId === req.userId)) {
+    t.lastActivity = Date.now();
+    return res.json({ tournament: publicTournamentState(t) });
+  }
+  if (t.players.length >= t.size) return res.status(409).json({ error: 'Tournament is full' });
+  const users = loadUsers();
+  const email = findEmailById(users, req.userId);
+  t.players.push({
+    userId: req.userId,
+    name: (email && users[email].name) || (email && email.split('@')[0]) || 'Player',
+    stream: null,
+  });
+  t.lastActivity = Date.now();
+  pushTournamentEvent(t, 'player_joined', { tournament: publicTournamentState(t) });
+  res.json({ tournament: publicTournamentState(t) });
+});
+
+// GET /api/debate/tournament/:code/stream — SSE for bracket updates.
+app.get('/api/debate/tournament/:code/stream', authMiddleware, (req, res) => {
+  const t = tournaments.get(req.params.code);
+  if (!t) return res.status(404).json({ error: 'Tournament not found' });
+  const player = t.players.find(p => p.userId === req.userId);
+  if (!player) return res.status(403).json({ error: 'Not in this tournament' });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+  player.stream = res;
+  res.write(`data: ${JSON.stringify({ type: 'snapshot', tournament: publicTournamentState(t) })}\n\n`);
+  res.flush?.();
+
+  const heartbeat = setInterval(() => {
+    try { res.write(`: keepalive ${Date.now()}\n\n`); res.flush?.(); } catch {}
+  }, 15000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    if (player.stream === res) player.stream = null;
+  });
+});
+
+// POST /api/debate/tournament/:code/kick — host removes a player from
+// the lobby. Only allowed while the tournament is in 'waiting' state.
+app.post('/api/debate/tournament/:code/kick', authMiddleware, (req, res) => {
+  const t = tournaments.get(req.params.code);
+  if (!t) return res.status(404).json({ error: 'Tournament not found' });
+  if (t.hostId !== req.userId) return res.status(403).json({ error: 'Only host can kick' });
+  if (t.state !== 'waiting') return res.status(409).json({ error: 'Cannot kick after tournament starts' });
+  const targetId = String(req.body?.userId || '');
+  if (!targetId) return res.status(400).json({ error: 'userId required' });
+  if (targetId === t.hostId) return res.status(400).json({ error: 'Host cannot kick themselves' });
+  const target = t.players.find(p => p.userId === targetId);
+  if (!target) return res.status(404).json({ error: 'Player not in lobby' });
+
+  // Tell the kicked player directly before closing their stream, so their
+  // client can show a "you were kicked" toast and bail out.
+  if (target.stream && !target.stream.writableEnded) {
+    try {
+      target.stream.write(`data: ${JSON.stringify({ type: 'kicked' })}\n\n`);
+      target.stream.flush?.();
+      target.stream.end();
+    } catch {}
+    target.stream = null;
+  }
+  t.players = t.players.filter(p => p.userId !== targetId);
+  t.lastActivity = Date.now();
+  pushTournamentEvent(t, 'player_kicked', { tournament: publicTournamentState(t), kickedId: targetId });
+  res.json({ tournament: publicTournamentState(t) });
+});
+
+// POST /api/debate/tournament/:code/start — host starts when lobby is full.
+app.post('/api/debate/tournament/:code/start', authMiddleware, (req, res) => {
+  const t = tournaments.get(req.params.code);
+  if (!t) return res.status(404).json({ error: 'Tournament not found' });
+  if (t.hostId !== req.userId) return res.status(403).json({ error: 'Only host can start' });
+  if (t.state !== 'waiting') return res.status(409).json({ error: 'Already started' });
+  if (t.players.length < t.size) return res.status(409).json({ error: `Need ${t.size - t.players.length} more player(s)` });
+
+  // Random opening pairings.
+  const ids = t.players.map(p => p.userId);
+  shuffleInPlace(ids);
+  createTournamentRound(t, 1, ids);
+  t.state = 'playing';
+  t.startedAt = Date.now();
+  pushTournamentEvent(t, 'started', { tournament: publicTournamentState(t) });
+  res.json({ tournament: publicTournamentState(t) });
+});
+
+// GET /api/debate/tournament/:code — fetch current state. Useful for
+// players returning to the bracket view from inside a match.
+app.get('/api/debate/tournament/:code', authMiddleware, (req, res) => {
+  const t = tournaments.get(req.params.code);
+  if (!t) return res.status(404).json({ error: 'Tournament not found' });
+  if (!t.players.some(p => p.userId === req.userId)) return res.status(403).json({ error: 'Not in this tournament' });
+  res.json({ tournament: publicTournamentState(t) });
+});
+
+// POST /api/debate/tournament/:code/leave — leave the lobby (waiting),
+// or forfeit your current bracket match (playing).
+app.post('/api/debate/tournament/:code/leave', authMiddleware, (req, res) => {
+  const t = tournaments.get(req.params.code);
+  if (!t) return res.json({ ok: true });
+  const player = t.players.find(p => p.userId === req.userId);
+  if (!player) return res.json({ ok: true });
+
+  if (t.state === 'waiting') {
+    // Remove from lobby. Host leaving cancels the tournament.
+    if (t.hostId === req.userId) {
+      pushTournamentEvent(t, 'cancelled', {});
+      tournaments.delete(t.code);
+      return res.json({ ok: true, cancelled: true });
+    }
+    t.players = t.players.filter(p => p.userId !== req.userId);
+    if (player.stream) { try { player.stream.end(); } catch {} }
+    pushTournamentEvent(t, 'player_left', { tournament: publicTournamentState(t) });
+    return res.json({ ok: true });
+  }
+
+  // Mid-tournament leave → forfeit any in-progress match they're in.
+  const live = t.bracket.find(b => b.state === 'playing' && b.players.includes(req.userId));
+  if (live) {
+    const match = debateMatches.get(live.code);
+    if (match && match.state === 'playing') {
+      // Award the win to the opponent and let advance logic eliminate
+      // the leaver. Synthetic verdict so finalizeDebateMatch isn't needed.
+      const oppEntry = match.players.find(p => p.userId !== req.userId);
+      match.verdict = {
+        winner: oppEntry?.side || 'for',
+        summary: `${player.name} forfeited.`,
+        forStrongest: '',
+        againstStrongest: '',
+      };
+      match.state = 'finished';
+      pushDebateEvent(match, 'finished', { match: publicDebateState(match) });
+      advanceTournamentBracket(t.code, match.code);
+    }
+  } else {
+    // Not in a live match — just mark eliminated.
+    player.eliminated = true;
+    player.eliminatedAt = Date.now();
+    pushTournamentEvent(t, 'player_left', { tournament: publicTournamentState(t) });
+  }
+  if (player.stream) { try { player.stream.end(); } catch {} player.stream = null; }
+  res.json({ ok: true });
+});
+
+// GET /api/debate/history — list this user's finished matches.
+app.get('/api/debate/history', authMiddleware, (req, res) => {
+  const users = loadUsers();
+  const u = users[req.userId];
+  const history = Array.isArray(u?.debateHistory) ? u.debateHistory : [];
+  // Summary list (lightweight) — exclude full transcripts by default to
+  // keep the response small. Fetch individual entries via ?full=1 when
+  // viewing a specific record.
+  const wantFull = req.query?.full === '1';
+  res.json({
+    history: wantFull ? history : history.map(h => ({
+      mode: h.mode, code: h.code || null, topic: h.topic, finishedAt: h.finishedAt,
+      mySide: h.mySide, myScore: h.myScore, opponent: h.opponent, opponentScore: h.opponentScore,
+      result: h.result, verdict: h.verdict ? { winner: h.verdict.winner, summary: h.verdict.summary } : null,
+      timedMode: !!h.timedMode, maxRounds: h.maxRounds || 0,
+      turnCount: Array.isArray(h.turns) ? h.turns.length : 0,
+    })),
+    stats: {
+      total: history.length,
+      wins: history.filter(h => h.result === 'win').length,
+      losses: history.filter(h => h.result === 'loss').length,
+      ties: history.filter(h => h.result === 'tie').length,
+    },
+  });
+});
+
+// GET /api/debate/history/:id — fetch one match with full transcript.
+// `id` is the finishedAt timestamp (history records are keyed by it
+// since match codes get reused once a match leaves the live Map).
+app.get('/api/debate/history/:id', authMiddleware, (req, res) => {
+  const users = loadUsers();
+  const u = users[req.userId];
+  const history = Array.isArray(u?.debateHistory) ? u.debateHistory : [];
+  const id = Number(req.params.id);
+  const entry = history.find(h => h.finishedAt === id);
+  if (!entry) return res.status(404).json({ error: 'Not found' });
+  res.json({ entry });
 });
 
 // SPA fallback (Express 5 syntax)

@@ -244,7 +244,7 @@ export default function AssessmentsPage() {
             {history.length === 0 ? 'No quizzes yet' : `${history.length} ${history.length === 1 ? 'quiz' : 'quizzes'} completed`}
           </p>
         </div>
-        <Button onClick={() => setShowCreate(true)} size="sm"><Plus size={16} /> New Quiz</Button>
+        <Button onClick={() => setShowCreate(true)} size="sm"><Plus size={16} /> New</Button>
       </div>
 
       {history.length > 0 && (
@@ -255,9 +255,9 @@ export default function AssessmentsPage() {
         </div>
       )}
 
-      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Create Quiz">
+      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="New quiz">
         <form onSubmit={handleGenerate} className="flex flex-col gap-4">
-          <Input label="Topic" placeholder="e.g., Calculus derivatives, World War II" value={topic} onChange={e => setTopic(e.target.value)} required />
+          <Input label="Topic" placeholder="Calculus, WW2, etc." value={topic} onChange={e => setTopic(e.target.value)} required />
           <PillGroup label="Difficulty" options={DIFFICULTY_OPTIONS} value={difficulty} onChange={setDifficulty} />
           <div>
             <label className="block text-[10px] font-black uppercase tracking-[0.18em] text-white/35 mb-2">Questions</label>

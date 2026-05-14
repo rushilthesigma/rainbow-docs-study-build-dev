@@ -504,13 +504,13 @@ export default function CurriculaApp() {
     return (
       <div>
         <button onClick={() => setView('list')} className="flex items-center gap-2 text-sm text-white/40 hover:text-white/90 mb-4"><ArrowLeft size={16} /> Back</button>
-        <h2 className="text-lg font-bold text-white mb-4">New Curriculum</h2>
+        <h2 className="text-lg font-bold text-white mb-4">New curriculum</h2>
         {generating ? (
           <div className="py-10 px-2 max-w-xl mx-auto w-full">
             <LoadingProgress
               active
               label={`Generating ${settings.topic || 'curriculum'}…`}
-              hint="Building units + lesson outlines. 20-40 seconds."
+              hint="~30s"
               duration={30000}
             />
             <div className="mt-6">
@@ -518,19 +518,16 @@ export default function CurriculaApp() {
             </div>
             {isDemo && (
               <div className="mt-6 max-w-sm mx-auto text-center rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-4 py-3">
-                <p className="text-[12px] font-semibold text-amber-800 dark:text-amber-300 mb-0.5">Please don&apos;t leave the app.</p>
-                <p className="text-[11px] text-amber-700 dark:text-amber-400">
-                  Full curriculum generation takes 20–40 seconds. Switching tabs or closing this window will cancel the request.
-                </p>
+                <p className="text-[12px] font-semibold text-amber-800 dark:text-amber-300">Don&apos;t leave or close — request will cancel.</p>
               </div>
             )}
           </div>
         ) : (
           <div className="space-y-4">
             {genError && <div className="px-4 py-2 rounded-xl bg-rose-50 dark:bg-rose-900/15 border border-rose-200 dark:border-rose-800 text-xs text-rose-600">{genError}</div>}
-            <Input label="Topic" placeholder="e.g., Calculus, US History..." value={settings.topic} onChange={e => setSettings(p => ({ ...p, topic: e.target.value }))} data-tour="curriculum-topic-input" />
+            <Input label="Topic" placeholder="Calculus, US History, etc." value={settings.topic} onChange={e => setSettings(p => ({ ...p, topic: e.target.value }))} data-tour="curriculum-topic-input" />
             <PillGroup label="Difficulty" options={DIFFICULTY_OPTIONS} value={settings.difficulty} onChange={v => setSettings(p => ({ ...p, difficulty: v }))} />
-            <PillGroup label="Learning Style" options={LEARNING_STYLE_OPTIONS} value={settings.learningStyle} onChange={v => setSettings(p => ({ ...p, learningStyle: v }))} />
+            <PillGroup label="Style" options={LEARNING_STYLE_OPTIONS} value={settings.learningStyle} onChange={v => setSettings(p => ({ ...p, learningStyle: v }))} />
             <div className="flex gap-4">
               <Toggle label="Examples" checked={settings.includeExamples} onChange={v => setSettings(p => ({ ...p, includeExamples: v }))} />
               <Toggle label="Exercises" checked={settings.includeExercises} onChange={v => setSettings(p => ({ ...p, includeExercises: v }))} />
@@ -538,15 +535,12 @@ export default function CurriculaApp() {
 
             {/* ===== Source material (textbooks + websites) ===== */}
             <div className="rounded-xl border border-white/10 bg-white/[0.06] backdrop-blur-sm p-4">
-              <div className="flex items-baseline justify-between mb-1">
-                <p className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-200">Source material <span className="font-normal opacity-60">(optional)</span></p>
+              <div className="flex items-baseline justify-between mb-3">
+                <p className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-200">Sources <span className="font-normal opacity-60">(optional)</span></p>
                 {sources.length > 0 && (
                   <span className="text-[10px] text-gray-400 tabular-nums">{sources.length}/8</span>
                 )}
               </div>
-              <p className="text-[11px] text-white/45 mb-3">
-                Drop in a textbook PDF or paste a URL — the AI will align the curriculum to your sources instead of generating from scratch.
-              </p>
 
               {/* URL input */}
               <form onSubmit={handleAddSourceUrl} className="flex items-center gap-2 mb-2">
@@ -554,7 +548,7 @@ export default function CurriculaApp() {
                   type="url"
                   value={sourceUrlInput}
                   onChange={e => setSourceUrlInput(e.target.value)}
-                  placeholder="https://example.com/article"
+                  placeholder="https://…"
                   disabled={sourceBusy || sources.length >= 8}
                   className="flex-1 px-3 py-2 rounded-lg border border-white/10 bg-white dark:bg-[#0D0D14] text-sm text-white outline-none focus:ring-2 focus:ring-white/20 disabled:opacity-50"
                 />
@@ -582,7 +576,7 @@ export default function CurriculaApp() {
                 className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border-2 border-dashed border-gray-300 dark:border-white/10 text-white/45 text-xs hover:border-white/30 hover:text-white/70 transition-colors disabled:opacity-50"
               >
                 {sourceBusy ? <InlineProgress active /> : <Paperclip size={13} />}
-                Attach textbook PDFs or text files
+                Attach PDFs or text files
               </button>
 
               {sourceError && (
@@ -646,14 +640,14 @@ export default function CurriculaApp() {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-bold text-white">My Curricula</h2>
+        <h2 className="text-lg font-bold text-white">Curricula</h2>
         <div className="flex items-center gap-2">
           <Button
             size="sm"
             variant="secondary"
             onClick={() => { loadPausdCatalog(); setView('pausd'); }}
           >
-            <GraduationCap size={14} /> PAUSD Catalog
+            <GraduationCap size={14} /> PAUSD
           </Button>
           <Button size="sm" data-tour="new-curriculum-button" onClick={() => setView('new')}><Plus size={14} /> New</Button>
         </div>
@@ -669,8 +663,8 @@ export default function CurriculaApp() {
           <GraduationCap size={18} />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-white">PAUSD Common Core Catalog</p>
-          <p className="text-[11px] text-white/50">Pre-built middle + high-school courses at PAUSD rigor: Math 6 → Geometry Honors and full middle-school science. Tap to browse.</p>
+          <p className="text-sm font-semibold text-white">PAUSD Common Core</p>
+          <p className="text-[11px] text-white/50">Pre-built middle + high-school courses.</p>
         </div>
         <ChevronRight size={16} className="text-white/30 flex-shrink-0" />
       </button>
@@ -680,9 +674,9 @@ export default function CurriculaApp() {
           <BookOpen size={32} className="text-white/40 mx-auto mb-3" />
           <p className="text-sm text-gray-500 mb-4">No curricula yet</p>
           <div className="flex items-center justify-center gap-2">
-            <Button onClick={() => setView('new')}><Plus size={16} /> Create Curriculum</Button>
+            <Button onClick={() => setView('new')}><Plus size={16} /> New</Button>
             <Button variant="secondary" onClick={() => { loadPausdCatalog(); setView('pausd'); }}>
-              <GraduationCap size={16} /> Browse PAUSD
+              <GraduationCap size={16} /> PAUSD
             </Button>
           </div>
         </div>

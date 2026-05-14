@@ -367,9 +367,9 @@ function CurriculumPickerModal({ activeId, onClose, onPick }) {
       .finally(() => setLoading(false));
   }, []);
   return (
-    <ModalShell title="Integrate with a course" onClose={onClose}>
+    <ModalShell title="Use a curriculum" onClose={onClose}>
       <p className="text-[12px] text-gray-500 dark:text-gray-400 mb-3">
-        The AI will scope its answers to this course&apos;s units + lessons.
+        Scopes answers to a course&apos;s lessons.
       </p>
       <div className="space-y-1.5 max-h-[380px] overflow-y-auto pr-1">
         <PickRow active={activeId == null} onClick={() => onPick(null)} title="None" sub="Free-form study chat" />
@@ -468,7 +468,7 @@ function SourcesModal({ sources, onClose, onChange }) {
   return (
     <ModalShell title="Sources" onClose={onClose}>
       <p className="text-[12px] text-gray-500 dark:text-gray-400 mb-3">
-        Drop URLs or PDFs the AI should reference. Cited inline as [1], [2], …
+        Cited inline as [1], [2], …
       </p>
 
       <form onSubmit={addUrl} className="flex items-center gap-2 mb-2">

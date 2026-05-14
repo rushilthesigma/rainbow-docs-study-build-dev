@@ -63,7 +63,7 @@ function NoteEditor({ noteId, onBack }) {
         value={note.title}
         onChange={e => handleChange('title', e.target.value)}
         className="w-full text-xl font-bold bg-transparent border-none outline-none text-white/95 placeholder-white/25 mb-3 flex-shrink-0"
-        placeholder="Note title..."
+        placeholder="Title"
       />
 
       {isCornell ? (
@@ -88,7 +88,7 @@ function NoteEditor({ noteId, onBack }) {
               value={note.mainNotes}
               onChange={e => handleChange('mainNotes', e.target.value)}
               className="w-full h-full p-3 bg-transparent text-sm text-white/88 placeholder-white/25 resize-none outline-none"
-              placeholder="Write your notes here..."
+              placeholder="Notes…"
             />
           </div>
           <div className="bg-white/[0.02] rounded-2xl border border-white/[0.06] p-3 flex-shrink-0">
@@ -102,7 +102,7 @@ function NoteEditor({ noteId, onBack }) {
               value={note.summary}
               onChange={e => handleChange('summary', e.target.value)}
               className="w-full bg-transparent text-sm text-white/88 placeholder-white/25 resize-none outline-none min-h-[40px]"
-              placeholder="Summary..."
+              placeholder="Summary"
             />
           </div>
         </div>
@@ -112,7 +112,7 @@ function NoteEditor({ noteId, onBack }) {
             value={note.mainNotes}
             onChange={e => handleChange('mainNotes', e.target.value)}
             className="w-full h-full p-4 bg-transparent text-sm text-white/88 placeholder-white/25 resize-none outline-none leading-relaxed"
-            placeholder="Start writing..."
+            placeholder="Notes…"
           />
         </div>
       )}
@@ -292,9 +292,9 @@ export default function NotesApp() {
         <h2 className="text-lg font-bold text-white/90">Notes</h2>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="secondary" onClick={() => setShowAI(true)}>
-            <Wand2 size={14} /> Generate with AI
+            <Wand2 size={14} /> AI
           </Button>
-          <Button size="sm" onClick={() => setShowCreate(true)}><Plus size={14} /> New Note</Button>
+          <Button size="sm" onClick={() => setShowCreate(true)}><Plus size={14} /> New</Button>
         </div>
       </div>
 
@@ -402,15 +402,13 @@ export default function NotesApp() {
 
           <div>
             <label className="text-xs font-medium text-white/40 mb-1.5 block">
-              {aiSource === 'curriculum' ? 'Extra instructions (optional)' : 'What should the note cover?'}
+              {aiSource === 'curriculum' ? 'Extra instructions (optional)' : 'Topic'}
             </label>
             <textarea
               value={aiPrompt}
               onChange={e => setAiPrompt(e.target.value)}
               rows={3}
-              placeholder={aiSource === 'curriculum'
-                ? 'e.g., Focus on formulas and definitions only. Or leave blank.'
-                : 'e.g., Photosynthesis — inputs/outputs, light vs dark reactions. Include the chemical equation.'}
+              placeholder={aiSource === 'curriculum' ? 'Extra instructions…' : 'What should the note cover?'}
               className="w-full px-3 py-2 rounded-xl border border-white/[0.06] bg-white/[0.04] text-sm text-white/70 placeholder-white/20 outline-none resize-none"
             />
           </div>
@@ -429,18 +427,17 @@ export default function NotesApp() {
         </div>
       </Modal>
 
-      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="New Note">
-        <p className="text-sm text-white/40 mb-4">Choose a note type:</p>
+      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="New note">
         <div className="grid grid-cols-2 gap-3">
           <button onClick={() => handleCreate('regular')} className="flex flex-col items-center gap-2 p-5 rounded-2xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.06] hover:border-white/[0.14] transition-colors text-center backdrop-blur-sm">
             <FileText size={24} className="text-white/50" />
-            <span className="text-sm font-medium text-white/70">Regular Note</span>
-            <span className="text-xs text-white/30">Freeform writing</span>
+            <span className="text-sm font-medium text-white/70">Regular</span>
+            <span className="text-xs text-white/30">Freeform</span>
           </button>
           <button onClick={() => handleCreate('cornell')} className="flex flex-col items-center gap-2 p-5 rounded-2xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.06] hover:border-white/[0.14] transition-colors text-center backdrop-blur-sm">
             <Layout size={24} className="text-white/50" />
-            <span className="text-sm font-medium text-white/70">Cornell Note</span>
-            <span className="text-xs text-white/30">Cues, notes, summary</span>
+            <span className="text-sm font-medium text-white/70">Cornell</span>
+            <span className="text-xs text-white/30">Cues + summary</span>
           </button>
         </div>
       </Modal>
@@ -449,7 +446,7 @@ export default function NotesApp() {
         <div className="text-center py-12">
           <FileText size={28} className="text-white/35 mx-auto mb-3" />
           <p className="text-sm text-white/55 mb-3">No notes yet</p>
-          <Button size="sm" onClick={() => setShowCreate(true)}><Plus size={14} /> Create Note</Button>
+          <Button size="sm" onClick={() => setShowCreate(true)}><Plus size={14} /> New note</Button>
         </div>
       ) : (
         <div className="space-y-1.5">

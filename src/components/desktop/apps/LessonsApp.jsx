@@ -123,15 +123,14 @@ export default function LessonsApp() {
         <button onClick={() => setView('list')} className="flex items-center gap-2 text-sm text-white/35 hover:text-white/65 transition-colors mb-4">
           <ArrowLeft size={16} /> Back
         </button>
-        <h2 className="text-lg font-bold text-white/85 mb-1">Request a Lesson</h2>
-        <p className="text-sm text-white/40 mb-5">One topic, one focused lesson. The AI will teach it directly.</p>
+        <h2 className="text-lg font-bold text-white/85 mb-5">New lesson</h2>
 
         {creating ? (
           <div className="py-10 max-w-md mx-auto w-full">
             <ProgressBar
               active
               label={`Preparing lesson on ${topic || 'your topic'}`}
-              hint="10-20 seconds. Don't refresh."
+              hint="~15s"
               duration={15000}
             />
           </div>
@@ -139,15 +138,15 @@ export default function LessonsApp() {
           <div className="space-y-4">
             {createError && <div className="px-4 py-2 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-400">{createError}</div>}
             <Input
-              label="What do you want to learn?"
-              placeholder="e.g., Photosynthesis, the French Revolution, Fourier transforms"
+              label="Topic"
+              placeholder="What do you want to learn?"
               value={topic}
               onChange={e => setTopic(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') handleCreate(); }}
             />
             <PillGroup label="Difficulty" options={DIFFICULTY_OPTIONS} value={difficulty} onChange={setDifficulty} />
             <Button onClick={handleCreate} disabled={!topic.trim()}>
-              <Lightbulb size={16} /> Start Lesson
+              <Lightbulb size={16} /> Start
             </Button>
           </div>
         )}
@@ -161,20 +160,17 @@ export default function LessonsApp() {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <div>
-          <h2 className="text-lg font-bold text-white/85">Lessons</h2>
-          <p className="text-xs text-white/35 mt-0.5">Single topics, taught one at a time.</p>
-        </div>
+        <h2 className="text-lg font-bold text-white/85">Lessons</h2>
         <Button size="sm" onClick={() => { setTopic(''); setCreateError(null); setView('new'); }}>
-          <Plus size={14} /> New Lesson
+          <Plus size={14} /> New lesson
         </Button>
       </div>
 
       {lessons.length === 0 ? (
         <div className="text-center py-12">
           <Lightbulb size={32} className="text-white/40 mx-auto mb-3" />
-          <p className="text-sm text-white/55 mb-4">No lessons yet. Request one to get started.</p>
-          <Button onClick={() => setView('new')}><Plus size={16} /> Request a Lesson</Button>
+          <p className="text-sm text-white/55 mb-4">No lessons yet</p>
+          <Button onClick={() => setView('new')}><Plus size={16} /> New lesson</Button>
         </div>
       ) : (
         <div className="space-y-2">
@@ -195,8 +191,8 @@ export default function LessonsApp() {
                 <h3 className="text-sm font-medium text-white/85 truncate">{l.title}</h3>
                 <p className="text-xs text-white/40 mt-0.5">
                   {l.difficulty}
-                  {l.messageCount > 0 ? ` · ${l.messageCount} messages` : ' · not started'}
-                  {l.isCompleted ? ' · completed' : ''}
+                  {l.messageCount > 0 ? ` · ${l.messageCount}` : ''}
+                  {l.isCompleted ? ' · ✓' : ''}
                 </p>
               </div>
               <button
