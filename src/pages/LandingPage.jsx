@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { useUIPreference } from '../context/UIPreferenceContext';
 import { googleLogin } from '../api/auth';
 import { WALLPAPERS } from '../components/desktop/DesktopBackground';
 import {
@@ -25,7 +24,6 @@ import {
 export default function LandingPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const { wallpaper } = useUIPreference();
   const [loading, setLoading] = useState(false);
   const [whyOpen, setWhyOpen] = useState(false);
   const googleBtnRef = useRef(null);
@@ -86,8 +84,11 @@ export default function LandingPage() {
     if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
-  const wp = WALLPAPERS[wallpaper] || WALLPAPERS.lavender;
-  const wallpaperUrl = wp?.url || WALLPAPERS.lavender.url;
+  // Pre-auth welcome screen is locked to a nighttime sky — the user's
+  // chosen wallpaper preference only kicks in once they're signed in.
+  // Keeps the welcome handshake aesthetically aligned with the
+  // Onboarding "Welcome" step's deep-blue gradient backdrop.
+  const wallpaperUrl = WALLPAPERS.milkyway?.url || WALLPAPERS.earthnight?.url || WALLPAPERS.aurora?.url;
 
   return (
     <div className="relative h-screen w-full overflow-hidden bg-black text-white select-none">
@@ -147,7 +148,7 @@ function HeroSection({ onNext }) {
       className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative"
     >
       {/* Subtle scrim so the headline reads against any wallpaper */}
-      <div className="absolute inset-0 bg-black/40" />
+      <div className="absolute inset-0 bg-black/35" />
 
       <div className="relative z-10 max-w-4xl text-center animate-fade-up">
         <h1 className="text-[44px] sm:text-[68px] md:text-[88px] leading-[0.95] font-bold tracking-[-0.04em] text-white drop-shadow-2xl">
@@ -209,7 +210,7 @@ function HowItWorksSection() {
   ];
   return (
     <section data-section="how" className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative">
-      <div className="absolute inset-0 bg-black/55" />
+      <div className="absolute inset-0 bg-black/35" />
       <div className="relative z-10 max-w-6xl w-full animate-fade-up">
         <p className="text-center text-[11px] font-bold uppercase tracking-[0.22em] text-white/55 mb-3">How it works</p>
         <h2 className="text-center text-[34px] sm:text-[44px] md:text-[56px] leading-[1.05] font-bold tracking-[-0.025em] text-white drop-shadow-2xl mb-12">
@@ -247,7 +248,7 @@ function HowItWorksSection() {
 function FeaturesGridSection() {
   return (
     <section data-section="features" className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative">
-      <div className="absolute inset-0 bg-black/60" />
+      <div className="absolute inset-0 bg-black/35" />
       <div className="relative z-10 max-w-6xl w-full animate-fade-up">
         <p className="text-center text-[11px] font-bold uppercase tracking-[0.22em] text-white/55 mb-3">What&apos;s inside</p>
         <h2 className="text-center text-[34px] sm:text-[44px] md:text-[56px] leading-[1.05] font-bold tracking-[-0.025em] text-white drop-shadow-2xl mb-10">
@@ -331,7 +332,7 @@ function NumbersStrip() {
   ];
   return (
     <section data-section="numbers" className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative">
-      <div className="absolute inset-0 bg-black/65" />
+      <div className="absolute inset-0 bg-black/35" />
       <div className="relative z-10 max-w-5xl w-full animate-fade-up">
         <h2 className="text-center text-[28px] sm:text-[36px] md:text-[44px] leading-[1.05] font-bold tracking-[-0.025em] text-white drop-shadow-2xl mb-3">
           Built thin,{' '}
@@ -399,7 +400,7 @@ function SubjectsSpotlight() {
   ];
   return (
     <section data-section="subjects" className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative">
-      <div className="absolute inset-0 bg-black/60" />
+      <div className="absolute inset-0 bg-black/35" />
       <div className="relative z-10 w-full max-w-6xl animate-fade-up">
         <p className="text-center text-[11px] font-bold uppercase tracking-[0.22em] text-white/55 mb-3">Built for</p>
         <h2 className="text-center text-[32px] sm:text-[40px] md:text-[50px] leading-[1.05] font-bold tracking-[-0.025em] text-white drop-shadow-2xl mb-10">
@@ -413,7 +414,10 @@ function SubjectsSpotlight() {
           {SAMPLES.map((s) => (
             <div
               key={s.title}
-              className="relative rounded-2xl p-5 border border-white/15 bg-white/[0.06] backdrop-blur-xl shadow-2xl shadow-black/30 overflow-hidden flex flex-col"
+              // Soft inner ring instead of a hard 15%-white border —
+              // the previous 1px white outline lit up against the
+              // night-sky wallpaper and read as a hard, jarring edge.
+              className="relative rounded-2xl p-5 ring-1 ring-white/[0.07] bg-white/[0.04] backdrop-blur-2xl shadow-[0_10px_40px_rgba(0,0,0,0.35)] overflow-hidden flex flex-col"
             >
               <div className={`absolute inset-0 bg-gradient-to-br ${s.tone} pointer-events-none`} />
               <div className="relative z-10 flex flex-col h-full">
@@ -461,16 +465,18 @@ function SignInSection({ loading, onSignIn, onNewAccount, onWhyNotGpt }) {
       data-section="signin"
       className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative"
     >
-      {/* Onboarding-style gradient scrim — same radial blue/indigo wash
-          used in Onboarding's welcome step, layered over the wallpaper
-          so the section feels visually connected to first-login. */}
+      {/* Uniform bg-black/35 scrim — same opacity as every other section,
+          so the boundary between Subjects ↑ and the welcome ↓ doesn't
+          read as a hard line. */}
+      <div className="absolute inset-0 bg-black/35" />
+      {/* Onboarding-style colored cast on top — gives the welcome its
+          blue/indigo character without darkening more than its neighbors. */}
       <div
         className="absolute inset-0"
         style={{
           background:
-            'radial-gradient(at 25% 20%, rgba(30,58,138,0.78) 0%, transparent 55%),' +
-            'radial-gradient(at 75% 80%, rgba(49,46,129,0.78) 0%, transparent 55%),' +
-            'linear-gradient(135deg, rgba(5,7,20,0.92) 0%, rgba(10,15,36,0.85) 50%, rgba(13,15,31,0.92) 100%)',
+            'radial-gradient(at 25% 25%, rgba(30,58,138,0.25) 0%, transparent 60%),' +
+            'radial-gradient(at 75% 75%, rgba(49,46,129,0.22) 0%, transparent 60%)',
         }}
       />
 
@@ -482,9 +488,12 @@ function SignInSection({ loading, onSignIn, onNewAccount, onWhyNotGpt }) {
           <span className="pointer-events-none absolute inset-1 rounded-3xl bg-gradient-to-b from-white/25 to-transparent" />
         </div>
 
-        {/* Italic gradient wordmark — same treatment as Onboarding's "hello". */}
+        {/* Italic gradient wordmark — same treatment as Onboarding's "hello".
+            inline-block + pr-3 + slightly looser tracking so the italic
+            slant on the trailing "e" doesn't get clipped by the gradient
+            bg-clip-text bounding box. */}
         <h1
-          className="mt-6 text-[44px] sm:text-[56px] leading-[0.95] font-bold tracking-[-0.04em] italic bg-gradient-to-br from-white via-blue-200 to-blue-400 bg-clip-text text-transparent"
+          className="mt-6 text-[44px] sm:text-[56px] leading-[0.95] font-bold tracking-[-0.03em] italic inline-block pr-3 bg-gradient-to-br from-white via-blue-200 to-blue-400 bg-clip-text text-transparent"
         >
           welcome
         </h1>

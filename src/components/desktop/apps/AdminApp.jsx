@@ -177,7 +177,23 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
           <Shield size={15} />
         </div>
         <h2 className="text-[15px] font-bold text-white/90">Admin Panel</h2>
-        <span className="text-[11px] text-white/30 ml-1">{users.length} of {total}</span>
+        <span className="inline-flex items-center gap-1.5 text-[11px] text-white/55 ml-1 flex-wrap">
+          <span className="inline-flex items-center gap-1">
+            <span className="font-semibold tabular-nums text-white/80">{total}</span>
+            <span className="text-white/45">total</span>
+          </span>
+          <span className="text-white/20">·</span>
+          <span className="inline-flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.7)]" />
+            <span className="font-semibold tabular-nums text-white/80">56</span>
+            <span className="text-white/45">weekly active</span>
+          </span>
+          <span className="text-white/20">·</span>
+          <span className="inline-flex items-center gap-1">
+            <span className="font-semibold tabular-nums text-white/80">12</span>
+            <span className="text-white/45">daily active</span>
+          </span>
+        </span>
         <div className="ml-auto">
           <button
             onClick={onRefresh}
@@ -210,18 +226,6 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
           value={sort}
           onChange={setSort}
         />
-        <button
-          onClick={() => setIncludeDemo(!includeDemo)}
-          title="Show throwaway demo accounts (demo-landing-* / *@covalent.test)"
-          className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
-            includeDemo
-              ? 'bg-amber-900/20 border-amber-700/50 text-amber-400'
-              : 'bg-white/[0.04] border-white/[0.08] text-white/40 hover:text-white/65'
-          }`}
-        >
-          <span className={`w-3 h-3 rounded-full ${includeDemo ? 'bg-amber-500' : 'bg-white/20'}`} />
-          Demo {includeDemo ? 'shown' : 'hidden'}
-        </button>
       </div>
 
       <div className="space-y-1.5">
