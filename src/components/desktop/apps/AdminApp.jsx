@@ -1,8 +1,8 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Shield, ArrowLeft, Ban, Trash2, User, BookOpen, FileText, Target, Layers,
   MessageSquare, Lightbulb, Trophy, CreditCard, Search, Crown, Calendar,
-  RefreshCw, ChevronRight, Zap, ClipboardList,
+  RefreshCw, ChevronRight, Zap, ClipboardList, BarChart3, X,
 } from 'lucide-react';
 import {
   checkAdmin, listUsers, getUser, toggleBan, deleteUser,
@@ -170,13 +170,36 @@ function sumMsgs(u) { return (u.chatMessages?.study || 0) + (u.chatMessages?.les
 
 /* ====================== USER LIST ====================== */
 function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, sort, setSort, includeDemo, setIncludeDemo, onOpen, onRefresh }) {
+  // "Secret" analytics panel — toggled by five fast taps on the
+  // Admin Panel title. The header keeps the public-facing vanity
+  // counts (56 weekly / 12 daily); the hidden panel computes the
+  // REAL numbers from the loaded users list (MAU/WAU/DAU, plan split,
+  // churn signal, etc.) and overlays the user list while open.
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  const tapsRef = useRef({ count: 0, last: 0 });
+  function onTitleTap() {
+    const now = Date.now();
+    if (now - tapsRef.current.last > 1500) tapsRef.current.count = 0;
+    tapsRef.current.count += 1;
+    tapsRef.current.last = now;
+    if (tapsRef.current.count >= 5) {
+      tapsRef.current.count = 0;
+      setShowAnalytics(true);
+    }
+  }
   return (
     <div>
       <div className="flex items-center gap-2 mb-4">
         <div className="w-8 h-8 rounded-xl bg-white/[0.08] border border-white/[0.10] flex items-center justify-center text-white/50 flex-shrink-0">
           <Shield size={15} />
         </div>
-        <h2 className="text-[15px] font-bold text-white/90">Admin Panel</h2>
+        <h2
+          onClick={onTitleTap}
+          className="text-[15px] font-bold text-white/90 cursor-default select-none"
+          title=""
+        >
+          Admin Panel
+        </h2>
         <span className="inline-flex items-center gap-1.5 text-[11px] text-white/55 ml-1 flex-wrap">
           <span className="inline-flex items-center gap-1">
             <span className="font-semibold tabular-nums text-white/80">{total}</span>
@@ -254,6 +277,10 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
           </div>
         ))}
       </div>
+
+      {showAnalytics && (
+        <AnalyticsPanel users={users} total={total} onClose={() => setShowAnalytics(false)} />
+      )}
     </div>
   );
 }
@@ -279,6 +306,184 @@ function ProPill() {
     <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-yellow-500 text-white">
       <Crown size={8} /> PRO
     </span>
+  );
+}
+
+/* =====================================================
+ * SECRET ANALYTICS PANEL
+ * Hidden behind 5 fast taps on the "Admin Panel" title.
+ * Computes real metrics from the loaded user list — MAU/WAU/DAU,
+ * stickiness ratio, churn signal, plan split, signup cohorts,
+ * power users, time-on-site proxy (avg visits).
+ * =====================================================*/
+function AnalyticsPanel({ users, total, onClose }) {
+  const stats = useMemo(() => {
+    const now = Date.now();
+    const DAY = 86_400_000;
+    // Resolve a "last active" timestamp per user. lastActiveAt is a
+    // YYYY-MM-DD string from study streaks; lastVisitAt is a precise
+    // ISO/ms. Prefer the precise one and fall back to the date string.
+    const lastActiveMs = (u) => {
+      const v = u.lastVisitAt;
+      if (v) {
+        const t = typeof v === 'number' ? v : Date.parse(v);
+        if (Number.isFinite(t)) return t;
+      }
+      if (u.lastActiveAt) {
+        const t = Date.parse(u.lastActiveAt);
+        if (Number.isFinite(t)) return t;
+      }
+      return 0;
+    };
+    const createdMs = (u) => {
+      if (!u.createdAt) return 0;
+      const t = typeof u.createdAt === 'number' ? u.createdAt : Date.parse(u.createdAt);
+      return Number.isFinite(t) ? t : 0;
+    };
+
+    let dau = 0, wau = 0, mau = 0;
+    let newToday = 0, new7d = 0, new30d = 0;
+    let pro = 0, banned = 0;
+    let totalVisits = 0, totalMsgs = 0;
+    // Churn — users active in the prior 30d window but NOT in the
+    // current 7d. Rough but useful directional signal.
+    let activePrior30 = 0, activeNow7 = 0;
+    const usersWithActivity = users.filter(u => lastActiveMs(u) > 0);
+    for (const u of users) {
+      const la = lastActiveMs(u);
+      const ca = createdMs(u);
+      const ageActive = la ? now - la : Infinity;
+      const ageCreated = ca ? now - ca : Infinity;
+      if (ageActive < 1 * DAY) dau++;
+      if (ageActive < 7 * DAY) wau++;
+      if (ageActive < 30 * DAY) mau++;
+      if (ageCreated < 1 * DAY) newToday++;
+      if (ageCreated < 7 * DAY) new7d++;
+      if (ageCreated < 30 * DAY) new30d++;
+      if (u.plan === 'pro') pro++;
+      if (u.banned) banned++;
+      totalVisits += u.visitCount || 0;
+      const m = u.chatMessages || {};
+      totalMsgs += (m.study || 0) + (m.lessons || 0) + (m.curriculum || 0);
+      if (ageActive >= 7 * DAY && ageActive < 30 * DAY) activePrior30++;
+      if (ageActive < 7 * DAY && la > 0) activeNow7++;
+    }
+    const avgVisits = usersWithActivity.length ? totalVisits / usersWithActivity.length : 0;
+    const stickiness = mau ? (dau / mau) * 100 : 0;
+    // Churn: of users active in the prior window, what fraction
+    // is NOT active in the current 7d window? Lower is better.
+    const churn = (activePrior30 + activeNow7) ? (activePrior30 / (activePrior30 + activeNow7)) * 100 : 0;
+
+    // Power users — top 5 by total chat messages.
+    const powerUsers = [...users]
+      .map(u => ({
+        u,
+        msgs: ((u.chatMessages?.study || 0) + (u.chatMessages?.lessons || 0) + (u.chatMessages?.curriculum || 0)),
+      }))
+      .filter(x => x.msgs > 0)
+      .sort((a, b) => b.msgs - a.msgs)
+      .slice(0, 5);
+
+    return { dau, wau, mau, newToday, new7d, new30d, pro, banned, avgVisits, stickiness, churn, totalMsgs, totalVisits, powerUsers };
+  }, [users]);
+
+  return (
+    <div className="absolute inset-0 z-30 bg-black/80 backdrop-blur-md overflow-y-auto p-5" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="max-w-3xl mx-auto">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="w-8 h-8 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-200 flex-shrink-0">
+            <BarChart3 size={15} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-[15px] font-bold text-white/90">Analytics</h2>
+            <p className="text-[10.5px] text-white/40">Real numbers — computed from the {total} non-demo accounts</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-white/55 hover:text-white hover:bg-white/[0.06] transition-colors"
+            title="Close"
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* Top-line stats */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+          <StatTile label="Daily active" value={stats.dau} accent="emerald" />
+          <StatTile label="Weekly active" value={stats.wau} accent="blue" />
+          <StatTile label="Monthly active" value={stats.mau} accent="indigo" />
+          <StatTile label="Total users" value={total} accent="white" />
+        </div>
+
+        {/* Engagement + cohorts */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-4">
+          <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
+            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-300/70 mb-2">Engagement</p>
+            <StatRow label="DAU / MAU stickiness" value={`${stats.stickiness.toFixed(1)}%`} />
+            <StatRow label="Churn (prior-30 not in last-7)" value={`${stats.churn.toFixed(1)}%`} />
+            <StatRow label="Avg visits / active user" value={stats.avgVisits.toFixed(1)} />
+            <StatRow label="Total chat messages" value={stats.totalMsgs.toLocaleString()} />
+            <StatRow label="Total visits" value={stats.totalVisits.toLocaleString()} />
+          </div>
+          <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
+            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-300/70 mb-2">Signups & plans</p>
+            <StatRow label="New today" value={stats.newToday} />
+            <StatRow label="New last 7 days" value={stats.new7d} />
+            <StatRow label="New last 30 days" value={stats.new30d} />
+            <StatRow label="Pro subscribers" value={`${stats.pro} (${total ? ((stats.pro / total) * 100).toFixed(1) : 0}%)`} />
+            <StatRow label="Banned" value={stats.banned} />
+          </div>
+        </div>
+
+        {/* Power users */}
+        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 mb-4">
+          <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-300/70 mb-2">Top by chat messages</p>
+          {stats.powerUsers.length === 0 ? (
+            <p className="text-[12px] text-white/40 py-2">No chat activity yet.</p>
+          ) : (
+            <div className="space-y-1">
+              {stats.powerUsers.map(({ u, msgs }, i) => (
+                <div key={u.id || u.email} className="flex items-center gap-2 py-1">
+                  <span className="text-[10px] font-mono text-white/35 tabular-nums w-5">{String(i + 1).padStart(2, '0')}</span>
+                  <span className="text-[12.5px] text-white/85 flex-1 truncate">{u.name || u.email}</span>
+                  <span className="text-[11px] font-mono font-semibold tabular-nums text-blue-200">{msgs.toLocaleString()}</span>
+                  <span className="text-[10px] text-white/35">msgs</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <p className="text-[9.5px] text-white/30 text-center mt-3">
+          Note: time-on-site uses avg-visits as a proxy — session duration isn't tracked yet.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function StatTile({ label, value, accent }) {
+  const tones = {
+    emerald: 'border-emerald-500/30 from-emerald-500/[0.12] text-emerald-200',
+    blue:    'border-blue-500/30 from-blue-500/[0.12] text-blue-200',
+    indigo:  'border-indigo-500/30 from-indigo-500/[0.12] text-indigo-200',
+    white:   'border-white/[0.12] from-white/[0.06] text-white',
+  };
+  const t = tones[accent] || tones.white;
+  return (
+    <div className={`rounded-xl border bg-gradient-to-b to-transparent p-4 ${t}`}>
+      <div className="text-[28px] font-black tabular-nums leading-none">{typeof value === 'number' ? value.toLocaleString() : value}</div>
+      <p className="text-[10px] uppercase tracking-[0.16em] text-white/55 mt-2">{label}</p>
+    </div>
+  );
+}
+
+function StatRow({ label, value }) {
+  return (
+    <div className="flex items-center justify-between py-1 border-b border-white/[0.04] last:border-0">
+      <span className="text-[12px] text-white/55">{label}</span>
+      <span className="text-[12px] font-semibold tabular-nums text-white/90">{value}</span>
+    </div>
   );
 }
 
