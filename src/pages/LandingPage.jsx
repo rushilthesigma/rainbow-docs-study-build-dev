@@ -449,35 +449,59 @@ function SubjectsSpotlight() {
 }
 
 // ===== Section 6: Sign-in =====
+//
+// Styled like the Onboarding "Welcome" step — same gradient blue brand
+// mark sized at 20x20, the same italic "hello"-style gradient headline
+// treatment for the wordmark, and the same blue→indigo CTA pill so the
+// landing handshake and the first-login flow read as one continuous
+// experience.
 function SignInSection({ loading, onSignIn, onNewAccount, onWhyNotGpt }) {
   return (
     <section
       data-section="signin"
       className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative"
     >
-      <div className="absolute inset-0 bg-black/45" />
+      {/* Onboarding-style gradient scrim — same radial blue/indigo wash
+          used in Onboarding's welcome step, layered over the wallpaper
+          so the section feels visually connected to first-login. */}
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            'radial-gradient(at 25% 20%, rgba(30,58,138,0.78) 0%, transparent 55%),' +
+            'radial-gradient(at 75% 80%, rgba(49,46,129,0.78) 0%, transparent 55%),' +
+            'linear-gradient(135deg, rgba(5,7,20,0.92) 0%, rgba(10,15,36,0.85) 50%, rgba(13,15,31,0.92) 100%)',
+        }}
+      />
 
       <div className="relative z-10 flex flex-col items-center text-center animate-fade-up">
-        {/* RushilAI brand mark */}
-        <div className="relative w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 grid place-items-center ring-2 ring-white/30 shadow-2xl shadow-black/50">
-          <Sparkles size={36} className="text-white drop-shadow-lg" strokeWidth={2.2} />
-          <span className="pointer-events-none absolute inset-1 rounded-2xl bg-gradient-to-b from-white/25 to-transparent" />
+        {/* RushilAI brand mark — matches Onboarding welcome (rounded-3xl,
+            blue→indigo gradient, soft shadow, top inner highlight). */}
+        <div className="relative w-20 h-20 rounded-3xl bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 grid place-items-center shadow-2xl shadow-blue-500/30">
+          <Sparkles size={38} className="text-white drop-shadow-lg" strokeWidth={2.2} />
+          <span className="pointer-events-none absolute inset-1 rounded-3xl bg-gradient-to-b from-white/25 to-transparent" />
         </div>
 
-        <p className="mt-3 text-[18px] font-bold tracking-tight text-white drop-shadow-md">
-          Welcome to RushilAI
+        {/* Italic gradient wordmark — same treatment as Onboarding's "hello". */}
+        <h1
+          className="mt-6 text-[44px] sm:text-[56px] leading-[0.95] font-bold tracking-[-0.04em] italic bg-gradient-to-br from-white via-blue-200 to-blue-400 bg-clip-text text-transparent"
+        >
+          welcome
+        </h1>
+        <p className="mt-4 text-[16px] sm:text-[17px] text-white/80 drop-shadow-md">
+          Sign in to start your first curriculum.
         </p>
-        <p className="text-[13px] text-white/75 mt-0.5 drop-shadow-md">Sign in to continue</p>
 
-        {/* Primary sign-in CTA */}
+        {/* Primary sign-in CTA — same shape + gradient as Onboarding's
+            "Continue" pill. */}
         <button
           onClick={onSignIn}
           disabled={loading}
-          className="group mt-6 inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 hover:brightness-110 active:scale-[0.98] text-white text-[14.5px] font-bold transition-all disabled:opacity-50 shadow-xl shadow-blue-900/40 w-[280px] max-w-full"
+          className="group mt-8 inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 hover:brightness-110 active:scale-[0.98] text-white text-[13.5px] font-bold transition-all disabled:opacity-60 shadow-xl shadow-blue-900/40"
         >
           {loading
-            ? <><Loader size={15} className="animate-spin" /> Signing in…</>
-            : <>Sign in with Google <ArrowRight size={15} className="group-hover:translate-x-0.5 transition-transform" /></>}
+            ? <><Loader size={14} className="animate-spin" /> Signing in…</>
+            : <>Sign in with Google <ArrowRight size={14} className="group-hover:translate-x-0.5 transition-transform" /></>}
         </button>
 
         <button

@@ -11,15 +11,20 @@ const RETIRED_WALLPAPERS = new Set(['desert', 'cherry']);
 
 // Hard defaults — used when there's no signed-in user (login screen,
 // onboarding pre-auth) or when the server hasn't backfilled prefs yet.
+//
+// windowOpacity / titlebarOpacity are stored as opacity percentages
+// where 100 = fully opaque. The "transparency %" the user sees in the
+// Settings panel is `100 - opacity`, so 80 / 65 here surfaces as
+// "20% transparency" on windows and "35%" on the titlebar.
 const DEFAULTS = {
   theme: 'dark',
-  wallpaper: 'lavender',
+  wallpaper: 'aurora',
   dockSize: 'medium',
   iconStyle: 'gradient',
   dockPosition: 'bottom',
   uiMode: 'desktop',
-  windowOpacity: 100,
-  titlebarOpacity: 100,
+  windowOpacity: 80,
+  titlebarOpacity: 65,
 };
 
 // All UI preferences are persisted server-side under

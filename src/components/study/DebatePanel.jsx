@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Swords, RotateCcw, ArrowLeft, ArrowRight, Trophy, Users, User, Copy, Check, Loader2, X, Zap, FileText, AlertCircle, Paperclip, Clock, Camera, Download,
+  Swords, RotateCcw, ArrowLeft, ArrowRight, Trophy, Users, User, Copy, Check, Loader2, X, Zap, FileText, AlertCircle, Paperclip, Clock, Camera, Download, Eye, Sparkles,
 } from 'lucide-react';
 import { apiFetch, getToken } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
@@ -29,12 +29,65 @@ const QUICK_TOPICS = [
   'Self-driving cars are safer than humans',
 ];
 
+// Reusable topic chip row used by every debate setup screen (solo,
+// 1v1 lobby, tournament setup). Starts with the QUICK_TOPICS defaults
+// plus an "AI" button that swaps in 6 fresh AI-picked topics from the
+// /api/debate/suggest-topics endpoint. Hitting AI again re-rolls.
+function TopicChips({ onPick, max = null }) {
+  const [aiTopics, setAiTopics] = useState(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiErr, setAiErr] = useState(null);
+  const defaults = max ? QUICK_TOPICS.slice(0, max) : QUICK_TOPICS;
+  const chips = aiTopics || defaults;
+  async function fetchAi() {
+    setAiBusy(true); setAiErr(null);
+    try {
+      const r = await apiFetch('/api/debate/suggest-topics', {
+        method: 'POST',
+        body: JSON.stringify({ exclude: chips }),
+      });
+      if (Array.isArray(r.topics) && r.topics.length) setAiTopics(r.topics);
+      else setAiErr('No topics');
+    } catch (e) { setAiErr(e.message || 'Failed'); }
+    setAiBusy(false);
+  }
+  return (
+    <div className="flex flex-wrap gap-1.5 items-center">
+      {chips.map(t => (
+        <button
+          key={t}
+          onClick={() => onPick(t)}
+          className="px-2.5 py-1 rounded-md bg-blue-500/10 border border-blue-500/30 text-[11px] font-medium text-blue-300 hover:bg-blue-500/20 hover:border-blue-500/50 hover:text-blue-200 transition-colors"
+        >
+          {t}
+        </button>
+      ))}
+      <button
+        onClick={fetchAi}
+        disabled={aiBusy}
+        title={aiTopics ? 'Re-roll AI suggestions' : 'AI-suggest fresh topics'}
+        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-gradient-to-b from-blue-500/30 to-blue-600/20 border border-blue-400/45 text-[11px] font-semibold text-blue-100 hover:from-blue-500/40 hover:to-blue-600/25 disabled:opacity-50 transition-colors"
+      >
+        {aiBusy ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
+        {aiTopics ? 'Re-roll' : 'AI'}
+      </button>
+      {aiErr && <span className="text-[10px] text-rose-300/85">· {aiErr}</span>}
+    </div>
+  );
+}
+
 export default function DebatePanel({ onBack }) {
   const [mode, setMode] = useState('menu');
   // Forced-timed flag: set when the user picks "Timed multiplayer" from
   // the menu so the lobby opens with the timed-mode toggle pre-checked.
   // Reset when we go back to the menu.
   const [forceTimed, setForceTimed] = useState(false);
+  // Tournament-rejoin entry point. When the mode menu detects this user
+  // is already in an active tournament (via /my-active-tournament), the
+  // Rejoin banner sets this and selectMode('tour-lobby' or 'tour-bracket')
+  // — the Tournament component reads `rejoinTournament` and skips its
+  // own create/join screen.
+  const [rejoinTournament, setRejoinTournament] = useState(null);
   const selectMode = (m) => {
     if (m === 'mp-menu-timed') {
       setForceTimed(true);
@@ -88,13 +141,26 @@ export default function DebatePanel({ onBack }) {
   );
 
   return (
-    <div className="h-full flex flex-col glass-card rounded-xl overflow-hidden">
+    <div className="h-full flex flex-col">
       {header}
       <div className="flex-1 min-h-0 overflow-y-auto">
-        {mode === 'menu' && <ModeMenu onSelect={selectMode} />}
+        {mode === 'menu' && (
+          <ModeMenu
+            onSelect={selectMode}
+            onRejoinTournament={(t) => {
+              setRejoinTournament(t);
+              setMode(t.state === 'waiting' ? 'tour-lobby' : 'tour-bracket');
+            }}
+          />
+        )}
         {mode === 'history' && <HistoryView onExit={() => selectMode('menu')} />}
         {(mode === 'tour-menu' || mode === 'tour-lobby' || mode === 'tour-bracket') && (
-          <Tournament mode={mode} setMode={selectMode} onExit={() => selectMode('menu')} />
+          <Tournament
+            mode={mode}
+            setMode={selectMode}
+            onExit={() => { setRejoinTournament(null); selectMode('menu'); }}
+            rejoinTournament={rejoinTournament}
+          />
         )}
         {(mode === 'single-setup' || mode === 'single-debate' || mode === 'single-verdict') && (
           <Singleplayer
@@ -119,10 +185,50 @@ export default function DebatePanel({ onBack }) {
 // =========================================================
 // MENU
 // =========================================================
-function ModeMenu({ onSelect }) {
+function ModeMenu({ onSelect, onRejoinTournament }) {
   const card = 'flex flex-col items-center justify-center gap-2.5 p-6 rounded-xl border transition-colors group';
+  // Detect a tournament this user is already in (created/joined on
+  // another device or earlier session). If found, surface a Rejoin
+  // banner at the top — clicking it routes straight to lobby/bracket
+  // without going through create/join.
+  const [activeTour, setActiveTour] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await apiFetch('/api/debate/my-active-tournament');
+        if (!cancelled) setActiveTour(r?.tournament || null);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   return (
     <div className="p-6 md:p-10 max-w-md md:max-w-3xl mx-auto">
+      {activeTour && onRejoinTournament && (
+        <button
+          onClick={() => onRejoinTournament(activeTour)}
+          className="w-full mb-5 flex items-center gap-3 p-3.5 rounded-xl border border-blue-400/45 bg-gradient-to-b from-blue-500/[0.18] to-blue-600/[0.10] hover:from-blue-500/[0.24] hover:to-blue-600/[0.14] hover:border-blue-400/65 transition-colors text-left"
+          title="Rejoin your active tournament"
+        >
+          <div className="w-10 h-10 rounded-xl bg-blue-500 text-white flex items-center justify-center shadow-[0_4px_12px_rgba(59,130,246,0.35)] flex-shrink-0">
+            <Trophy size={18} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[12.5px] font-bold text-white truncate">
+              You're in a tournament · <span className="font-mono tracking-wider">{activeTour.code}</span>
+            </p>
+            <p className="text-[11px] text-blue-100/80 truncate">
+              {activeTour.name && activeTour.name !== activeTour.topic ? activeTour.name : `"${activeTour.topic}"`}
+              {' · '}
+              {activeTour.state === 'waiting'
+                ? `Lobby ${activeTour.players?.length || 0}/${activeTour.size}`
+                : 'In progress'}
+            </p>
+          </div>
+          <ArrowRight size={14} className="text-blue-100 flex-shrink-0" />
+        </button>
+      )}
       <div className="flex items-center justify-between mb-5">
         <h2 className="text-base md:text-xl font-bold text-gray-900 dark:text-white">Pick a mode</h2>
         <button
@@ -269,15 +375,20 @@ function HistoryView({ onExit }) {
                 h.result === 'win' ? 'bg-emerald-400' : h.result === 'loss' ? 'bg-rose-400' : 'bg-amber-400'
               }`} />
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5 mb-0.5">
+                <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
                   <span className={`text-[9px] font-bold uppercase tracking-wider ${
                     h.result === 'win' ? 'text-emerald-300' : h.result === 'loss' ? 'text-rose-300' : 'text-amber-300'
-                  }`}>{h.result}</span>
+                  }`}>{h.result}{h.forfeit ? ' · forfeit' : ''}</span>
                   <span className="text-[9px] font-bold uppercase tracking-wider text-blue-300/60">·</span>
                   <span className="text-[9px] font-bold uppercase tracking-wider text-blue-300/70">
                     {h.mode === 'solo' ? 'vs AI' : (h.opponent?.name || 'opp')}
                   </span>
                   {h.timedMode && <Clock size={9} className="text-blue-300/60" />}
+                  {h.tournament && (
+                    <span className="inline-flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wider text-blue-300/85 bg-blue-500/10 border border-blue-500/25 rounded px-1 py-0.5">
+                      <Trophy size={8} /> {h.tournament.name}{h.tournament.round ? ` · R${h.tournament.round}` : ''}
+                    </span>
+                  )}
                 </div>
                 <p className="text-[13px] text-white/85 truncate">{h.topic}</p>
                 <p className="text-[10.5px] text-blue-300/55 tabular-nums">
@@ -303,6 +414,16 @@ function HistoryDetail({ entry, onBack }) {
         <ArrowLeft size={12} /> History
       </button>
       <p className="text-xs text-blue-300/55 mb-1">{new Date(entry.finishedAt).toLocaleString()}</p>
+      {entry.tournament && (
+        <p className="inline-flex items-center gap-1 text-[10.5px] font-bold uppercase tracking-wider text-blue-200 bg-blue-500/10 border border-blue-500/25 rounded px-2 py-0.5 mb-2">
+          <Trophy size={10} /> {entry.tournament.name}{entry.tournament.round ? ` · R${entry.tournament.round}${entry.tournament.totalRounds ? `/${entry.tournament.totalRounds}` : ''}` : ''}
+        </p>
+      )}
+      {entry.forfeit && (
+        <p className="inline-flex items-center gap-1 text-[10.5px] font-bold uppercase tracking-wider text-rose-300 bg-rose-500/10 border border-rose-500/25 rounded px-2 py-0.5 mb-2 ml-2">
+          Forfeit
+        </p>
+      )}
       <h2 className="text-base font-bold text-gray-900 dark:text-white mb-4">{entry.topic}</h2>
       <div className={`rounded-2xl p-4 mb-4 text-center border ${
         entry.result === 'win' ? 'bg-emerald-500/10 border-emerald-500/30' :
@@ -377,16 +498,17 @@ Format: GitHub-flavored markdown. **Bold** key claims, use - bullets for evidenc
 // view. When the user has a live match they're routed inline into the
 // existing Multiplayer game UI via the presetCode + tournamentCode path.
 // =========================================================
-function Tournament({ mode, setMode, onExit }) {
+function Tournament({ mode, setMode, onExit, rejoinTournament = null }) {
   const { user } = useAuth();
   const myId = user?.id || null;
-  const [code, setCode] = useState('');
-  const [iAmHost, setIAmHost] = useState(false);
-  const [tournament, setTournament] = useState(null);
+  const [code, setCode] = useState(rejoinTournament?.code || '');
+  const [iAmHost, setIAmHost] = useState(rejoinTournament?.hostId === (user?.id || null));
+  const [tournament, setTournament] = useState(rejoinTournament || null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   // Setup form state.
   const [size, setSize] = useState(4);
+  const [nameInput, setNameInput] = useState('');
   const [topicInput, setTopicInput] = useState('');
   const [timedMode, setTimedMode] = useState(false);
   const [maxRounds, setMaxRounds] = useState(5);
@@ -396,9 +518,15 @@ function Tournament({ mode, setMode, onExit }) {
   // round falls back to the main topic on the server.
   const [perRoundTopics, setPerRoundTopics] = useState(false);
   const [roundTopics, setRoundTopics] = useState({}); // { [roundNum]: string }
+  // Host can opt out of playing — useful for teachers / organizers
+  // running a bracket without taking a player slot.
+  const [hostPlays, setHostPlays] = useState(true);
   // In-match mode: switch the panel from the bracket view to the
   // Multiplayer game view scoped to the user's current bracket match.
   const [activeMatchCode, setActiveMatchCode] = useState(null);
+  // Set to true when the user opens a match they're NOT playing in —
+  // eliminated player or organizer watching a live match.
+  const [activeMatchIsSpectator, setActiveMatchIsSpectator] = useState(false);
   // Local "in-match" mode for Multiplayer's controlled state — it doesn't
   // need to share with the parent setMode because the user never goes back
   // to mp-menu from a tournament match.
@@ -469,9 +597,11 @@ function Tournament({ mode, setMode, onExit }) {
         method: 'POST',
         body: JSON.stringify({
           size,
+          name: nameInput.trim(),
           topic: topicInput.trim(),
           timedMode,
           maxRounds,
+          hostPlays,
           // Only send filled-in per-round topics; server fills the rest
           // with the main topic.
           roundTopics: perRoundTopics
@@ -543,9 +673,10 @@ function Tournament({ mode, setMode, onExit }) {
       <Multiplayer
         mode={matchMode}
         setMode={setMatchMode}
-        onExit={() => { setActiveMatchCode(null); setMatchMode('mp-game'); }}
+        onExit={() => { setActiveMatchCode(null); setActiveMatchIsSpectator(false); setMatchMode('mp-game'); }}
         presetCode={activeMatchCode}
         tournamentCode={code}
+        spectator={activeMatchIsSpectator}
       />
     );
   }
@@ -578,11 +709,21 @@ function Tournament({ mode, setMode, onExit }) {
           ))}
         </div>
         <input
+          value={nameInput}
+          onChange={e => setNameInput(e.target.value)}
+          placeholder="Tournament name (e.g., Spring 2026 Debate)"
+          maxLength={80}
+          className="w-full px-3 py-2 mb-2 rounded-lg border border-blue-500/25 bg-white/50 dark:bg-white/[0.06] text-sm font-semibold text-gray-900 dark:text-white placeholder-gray-400 outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/45"
+        />
+        <input
           value={topicInput}
           onChange={e => setTopicInput(e.target.value)}
           placeholder={perRoundTopics ? 'Default topic (used when a round is blank)' : 'Topic for the whole bracket'}
           className="w-full px-3 py-2 mb-2 rounded-lg border border-blue-500/25 bg-white/50 dark:bg-white/[0.06] text-sm text-gray-900 dark:text-white placeholder-gray-400 outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/45"
         />
+        <div className="mb-3">
+          <TopicChips onPick={setTopicInput} max={4} />
+        </div>
         {/* Per-round topic toggle + inputs. When on, host can give each
             round its own topic (Quarter / Semi / Final). Empty rounds
             inherit the main topic above. */}
@@ -599,6 +740,24 @@ function Tournament({ mode, setMode, onExit }) {
             </span>
             Different topic per round
           </span>
+        </button>
+
+        {/* Host-plays toggle. Default is "play" — uncheck to organize-only,
+            useful for a teacher / spectator running a bracket. */}
+        <button
+          type="button"
+          onClick={() => setHostPlays(v => !v)}
+          className={`w-full mb-2 flex items-center justify-between px-3 py-2 rounded-lg border text-[12px] transition-colors ${
+            hostPlays ? 'bg-blue-500/15 border-blue-500/45 text-blue-100' : 'border-blue-500/20 text-blue-300/70 hover:bg-blue-500/10 hover:text-blue-200'
+          }`}
+        >
+          <span className="inline-flex items-center gap-2 font-semibold">
+            <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center transition-colors ${hostPlays ? 'bg-blue-500 border-blue-400' : 'border-blue-500/50 bg-transparent'}`}>
+              {hostPlays && <Check size={10} className="text-white" />}
+            </span>
+            I'll play in this tournament
+          </span>
+          <span className="text-[10.5px] text-blue-300/65">{hostPlays ? `1/${size} filled` : `Organize only`}</span>
         </button>
         {perRoundTopics && (() => {
           const total = Math.log2(size);
@@ -701,7 +860,23 @@ function Tournament({ mode, setMode, onExit }) {
           <Copy size={16} className="text-blue-400/70" />
         </button>
         <p className="text-[11px] text-blue-300/50 text-center mb-1">Share with players</p>
+        {tournament.name && tournament.name !== tournament.topic && (
+          <p className="text-[14px] font-bold text-white text-center truncate">{tournament.name}</p>
+        )}
         <p className="text-[12px] text-white/75 text-center mb-5 truncate">"{tournament.topic}"</p>
+
+        {/* Organizer-host chip — shown when host opted out of playing. */}
+        {!tournament.hostPlays && iAmHost && (
+          <div className="rounded-xl border border-blue-400/35 bg-blue-500/[0.10] p-3 mb-3 flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-full bg-blue-500/30 border border-blue-400/50 grid place-items-center flex-shrink-0">
+              <Trophy size={12} className="text-blue-200" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[11px] font-bold text-blue-100">You're the organizer</p>
+              <p className="text-[10.5px] text-blue-200/65">Not playing — just running the bracket.</p>
+            </div>
+          </div>
+        )}
 
         <div className="rounded-xl border border-blue-500/[0.15] bg-blue-500/[0.04] p-3 mb-5">
           <div className="flex items-center justify-between mb-2">
@@ -773,6 +948,8 @@ function Tournament({ mode, setMode, onExit }) {
     );
     const me = tournament.players.find(p => p.userId === myId);
     const iAmEliminated = !!me?.eliminated;
+    // Host running the bracket without taking a player slot.
+    const iAmOrganizer = tournament.hostId === myId && !tournament.hostPlays;
 
     // Group bracket by round for the column layout.
     const roundsMap = {};
@@ -795,6 +972,9 @@ function Tournament({ mode, setMode, onExit }) {
         {/* Header */}
         <div className="mb-4 flex items-start gap-3">
           <div className="flex-1 min-w-0">
+            {tournament.name && tournament.name !== tournament.topic && (
+              <p className="text-[14px] font-bold text-white truncate">{tournament.name}</p>
+            )}
             <p className="text-[11px] text-blue-300/55 truncate">"{tournament.topic}"</p>
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
               <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-blue-300/70">
@@ -849,10 +1029,18 @@ function Tournament({ mode, setMode, onExit }) {
             <ArrowRight size={14} className="text-blue-100 flex-shrink-0" />
           </button>
         )}
-        {!finished && !myLiveMatch && iAmEliminated && (
+        {!finished && !myLiveMatch && iAmOrganizer && (
+          <div className="rounded-xl border border-blue-400/35 bg-blue-500/[0.08] p-3 mb-3 flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-full bg-blue-500/25 border border-blue-400/45 grid place-items-center flex-shrink-0">
+              <Trophy size={12} className="text-blue-200" />
+            </div>
+            <p className="text-[12px] text-blue-100/85 flex-1">Organizing — bracket auto-advances as matches finish.</p>
+          </div>
+        )}
+        {!finished && !myLiveMatch && iAmEliminated && !iAmOrganizer && (
           <p className="text-[12px] text-rose-300/70 text-center py-2 mb-2">You were eliminated in round {me?.eliminatedInRound || '?'}. Watching the bracket.</p>
         )}
-        {!finished && !myLiveMatch && !iAmEliminated && (
+        {!finished && !myLiveMatch && !iAmEliminated && !iAmOrganizer && (
           <p className="text-[12px] text-blue-300/55 text-center py-2 mb-2 italic">Waiting for the next round…</p>
         )}
 
@@ -873,20 +1061,47 @@ function Tournament({ mode, setMode, onExit }) {
                   const p2 = tournament.players.find(p => p.userId === b.players[1]);
                   const winnerId = b.winnerId;
                   const isMyMatch = b.players.includes(myId);
-                  return (
-                    <div
-                      key={b.code}
-                      className={`rounded-lg border p-2 ${
-                        isMyMatch && b.state === 'playing'
-                          ? 'border-blue-400/55 bg-blue-500/[0.12] shadow-[0_0_0_2px_rgba(96,165,250,0.18)]'
-                          : b.state === 'finished'
-                            ? 'border-blue-500/20 bg-blue-500/[0.04]'
-                            : 'border-blue-500/[0.18] bg-blue-500/[0.03]'
-                      }`}
-                    >
+                  // Anyone who isn't a player in this match can spectate
+                  // (eliminated players + organizer). The match must be
+                  // live to be worth watching.
+                  const canSpectate = !isMyMatch && b.state === 'playing' && (iAmEliminated || iAmOrganizer);
+                  const cellClasses = `rounded-lg border p-2 ${
+                    isMyMatch && b.state === 'playing'
+                      ? 'border-blue-400/55 bg-blue-500/[0.12] shadow-[0_0_0_2px_rgba(96,165,250,0.18)]'
+                      : b.state === 'finished'
+                        ? 'border-blue-500/20 bg-blue-500/[0.04]'
+                        : 'border-blue-500/[0.18] bg-blue-500/[0.03]'
+                  } ${canSpectate ? 'hover:border-blue-400/55 hover:bg-blue-500/[0.10] cursor-pointer transition-colors' : ''}`;
+                  const innerRows = (
+                    <>
                       <PlayerRow player={p1} score={b.scores?.[p1?.userId]} won={winnerId === p1?.userId} matchFinished={b.state === 'finished'} self={p1?.userId === myId} />
                       <div className="my-0.5 h-px bg-blue-500/[0.12]" />
                       <PlayerRow player={p2} score={b.scores?.[p2?.userId]} won={winnerId === p2?.userId} matchFinished={b.state === 'finished'} self={p2?.userId === myId} />
+                      {(b.spectatorCount > 0 || canSpectate) && (
+                        <div className="mt-1 pt-1 border-t border-blue-500/[0.10] flex items-center justify-between text-[9.5px] text-blue-300/55">
+                          {b.spectatorCount > 0 ? (
+                            <span className="inline-flex items-center gap-0.5"><Eye size={9} /> {b.spectatorCount}</span>
+                          ) : <span />}
+                          {canSpectate && <span className="font-semibold text-blue-300/80">Watch</span>}
+                        </div>
+                      )}
+                    </>
+                  );
+                  if (canSpectate) {
+                    return (
+                      <button
+                        key={b.code}
+                        onClick={() => { setActiveMatchIsSpectator(true); setActiveMatchCode(b.code); }}
+                        className={`${cellClasses} text-left w-full`}
+                        title="Watch live"
+                      >
+                        {innerRows}
+                      </button>
+                    );
+                  }
+                  return (
+                    <div key={b.code} className={cellClasses}>
+                      {innerRows}
                     </div>
                   );
                 })}
@@ -900,7 +1115,7 @@ function Tournament({ mode, setMode, onExit }) {
           onClick={handleLeaveTournament}
           className="w-full mt-4 py-2 rounded-xl text-[12px] text-rose-300/80 hover:text-rose-200 transition-colors inline-flex items-center justify-center gap-1.5"
         >
-          {finished ? <><ArrowLeft size={12} /> Back to menu</> : <><X size={12} /> {iAmEliminated ? 'Exit' : 'Leave (forfeit)'}</>}
+          {finished ? <><ArrowLeft size={12} /> Back to menu</> : <><X size={12} /> {iAmOrganizer ? 'Cancel tournament' : iAmEliminated ? 'Exit' : 'Leave (forfeit)'}</>}
         </button>
 
         {error && <p className="mt-3 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/25 rounded-lg px-3 py-2">{error}</p>}
@@ -970,7 +1185,7 @@ function TournamentSnapshotModal({ tournament, roundsMap, roundNumbers, roundLab
 
   function buildTextSummary() {
     const lines = [];
-    lines.push(`TOURNAMENT · ${tournament.code}`);
+    lines.push(`TOURNAMENT · ${tournament.code}${tournament.name && tournament.name !== tournament.topic ? ` · ${tournament.name}` : ''}`);
     lines.push(`Topic: ${tournament.topic}`);
     lines.push(`Size: ${tournament.size} · Best-of-${tournament.maxRounds || '?'} per match${tournament.timedMode ? ' · 2:00 per turn' : ''}`);
     lines.push(`State: ${tournament.state}`);
@@ -1067,6 +1282,9 @@ function TournamentSnapshotModal({ tournament, roundsMap, roundNumbers, roundLab
           <div className="flex items-start justify-between gap-4 mb-4">
             <div>
               <p className="text-[10px] uppercase tracking-[0.18em] text-blue-400/70">Tournament</p>
+              {tournament.name && tournament.name !== tournament.topic && (
+                <p className="text-[16px] font-bold text-white">{tournament.name}</p>
+              )}
               <p className="font-mono text-2xl font-black tabular-nums tracking-[0.18em] text-white">{tournament.code}</p>
               <p className="text-[12px] text-blue-200/85 mt-1.5 max-w-[440px]">"{tournament.topic}"</p>
               <div className="flex items-center gap-2 mt-1.5 flex-wrap">
@@ -1250,12 +1468,8 @@ function Singleplayer({ mode, setMode, onExit }) {
           placeholder="What do you want to debate?"
           className="w-full px-3 py-2 rounded-lg border border-blue-500/30 bg-white/50 dark:bg-white/[0.06] text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/60 mb-3"
         />
-        <div className="flex flex-wrap gap-1.5 mb-5">
-          {QUICK_TOPICS.map(t => (
-            <button key={t} onClick={() => setTopic(t)} className="px-2.5 py-1 rounded-md bg-blue-500/10 border border-blue-500/30 text-[11px] font-medium text-blue-300 hover:bg-blue-500/20 hover:border-blue-500/50 hover:text-blue-200 transition-colors">
-              {t}
-            </button>
-          ))}
+        <div className="mb-5">
+          <TopicChips onPick={setTopic} />
         </div>
         {topic.trim() && (
           <>
@@ -1356,7 +1570,7 @@ function Singleplayer({ mode, setMode, onExit }) {
 // =========================================================
 // MULTIPLAYER
 // =========================================================
-function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = null, tournamentCode = null }) {
+function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = null, tournamentCode = null, spectator = false }) {
   const { user } = useAuth();
   const myId = user?.id || null;
   const [iAmHost, setIAmHost] = useState(false);
@@ -1413,9 +1627,15 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
   // Tournament entry path: when a presetCode is passed in, idempotently
   // join the match (server treats already-a-player as a no-op) and load
   // its current state so the user lands directly in the game view without
-  // touching the create/join flow.
+  // touching the create/join flow. Spectator entry skips /join entirely —
+  // the SSE stream below auto-snapshots the match read-only.
   useEffect(() => {
     if (!presetCode || code) return;
+    if (spectator) {
+      setCode(presetCode);
+      setMode('mp-game');
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -1427,7 +1647,14 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
       } catch (e) { if (!cancelled) setError(e.message); }
     })();
     return () => { cancelled = true; };
-  }, [presetCode, code, setMode]);
+  }, [presetCode, code, setMode, spectator]);
+
+  // Spectator mode auto-switches into the verdict view once the SSE
+  // snapshot tells us the match is finished.
+  useEffect(() => {
+    if (!spectator || !match) return;
+    if (match.state === 'finished' && mode !== 'mp-verdict') setMode('mp-verdict');
+  }, [spectator, match, mode, setMode]);
 
   useEffect(() => {
     if (!code || mode === 'mp-menu') return;
@@ -1759,12 +1986,8 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
               placeholder="What are we debating?"
               className="w-full px-3 py-2 mb-2 rounded-lg border border-blue-500/25 bg-white/50 dark:bg-white/[0.06] text-sm text-gray-900 dark:text-white placeholder-gray-400 outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/45"
             />
-            <div className="flex flex-wrap gap-1 mb-4">
-              {QUICK_TOPICS.slice(0, 4).map(t => (
-                <button key={t} onClick={() => setTopicInput(t)} className="px-2 py-0.5 rounded text-[10px] font-medium text-blue-300/70 bg-blue-500/[0.06] border border-blue-500/[0.15] hover:border-blue-500/40 hover:text-blue-200 transition-colors">
-                  {t}
-                </button>
-              ))}
+            <div className="mb-4">
+              <TopicChips onPick={setTopicInput} max={4} />
             </div>
             <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2">Your side</p>
             <div className="grid grid-cols-2 gap-2 mb-3">
@@ -1882,37 +2105,63 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
         <div className="px-4 py-2 bg-transparent">
           <p className="text-xs text-white/80 font-medium truncate">{match.topic}</p>
           <div className="flex items-center gap-3 mt-1">
-            <ScorePill name={me?.name || 'You'} side={me?.side} score={myScore} active={myTurn} self />
+            <ScorePill name={me?.name || 'You'} side={me?.side} score={myScore} active={myTurn && !spectator} self={!spectator} />
             <span className="text-gray-300 dark:text-gray-600">vs</span>
-            <ScorePill name={opp?.name || 'Opponent'} side={opp?.side} score={oppScore} active={!myTurn} />
+            <ScorePill name={opp?.name || 'Opponent'} side={opp?.side} score={oppScore} active={!myTurn && !spectator} />
             <span
               title={match.maxRounds > 0 ? `Rounds used / cap per side. Match auto-ends when both sides hit ${match.maxRounds}.` : 'Infinite rounds — ends on vote'}
               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10.5px] font-semibold tabular-nums bg-blue-500/10 border border-blue-500/25 text-blue-300/85"
             >
               <Swords size={10} /> {roundsDisplay}
             </span>
+            {/* Live spectator count — visible to everyone when > 0. */}
+            {match.spectatorCount > 0 && (
+              <span
+                title={`${match.spectatorCount} spectator${match.spectatorCount === 1 ? '' : 's'} watching`}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10.5px] font-semibold tabular-nums bg-white/[0.06] border border-white/[0.12] text-white/70"
+              >
+                <Eye size={10} /> {match.spectatorCount}
+              </span>
+            )}
             <span className="flex-1" />
-            <button
-              onClick={() => setConfirmLeave(true)}
-              title="Leave debate"
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-rose-500/10 border border-rose-500/30 text-rose-300 hover:bg-rose-500/20 hover:border-rose-500/50 hover:text-rose-200 transition-colors"
-            >
-              <X size={11} /> Leave
-            </button>
-            <button
-              onClick={handleVoteEnd}
-              disabled={voting || iVoted}
-              title={iVoted ? 'Waiting for opponent to vote' : oppVoted ? 'Opponent voted — confirm to end' : 'Vote to end'}
-              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
-                iVoted
-                  ? 'bg-blue-500/15 border border-blue-500/30 text-blue-300/80'
-                  : oppVoted
-                    ? 'bg-gradient-to-b from-blue-500 to-blue-600 text-white border border-blue-400/40 animate-pulse'
-                    : 'bg-blue-500/20 border border-blue-400/40 text-blue-200 hover:bg-blue-500/30 hover:text-blue-100'
-              }`}
-            >
-              {voting ? <InlineProgress active /> : iVoted ? <><Check size={11} /> Waiting</> : oppVoted ? <><Trophy size={11} /> Confirm end</> : <><Trophy size={11} /> End</>}
-            </button>
+            {spectator ? (
+              <>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10.5px] font-semibold bg-blue-500/15 border border-blue-500/30 text-blue-200">
+                  <Eye size={10} /> Spectating
+                </span>
+                <button
+                  onClick={onExit}
+                  title="Stop watching"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-white/[0.06] border border-white/[0.12] text-white/75 hover:bg-white/[0.10] hover:text-white transition-colors"
+                >
+                  <X size={11} /> Exit
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => setConfirmLeave(true)}
+                  title="Leave debate"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-rose-500/10 border border-rose-500/30 text-rose-300 hover:bg-rose-500/20 hover:border-rose-500/50 hover:text-rose-200 transition-colors"
+                >
+                  <X size={11} /> Leave
+                </button>
+                <button
+                  onClick={handleVoteEnd}
+                  disabled={voting || iVoted}
+                  title={iVoted ? 'Waiting for opponent to vote' : oppVoted ? 'Opponent voted — confirm to end' : 'Vote to end'}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
+                    iVoted
+                      ? 'bg-blue-500/15 border border-blue-500/30 text-blue-300/80'
+                      : oppVoted
+                        ? 'bg-gradient-to-b from-blue-500 to-blue-600 text-white border border-blue-400/40 animate-pulse'
+                        : 'bg-blue-500/20 border border-blue-400/40 text-blue-200 hover:bg-blue-500/30 hover:text-blue-100'
+                  }`}
+                >
+                  {voting ? <InlineProgress active /> : iVoted ? <><Check size={11} /> Waiting</> : oppVoted ? <><Trophy size={11} /> Confirm end</> : <><Trophy size={11} /> End</>}
+                </button>
+              </>
+            )}
           </div>
           {remainingMs !== null && (
             <div className="mt-2 flex items-center justify-center gap-2">
@@ -2041,8 +2290,8 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
           )}
         </div>
 
-        {/* Composer */}
-        <div
+        {/* Composer — hidden for spectators (read-only). */}
+        {!spectator && <div
           className="relative bg-transparent px-3 pt-2 pb-3"
           onDragEnter={e => {
             if (!myTurn) return;
@@ -2160,7 +2409,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
               </div>
             </>
           )}
-        </div>
+        </div>}
 
         {error && <p className="mx-3 mb-2 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/25 rounded-lg px-3 py-1.5">{error}</p>}
 

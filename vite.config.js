@@ -5,7 +5,7 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   optimizeDeps: {
-    include: ['jspdf', 'pptxgenjs'],
+    include: ['jspdf', 'pptxgenjs', 'html-to-image'],
   },
   server: {
     proxy: {

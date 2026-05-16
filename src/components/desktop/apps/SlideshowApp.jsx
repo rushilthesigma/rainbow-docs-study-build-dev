@@ -8,12 +8,14 @@ import {
   Square, Circle as CircleIcon, Play, Pause, PanelLeft, PanelRight,
   LayoutGrid, Eye, ZoomIn, ZoomOut, X as XIcon,
   Volume2, VolumeX, Headphones, Zap, SlidersHorizontal, Download,
+  AlertCircle,
 } from 'lucide-react';
 import * as LucideIcons from 'lucide-react';
 import {
   listSlideshows, getSlideshow, deleteSlideshow,
   generateSlideshow, generateSlideImage, createSlideshow, updateSlideshow,
 } from '../../../api/slideshows';
+import { extractFiles } from '../../../api/curriculum';
 import LoadingSpinner from '../../shared/LoadingSpinner';
 import { useAuth } from '../../../context/AuthContext';
 import { useWindowManager } from '../../../context/WindowManagerContext';
@@ -665,8 +667,12 @@ function slideToElements(slide, themeKey, fontHint, image) {
         slide.title || '',
         { ...HEAD, color: overlayText, fontSize: fitFontSize(slide.title, 56, 28), align: 'left' }));
       if (slide.subtitle) {
+        // Over an image the dark veil makes light gray readable; without
+        // an image we sit on t.surface (light on light themes) so use
+        // the theme's muted color instead.
+        const subColor = image ? '#e5e7eb' : t.muted;
         els.push(T('sub', 6, 90, 88, 8, slide.subtitle,
-          { fontFamily: f.body, fontSize: 16, fontWeight: '500', color: '#e5e7eb', align: 'left' }));
+          { fontFamily: f.body, fontSize: 16, fontWeight: '500', color: subColor, align: 'left' }));
       }
       els.push(R('topBar', 0, 0, 100, 0.4, t.accent));
       return els;
@@ -1366,7 +1372,13 @@ async function captureSlidePng(slide, themeKey, fontHint, image, w = 1600, h = 9
   const layoutHasImage = elements.some(el => el.kind === 'image');
 
   const host = document.createElement('div');
-  host.style.cssText = `position:fixed;left:-99999px;top:0;width:${w}px;height:${h}px;background:${t.bg};overflow:hidden;z-index:-1;`;
+  // Keep the host visible to the browser's renderer but shift it off the
+  // viewport via `transform` — `opacity:0` got copied onto the cloned
+  // element by html-to-image and produced all-black frames; the old
+  // `left:-99999px` trick made some Chromium builds skip the paint.
+  // Transform moves the element at paint time only, so the cloned copy
+  // still renders with full opacity.
+  host.style.cssText = `position:fixed;left:0;top:0;width:${w}px;height:${h}px;background:${t.bg};overflow:hidden;z-index:-2147483647;pointer-events:none;transform:translate3d(-200vw,0,0);`;
 
   // PDF/PPTX export always uses the template path — matches the edit and
   // present views 1:1. The AI's bespoke HTML in slide.html is intentionally
@@ -1406,7 +1418,12 @@ async function captureSlidePng(slide, themeKey, fontHint, image, w = 1600, h = 9
       } else {
         const div = document.createElement('div');
         const ls = el.letterSpacing ? `letter-spacing:${el.letterSpacing};` : '';
-        div.style.cssText = `position:absolute;left:${el.x}%;top:${el.y}%;width:${el.w}%;height:${el.h}%;font-family:${el.fontFamily || 'Inter,system-ui,sans-serif'};font-size:${el.fontSize || 24}px;font-weight:${el.fontWeight || 400};font-style:${el.italic ? 'italic' : 'normal'};color:${el.color || '#fff'};text-align:${el.align || 'left'};line-height:${el.lineHeight ?? 1.3};${ls}overflow:hidden;white-space:pre-wrap;`;
+        // Fall back to the theme's text color, NOT plain white — light
+        // themes (ink, mono, newsprint, sun, sage, rose) have white-ish
+        // backgrounds, so a hard-coded `#fff` fallback was rendering
+        // text invisibly on those themes and producing all-white PDFs.
+        const fallbackText = t.text || '#fff';
+        div.style.cssText = `position:absolute;left:${el.x}%;top:${el.y}%;width:${el.w}%;height:${el.h}%;font-family:${el.fontFamily || 'Inter,system-ui,sans-serif'};font-size:${el.fontSize || 24}px;font-weight:${el.fontWeight || 400};font-style:${el.italic ? 'italic' : 'normal'};color:${el.color || fallbackText};text-align:${el.align || 'left'};line-height:${el.lineHeight ?? 1.3};${ls}overflow:hidden;white-space:pre-wrap;`;
         if (Array.isArray(el.parts) && el.parts.length) {
           for (const p of el.parts) {
             const span = document.createElement('span');
@@ -1434,42 +1451,88 @@ async function captureSlidePng(slide, themeKey, fontHint, image, w = 1600, h = 9
         ? Promise.resolve()
         : new Promise(res => { img.onload = () => res(); img.onerror = () => res(); setTimeout(res, 4000); })
     ));
-    return await toPng(host, { width: w, height: h, pixelRatio: 2, cacheBust: false, skipFonts: true });
+    // Wait two rAFs so the browser has actually painted the host before
+    // we ask html-to-image to serialize it. Without this, the first
+    // slide in a long export sometimes captures a blank frame.
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    // `style` is applied to the cloned node before rasterization, which
+    // means our hiding trick (transform off-screen) doesn't follow into
+    // the SVG — the clone renders at its natural position with full
+    // opacity. This is what the debate-tournament snapshot relies on.
+    const dataUrl = await toPng(host, {
+      width: w,
+      height: h,
+      pixelRatio: 2,
+      cacheBust: true,
+      skipFonts: true,
+      backgroundColor: t.bg,
+      style: { transform: 'none', opacity: '1', left: '0', top: '0' },
+    });
+    // Sanity-check: if html-to-image returned a degenerate PNG (under a
+    // few KB) the capture almost certainly missed everything. Throwing
+    // here trips the per-slide fallback path in exportToPdf/Pptx.
+    if (!dataUrl || dataUrl.length < 1500) {
+      throw new Error('capture returned empty frame');
+    }
+    return dataUrl;
   } finally {
     document.body.removeChild(host);
+  }
+}
+
+// Tiny 1x1 placeholder PNG so a slide that fails to capture (e.g. tainted
+// canvas from a cross-origin image) doesn't abort the entire export.
+const SLIDE_CAPTURE_FALLBACK_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNiYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+
+async function captureSlideWithFallback(slide, deck, getImage, w, h, captureErrors) {
+  try {
+    return await captureSlidePng(slide, deck.palette, deck.font, getImage?.(slide), w, h);
+  } catch (e) {
+    captureErrors.push({ slideId: slide.id, title: slide.title, err: e?.message || String(e) });
+    return SLIDE_CAPTURE_FALLBACK_PNG;
   }
 }
 
 async function exportToPdf(deck, getImage) {
   const jspdfMod = await import('jspdf');
   const jsPDF = jspdfMod.jsPDF || jspdfMod.default?.jsPDF || jspdfMod.default;
+  if (typeof jsPDF !== 'function') throw new Error('jsPDF failed to load');
   const W = 13.333, H = 7.5; // standard 16:9 PowerPoint dimensions in inches
   const pdf = new jsPDF({ orientation: 'landscape', unit: 'in', format: [W, H] });
 
+  const captureErrors = [];
   for (let i = 0; i < deck.slides.length; i++) {
     const slide = deck.slides[i];
     if (i > 0) pdf.addPage([W, H], 'landscape');
-    const png = await captureSlidePng(slide, deck.palette, deck.font, getImage?.(slide), 1920, 1080);
+    const png = await captureSlideWithFallback(slide, deck, getImage, 1920, 1080, captureErrors);
     pdf.addImage(png, 'PNG', 0, 0, W, H, undefined, 'FAST');
   }
 
-  pdf.save(`${deck.title || 'Presentation'}.pdf`);
+  pdf.save(`${(deck.title || 'Presentation').replace(/[/\\?%*:|"<>]/g, '-')}.pdf`);
+  if (captureErrors.length) {
+    throw new Error(`PDF saved, but ${captureErrors.length} slide(s) couldn't be rendered: ${captureErrors[0].err}`);
+  }
 }
 
 async function exportToPptx(deck, getImage) {
   const pptxMod = await import('pptxgenjs');
   const PptxGenJS = pptxMod.default || pptxMod.PptxGenJS || pptxMod;
+  if (typeof PptxGenJS !== 'function') throw new Error('PptxGenJS failed to load');
   const pres = new PptxGenJS();
   pres.layout = 'LAYOUT_16x9';
   const W = 13.333, H = 7.5;
 
+  const captureErrors = [];
   for (const slide of deck.slides) {
     const ps = pres.addSlide();
-    const png = await captureSlidePng(slide, deck.palette, deck.font, getImage?.(slide), 1920, 1080);
+    const png = await captureSlideWithFallback(slide, deck, getImage, 1920, 1080, captureErrors);
     ps.addImage({ data: png, x: 0, y: 0, w: W, h: H });
   }
 
-  await pres.writeFile({ fileName: `${deck.title || 'Presentation'}.pptx` });
+  await pres.writeFile({ fileName: `${(deck.title || 'Presentation').replace(/[/\\?%*:|"<>]/g, '-')}.pptx` });
+  if (captureErrors.length) {
+    throw new Error(`PPTX saved, but ${captureErrors.length} slide(s) couldn't be rendered: ${captureErrors[0].err}`);
+  }
 }
 
 function KeynoteWorkspace(props) {
@@ -1610,15 +1673,26 @@ function KeynoteWorkspace(props) {
   }
 
   const [exporting, setExporting] = useState(null); // 'pdf' | 'pptx' | null
+  const [exportError, setExportError] = useState(null);
   async function doExport(format) {
-    if (exporting || !deck) return;
+    if (exporting) return;
+    if (!deck || !Array.isArray(deck.slides) || deck.slides.length === 0) {
+      setExportError('No slides to export.');
+      return;
+    }
     setExporting(format);
+    setExportError(null);
     try {
       const getImage = s => slideImages?.[s.id] || s.imageDataUrl || null;
       if (format === 'pdf') await exportToPdf(deck, getImage);
       else await exportToPptx(deck, getImage);
-    } catch (e) { console.error('Export error:', e); }
-    finally { setExporting(null); }
+    } catch (e) {
+      // Surface the real reason — silent failure here was the #1 cause of
+      // "export doesn't work" reports. Most common: tainted-canvas from a
+      // cross-origin image, or a malformed slide element.
+      console.error('Export error:', e);
+      setExportError(`Export failed: ${e?.message || String(e)}`);
+    } finally { setExporting(null); }
   }
 
   const [improving, setImproving] = useState(false);
@@ -1702,6 +1776,22 @@ function KeynoteWorkspace(props) {
         onExport={doExport}
         exporting={exporting}
       />
+
+      {/* Export error banner — surfaces the real reason an export failed
+          (most common: tainted-canvas from a cross-origin image). */}
+      {exportError && (
+        <div className="flex-shrink-0 px-4 py-2 flex items-center gap-3 border-b border-rose-500/30 bg-rose-500/10">
+          <AlertCircle size={13} className="flex-shrink-0 text-rose-300" />
+          <span className="flex-1 text-[12px] text-rose-200">{exportError}</span>
+          <button
+            onClick={() => setExportError(null)}
+            className="text-rose-300/70 hover:text-rose-200 transition-colors"
+            title="Dismiss"
+          >
+            <XIcon size={13} />
+          </button>
+        </div>
+      )}
 
       {/* Image generation progress strip — slim, glanceable. */}
       {imgProgress.active && (
@@ -2208,7 +2298,7 @@ function ThumbnailPreview({ elements, image, t }) {
         </>
       )}
       <div style={{ width: '1000px', height: `${Math.round(1000 * 9 / 16)}px`, transform: `scale(${scale})`, transformOrigin: 'top left', pointerEvents: 'none' }}>
-        {elements.map(el => <RenderElement key={el.id} el={el} />)}
+        {elements.map(el => <RenderElement key={el.id} el={el} theme={t} />)}
       </div>
     </div>
   );
@@ -2711,7 +2801,7 @@ function SlideView({ slide, elements, image, isGenImg, t, slideIdx, totalSlides,
           either. */}
       <div className="absolute inset-0 overflow-hidden">
         <div style={{ width: '1000px', height: `${Math.round(1000 * 9 / 16)}px`, transform: `scale(${containerW / 1000})`, transformOrigin: 'top left' }}>
-          {elements.map(el => <RenderElement key={el.id} el={el} />)}
+          {elements.map(el => <RenderElement key={el.id} el={el} theme={t} />)}
         </div>
       </div>
       {isGenImg && !image && (
@@ -3414,7 +3504,7 @@ function ResizeHandle({ handle, color, onPointerDown }) {
 // radius). Sizing uses percentage units so the entire slide scales with its
 // container — no fixed-pixel layout math.
 // ─────────────────────────────────────────────────────────────────────────────
-function RenderElement({ el }) {
+function RenderElement({ el, theme }) {
   if (el.kind === 'image') {
     return (
       <img
@@ -3460,7 +3550,10 @@ function RenderElement({ el }) {
     fontSize: `${el.fontSize || 24}px`,
     fontWeight: el.fontWeight || '400',
     fontStyle: el.italic ? 'italic' : 'normal',
-    color: el.color || '#ffffff',
+    // Fall back to the theme's text color, not bare white — light
+    // themes were rendering uncolored text as white-on-white in both
+    // the editor and the export.
+    color: el.color || theme?.text || '#ffffff',
     textAlign: el.align || 'left',
     lineHeight: el.lineHeight ?? 1.3,
     letterSpacing: el.letterSpacing,
@@ -3516,7 +3609,7 @@ function MiniSlide({ deck }) {
   return (
     <div ref={wrapRef} style={{ aspectRatio: '16/9', background: t.bg, position: 'relative', overflow: 'hidden' }}>
       <div style={{ width: '1000px', height: '562.5px', transform: `scale(${scale})`, transformOrigin: 'top left', position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}>
-        {elements.map(el => <RenderElement key={el.id} el={el} />)}
+        {elements.map(el => <RenderElement key={el.id} el={el} theme={t} />)}
       </div>
     </div>
   );
@@ -3798,13 +3891,17 @@ function GenerateForm({ onBack, onCreate }) {
   const [template,   setTemplate]  = useState('none');
   const [palette]   = useState('');   // always let AI choose
   const [customInfo, setCustomInfo] = useState('');
-  const [sourceFiles, setSourceFiles] = useState([]); // [{ name, content }]
+  const [sourceFiles, setSourceFiles] = useState([]); // [{ name, content, kind }]
   const [loading,    setLoading]   = useState(false);
   const [progress,   setProgress]  = useState(0);
   const [statusMsg,  setStatusMsg] = useState('');
   const [error,      setError]     = useState('');
   const fileInputRef = useRef(null);
   const [dragOver, setDragOver]   = useState(false);
+  // Files staged during PDF extraction so the UI can show a per-file
+  // spinner instead of just freezing.
+  const [uploadingFiles, setUploadingFiles] = useState([]); // [{ name, kind }]
+  const [uploadError, setUploadError] = useState('');
 
   // Render's proxy buffers SSE so progress events arrive all at once at the
   // end — run a smooth fake animation instead, capped at 90 so the final
@@ -3823,18 +3920,60 @@ function GenerateForm({ onBack, onCreate }) {
   function readFileAsText(file) {
     return new Promise((resolve) => {
       const reader = new FileReader();
-      reader.onload = e => resolve({ name: file.name, content: e.target.result });
-      reader.onerror = () => resolve({ name: file.name, content: '' });
+      reader.onload = e => resolve({ name: file.name, content: e.target.result, kind: 'text' });
+      reader.onerror = () => resolve({ name: file.name, content: '', kind: 'text' });
       reader.readAsText(file);
     });
   }
 
+  // Accept text files (.txt/.md/.csv) plus PDFs. PDFs go through the
+  // server-side `/api/files/extract` endpoint which uses pdf-parse — same
+  // path the Curricula app uses. Per-file upload state drives the
+  // "uploading…" pill so users see PDF extraction in flight.
   async function handleFiles(files) {
-    const supported = Array.from(files).filter(f =>
-      f.type === 'text/plain' || f.name.endsWith('.md') || f.name.endsWith('.txt') || f.name.endsWith('.csv')
-    );
-    const read = await Promise.all(supported.map(readFileAsText));
-    setSourceFiles(prev => [...prev, ...read].slice(0, 5));
+    setUploadError('');
+    const all = Array.from(files || []);
+    const isText = f => f.type === 'text/plain' || f.name.endsWith('.md') || f.name.endsWith('.txt') || f.name.endsWith('.csv');
+    const isPdf = f => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf');
+    const textFiles = all.filter(isText);
+    const pdfFiles = all.filter(isPdf);
+    const unsupported = all.filter(f => !isText(f) && !isPdf(f));
+    if (unsupported.length) {
+      setUploadError(`Unsupported: ${unsupported.map(f => f.name).join(', ')}`);
+    }
+
+    // 1. Read text files inline (fast).
+    const textRead = await Promise.all(textFiles.map(readFileAsText));
+    if (textRead.length) setSourceFiles(prev => [...prev, ...textRead].slice(0, 5));
+
+    // 2. PDFs: stage them as "uploading", call the extract endpoint,
+    // then merge the results in. We keep the staged pills until the
+    // result lands so the user sees a per-file spinner.
+    if (pdfFiles.length) {
+      const staged = pdfFiles.map(f => ({ name: f.name, kind: 'pdf' }));
+      setUploadingFiles(prev => [...prev, ...staged]);
+      try {
+        const { files: extracted } = await extractFiles(pdfFiles);
+        const ok = (extracted || []).filter(f => !f.error && f.text);
+        const failed = (extracted || []).filter(f => f.error || !f.text);
+        if (ok.length) {
+          setSourceFiles(prev => [
+            ...prev,
+            ...ok.map(f => ({ name: f.name, content: f.text, kind: 'pdf' })),
+          ].slice(0, 5));
+        }
+        if (failed.length) {
+          setUploadError(`Couldn't read ${failed.length} PDF(s): ${failed.map(f => f.name).join(', ')}`);
+        }
+      } catch (e) {
+        setUploadError(e.message || 'PDF upload failed');
+      } finally {
+        // Drop staged entries — by-name dedupe; if two PDFs share a name
+        // this collapses them, which is fine because the result merge
+        // above is also lossy on duplicates.
+        setUploadingFiles(prev => prev.filter(u => !staged.some(s => s.name === u.name)));
+      }
+    }
   }
 
   async function handleGenerate() {
@@ -3937,9 +4076,9 @@ function GenerateForm({ onBack, onCreate }) {
           {/* 4. Source material */}
           <div>
             <label className="block text-[11px] font-semibold text-white/35 uppercase tracking-[0.14em] mb-2">
-              Source Material <span className="normal-case font-normal tracking-normal text-white/20">— optional · .txt .md .csv</span>
+              Source Material <span className="normal-case font-normal tracking-normal text-white/20">— optional · .pdf .txt .md .csv</span>
             </label>
-            <input ref={fileInputRef} type="file" multiple accept=".txt,.md,.csv,text/plain"
+            <input ref={fileInputRef} type="file" multiple accept=".pdf,.txt,.md,.csv,application/pdf,text/plain"
               className="hidden" onChange={e => { handleFiles(e.target.files); e.target.value = ''; }} />
             <div
               onClick={() => fileInputRef.current?.click()}
@@ -3949,21 +4088,45 @@ function GenerateForm({ onBack, onCreate }) {
               className={`rounded-xl border border-dashed transition-colors cursor-pointer px-4 py-4 text-center ${dragOver ? 'border-white/40 bg-white/[0.07]' : 'border-white/[0.12] bg-white/[0.02] hover:bg-white/[0.04] hover:border-white/[0.20]'}`}
             >
               <p className="text-[12px] text-white/35">Drop files here or <span className="text-white/55 underline underline-offset-2">browse</span></p>
-              <p className="text-[10px] text-white/20 mt-0.5">AI will use your documents as the primary source of facts and structure</p>
+              <p className="text-[10px] text-white/20 mt-0.5">PDFs and text files — AI uses them as the primary source of facts</p>
             </div>
-            {sourceFiles.length > 0 && (
+            {(sourceFiles.length > 0 || uploadingFiles.length > 0) && (
               <div className="mt-2 flex flex-wrap gap-1.5">
-                {sourceFiles.map((f, i) => (
-                  <div key={i} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/[0.07] border border-white/[0.10] text-[11px] text-white/65">
-                    <FileText size={10} className="text-white/35 shrink-0" />
+                {sourceFiles.map((f, i) => {
+                  const isPdf = f.kind === 'pdf';
+                  return (
+                    <div
+                      key={`done-${i}`}
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] ${
+                        isPdf
+                          ? 'bg-rose-500/10 border-rose-500/25 text-rose-200/85'
+                          : 'bg-white/[0.07] border-white/[0.10] text-white/65'
+                      }`}
+                      title={isPdf ? `PDF · ${(f.content || '').length.toLocaleString()} chars extracted` : `${(f.content || '').length.toLocaleString()} chars`}
+                    >
+                      {isPdf
+                        ? <span className="text-[8.5px] font-bold tracking-wider px-1 rounded bg-rose-500/25 text-rose-100">PDF</span>
+                        : <FileText size={10} className="text-white/35 shrink-0" />}
+                      <span className="max-w-[140px] truncate">{f.name}</span>
+                      <Check size={9} className={isPdf ? 'text-rose-300' : 'text-emerald-400'} />
+                      <button onClick={e => { e.stopPropagation(); setSourceFiles(prev => prev.filter((_, j) => j !== i)); }}
+                        className="text-white/30 hover:text-rose-400 transition-colors ml-0.5">
+                        <XIcon size={10} />
+                      </button>
+                    </div>
+                  );
+                })}
+                {uploadingFiles.map((f, i) => (
+                  <div key={`up-${i}`} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/10 border border-blue-500/25 text-[11px] text-blue-200/85">
+                    <Loader2 size={10} className="animate-spin text-blue-300 shrink-0" />
                     <span className="max-w-[140px] truncate">{f.name}</span>
-                    <button onClick={e => { e.stopPropagation(); setSourceFiles(prev => prev.filter((_, j) => j !== i)); }}
-                      className="text-white/30 hover:text-rose-400 transition-colors ml-0.5">
-                      <XIcon size={10} />
-                    </button>
+                    <span className="text-[9px] uppercase tracking-wider text-blue-300/65">extracting…</span>
                   </div>
                 ))}
               </div>
+            )}
+            {uploadError && (
+              <p className="mt-2 text-[11px] text-rose-300 bg-rose-500/10 border border-rose-500/25 rounded-md px-2 py-1.5">{uploadError}</p>
             )}
           </div>
 

@@ -323,7 +323,7 @@ export default function MathTutorApp({ seedTopic = null, onBack = null, defaultM
 
           {/* Topic */}
           <div>
-            <label className="text-[11px] font-medium text-[#555] uppercase tracking-widest block mb-2">Topic</label>
+            <label className="text-[11px] font-medium text-white/65 uppercase tracking-widest block mb-2">Topic</label>
             <input
               value={topic}
               onChange={e => setTopic(e.target.value)}
@@ -338,7 +338,7 @@ export default function MathTutorApp({ seedTopic = null, onBack = null, defaultM
           <div>
             <button
               onClick={() => setShowSettings(s => !s)}
-              className="flex items-center gap-1.5 text-[11px] font-medium text-[#484848] hover:text-[#888] uppercase tracking-widest transition-colors"
+              className="flex items-center gap-1.5 text-[11px] font-medium text-white/55 hover:text-white/85 uppercase tracking-widest transition-colors"
             >
               <Settings size={11} />
               {showSettings ? 'Hide' : 'Custom instructions'}
@@ -358,7 +358,7 @@ export default function MathTutorApp({ seedTopic = null, onBack = null, defaultM
           <button
             onClick={startTutor}
             disabled={!topic.trim()}
-            className="w-full py-2.5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/40 text-white text-sm font-semibold shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_16px_rgba(59,130,246,0.40)] disabled:opacity-30 disabled:cursor-not-allowed disabled:shadow-none flex items-center justify-center gap-2 transition-all"
+            className="w-full py-2.5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/40 text-white text-sm font-semibold disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all"
           >
             <Sparkles size={13} className="text-white" /> Start
           </button>
@@ -533,14 +533,14 @@ export default function MathTutorApp({ seedTopic = null, onBack = null, defaultM
                 <button
                   onClick={handleFeedback}
                   disabled={streaming}
-                  className="flex-1 py-2 rounded-lg bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-white border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_16px_rgba(59,130,246,0.35)] text-[12px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-all"
+                  className="flex-1 py-2 rounded-lg bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-white border border-blue-400/40 text-[12px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-all"
                 >
                   <Check size={12} /> Get feedback
                 </button>
                 <button
                   onClick={handleGrade}
                   disabled={streaming}
-                  className="flex-1 py-2 rounded-lg bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-white border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_16px_rgba(59,130,246,0.35)] text-[12px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-all"
+                  className="flex-1 py-2 rounded-lg bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-white border border-blue-400/40 text-[12px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-all"
                 >
                   <ClipboardCheck size={12} /> Grade my work
                 </button>
