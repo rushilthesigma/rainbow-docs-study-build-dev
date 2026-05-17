@@ -1,50 +1,11 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { X, Minus, Maximize2, Square } from 'lucide-react';
+import { X, Minus, Square } from 'lucide-react';
 import { useWindowManager } from '../../context/WindowManagerContext';
 import { useUIPreference } from '../../context/UIPreferenceContext';
 
-// Default shell style. The actual runtime value now comes from the
-// `osStyle` user preference (read inside Window below) — this constant
-// just acts as a fallback when the preference isn't available yet.
-// Valid values: 'macos' | 'windows' | 'chromeos' | 'linux'.
-const STYLE_FALLBACK = 'macos';
-
-// macOS traffic lights. Green button = in-app "zoom" (full window inside
-// the macOS shell — covers the dock area but stays inside the browser
-// window). For TRUE OS-level fullscreen (taking over the whole monitor),
-// use ⌘⇧P — that calls the browser Fullscreen API.
-function MacTitleBar({ windowId, appId, isMaximized, isActive, title, onDragStart, onDoubleClick, titlebarOpacity = 80 }) {
-  const { closeWindow, minimizeWindow, maximizeWindow } = useWindowManager();
-  const [hovered, setHovered] = useState(false);
-  const isDark = document.documentElement.classList.contains('dark');
-  const a = titlebarOpacity / 100;
-  const barStyle = isDark
-    ? {
-        background: isActive ? `rgba(36, 36, 40, ${a})` : `rgba(30, 30, 34, ${a})`,
-        borderBottom: '1px solid rgba(255,255,255,0.06)',
-      }
-    : { background: isActive ? `rgba(232,232,234,${a})` : `rgba(240,240,240,${a})` };
-  // The green "zoom" button is hidden when this app is maximized for the
-  // slideshow only — once a deck is full-bleed there's nothing useful to do
-  // with another zoom toggle, and the slideshow workspace is designed to
-  // own the viewport. Every other app keeps the green button visible when
-  // maximized so the user can click it to restore.
-  const hideGreenWhenMaximized = appId === 'slides';
-  const showGreen = !(isMaximized && hideGreenWhenMaximized);
-  return (
-    <div className="h-8 flex items-center flex-shrink-0 select-none backdrop-blur-md" style={barStyle} onPointerDown={onDragStart} onDoubleClick={onDoubleClick} data-titlebar={windowId}>
-      <div className="flex items-center gap-[7px] px-3" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
-        <button onClick={e => { e.stopPropagation(); closeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FF5F57] hover:brightness-90 flex items-center justify-center" title="Close"><X size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#4a0002]" /></button>
-        <button onClick={e => { e.stopPropagation(); minimizeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FEBC2E] hover:brightness-90 flex items-center justify-center" title="Minimize"><Minus size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#5a3e00]" /></button>
-        {showGreen && <button onClick={e => { e.stopPropagation(); maximizeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#28C840] hover:brightness-90 flex items-center justify-center" title={isMaximized ? 'Restore' : 'Zoom — fills the desktop. ⌘⇧P for true fullscreen.'}><Maximize2 size={hovered ? 7 : 0} strokeWidth={2.5} className="text-[#005200]" /></button>}
-      </div>
-      <div className="flex-1 text-center text-xs font-medium text-gray-600 dark:text-white/65 truncate pr-12 pointer-events-none">{title}</div>
-    </div>
-  );
-}
-
-// Windows-style title bar (buttons on right)
-function WindowsTitleBar({ windowId, isMaximized, isActive, title, onDragStart, onDoubleClick }) {
+// Windows 11 is the only window style. macOS traffic-light + ChromeOS /
+// Linux title bars were removed along with the osStyle preference.
+function WindowsTitleBar({ windowId, isActive, title, onDragStart, onDoubleClick }) {
   const { closeWindow, minimizeWindow, maximizeWindow } = useWindowManager();
   const dark = document.documentElement.classList.contains('dark');
   return (
@@ -59,29 +20,9 @@ function WindowsTitleBar({ windowId, isMaximized, isActive, title, onDragStart, 
   );
 }
 
-// ChromeOS / Linux title bar (close on right, minimal)
-function GenericTitleBar({ windowId, isMaximized, isActive, title, onDragStart, onDoubleClick }) {
-  const { closeWindow, minimizeWindow, maximizeWindow } = useWindowManager();
-  const dark = document.documentElement.classList.contains('dark');
-  return (
-    <div className={`h-8 flex items-center flex-shrink-0 ${isActive ? (dark ? 'bg-[#2b2b35]' : 'bg-[#e8e8ec]') : (dark ? 'bg-[#353540]' : 'bg-[#ededf0]')}`} onPointerDown={onDragStart} onDoubleClick={onDoubleClick} data-titlebar={windowId}>
-      <div className={`flex-1 text-center text-xs font-medium truncate px-3 ${isActive ? (dark ? 'text-white' : 'text-gray-900') : (dark ? 'text-gray-500' : 'text-gray-400')}`}>{title}</div>
-      <div className="flex items-center h-full">
-        <button onClick={e => { e.stopPropagation(); minimizeWindow(windowId); }} className={`h-full px-2.5 flex items-center justify-center ${dark ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-gray-200 text-gray-600'}`}><Minus size={12} /></button>
-        <button onClick={e => { e.stopPropagation(); maximizeWindow(windowId); }} className={`h-full px-2.5 flex items-center justify-center ${dark ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-gray-200 text-gray-600'}`}><Maximize2 size={11} /></button>
-        <button onClick={e => { e.stopPropagation(); closeWindow(windowId); }} className="h-full px-2.5 flex items-center justify-center hover:bg-red-500 hover:text-white text-gray-400 rounded-tr-xl"><X size={14} /></button>
-      </div>
-    </div>
-  );
-}
-
 export default function Window({ win, isActive, children }) {
   const { focusWindow, moveWindow, resizeWindow, removeWindow, maximizeWindow } = useWindowManager();
-  const { windowOpacity, titlebarOpacity, osStyle } = useUIPreference();
-  // Read the per-user shell style at render time. All the STYLE
-  // branches below still work because they each compare against the
-  // same string set the preference accepts.
-  const STYLE = osStyle || STYLE_FALLBACK;
+  const { windowOpacity, titlebarOpacity } = useUIPreference();
   const windowRef = useRef(null);
   const resizeRef = useRef(null);
   const [animState, setAnimState] = useState('opening');
@@ -194,28 +135,11 @@ export default function Window({ win, isActive, children }) {
     }
   }, [focusWindow, win.id]);
 
-  // Fullscreen dimensions per OS style.
-  //
-  // The dock/taskbar now stays visible during maximize across all
-  // styles (Windows-taskbar behavior), so every branch leaves 48px at
-  // the bottom for the dock. The menu bar still hides on maximize, so
-  // top edge is 0 except for Linux GNOME which has a 28px top panel
-  // that doesn't hide.
+  // Maximize dimensions: full viewport width, leaves 48px at the bottom
+  // for the Win11 taskbar (which stays visible during maximize) and
+  // claims the full top edge — the in-app menu bar hides on maximize.
   const DOCK_RESERVE = 48;
-  let maxStyle;
-  if (STYLE === 'windows') {
-    maxStyle = { left: 0, top: 0, width: '100vw', height: `calc(100vh - ${DOCK_RESERVE}px)` };
-  } else if (STYLE === 'chromeos') {
-    maxStyle = { left: 0, top: 0, width: '100vw', height: `calc(100vh - ${DOCK_RESERVE}px)` };
-  } else if (STYLE === 'linux') {
-    // Below top panel (28px), above dock (48px).
-    maxStyle = { left: 0, top: 28, width: '100vw', height: `calc(100vh - 28px - ${DOCK_RESERVE}px)` };
-  } else {
-    // macOS in-app zoom: full viewport width, leaves the dock visible at
-    // the bottom (the in-app menu bar still hides). For true OS-level
-    // fullscreen across multiple monitors / browser chrome, use ⌘⇧P.
-    maxStyle = { left: 0, top: 0, width: '100vw', height: `calc(100vh - ${DOCK_RESERVE}px)` };
-  }
+  const maxStyle = { left: 0, top: 0, width: '100vw', height: `calc(100vh - ${DOCK_RESERVE}px)` };
 
   const style = maxed
     ? { ...maxStyle, zIndex: win.zIndex }
@@ -228,16 +152,12 @@ export default function Window({ win, isActive, children }) {
     animState === 'closing' ? 'window-closing' :
     '';
 
-  // Pick title bar based on desktop style
-  const TitleBar = STYLE === 'windows' ? WindowsTitleBar : STYLE === 'chromeos' || STYLE === 'linux' ? GenericTitleBar : MacTitleBar;
-
-  // Window border radius: macOS = rounded, Windows = sharp corners,
-  // others = slightly rounded. Snapped to `rounded-none` whenever the
-  // window is taking the full screen (zoom OR browser fullscreen) so
-  // the corners don't leave dark gaps against the desktop / OS chrome.
-  const radius = (maxed || isFullscreen)
-    ? 'rounded-none'
-    : (STYLE === 'windows' ? 'rounded-sm' : STYLE === 'macos' ? 'rounded-xl' : 'rounded-lg');
+  // Win11 is the only chrome — square-ish corners (`rounded-sm`).
+  // Snapped to `rounded-none` whenever the window is taking the full
+  // screen (zoom OR browser fullscreen) so corners don't leave dark
+  // gaps against the desktop / OS chrome.
+  const TitleBar = WindowsTitleBar;
+  const radius = (maxed || isFullscreen) ? 'rounded-none' : 'rounded-sm';
 
   const fullBleed = maxed || isFullscreen;
 

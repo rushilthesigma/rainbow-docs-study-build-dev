@@ -117,16 +117,12 @@ function Section({ title, children }) {
 }
 
 function InterfaceSection() {
-  const { wallpaper, setWallpaper, dockSize, setDockSize, iconStyle, setIconStyle, windowOpacity, setWindowOpacity, titlebarOpacity, setTitlebarOpacity, osStyle, setOsStyle } = useUIPreference();
+  // Window Style toggle was removed — the shell is now Windows 11 only.
+  // No more osStyle preference, no Mac / ChromeOS / Linux paths.
+  const { wallpaper, setWallpaper, dockSize, setDockSize, iconStyle, setIconStyle, windowOpacity, setWindowOpacity, titlebarOpacity, setTitlebarOpacity } = useUIPreference();
   const wallpaperOpts = WALLPAPER_LIST.map(w => ({ value: w.id, label: w.label }));
   const dockOpts = [{ value: 'small', label: 'Small' }, { value: 'medium', label: 'Medium' }, { value: 'large', label: 'Large' }];
   const iconOpts = [{ value: 'gradient', label: 'Colorful' }, { value: 'mono', label: 'Monochrome' }, { value: 'glass', label: 'Glass' }, { value: 'accent', label: 'Accent Tint' }];
-  const osOpts = [
-    { value: 'macos', label: 'macOS — traffic lights' },
-    { value: 'windows', label: 'Windows 11 — Fluent' },
-    { value: 'chromeos', label: 'ChromeOS' },
-    { value: 'linux', label: 'Linux' },
-  ];
   const isMobileScreen = typeof window !== 'undefined' && window.innerWidth < 768;
   const opacity = windowOpacity ?? 55;
 
@@ -134,7 +130,6 @@ function InterfaceSection() {
     <Section title={isMobileScreen ? 'Appearance' : 'Desktop'}>
       {!isMobileScreen && (
         <>
-          <Dropdown label="Window Style" value={osStyle || 'macos'} options={osOpts} onChange={setOsStyle} />
           <Dropdown label="Wallpaper" value={wallpaper} options={wallpaperOpts} onChange={setWallpaper} />
           <Dropdown label="Dock Size" value={dockSize} options={dockOpts} onChange={setDockSize} />
           <Dropdown label="Icon Style" value={iconStyle} options={iconOpts} onChange={setIconStyle} />

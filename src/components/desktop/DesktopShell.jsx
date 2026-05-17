@@ -1,7 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Sparkles } from 'lucide-react';
 import { WindowManagerProvider, useWindowManager } from '../../context/WindowManagerContext';
-import { useUIPreference } from '../../context/UIPreferenceContext';
 import DesktopBackground from './DesktopBackground';
 import MenuBar from './MenuBar';
 import Dock from './Dock';
@@ -11,11 +9,12 @@ import Spotlight from './Spotlight';
 import ContextMenu from './ContextMenu';
 import GuidedTour from './GuidedTour';
 import ShortcutsHelp from './ShortcutsHelp';
-import { Z } from '../../styles/tokens';
 
-// macOS is the only desktop shell. The Windows / ChromeOS / Linux
-// alternates were removed — the OS-style picker is gone, and any
-// `cov-desktop-style` value in localStorage is ignored.
+// Windows 11 is the only desktop shell. macOS / ChromeOS / Linux paths
+// were removed along with the OS-style picker. The HTML root gets a
+// hardcoded `os-windows` class so the Fluent-scoped index.css rules
+// apply uniformly. The component is still named MacOSContent for
+// historical churn-minimization; rename is a separate task.
 function MacOSContent() {
   const { state, minimizeWindow, restoreWindow } = useWindowManager();
   const [spotlightOpen, setSpotlightOpen] = useState(false);
@@ -83,73 +82,18 @@ function MacOSContent() {
   );
 }
 
-// One-time forced-migration notice for users who previously had
-// Windows / ChromeOS / Linux selected. localStorage `cov-desktop-style`
-// holds their old choice; once we've shown the notice, `cov-os-migrated`
-// is set so the modal never re-fires.
-const OS_LABELS = { windows: 'Windows', chromeos: 'ChromeOS', linux: 'Linux', mobile: 'Mobile' };
-
-function MigrationNotice({ priorOs, onClose }) {
-  const label = OS_LABELS[priorOs] || priorOs;
-  return (
-    <div className="fixed inset-0 grid place-items-center bg-black/60 backdrop-blur-sm" style={{ zIndex: Z.modal }}>
-      <div className="w-[440px] max-w-[90vw] rounded-2xl border border-blue-500/30 bg-[#0f1124] p-6 shadow-2xl">
-        <div className="flex items-start gap-3 mb-4">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 grid place-items-center shrink-0">
-            <Sparkles size={18} className="text-white" />
-          </div>
-          <div>
-            <h2 className="text-lg font-bold text-white">{label} is no longer supported</h2>
-            <p className="text-[12px] text-gray-400 mt-0.5">macOS is now the only supported shell.</p>
-          </div>
-        </div>
-        <p className="text-[13px] text-gray-300 leading-relaxed mb-5">
-          We've moved everyone to the macOS-style desktop. Your apps, lessons, and data are
-          unchanged — only the shell chrome (windows, dock, menu bar) is different. There's no
-          way back to {label} from this build.
-        </p>
-        <div className="flex justify-end">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-[13px] font-semibold shadow-lg shadow-blue-500/30"
-          >
-            Continue to macOS
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function ShellContent() {
   const { state, closeWindow, minimizeWindow, focusWindow, restoreWindow } = useWindowManager();
   const [helpOpen, setHelpOpen] = useState(false);
-  // `null` = no notice; otherwise the prior os string ('windows'|'chromeos'|...)
-  const [migrationFromOs, setMigrationFromOs] = useState(null);
-  const { osStyle } = useUIPreference();
 
-  // Tag <html> with `os-<style>` so the per-os CSS rules in index.css
-  // (Fluent for windows, Material for chromeos, etc.) kick in. Falls
-  // back to macos if the preference isn't set yet.
+  // Tag <html> with `os-windows` so the Fluent-scoped CSS rules in
+  // index.css kick in. The shell is Win11-only now — no more dynamic
+  // os-style switching, no legacy macOS/ChromeOS/Linux migration.
   useEffect(() => {
     const root = document.documentElement;
     Array.from(root.classList).filter(c => c.startsWith('os-')).forEach(c => root.classList.remove(c));
-    root.classList.add(`os-${osStyle || 'macos'}`);
-
-    // Forced migration: read the legacy `cov-desktop-style` value once
-    // and show a notice if it points to a removed shell. We always
-    // overwrite to 'macos' so even if the user dismisses, they don't
-    // get re-prompted on reload.
-    try {
-      if (!localStorage.getItem('cov-os-migrated')) {
-        const prior = localStorage.getItem('cov-desktop-style');
-        const removedShell = prior && prior !== 'macos' && OS_LABELS[prior];
-        if (removedShell) setMigrationFromOs(prior);
-        localStorage.setItem('cov-desktop-style', 'macos');
-        localStorage.setItem('cov-os-migrated', '1');
-      }
-    } catch {}
-  }, [osStyle]);
+    root.classList.add('os-windows');
+  }, []);
 
   // Global keyboard shortcuts.
   useEffect(() => {
@@ -211,9 +155,6 @@ function ShellContent() {
       <MacOSContent />
       <GuidedTour />
       <ShortcutsHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
-      {migrationFromOs && (
-        <MigrationNotice priorOs={migrationFromOs} onClose={() => setMigrationFromOs(null)} />
-      )}
     </>
   );
 }
