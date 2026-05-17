@@ -62,11 +62,18 @@ function reducer(state, action) {
       const size = getDefaultSize(action.appId);
       const position = getCascadePos(state.cascadeOffset);
       const fixedSize = isFixedSize(action.appId);
+      // Slideshow auto-maximizes on open — the deck workspace is designed
+      // to own the viewport. Its title-bar maximize button is also hidden
+      // (see Window.jsx WindowsTitleBar), so the only way out is close /
+      // minimize. preMaximize stays at the cascade position so if the
+      // user ever does restore via keyboard shortcut, the float lands in
+      // a sane place.
+      const openMaximized = action.appId === 'slides';
       return {
         ...state,
         windows: {
           ...state.windows,
-          [id]: { id, appId: action.appId, title: action.title || action.appId, position, size, zIndex: state.nextZIndex, isMinimized: false, isMaximized: false, isClosing: false, preMaximize: null, fixedSize },
+          [id]: { id, appId: action.appId, title: action.title || action.appId, position, size, zIndex: state.nextZIndex, isMinimized: false, isMaximized: openMaximized, isClosing: false, preMaximize: openMaximized ? { position, size } : null, fixedSize },
         },
         nextZIndex: state.nextZIndex + 1,
         activeWindowId: id,
