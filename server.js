@@ -763,6 +763,12 @@ async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096,
           // prose, no markdown fences. Dramatically reduces parseAIJson
           // failures on structured outputs like slides.
           ...(opts.jsonMode ? { responseMimeType: 'application/json' } : {}),
+          // disableThinking: skip Gemini 3's built-in CoT for cheap,
+          // short generative calls (debate topic suggestions, etc).
+          // Without this, the model burns the entire token budget on a
+          // hidden `thoughtSignature` and the visible JSON gets cut off
+          // mid-sentence — which broke the AI debate-topic chip.
+          ...(opts.disableThinking ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
         },
       });
 
@@ -8320,7 +8326,10 @@ Constraints:
 - ${theme ? `Loosely themed around: ${theme}` : 'Mix of categories'}
 ${exclude.length ? `- Avoid these (and close paraphrases): ${exclude.map(e => `"${e}"`).join(', ')}` : ''}`;
 
-    const aiResp = await callGemini(sys, [{ role: 'user', content: usr }], MODEL_FLASH_LITE, 800, { jsonMode: true, temperature: 0.95 });
+    // disableThinking=true: this is a short generative task, no reasoning
+    // needed. Without it Gemini 3 Flash burns the entire 1500-token budget
+    // on hidden chain-of-thought and the JSON gets truncated mid-array.
+    const aiResp = await callGemini(sys, [{ role: 'user', content: usr }], MODEL_FLASH_LITE, 1500, { jsonMode: true, temperature: 0.95, disableThinking: true });
     if (!aiResp.success) return res.status(500).json({ error: aiResp.error || 'AI call failed' });
     const parsed = parseAIJson(aiResp.data.content?.[0]?.text || '');
     let topics = Array.isArray(parsed?.topics) ? parsed.topics : [];
