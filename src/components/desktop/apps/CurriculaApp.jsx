@@ -10,6 +10,7 @@ import Input from '../../shared/Input';
 import PillGroup from '../../shared/PillGroup';
 import Toggle from '../../shared/Toggle';
 import LoadingSpinner from '../../shared/LoadingSpinner';
+import { Z } from '../../../styles/tokens';
 import LoadingProgress from '../../shared/ProgressBar';
 import { SkeletonProse } from '../../shared/Skeleton';
 import ProgressBar from '../../curriculum/ProgressBar';
@@ -1185,7 +1186,7 @@ function EditCurriculumModal({ curriculum, onClose, onUpdated }) {
   }
 
   return (
-    <div className="fixed inset-0 z-[1500] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 flex items-center justify-center bg-black/50 p-4" style={{ zIndex: Z.modal }} onClick={onClose}>
       <div
         className="w-full max-w-xl bg-black/40 backdrop-blur-2xl rounded-2xl border border-white/10 shadow-2xl overflow-hidden"
         onClick={e => e.stopPropagation()}

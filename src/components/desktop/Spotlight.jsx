@@ -3,6 +3,7 @@ import { Search, CornerDownLeft } from 'lucide-react';
 import APP_REGISTRY from './appRegistry';
 import { useWindowManager } from '../../context/WindowManagerContext';
 import { checkAdmin } from '../../api/admin';
+import { Z } from '../../styles/tokens';
 
 export default function Spotlight({ open, onClose }) {
   const [query, setQuery] = useState('');
@@ -78,7 +79,7 @@ export default function Spotlight({ open, onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 z-[2000] flex items-start justify-center pt-[16vh]" onClick={onClose}>
+    <div className="fixed inset-0 flex items-start justify-center pt-[16vh]" style={{ zIndex: Z.spotlight }} onClick={onClose}>
       <div
         className="w-full max-w-[620px] mx-4 rounded-2xl overflow-hidden shadow-2xl"
         style={{

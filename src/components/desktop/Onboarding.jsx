@@ -5,6 +5,7 @@ import { useUIPreference } from '../../context/UIPreferenceContext';
 import { syncData } from '../../api/auth';
 import { WALLPAPERS } from './DesktopBackground';
 import { setProfile, getMyProfile } from '../../api/social';
+import { Z } from '../../styles/tokens';
 
 // macOS Setup-Assistant-style onboarding. Five steps with full-screen
 // transitions, Apple-flavored typography, and a back / continue chrome
@@ -99,8 +100,8 @@ export default function Onboarding({ onComplete }) {
 
   return (
     <div
-      className="fixed inset-0 z-[3000] flex flex-col transition-[background] duration-700 ease-out"
-      style={{ background: bg }}
+      className="fixed inset-0 flex flex-col transition-[background] duration-700 ease-out"
+      style={{ zIndex: Z.tour, background: bg }}
     >
       <ProgressDots count={STEPS.length} active={step} dark={dark} />
 
@@ -135,7 +136,7 @@ export default function Onboarding({ onComplete }) {
         {step > 0 ? (
           <button
             onClick={back}
-            className={`inline-flex items-center gap-1 px-4 py-2 rounded-full text-[13px] font-medium ${
+            className={`inline-flex items-center gap-1 px-4 py-2 rounded-md text-[13px] font-medium ${
               dark ? 'text-white/70 hover:bg-white/[0.08]' : 'text-gray-600 hover:bg-black/[0.04]'
             } transition-colors`}
           >
@@ -147,7 +148,7 @@ export default function Onboarding({ onComplete }) {
           <button
             onClick={next}
             disabled={handleSaving && STEPS[step] === 'handle'}
-            className="inline-flex items-center gap-2 px-6 py-2.5 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 hover:brightness-110 active:scale-[0.98] disabled:opacity-60 text-white text-[13.5px] font-bold transition-all"
+            className="inline-flex items-center gap-2 px-6 py-2.5 rounded-md bg-gradient-to-br from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 active:scale-[0.98] disabled:opacity-60 text-white text-[13.5px] font-semibold transition-all border border-blue-400/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),inset_0_-1px_0_rgba(0,0,0,0.18),0_4px_14px_rgba(99,102,241,0.40)]"
           >
             {STEPS[step] === 'handle' && handleSaving
               ? <><Loader2 size={14} className="animate-spin" /> Saving</>
@@ -189,9 +190,8 @@ function Welcome({ name, dark }) {
   return (
     <div className="text-center select-none">
       <div className="mb-6 flex justify-center">
-        <div className="relative w-20 h-20 rounded-3xl bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 grid place-items-center shadow-2xl shadow-blue-500/30 animate-fade-up">
+        <div className="relative w-20 h-20 rounded-xl bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 grid place-items-center shadow-[0_12px_32px_rgba(99,102,241,0.45),inset_0_1px_0_rgba(255,255,255,0.25),inset_0_-1px_0_rgba(0,0,0,0.18)] ring-1 ring-blue-400/40 animate-fade-up">
           <Sparkles size={38} className="text-white drop-shadow-lg" strokeWidth={2.2} />
-          <span className="pointer-events-none absolute inset-1 rounded-3xl bg-gradient-to-b from-white/25 to-transparent" />
         </div>
       </div>
       <h1
@@ -259,9 +259,9 @@ function ThemeCard({ active, onClick, label, icon, preview }) {
   return (
     <button
       onClick={onClick}
-      className={`relative rounded-2xl p-3 border-2 transition-all text-left ${
+      className={`relative rounded-md p-3 border transition-all text-left ${
         active
-          ? 'border-blue-500 bg-blue-500/10 ring-4 ring-blue-500/15'
+          ? 'border-blue-500 bg-blue-500/10 ring-2 ring-blue-500/25 shadow-[0_4px_14px_rgba(99,102,241,0.30)]'
           : 'border-white/15 dark:border-white/15 bg-white/[0.04] hover:bg-white/[0.08]'
       }`}
     >
@@ -270,7 +270,7 @@ function ThemeCard({ active, onClick, label, icon, preview }) {
         {icon}
         <span className="text-[14px] font-semibold text-gray-900 dark:text-white">{label}</span>
         {active && (
-          <span className="ml-auto w-5 h-5 rounded-full bg-blue-500 grid place-items-center text-white">
+          <span className="ml-auto w-5 h-5 rounded-sm bg-gradient-to-br from-blue-500 to-indigo-600 grid place-items-center text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.25)]">
             <Check size={11} strokeWidth={3} />
           </span>
         )}
@@ -297,8 +297,8 @@ function WallpaperPick({ wallpaper, setWallpaper, picks, dark }) {
             <button
               key={id}
               onClick={() => setWallpaper(id)}
-              className={`group relative aspect-[4/3] rounded-xl overflow-hidden border-2 transition-all ${
-                isActive ? 'border-blue-500 ring-4 ring-blue-500/15 scale-[1.02]' : 'border-white/15 dark:border-white/15 hover:border-white/40'
+              className={`group relative aspect-[4/3] rounded-lg overflow-hidden border-2 transition-all ${
+                isActive ? 'border-blue-500 ring-2 ring-blue-500/25 scale-[1.02] shadow-[0_4px_14px_rgba(99,102,241,0.40)]' : 'border-white/15 dark:border-white/15 hover:border-white/40'
               }`}
               title={wp.label}
             >
@@ -308,7 +308,7 @@ function WallpaperPick({ wallpaper, setWallpaper, picks, dark }) {
               />
               <div className="absolute inset-0 bg-black/10 group-hover:bg-black/0 transition-colors" />
               {isActive && (
-                <span className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-blue-500 grid place-items-center text-white shadow-lg">
+                <span className="absolute top-1.5 right-1.5 w-6 h-6 rounded-sm bg-gradient-to-br from-blue-500 to-indigo-600 grid place-items-center text-white shadow-[0_2px_8px_rgba(99,102,241,0.55),inset_0_1px_0_rgba(255,255,255,0.25)]">
                   <Check size={12} strokeWidth={3} />
                 </span>
               )}
@@ -340,12 +340,12 @@ function HandlePick({ handle, setHandle, error, saving, dark }) {
       />
       <div className="mt-8 max-w-sm mx-auto">
         <div
-          className={`flex items-center gap-2 px-4 py-3 rounded-xl border-2 transition-colors ${
+          className={`flex items-center gap-2 px-4 py-3 rounded-md border transition-colors ${
             error
               ? 'border-rose-400/70 bg-rose-500/[0.05]'
               : dark
-                ? 'border-white/15 bg-white/[0.04] focus-within:border-blue-400/70'
-                : 'border-gray-300 bg-white focus-within:border-blue-500'
+                ? 'border-white/15 bg-white/[0.04] focus-within:border-blue-400/70 shadow-[inset_0_1px_2px_rgba(0,0,0,0.25)]'
+                : 'border-gray-300 bg-white focus-within:border-blue-500 shadow-[inset_0_1px_2px_rgba(0,0,0,0.08)]'
           }`}
         >
           <AtSign size={16} className={dark ? 'text-white/45' : 'text-gray-400'} />
@@ -370,7 +370,7 @@ function HandlePick({ handle, setHandle, error, saving, dark }) {
 function Tour({ onSkip, onTour, dark }) {
   return (
     <div className="text-center">
-      <div className="mb-5 inline-grid place-items-center w-16 h-16 rounded-3xl bg-emerald-500/15 ring-1 ring-emerald-500/30">
+      <div className="mb-5 inline-grid place-items-center w-16 h-16 rounded-xl bg-emerald-500/15 ring-1 ring-emerald-500/30">
         <Check size={28} strokeWidth={2.4} className="text-emerald-500" />
       </div>
       <Header
@@ -381,7 +381,7 @@ function Tour({ onSkip, onTour, dark }) {
       <div className="mt-8 flex items-center justify-center gap-2.5">
         <button
           onClick={onSkip}
-          className={`px-5 py-2.5 rounded-full border text-[13.5px] font-semibold transition-colors ${
+          className={`px-5 py-2.5 rounded-md border text-[13.5px] font-semibold transition-colors ${
             dark
               ? 'border-white/15 text-white/80 hover:bg-white/[0.08]'
               : 'border-gray-300 text-gray-700 hover:bg-black/[0.04]'
@@ -391,7 +391,7 @@ function Tour({ onSkip, onTour, dark }) {
         </button>
         <button
           onClick={onTour}
-          className="inline-flex items-center gap-2 px-6 py-2.5 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 hover:brightness-110 active:scale-[0.98] text-white text-[13.5px] font-bold transition-all"
+          className="inline-flex items-center gap-2 px-6 py-2.5 rounded-md bg-gradient-to-br from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 active:scale-[0.98] text-white text-[13.5px] font-semibold transition-all border border-blue-400/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),inset_0_-1px_0_rgba(0,0,0,0.18),0_4px_14px_rgba(99,102,241,0.40)]"
         >
           Show me around <ArrowRight size={14} />
         </button>

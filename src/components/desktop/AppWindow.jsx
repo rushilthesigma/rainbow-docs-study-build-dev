@@ -10,6 +10,7 @@ import MobilePreview from '../admin/MobilePreview';
 import StudyPage from '../../pages/StudyPage';
 import SettingsPage from '../../pages/SettingsPage';
 import DebatePanel from '../study/DebatePanel';
+import ErrorBoundary from '../shared/ErrorBoundary';
 
 // The standalone Assessments app was retired — per-curriculum quizzes
 // (CurriculumAssessmentPage) still exist inside lessons; the
@@ -43,25 +44,28 @@ export default function AppWindow({ appId }) {
   const Component = APP_COMPONENTS[appId];
   if (!Component) return <div className="flex items-center justify-center h-full text-gray-400 text-sm">Unknown app</div>;
 
+  // Per-app ErrorBoundary so a crash in (e.g.) the slideshow renderer
+  // doesn't blank the entire desktop. The shell keeps running and the
+  // user can close the window or try again.
+  const safe = (
+    <ErrorBoundary label={`The ${appId} app crashed`}>
+      <Component />
+    </ErrorBoundary>
+  );
+
   if (FULLBLEED_APPS.has(appId)) {
-    return (
-      <div className="h-full flex flex-col">
-        <Component />
-      </div>
-    );
+    return <div className="h-full flex flex-col">{safe}</div>;
   }
 
   if (FLEX_APPS.has(appId)) {
     return (
-      <div className="h-full overflow-hidden p-4 md:p-5 flex flex-col">
-        <Component />
-      </div>
+      <div className="h-full overflow-hidden p-4 md:p-5 flex flex-col">{safe}</div>
     );
   }
 
   return (
     <div className="h-full overflow-y-auto overflow-x-hidden p-4 md:p-5 flex flex-col">
-      <Component />
+      {safe}
     </div>
   );
 }

@@ -19,6 +19,7 @@ import { extractFiles } from '../../../api/curriculum';
 import LoadingSpinner from '../../shared/LoadingSpinner';
 import { useAuth } from '../../../context/AuthContext';
 import { useWindowManager } from '../../../context/WindowManagerContext';
+import { Z } from '../../../styles/tokens';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // THEMES  (only the slide canvas uses these — UI chrome stays glass)
@@ -2544,7 +2545,7 @@ function PlayMode({ slide, slideIdx, totalSlides, elements, image, t, deckTitle,
   }, [listen, autoAdvance, isLast, onNav]);
   const { speaking } = useSlideNarration({ enabled: listen, slide, onEnd: onNarrationEnd });
   return (
-    <div className="fixed inset-0 z-[10000] bg-black flex items-center justify-center" style={{ background: t.bg }}>
+    <div className="fixed inset-0 bg-black flex items-center justify-center" style={{ zIndex: Z.presentation, background: t.bg }}>
       <div className="w-full h-full flex items-center justify-center p-8">
         <SlideView
           key={slideKey}

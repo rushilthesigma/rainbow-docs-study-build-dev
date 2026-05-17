@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { ArrowRight, X, GraduationCap, Sparkles } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { syncData } from '../../api/auth';
+import { Z } from '../../styles/tokens';
 
 // Guided product tour. Anchors a spotlight + tooltip to a real DOM
 // element identified by a CSS selector. Each step's `target` element is
@@ -224,7 +225,7 @@ export default function GuidedTour() {
   const body = isWaiting && step.waitingBody ? step.waitingBody : step.body;
 
   return (
-    <div className="fixed inset-0 z-[3500] pointer-events-none">
+    <div className="fixed inset-0 pointer-events-none" style={{ zIndex: Z.tour }}>
       {/* Dim mask with hole */}
       <svg width={vw} height={vh} className="absolute inset-0">
         <defs>
@@ -245,7 +246,9 @@ export default function GuidedTour() {
         <rect width={vw} height={vh} fill="rgba(5, 8, 22, 0.55)" mask="url(#tour-mask)" />
       </svg>
 
-      {/* Pulsing ring around the target */}
+      {/* Pulsing ring around the target — Win11 accent blue so it reads
+          as the same focus color used elsewhere in the chrome (taskbar
+          active-app indicator, Search button focus ring, etc.). */}
       {showHole && (
         <div
           className="absolute pointer-events-none"
@@ -255,7 +258,7 @@ export default function GuidedTour() {
             width: rect.width + spotlightPad * 2,
             height: rect.height + spotlightPad * 2,
             borderRadius: radius,
-            boxShadow: '0 0 0 2px rgba(255,255,255,0.75), 0 0 28px 6px rgba(255,255,255,0.18)',
+            boxShadow: '0 0 0 2px rgba(96,165,250,0.85), 0 0 28px 6px rgba(96,165,250,0.30)',
             animation: 'tour-pulse 1.6s ease-in-out infinite',
           }}
         />
@@ -273,13 +276,16 @@ export default function GuidedTour() {
           WebkitBackdropFilter: 'blur(32px)',
         }}
       >
-        {/* Step progress bars */}
+        {/* Step progress bars — active step shows the Win11 accent blue
+            so the tour's focus color matches the spotlight ring outside
+            the tooltip. Completed steps get a dimmed blue; future steps
+            stay neutral. */}
         <div className="flex gap-1 mb-3">
           {STEPS.map((_, i) => (
             <div
               key={i}
               className={`flex-1 h-[3px] rounded-full transition-all ${
-                i < stepIdx ? 'bg-white/50' : i === stepIdx ? 'bg-white' : 'bg-white/[0.12]'
+                i < stepIdx ? 'bg-blue-400/55' : i === stepIdx ? 'bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.55)]' : 'bg-white/[0.12]'
               }`}
             />
           ))}
@@ -287,7 +293,7 @@ export default function GuidedTour() {
 
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-1.5">
-            <Sparkles size={12} className={isWaiting ? 'text-white/40 animate-pulse' : 'text-white/55'} />
+            <Sparkles size={12} className={isWaiting ? 'text-blue-300/50 animate-pulse' : 'text-blue-400/85'} />
             <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/45">
               {isWaiting ? 'Loading…' : `Step ${stepIdx + 1} of ${STEPS.length}`}
             </span>
@@ -322,8 +328,8 @@ export default function GuidedTour() {
 
       <style>{`
         @keyframes tour-pulse {
-          0%, 100% { box-shadow: 0 0 0 2px rgba(255,255,255,0.75), 0 0 28px 6px rgba(255,255,255,0.18); }
-          50%       { box-shadow: 0 0 0 3px rgba(255,255,255,0.95), 0 0 40px 9px rgba(255,255,255,0.30); }
+          0%, 100% { box-shadow: 0 0 0 2px rgba(96,165,250,0.85), 0 0 28px 6px rgba(96,165,250,0.30); }
+          50%       { box-shadow: 0 0 0 3px rgba(96,165,250,1.00), 0 0 40px 9px rgba(96,165,250,0.50); }
         }
       `}</style>
     </div>

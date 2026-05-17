@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Lock, ArrowLeft } from 'lucide-react';
+import { Z } from '../../styles/tokens';
 
 export default function UserSelect({ parentName, students, onSelectStudent, onSelectParent }) {
   const [showPin, setShowPin] = useState(false);
@@ -26,7 +27,8 @@ export default function UserSelect({ parentName, students, onSelectStudent, onSe
   const dateStr = time.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 
   return (
-    <div className="fixed inset-0 z-[3000] flex flex-col items-center justify-center" style={{
+    <div className="fixed inset-0 flex flex-col items-center justify-center" style={{
+      zIndex: Z.tour,
       background: dark
         ? 'radial-gradient(ellipse at 20% 50%, rgba(88,28,135,0.4) 0%, transparent 50%), radial-gradient(ellipse at 80% 20%, rgba(30,58,138,0.5) 0%, transparent 50%), linear-gradient(135deg, #0a0a1a, #0d1117, #0f0a1e)'
         : 'radial-gradient(ellipse at 20% 50%, rgba(167,139,250,0.25) 0%, transparent 50%), linear-gradient(135deg, #e0e7ff, #ede9fe, #e0e7ff)',

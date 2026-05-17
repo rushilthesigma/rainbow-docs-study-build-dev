@@ -1,4 +1,5 @@
 import { Target, MessageSquare, Zap, Layers, Swords, Users, Settings, X } from 'lucide-react';
+import { Z } from '../../styles/tokens';
 
 // Bottom-sheet of secondary apps. Animates up from the dock so it
 // reads as "pulled out from the More tab".
@@ -15,7 +16,7 @@ const MORE_ITEMS = [
 export default function MoreSheet({ open, onClose, onSelect }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-[60]">
+    <div className="fixed inset-0" style={{ zIndex: Z.sheet }}>
       {/* Backdrop */}
       <button
         aria-label="Close"

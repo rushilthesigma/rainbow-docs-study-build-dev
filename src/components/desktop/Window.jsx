@@ -3,10 +3,11 @@ import { X, Minus, Maximize2, Square } from 'lucide-react';
 import { useWindowManager } from '../../context/WindowManagerContext';
 import { useUIPreference } from '../../context/UIPreferenceContext';
 
-// macOS is the only shell now; all the per-OS branching below collapses
-// to the macOS branch via this constant. Kept as a const so the existing
-// `STYLE === 'macos'` checks throughout the file still resolve normally.
-const STYLE = 'macos';
+// Default shell style. The actual runtime value now comes from the
+// `osStyle` user preference (read inside Window below) — this constant
+// just acts as a fallback when the preference isn't available yet.
+// Valid values: 'macos' | 'windows' | 'chromeos' | 'linux'.
+const STYLE_FALLBACK = 'macos';
 
 // macOS traffic lights. Green button = in-app "zoom" (full window inside
 // the macOS shell — covers the dock area but stays inside the browser
@@ -76,7 +77,11 @@ function GenericTitleBar({ windowId, isMaximized, isActive, title, onDragStart, 
 
 export default function Window({ win, isActive, children }) {
   const { focusWindow, moveWindow, resizeWindow, removeWindow, maximizeWindow } = useWindowManager();
-  const { windowOpacity, titlebarOpacity } = useUIPreference();
+  const { windowOpacity, titlebarOpacity, osStyle } = useUIPreference();
+  // Read the per-user shell style at render time. All the STYLE
+  // branches below still work because they each compare against the
+  // same string set the preference accepts.
+  const STYLE = osStyle || STYLE_FALLBACK;
   const windowRef = useRef(null);
   const resizeRef = useRef(null);
   const [animState, setAnimState] = useState('opening');
@@ -95,8 +100,12 @@ export default function Window({ win, isActive, children }) {
     const prevTransition = el ? el.style.transition : '';
     if (el) el.style.transition = 'none';
     function onMove(ev) {
-      const topBar = STYLE === 'windows' || STYLE === 'chromeos' ? 0 : 28;
-      const bottomBar = STYLE === 'windows' ? 40 : STYLE === 'chromeos' ? 48 : STYLE === 'linux' ? 0 : 72;
+      // RushilAI menu bar is always 28px at the top (regardless of
+      // osStyle — it renders for every shell). Win11 taskbar is always
+      // 48px at the bottom. Both constraints apply unconditionally so a
+      // dragged window can never slip behind the chrome.
+      const topBar = 28;
+      const bottomBar = 48;
       const maxX = window.innerWidth - win.size.w;
       const maxY = window.innerHeight - win.size.h - bottomBar;
       posRef.x = Math.max(0, Math.min(maxX, ev.clientX - startX));
@@ -124,8 +133,10 @@ export default function Window({ win, isActive, children }) {
     function onMove(ev) {
       const dx = ev.clientX - startX; const dy = ev.clientY - startY;
       const vw = window.innerWidth; const vh = window.innerHeight;
-      const topBar = STYLE === 'windows' || STYLE === 'chromeos' ? 0 : 28;
-      const bottomBar = STYLE === 'windows' ? 40 : STYLE === 'chromeos' ? 48 : STYLE === 'linux' ? 0 : 72;
+      // Same fixed top/bottom reserves as the drag handler — menu bar
+      // 28px, Win11 taskbar 48px, both always present.
+      const topBar = 28;
+      const bottomBar = 48;
       let x = startPos.x, y = startPos.y, w = startSize.w, h = startSize.h;
       if (dir.includes('e')) w = Math.min(vw - x, Math.max(400, startSize.w + dx));
       if (dir.includes('w')) { w = Math.max(400, startSize.w - dx); x = startPos.x + (startSize.w - w); if (x < 0) { w += x; x = 0; } }
@@ -183,23 +194,27 @@ export default function Window({ win, isActive, children }) {
     }
   }, [focusWindow, win.id]);
 
-  // Fullscreen dimensions per OS style
+  // Fullscreen dimensions per OS style.
+  //
+  // The dock/taskbar now stays visible during maximize across all
+  // styles (Windows-taskbar behavior), so every branch leaves 48px at
+  // the bottom for the dock. The menu bar still hides on maximize, so
+  // top edge is 0 except for Linux GNOME which has a 28px top panel
+  // that doesn't hide.
+  const DOCK_RESERVE = 48;
   let maxStyle;
   if (STYLE === 'windows') {
-    // Windows: full screen above taskbar (40px bottom)
-    maxStyle = { left: 0, top: 0, width: '100vw', height: 'calc(100vh - 40px)' };
+    maxStyle = { left: 0, top: 0, width: '100vw', height: `calc(100vh - ${DOCK_RESERVE}px)` };
   } else if (STYLE === 'chromeos') {
-    // ChromeOS: full screen above shelf (48px bottom)
-    maxStyle = { left: 0, top: 0, width: '100vw', height: 'calc(100vh - 48px)' };
+    maxStyle = { left: 0, top: 0, width: '100vw', height: `calc(100vh - ${DOCK_RESERVE}px)` };
   } else if (STYLE === 'linux') {
-    // Linux GNOME: below top panel (28px), full width, above dash (left 48px ignored — full width is fine)
-    maxStyle = { left: 0, top: 28, width: '100vw', height: 'calc(100vh - 28px)' };
+    // Below top panel (28px), above dock (48px).
+    maxStyle = { left: 0, top: 28, width: '100vw', height: `calc(100vh - 28px - ${DOCK_RESERVE}px)` };
   } else {
-    // macOS: in-app zoom covers the ENTIRE viewport — menu bar AND dock
-    // hide (handled by MacOSContent reading window-manager state). The
-    // window goes edge-to-edge (0,0 → 100vw × 100vh). For true OS-level
+    // macOS in-app zoom: full viewport width, leaves the dock visible at
+    // the bottom (the in-app menu bar still hides). For true OS-level
     // fullscreen across multiple monitors / browser chrome, use ⌘⇧P.
-    maxStyle = { left: 0, top: 0, width: '100vw', height: '100vh' };
+    maxStyle = { left: 0, top: 0, width: '100vw', height: `calc(100vh - ${DOCK_RESERVE}px)` };
   }
 
   const style = maxed

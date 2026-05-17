@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Sparkles } from 'lucide-react';
 import { WindowManagerProvider, useWindowManager } from '../../context/WindowManagerContext';
+import { useUIPreference } from '../../context/UIPreferenceContext';
 import DesktopBackground from './DesktopBackground';
 import MenuBar from './MenuBar';
 import Dock from './Dock';
@@ -10,6 +11,7 @@ import Spotlight from './Spotlight';
 import ContextMenu from './ContextMenu';
 import GuidedTour from './GuidedTour';
 import ShortcutsHelp from './ShortcutsHelp';
+import { Z } from '../../styles/tokens';
 
 // macOS is the only desktop shell. The Windows / ChromeOS / Linux
 // alternates were removed — the OS-style picker is gone, and any
@@ -71,7 +73,10 @@ function MacOSContent() {
           <AppWindow appId={win.appId} />
         </Window>
       ))}
-      {!anyMaximized && <Dock />}
+      {/* Dock stays visible even when a window is maximized — Windows-
+          taskbar behavior. The menu bar still hides on maximize so the
+          window can claim the full top of the screen. */}
+      <Dock onSpotlight={toggleSpotlight} />
       <ContextMenu onSpotlight={toggleSpotlight} />
       <Spotlight open={spotlightOpen} onClose={() => setSpotlightOpen(false)} />
     </div>
@@ -87,7 +92,7 @@ const OS_LABELS = { windows: 'Windows', chromeos: 'ChromeOS', linux: 'Linux', mo
 function MigrationNotice({ priorOs, onClose }) {
   const label = OS_LABELS[priorOs] || priorOs;
   return (
-    <div className="fixed inset-0 z-[100] grid place-items-center bg-black/60 backdrop-blur-sm">
+    <div className="fixed inset-0 grid place-items-center bg-black/60 backdrop-blur-sm" style={{ zIndex: Z.modal }}>
       <div className="w-[440px] max-w-[90vw] rounded-2xl border border-blue-500/30 bg-[#0f1124] p-6 shadow-2xl">
         <div className="flex items-start gap-3 mb-4">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 grid place-items-center shrink-0">
@@ -121,14 +126,15 @@ function ShellContent() {
   const [helpOpen, setHelpOpen] = useState(false);
   // `null` = no notice; otherwise the prior os string ('windows'|'chromeos'|...)
   const [migrationFromOs, setMigrationFromOs] = useState(null);
+  const { osStyle } = useUIPreference();
 
-  // macOS is the only shell — tag <html> with `os-macos` so any per-os
-  // CSS tweaks that target it still work. Also fire the one-time
-  // migration notice for users who had a non-macOS shell selected.
+  // Tag <html> with `os-<style>` so the per-os CSS rules in index.css
+  // (Fluent for windows, Material for chromeos, etc.) kick in. Falls
+  // back to macos if the preference isn't set yet.
   useEffect(() => {
     const root = document.documentElement;
     Array.from(root.classList).filter(c => c.startsWith('os-')).forEach(c => root.classList.remove(c));
-    root.classList.add('os-macos');
+    root.classList.add(`os-${osStyle || 'macos'}`);
 
     // Forced migration: read the legacy `cov-desktop-style` value once
     // and show a notice if it points to a removed shell. We always
@@ -143,7 +149,7 @@ function ShellContent() {
         localStorage.setItem('cov-os-migrated', '1');
       }
     } catch {}
-  }, []);
+  }, [osStyle]);
 
   // Global keyboard shortcuts.
   useEffect(() => {

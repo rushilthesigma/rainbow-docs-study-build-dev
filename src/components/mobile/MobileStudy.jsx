@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Sparkles, History, Send, Calculator, Beaker, Lightbulb, Compass, Plus, X } from 'lucide-react';
 import { sendStudyMessage, listStudySessions, getStudySession, deleteStudySession } from '../../api/curriculum';
 import { errorChatMessage } from '../../utils/aiErrors';
+import { Z } from '../../styles/tokens';
 
 // Mobile-native Study Mode: full-bleed chat, slim title, no Debate
 // button (head-to-head needs a wider canvas), no sidebar. The empty
@@ -243,7 +244,7 @@ function TypingBubble() {
 // ===== History sheet =====
 function HistorySheet({ loading, sessions, onClose, onPick, onDelete }) {
   return (
-    <div className="fixed inset-0 z-[60]">
+    <div className="fixed inset-0" style={{ zIndex: Z.sheet }}>
       <button onClick={onClose} aria-label="Close" className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" />
       <div className="absolute bottom-0 left-0 right-0 max-h-[70%] rounded-t-3xl bg-white dark:bg-[#13131f] border-t border-gray-200 dark:border-white/[0.06] shadow-2xl flex flex-col"
            style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)' }}>

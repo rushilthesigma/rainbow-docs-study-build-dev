@@ -4,6 +4,7 @@ import {
   listDMs, getDM, sendDM, getFriendRequests, getFriends, searchUsers,
   acceptFriendRequest, declineFriendRequest, sendFriendRequest, getMyProfile,
 } from '../../api/social';
+import { Z } from '../../styles/tokens';
 
 // SocialPanel — menu-bar dropdown for the Social experience.
 //
@@ -147,8 +148,9 @@ export default function SocialPanel({ open, onClose, anchorRect }) {
   return (
     <div
       ref={panelRef}
-      className="fixed z-[1300] w-[340px] max-h-[70vh] flex flex-col rounded-2xl overflow-hidden text-[12.5px] text-gray-200"
+      className="fixed w-[340px] max-h-[70vh] flex flex-col rounded-2xl overflow-hidden text-[12.5px] text-gray-200"
       style={{
+        zIndex: Z.social,
         top, right,
         background: 'rgba(20, 20, 28, 0.55)',
         backdropFilter: 'blur(48px) saturate(2)',

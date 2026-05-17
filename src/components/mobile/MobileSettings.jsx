@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useUIPreference } from '../../context/UIPreferenceContext';
 import { syncData } from '../../api/auth';
 import MobilePage from './MobilePage';
+import { Z } from '../../styles/tokens';
 
 // Mobile-native settings — plan banner removed (it's not actionable
 // from this screen anyway). Model preference is now a real picker
@@ -147,7 +148,7 @@ function Row({ icon, tone, title, value, onClick, destructive }) {
 
 function PickerSheet({ title, onClose, children }) {
   return (
-    <div className="fixed inset-0 z-[60]">
+    <div className="fixed inset-0" style={{ zIndex: Z.sheet }}>
       <button onClick={onClose} aria-label="Close" className="absolute inset-0 bg-black/50 backdrop-blur-[2px] animate-fade-in" />
       <div className="absolute bottom-0 left-0 right-0 rounded-t-3xl bg-white dark:bg-[#13131f] border-t border-gray-200 dark:border-white/[0.06] shadow-2xl pb-2 animate-slide-up"
            style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)' }}>

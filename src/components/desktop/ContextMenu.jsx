@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useWindowManager } from '../../context/WindowManagerContext';
 import { useUIPreference } from '../../context/UIPreferenceContext';
 import APP_REGISTRY from './appRegistry';
+import { Z } from '../../styles/tokens';
 
 export default function ContextMenu({ onSpotlight }) {
   const [menu, setMenu] = useState(null); // { x, y }
@@ -24,7 +25,10 @@ export default function ContextMenu({ onSpotlight }) {
       // Only show desktop context menu if clicking on background (not on windows/dock)
       const onWindow = e.target.closest('.absolute.flex.flex-col');
       const onDock = e.target.closest('.dock-icon');
-      const onMenuBar = e.target.closest('[class*="z-[1100]"]');
+      // MenuBar tags itself with data-menubar so we don't have to
+      // match a brittle class string — keeps the z-index token system
+      // (see styles/tokens.js) as the single source of truth.
+      const onMenuBar = e.target.closest('[data-menubar]');
       if (onWindow || onDock || onMenuBar) return;
 
       e.preventDefault();
@@ -47,8 +51,10 @@ export default function ContextMenu({ onSpotlight }) {
     return (
       <div
         ref={menuRef}
-        className="fixed z-[2000] w-52 rounded-xl overflow-hidden shadow-2xl py-1"
+        role="menu"
+        className="fixed w-52 rounded-xl overflow-hidden shadow-2xl py-1"
         style={{
+          zIndex: Z.contextMenu,
           left: Math.min(menu.x, window.innerWidth - 220),
           top: Math.min(menu.y, window.innerHeight - 300),
           background: 'rgba(30, 30, 40, 0.85)',
@@ -81,8 +87,10 @@ export default function ContextMenu({ onSpotlight }) {
     if (!win) return null;
     return (
       <div
-        className="fixed z-[2000] w-44 rounded-xl overflow-hidden shadow-2xl py-1"
+        role="menu"
+        className="fixed w-44 rounded-xl overflow-hidden shadow-2xl py-1"
         style={{
+          zIndex: Z.contextMenu,
           left: Math.min(windowMenu.x, window.innerWidth - 180),
           top: Math.min(windowMenu.y, window.innerHeight - 200),
           background: 'rgba(30, 30, 40, 0.85)',

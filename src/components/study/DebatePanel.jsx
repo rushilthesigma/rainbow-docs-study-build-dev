@@ -7,6 +7,7 @@ import { useAuth } from '../../context/AuthContext';
 import ChatContainer from '../chat/ChatContainer';
 import { errorChatMessage } from '../../utils/aiErrors';
 import { InlineProgress } from '../shared/ProgressBar';
+import { useToast } from '../shared/Toast';
 
 // =========================================================
 // DEBATE PANEL — embedded inside Study Mode (no longer a top-level app).
@@ -500,6 +501,7 @@ Format: GitHub-flavored markdown. **Bold** key claims, use - bullets for evidenc
 // =========================================================
 function Tournament({ mode, setMode, onExit, rejoinTournament = null }) {
   const { user } = useAuth();
+  const toast = useToast();
   const myId = user?.id || null;
   const [code, setCode] = useState(rejoinTournament?.code || '');
   const [iAmHost, setIAmHost] = useState(rejoinTournament?.hostId === (user?.id || null));
@@ -664,7 +666,9 @@ function Tournament({ mode, setMode, onExit, rejoinTournament = null }) {
 
   function copyCode() {
     if (!code) return;
-    try { navigator.clipboard.writeText(code); } catch {}
+    navigator.clipboard.writeText(code)
+      .then(() => toast.success(`Code ${code} copied`))
+      .catch(() => toast.error('Copy failed — select the code manually'));
   }
 
   // ===== ACTIVE BRACKET MATCH =====
@@ -1572,6 +1576,7 @@ function Singleplayer({ mode, setMode, onExit }) {
 // =========================================================
 function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = null, tournamentCode = null, spectator = false }) {
   const { user } = useAuth();
+  const toast = useToast();
   const myId = user?.id || null;
   const [iAmHost, setIAmHost] = useState(false);
   const [code, setCode] = useState('');
@@ -1855,8 +1860,12 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
 
   function copyCode() {
     if (!code) return;
-    try { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 1500); }
-    catch {}
+    navigator.clipboard.writeText(code)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => toast.error('Copy failed — select the code manually'));
   }
 
   // ===== MENU (Create / Join) =====

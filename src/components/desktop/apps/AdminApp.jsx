@@ -27,7 +27,10 @@ export default function AdminApp() {
   const [query, setQuery] = useState('');
   const [planFilter, setPlanFilter] = useState('all');
   const [sort, setSort] = useState('recent');
-  const [includeDemo, setIncludeDemo] = useState(false);
+  // Demo accounts (demo-landing-* / *@covalent.test) are real signups
+  // from the public landing demo flow, so they count toward total
+  // users and the analytics tiles.
+  const [includeDemo, setIncludeDemo] = useState(true);
 
   useEffect(() => {
     (async () => {

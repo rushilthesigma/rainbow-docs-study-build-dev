@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { X, Keyboard } from 'lucide-react';
+import { Z } from '../../styles/tokens';
 
 // Modal that lists every keyboard shortcut. Triggered by ⌘/Ctrl+/.
 // Shortcuts that are active GLOBALLY (work from anywhere on the desktop)
@@ -48,7 +49,7 @@ export default function ShortcutsHelp({ open, onClose }) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[3200] flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: Z.shortcuts }} onClick={onClose}>
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
       <div
         onClick={e => e.stopPropagation()}

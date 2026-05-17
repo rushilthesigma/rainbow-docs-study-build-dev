@@ -23,6 +23,14 @@ const DEFAULTS = {
   iconStyle: 'gradient',
   dockPosition: 'bottom',
   uiMode: 'desktop',
+  // Window chrome style. Window.jsx has dedicated branches for each:
+  // macos (traffic-light buttons, rounded-xl), windows (Fluent title
+  // bar + flat rectangles), chromeos / linux (generic).
+  // Default flipped to 'windows' — every cool color accent / gradient
+  // is preserved (those are in component CSS), only the shape
+  // language switches to Segoe / squared chrome via the `.os-windows`
+  // class hooks in index.css.
+  osStyle: 'windows',
   windowOpacity: 80,
   titlebarOpacity: 65,
 };
@@ -49,6 +57,7 @@ export function UIPreferenceProvider({ children }) {
   const uiMode          = prefs.uiMode          || DEFAULTS.uiMode;
   const windowOpacity       = prefs.windowOpacity       ?? DEFAULTS.windowOpacity;
   const titlebarOpacity     = prefs.titlebarOpacity     ?? DEFAULTS.titlebarOpacity;
+  const osStyle             = prefs.osStyle             || DEFAULTS.osStyle;
 
   // Apply theme to <html> whenever it changes — covers initial render
   // (server-side load), subsequent setTheme calls, and post-fetchUser
@@ -121,6 +130,7 @@ export function UIPreferenceProvider({ children }) {
   const setUiMode          = useCallback((v) => setPref('uiMode', v),          [setPref]);
   const setWindowOpacity       = useCallback((v) => setPref('windowOpacity', v),       [setPref]);
   const setTitlebarOpacity     = useCallback((v) => setPref('titlebarOpacity', v),     [setPref]);
+  const setOsStyle             = useCallback((v) => setPref('osStyle', v),             [setPref]);
 
   // Mobile mode is inferred from viewport, not persisted — narrow
   // viewports always get the mobile shell regardless of user pref.
@@ -142,6 +152,7 @@ export function UIPreferenceProvider({ children }) {
       theme, setTheme,
       windowOpacity, setWindowOpacity,
       titlebarOpacity, setTitlebarOpacity,
+      osStyle, setOsStyle,
     }}>
       {children}
     </UIPreferenceContext.Provider>

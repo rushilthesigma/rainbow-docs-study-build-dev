@@ -5,6 +5,7 @@ import { getApp } from './appRegistry';
 import { useAuth } from '../../context/AuthContext';
 import { listDMs, getFriendRequests } from '../../api/social';
 import SocialPanel from './SocialPanel';
+import { Z } from '../../styles/tokens';
 
 // macOS-style menu bar.
 //
@@ -108,8 +109,10 @@ export default function MenuBar({ onSpotlight }) {
 
   return (
     <div
-      className="fixed top-0 left-0 right-0 h-7 flex items-center justify-between px-4 z-[1100] select-none text-[13px]"
+      data-menubar
+      className="fixed top-0 left-0 right-0 h-7 flex items-center justify-between px-4 select-none text-[13px]"
       style={{
+        zIndex: Z.menubar,
         background: dark ? 'rgba(22, 20, 42, 0.48)' : 'rgba(220, 220, 228, 0.50)',
         backdropFilter: 'blur(64px) saturate(2.2)',
         WebkitBackdropFilter: 'blur(64px) saturate(2.2)',
@@ -171,8 +174,9 @@ export default function MenuBar({ onSpotlight }) {
 
           {showUserMenu && (
             <div
-              className="absolute right-0 top-7 w-48 rounded-lg shadow-xl overflow-hidden z-[1200]"
+              className="absolute right-0 top-7 w-48 rounded-lg shadow-xl overflow-hidden"
               style={{
+                zIndex: Z.menubarMenu,
                 background: dark ? 'rgba(30, 30, 40, 0.9)' : 'rgba(255, 255, 255, 0.95)',
                 backdropFilter: 'blur(30px)',
                 border: dark ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)',

@@ -117,10 +117,16 @@ function Section({ title, children }) {
 }
 
 function InterfaceSection() {
-  const { wallpaper, setWallpaper, dockSize, setDockSize, iconStyle, setIconStyle, windowOpacity, setWindowOpacity, titlebarOpacity, setTitlebarOpacity } = useUIPreference();
+  const { wallpaper, setWallpaper, dockSize, setDockSize, iconStyle, setIconStyle, windowOpacity, setWindowOpacity, titlebarOpacity, setTitlebarOpacity, osStyle, setOsStyle } = useUIPreference();
   const wallpaperOpts = WALLPAPER_LIST.map(w => ({ value: w.id, label: w.label }));
   const dockOpts = [{ value: 'small', label: 'Small' }, { value: 'medium', label: 'Medium' }, { value: 'large', label: 'Large' }];
   const iconOpts = [{ value: 'gradient', label: 'Colorful' }, { value: 'mono', label: 'Monochrome' }, { value: 'glass', label: 'Glass' }, { value: 'accent', label: 'Accent Tint' }];
+  const osOpts = [
+    { value: 'macos', label: 'macOS — traffic lights' },
+    { value: 'windows', label: 'Windows 11 — Fluent' },
+    { value: 'chromeos', label: 'ChromeOS' },
+    { value: 'linux', label: 'Linux' },
+  ];
   const isMobileScreen = typeof window !== 'undefined' && window.innerWidth < 768;
   const opacity = windowOpacity ?? 55;
 
@@ -128,6 +134,7 @@ function InterfaceSection() {
     <Section title={isMobileScreen ? 'Appearance' : 'Desktop'}>
       {!isMobileScreen && (
         <>
+          <Dropdown label="Window Style" value={osStyle || 'macos'} options={osOpts} onChange={setOsStyle} />
           <Dropdown label="Wallpaper" value={wallpaper} options={wallpaperOpts} onChange={setWallpaper} />
           <Dropdown label="Dock Size" value={dockSize} options={dockOpts} onChange={setDockSize} />
           <Dropdown label="Icon Style" value={iconStyle} options={iconOpts} onChange={setIconStyle} />
@@ -361,17 +368,39 @@ export default function SettingsPage() {
           <div className="min-w-0">
             <p className="text-[13px] font-medium text-white/85">Restart onboarding</p>
             <p className="text-[11px] text-white/35 mt-0.5 leading-relaxed">
-              Replay the 8-step welcome tutorial — pedagogy, catalog, lesson flow, progress.
+              Replay the welcome flow — appearance, wallpaper, handle, guided tour.
             </p>
           </div>
           <button
-            onClick={() => {
+            onClick={async () => {
               if (!confirm('Replay the welcome tutorial now?')) return;
-              localStorage.removeItem('covalent-onboarded');
-              localStorage.removeItem('cov-launch-app');
+              // Onboarding state lives in user.data.preferences on the
+              // server. Clearing the flag + tourStep there is what
+              // actually flips the gate; the old localStorage keys are
+              // dead code from a previous design — kept the removeItem
+              // calls as a defensive cleanup for any stale browsers.
+              try {
+                const nextPrefs = {
+                  ...(user?.data?.preferences || {}),
+                  onboarded: false,
+                  tourStep: null,
+                };
+                await syncData({ preferences: nextPrefs });
+                await fetchUser();
+              } catch (err) {
+                console.error('Failed to clear onboarded flag:', err);
+                alert('Could not restart onboarding right now. Please try again.');
+                return;
+              }
+              try {
+                localStorage.removeItem('covalent-onboarded');
+                localStorage.removeItem('cov-launch-app');
+              } catch {}
+              // Reload so the App router re-evaluates the onboarded gate
+              // and renders <Onboarding> instead of <DesktopShell>.
               window.location.reload();
             }}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/[0.07] border border-white/[0.10] hover:bg-white/[0.12] text-white/65 hover:text-white/85 text-[12px] font-semibold transition-colors flex-shrink-0"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md bg-white/[0.07] border border-white/[0.10] hover:bg-white/[0.12] text-white/65 hover:text-white/85 text-[12px] font-semibold transition-colors flex-shrink-0"
           >
             <GraduationCap size={13} /> Restart
           </button>

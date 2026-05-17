@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { googleLogin } from '../api/auth';
 import { WALLPAPERS } from '../components/desktop/DesktopBackground';
+import { Z } from '../styles/tokens';
 import {
   Loader2 as Loader, Sparkles, ArrowRight, X, Check, ChevronDown,
   BookOpen, Brain, Zap, PenTool, Cpu, Repeat,
@@ -164,7 +165,7 @@ function HeroSection({ onNext }) {
 
         <button
           onClick={onNext}
-          className="mt-10 inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-full bg-white text-gray-900 text-[14.5px] font-bold hover:bg-white/95 active:scale-[0.98] transition-all shadow-2xl shadow-black/30"
+          className="mt-10 inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-md bg-gradient-to-br from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 active:scale-[0.98] text-white text-[14.5px] font-semibold transition-all shadow-[inset_0_1px_0_rgba(255,255,255,0.18),inset_0_-1px_0_rgba(0,0,0,0.18),0_4px_18px_rgba(99,102,241,0.45)] border border-blue-400/50"
         >
           Get started <ChevronDown size={15} />
         </button>
@@ -225,7 +226,7 @@ function HowItWorksSection() {
             return (
               <div
                 key={s.n}
-                className="rounded-2xl p-6 border border-white/15 bg-white/[0.06] backdrop-blur-xl shadow-2xl shadow-black/30"
+                className="rounded-lg p-6 ring-1 ring-white/[0.10] bg-white/[0.05] backdrop-blur-[20px] backdrop-saturate-150 shadow-[0_8px_24px_rgba(0,0,0,0.30)]"
               >
                 <div className="flex items-center justify-between mb-5">
                   <span className="text-[11px] font-mono font-bold tracking-wider text-white/45">{s.n}</span>
@@ -304,7 +305,7 @@ function FeaturesGridSection() {
 function FeatureTile({ icon: Icon, title, body, tone, className = '', big = false }) {
   return (
     <div
-      className={`relative rounded-2xl p-4 sm:p-5 border border-white/15 bg-white/[0.05] backdrop-blur-xl shadow-2xl shadow-black/30 overflow-hidden flex flex-col ${className}`}
+      className={`relative rounded-lg p-4 sm:p-5 ring-1 ring-white/[0.10] bg-white/[0.05] backdrop-blur-[20px] backdrop-saturate-150 shadow-[0_8px_24px_rgba(0,0,0,0.30)] overflow-hidden flex flex-col ${className}`}
     >
       <div className={`absolute inset-0 bg-gradient-to-br ${tone} pointer-events-none`} />
       <div className="relative z-10 flex flex-col h-full">
@@ -345,7 +346,7 @@ function NumbersStrip() {
         </p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {STATS.map((s) => (
-            <div key={s.label} className="rounded-2xl p-5 border border-white/15 bg-white/[0.06] backdrop-blur-xl text-center">
+            <div key={s.label} className="rounded-lg p-5 ring-1 ring-white/[0.10] bg-white/[0.05] backdrop-blur-[20px] backdrop-saturate-150 text-center">
               <div className="text-[34px] sm:text-[40px] font-bold tracking-tight text-white tabular-nums leading-none">
                 {s.n}
               </div>
@@ -417,7 +418,7 @@ function SubjectsSpotlight() {
               // Soft inner ring instead of a hard 15%-white border —
               // the previous 1px white outline lit up against the
               // night-sky wallpaper and read as a hard, jarring edge.
-              className="relative rounded-2xl p-5 ring-1 ring-white/[0.07] bg-white/[0.04] backdrop-blur-2xl shadow-[0_10px_40px_rgba(0,0,0,0.35)] overflow-hidden flex flex-col"
+              className="relative rounded-lg p-5 ring-1 ring-white/[0.10] bg-white/[0.05] backdrop-blur-[20px] backdrop-saturate-150 shadow-[0_8px_24px_rgba(0,0,0,0.30)] overflow-hidden flex flex-col"
             >
               <div className={`absolute inset-0 bg-gradient-to-br ${s.tone} pointer-events-none`} />
               <div className="relative z-10 flex flex-col h-full">
@@ -481,21 +482,20 @@ function SignInSection({ loading, onSignIn, onNewAccount, onWhyNotGpt }) {
       />
 
       <div className="relative z-10 flex flex-col items-center text-center animate-fade-up">
-        {/* RushilAI brand mark — matches Onboarding welcome (rounded-3xl,
-            blue→indigo gradient, soft shadow, top inner highlight). */}
-        <div className="relative w-20 h-20 rounded-3xl bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 grid place-items-center shadow-2xl shadow-blue-500/30">
+        {/* RushilAI brand mark — Fluent rounded-xl shape, cool blue→
+            indigo gradient kept so it still pops; inner highlight +
+            outer glow for "raised" Windows depth. */}
+        <div className="relative w-20 h-20 rounded-xl bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 grid place-items-center shadow-[0_10px_30px_rgba(99,102,241,0.45),inset_0_1px_0_rgba(255,255,255,0.25),inset_0_-1px_0_rgba(0,0,0,0.18)] ring-1 ring-blue-400/40">
           <Sparkles size={38} className="text-white drop-shadow-lg" strokeWidth={2.2} />
-          <span className="pointer-events-none absolute inset-1 rounded-3xl bg-gradient-to-b from-white/25 to-transparent" />
         </div>
 
-        {/* Italic gradient wordmark — same treatment as Onboarding's "hello".
-            inline-block + pr-3 + slightly looser tracking so the italic
-            slant on the trailing "e" doesn't get clipped by the gradient
-            bg-clip-text bounding box. */}
+        {/* Windows Segoe-flavored title — flat, semibold, lighter
+            tracking. Replaces the italic gradient (very macOS) with a
+            crisp white wordmark in Fluent's Display style. */}
         <h1
-          className="mt-6 text-[44px] sm:text-[56px] leading-[0.95] font-bold tracking-[-0.03em] italic inline-block pr-3 bg-gradient-to-br from-white via-blue-200 to-blue-400 bg-clip-text text-transparent"
+          className="mt-6 text-[40px] sm:text-[52px] leading-[1.05] font-semibold tracking-[-0.02em] text-white"
         >
-          welcome
+          Welcome
         </h1>
         <p className="mt-4 text-[16px] sm:text-[17px] text-white/80 drop-shadow-md">
           Sign in to start your first curriculum.
@@ -506,7 +506,7 @@ function SignInSection({ loading, onSignIn, onNewAccount, onWhyNotGpt }) {
         <button
           onClick={onSignIn}
           disabled={loading}
-          className="group mt-8 inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 hover:brightness-110 active:scale-[0.98] text-white text-[13.5px] font-bold transition-all disabled:opacity-60 shadow-xl shadow-blue-900/40"
+          className="group mt-8 inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-md bg-gradient-to-br from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 active:scale-[0.98] text-white text-[13.5px] font-semibold transition-all disabled:opacity-60 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),inset_0_-1px_0_rgba(0,0,0,0.18),0_4px_14px_rgba(99,102,241,0.40)] border border-blue-400/50"
         >
           {loading
             ? <><Loader size={14} className="animate-spin" /> Signing in…</>
@@ -565,13 +565,13 @@ function WhyNotGptModal({ onClose }) {
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-black/70 backdrop-blur-md animate-fade-in">
+    <div className="fixed inset-0 flex items-start justify-center overflow-y-auto bg-black/70 backdrop-blur-md animate-fade-in" style={{ zIndex: Z.modal }}>
       <button
         aria-label="Close"
         onClick={onClose}
         className="absolute inset-0 -z-0"
       />
-      <div className="relative my-12 mx-4 w-full max-w-3xl rounded-3xl bg-[#0c0e1c] border border-white/10 shadow-2xl shadow-black/50 overflow-hidden">
+      <div className="relative my-12 mx-4 w-full max-w-3xl rounded-lg bg-[#0c0e1c] ring-1 ring-white/[0.10] shadow-[0_24px_48px_rgba(0,0,0,0.55)] overflow-hidden">
         {/* Header */}
         <div className="relative px-7 pt-7 pb-5 border-b border-white/10">
           <div className="flex items-center gap-3 mb-3">
@@ -611,7 +611,7 @@ function WhyNotGptModal({ onClose }) {
         <div className="px-7 py-5 border-t border-white/10 flex items-center justify-end">
           <button
             onClick={onClose}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 hover:brightness-110 active:scale-[0.98] text-white text-[13px] font-bold transition-all"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-md bg-gradient-to-br from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 active:scale-[0.98] text-white text-[13px] font-semibold transition-all border border-blue-400/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),inset_0_-1px_0_rgba(0,0,0,0.18)]"
           >
             Got it <ArrowRight size={13} />
           </button>
@@ -623,7 +623,7 @@ function WhyNotGptModal({ onClose }) {
 
 function Row({ icon, title, us, them }) {
   return (
-    <div className="rounded-2xl px-4 py-3 hover:bg-white/[0.03] transition-colors">
+    <div className="rounded-md px-4 py-3 hover:bg-white/[0.03] transition-colors">
       <div className="flex items-center gap-2 mb-2">
         <span className="w-7 h-7 rounded-lg bg-blue-500/15 text-blue-300 grid place-items-center">
           {icon}

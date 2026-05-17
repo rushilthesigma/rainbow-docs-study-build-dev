@@ -5,6 +5,8 @@ import ChatContainer from '../chat/ChatContainer';
 import DebatePanel from './DebatePanel';
 import { errorChatMessage } from '../../utils/aiErrors';
 import { InlineProgress } from '../shared/ProgressBar';
+import { Z } from '../../styles/tokens';
+import { useToast } from '../shared/Toast';
 
 // Quick-start prompts shown in the empty state. Replaces the bland
 // "Start the conversation..." default with concrete suggestions tied to
@@ -18,6 +20,7 @@ const QUICK_PROMPTS = [
 ];
 
 export default function StudyModePanel({ className = '', flush = false, initialMessage }) {
+  const toast = useToast();
   const [messages, setMessages] = useState([]);
   const [streamingContent, setStreamingContent] = useState('');
   const [streamingSources, setStreamingSources] = useState([]);
@@ -133,7 +136,10 @@ export default function StudyModePanel({ className = '', flush = false, initialM
     try {
       const data = await listStudySessions();
       setSessions(data.sessions || []);
-    } catch {}
+    } catch (err) {
+      console.error('loadHistory', err);
+      toast.error("Couldn't load study history");
+    }
     setLoadingHistory(false);
   }
 
@@ -145,14 +151,20 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         setMessages(data.session.messages || []);
         setShowHistory(false);
       }
-    } catch {}
+    } catch (err) {
+      console.error('resumeSession', err);
+      toast.error("Couldn't open that session");
+    }
   }
 
   async function handleDeleteSession(sid) {
     try {
       await deleteStudySession(sid);
       setSessions(prev => prev.filter(s => s.id !== sid));
-    } catch {}
+    } catch (err) {
+      console.error('deleteStudySession', err);
+      toast.error("Couldn't delete that session");
+    }
   }
 
   function newChat() {
@@ -538,7 +550,7 @@ function ModalShell({ title, onClose, children }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center px-4">
+    <div className="fixed inset-0 flex items-center justify-center px-4" style={{ zIndex: Z.modal }}>
       <button aria-label="Close" onClick={onClose} className="absolute inset-0 bg-black/55 backdrop-blur-[2px] animate-fade-in" />
       <div className="relative w-full max-w-md rounded-2xl bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-2xl p-5">
         <div className="flex items-center justify-between mb-3">
