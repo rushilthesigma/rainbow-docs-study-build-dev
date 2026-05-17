@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Wifi, ChevronUp, Search } from 'lucide-react';
+import { ChevronUp, Search } from 'lucide-react';
 import APP_REGISTRY from './appRegistry';
 import { useWindowManager } from '../../context/WindowManagerContext';
 import { useUIPreference } from '../../context/UIPreferenceContext';
@@ -110,9 +110,9 @@ function SearchButton({ size, onClick }) {
   );
 }
 
-// Right-side system tray. Just the hidden-icons chevron and a Wi-Fi
-// glyph — battery and volume were removed since they're decorative-only
-// (the web app can't actually control system audio/power) and were
+// Right-side system tray. Just the hidden-icons chevron — Wi-Fi, volume,
+// and battery were all removed since they're decorative-only (the web
+// app can't actually control system audio/network/power) and were
 // adding clutter. The chevron stays as a visual Windows cue.
 function SystemTrayIcons() {
   return (
@@ -121,7 +121,6 @@ function SystemTrayIcons() {
       aria-label="System tray"
     >
       <ChevronUp size={12} strokeWidth={2.2} className="text-white/60" />
-      <Wifi      size={14} strokeWidth={2}   />
     </button>
   );
 }
