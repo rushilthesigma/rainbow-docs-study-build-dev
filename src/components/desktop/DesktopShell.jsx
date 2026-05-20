@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { WindowManagerProvider, useWindowManager } from '../../context/WindowManagerContext';
+import { UIShellProvider, useUIShell } from '../../context/UIShellContext';
 import DesktopBackground from './DesktopBackground';
 import MenuBar from './MenuBar';
 import Dock from './Dock';
@@ -9,12 +10,17 @@ import Spotlight from './Spotlight';
 import ContextMenu from './ContextMenu';
 import GuidedTour from './GuidedTour';
 import ShortcutsHelp from './ShortcutsHelp';
+import BootScreen from './BootScreen';
+import PowerOverlay from './PowerOverlay';
 
-// Windows 11 is the only desktop shell. macOS / ChromeOS / Linux paths
-// were removed along with the OS-style picker. The HTML root gets a
-// hardcoded `os-windows` class so the Fluent-scoped index.css rules
-// apply uniformly. The component is still named MacOSContent for
-// historical churn-minimization; rename is a separate task.
+// EngOS-style desktop shell. Glass menu bar + floating squircle dock +
+// macOS traffic-light window chrome + Conway live wallpaper. Boot screen
+// runs once on first mount; PowerOverlay handles Sleep / Shut Down from
+// the menu-bar logo dropdown.
+//
+// The HTML root gets `os-macos` so any leftover Win11-scoped `.os-windows`
+// rules in index.css stop applying. The Fluent-shape overrides are now
+// dormant.
 function MacOSContent() {
   const { state, minimizeWindow, restoreWindow } = useWindowManager();
   const [spotlightOpen, setSpotlightOpen] = useState(false);
@@ -86,13 +92,13 @@ function ShellContent() {
   const { state, closeWindow, minimizeWindow, focusWindow, restoreWindow } = useWindowManager();
   const [helpOpen, setHelpOpen] = useState(false);
 
-  // Tag <html> with `os-windows` so the Fluent-scoped CSS rules in
-  // index.css kick in. The shell is Win11-only now — no more dynamic
-  // os-style switching, no legacy macOS/ChromeOS/Linux migration.
+  // Tag <html> with `os-macos` now that the shell is EngOS-style. Any
+  // `.os-windows` Fluent overrides in index.css are left dormant — they
+  // don't apply without the class.
   useEffect(() => {
     const root = document.documentElement;
     Array.from(root.classList).filter(c => c.startsWith('os-')).forEach(c => root.classList.remove(c));
-    root.classList.add('os-windows');
+    root.classList.add('os-macos');
   }, []);
 
   // Global keyboard shortcuts.
@@ -151,18 +157,32 @@ function ShellContent() {
   }, [state.activeWindowId, state.windows, closeWindow, minimizeWindow, focusWindow, restoreWindow]);
 
   return (
+    <ShellWithOverlays helpOpen={helpOpen} setHelpOpen={setHelpOpen} />
+  );
+}
+
+// Splits the boot/power overlays out so they can read from UIShell
+// (mounted at the very top of DesktopShell) without re-running the
+// keyboard handler effects above.
+function ShellWithOverlays({ helpOpen, setHelpOpen }) {
+  const { booted } = useUIShell();
+  return (
     <>
+      {!booted && <BootScreen />}
       <MacOSContent />
       <GuidedTour />
       <ShortcutsHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
+      <PowerOverlay />
     </>
   );
 }
 
 export default function DesktopShell() {
   return (
-    <WindowManagerProvider>
-      <ShellContent />
-    </WindowManagerProvider>
+    <UIShellProvider>
+      <WindowManagerProvider>
+        <ShellContent />
+      </WindowManagerProvider>
+    </UIShellProvider>
   );
 }
