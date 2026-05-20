@@ -1,66 +1,28 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
+import { X, Minus, Square } from 'lucide-react';
 import { useWindowManager } from '../../context/WindowManagerContext';
 import { useUIPreference } from '../../context/UIPreferenceContext';
 
-// macOS-style traffic-light title bar (EngOS chrome).
+// Windows 11 is the only window style. macOS traffic-light + ChromeOS /
+// Linux title bars were removed along with the osStyle preference.
 //
-// Traffic lights live on the LEFT; the title is centered absolutely so it
-// reads the same regardless of how many buttons render. Symbols inside the
-// lights (×, −, +) only appear on hover for that subtle "they look like
-// dots until you actually need them" effect.
-//
-// Slideshow forces maximize at open time (see OPEN_WINDOW reducer) and the
-// green +-light is hidden for that app only — the deck workspace owns the
-// viewport and there's nothing useful left to toggle.
-function TrafficLight({ color, symbol, focused, hover, onClick, title }) {
-  const bg = !focused && !hover
-    ? '#6b7280'
-    : color === 'red'
-      ? 'var(--traffic-red)'
-      : color === 'yellow'
-        ? 'var(--traffic-yellow)'
-        : 'var(--traffic-green)';
-  return (
-    <button
-      onClick={(e) => { e.stopPropagation(); onClick(); }}
-      className="w-3 h-3 rounded-full flex items-center justify-center text-[9px] font-bold text-black/70 leading-none transition-all hover:scale-110 active:scale-95"
-      style={{
-        background: bg,
-        boxShadow: focused || hover
-          ? 'inset 0 0.5px 0 rgba(255,255,255,0.4), inset 0 -0.5px 0 rgba(0,0,0,0.25)'
-          : 'none',
-      }}
-      tabIndex={-1}
-      title={title}
-    >
-      <span className={hover ? 'opacity-90' : 'opacity-0'}>{symbol}</span>
-    </button>
-  );
-}
-
-function MacTitleBar({ windowId, appId, isActive, title, onDragStart, onDoubleClick }) {
+// Slideshow is force-maximized at open time (see OPEN_WINDOW reducer) and
+// its maximize button is hidden — the deck workspace is designed to own
+// the viewport. The minimize and close buttons stay so the user can step
+// away or quit.
+function WindowsTitleBar({ windowId, appId, isActive, title, onDragStart, onDoubleClick }) {
   const { closeWindow, minimizeWindow, maximizeWindow } = useWindowManager();
-  const [hover, setHover] = useState(false);
-  const hideGreen = appId === 'slides';
+  const dark = document.documentElement.classList.contains('dark');
+  const hideMaximize = appId === 'slides';
   return (
-    <div
-      className="h-9 flex items-center flex-shrink-0 chrome relative"
-      style={{ background: 'rgba(255,255,255,0.04)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}
-      onPointerDown={onDragStart}
-      onDoubleClick={onDoubleClick}
-      data-titlebar={windowId}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-    >
-      <div className="flex items-center gap-2 px-3">
-        <TrafficLight color="red"    symbol="×" focused={isActive} hover={hover} onClick={() => closeWindow(windowId)} title="Close" />
-        <TrafficLight color="yellow" symbol="−" focused={isActive} hover={hover} onClick={() => minimizeWindow(windowId)} title="Minimize" />
-        {!hideGreen && (
-          <TrafficLight color="green" symbol="+" focused={isActive} hover={hover} onClick={() => maximizeWindow(windowId)} title="Zoom" />
+    <div className={`h-8 flex items-center flex-shrink-0 ${isActive ? (dark ? 'bg-[#1f1f1f]' : 'bg-white') : (dark ? 'bg-[#2d2d2d]' : 'bg-[#f0f0f0]')}`} onPointerDown={onDragStart} onDoubleClick={onDoubleClick} data-titlebar={windowId} style={{ borderBottom: dark ? '1px solid #3a3a3a' : '1px solid #e0e0e0' }}>
+      <div className={`pl-3 text-xs font-normal truncate flex-1 ${isActive ? (dark ? 'text-white' : 'text-gray-900') : (dark ? 'text-gray-500' : 'text-gray-400')}`}>{title}</div>
+      <div className="flex items-center h-full">
+        <button onClick={e => { e.stopPropagation(); minimizeWindow(windowId); }} className={`h-full px-3 flex items-center justify-center ${dark ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-gray-200 text-gray-600'}`}><Minus size={12} /></button>
+        {!hideMaximize && (
+          <button onClick={e => { e.stopPropagation(); maximizeWindow(windowId); }} className={`h-full px-3 flex items-center justify-center ${dark ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-gray-200 text-gray-600'}`}><Square size={10} /></button>
         )}
-      </div>
-      <div className="absolute left-1/2 -translate-x-1/2 text-[13px] font-medium text-white/85 truncate max-w-[60%] pointer-events-none">
-        {title}
+        <button onClick={e => { e.stopPropagation(); closeWindow(windowId); }} className="h-full px-3 flex items-center justify-center hover:bg-red-500 hover:text-white text-gray-400"><X size={14} /></button>
       </div>
     </div>
   );
@@ -87,10 +49,12 @@ export default function Window({ win, isActive, children }) {
     const prevTransition = el ? el.style.transition : '';
     if (el) el.style.transition = 'none';
     function onMove(ev) {
-      // EngOS chrome reserves: 28px menu bar at top, ~100px for the
-      // floating dock at the bottom (its tallest setting + the 8px gap).
+      // RushilAI menu bar is always 28px at the top (regardless of
+      // osStyle — it renders for every shell). Win11 taskbar is always
+      // 48px at the bottom. Both constraints apply unconditionally so a
+      // dragged window can never slip behind the chrome.
       const topBar = 28;
-      const bottomBar = 100;
+      const bottomBar = 48;
       const maxX = window.innerWidth - win.size.w;
       const maxY = window.innerHeight - win.size.h - bottomBar;
       posRef.x = Math.max(0, Math.min(maxX, ev.clientX - startX));
@@ -118,9 +82,10 @@ export default function Window({ win, isActive, children }) {
     function onMove(ev) {
       const dx = ev.clientX - startX; const dy = ev.clientY - startY;
       const vw = window.innerWidth; const vh = window.innerHeight;
-      // Same reserves as the drag handler — 28px menu bar + 100px dock.
+      // Same fixed top/bottom reserves as the drag handler — menu bar
+      // 28px, Win11 taskbar 48px, both always present.
       const topBar = 28;
-      const bottomBar = 100;
+      const bottomBar = 48;
       let x = startPos.x, y = startPos.y, w = startSize.w, h = startSize.h;
       if (dir.includes('e')) w = Math.min(vw - x, Math.max(400, startSize.w + dx));
       if (dir.includes('w')) { w = Math.max(400, startSize.w - dx); x = startPos.x + (startSize.w - w); if (x < 0) { w += x; x = 0; } }
@@ -178,11 +143,10 @@ export default function Window({ win, isActive, children }) {
     }
   }, [focusWindow, win.id]);
 
-  // Maximize dimensions: full viewport width, claims the full top edge
-  // (the menu bar hides on maximize via MacOSContent), and leaves room
-  // at the bottom for the floating EngOS dock — its tallest 'large'
-  // setting + the 8px bottom inset works out to ~100px reserved.
-  const DOCK_RESERVE = 100;
+  // Maximize dimensions: full viewport width, leaves 48px at the bottom
+  // for the Win11 taskbar (which stays visible during maximize) and
+  // claims the full top edge — the in-app menu bar hides on maximize.
+  const DOCK_RESERVE = 48;
   const maxStyle = { left: 0, top: 0, width: '100vw', height: `calc(100vh - ${DOCK_RESERVE}px)` };
 
   const style = maxed
@@ -200,11 +164,8 @@ export default function Window({ win, isActive, children }) {
   // Snapped to `rounded-none` whenever the window is taking the full
   // screen (zoom OR browser fullscreen) so corners don't leave dark
   // gaps against the desktop / OS chrome.
-  // EngOS chrome: traffic-light title bar, rounded-2xl corners when floating
-  // (matches the 16px radius EngOS Window.tsx uses), no corner radius when
-  // the window is full-bleed.
-  const TitleBar = MacTitleBar;
-  const radius = (maxed || isFullscreen) ? 'rounded-none' : 'rounded-2xl';
+  const TitleBar = WindowsTitleBar;
+  const radius = (maxed || isFullscreen) ? 'rounded-none' : 'rounded-sm';
 
   const fullBleed = maxed || isFullscreen;
 

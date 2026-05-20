@@ -34,18 +34,6 @@
 
   --color-accent-dark: #3B82F6;
   --color-accent-glow-dark: rgba(59, 130, 246, 0.18);
-
-  /* ===== EngOS shell theme tokens =====
-     macOS-style chrome accent + traffic lights + window shadow,
-     ported from the EngOS tailwind.config.js so the new shell components
-     can reference them as plain CSS vars. */
-  --accent: #0A84FF;
-  --accent-hover: #3D9BFF;
-  --traffic-red:    #FF5F57;
-  --traffic-yellow: #FEBC2E;
-  --traffic-green:  #28C840;
-  --shadow-window: 0 10px 40px -10px rgba(0,0,0,0.45), 0 2px 6px rgba(0,0,0,0.2);
-  --shadow-window-unfocused: 0 4px 16px -6px rgba(0,0,0,0.25);
 }
 
 * {
@@ -158,52 +146,6 @@ body {
   to   { opacity: 1; transform: translateY(0); }
 }
 .animate-fade-up { animation: fade-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards; opacity: 0; }
-
-/* ===== EngOS glass / chrome utility classes =====
-   Three glass layers from the EngOS shell. Cover everything from light
-   menu-bar translucency (.glass) to opaque app-window mica
-   (.glass-window). .chrome disables text selection on UI surfaces; the
-   matching .app-content re-enables it for the actual app body. */
-.glass {
-  background: rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-}
-.glass-strong {
-  background: rgba(20, 20, 24, 0.62);
-  backdrop-filter: blur(28px) saturate(180%);
-  -webkit-backdrop-filter: blur(28px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-}
-.glass-window {
-  background: rgba(28, 28, 32, 0.78);
-  backdrop-filter: blur(36px) saturate(200%);
-  -webkit-backdrop-filter: blur(36px) saturate(200%);
-}
-:root:not(.dark) .glass-window {
-  background: rgba(245, 245, 248, 0.82);
-}
-.glass-edge {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
-}
-.chrome {
-  user-select: none;
-  -webkit-user-select: none;
-}
-.app-content {
-  user-select: text;
-  -webkit-user-select: text;
-}
-
-/* Dock launch bounce — runs once when an app icon is clicked. Triggered by
-   the launching state in the Dock; the icon hops up ~22px then settles. */
-@keyframes dock-bounce {
-  0%, 100% { transform: translateY(0); }
-  40%      { transform: translateY(-22px); }
-  70%      { transform: translateY(-6px); }
-}
-.animate-dock-bounce { animation: dock-bounce 0.6s ease-out; }
 
 /* Slow "scroll for more" arrow bounce on the landing-page hero. */
 @keyframes bounce-slow {
