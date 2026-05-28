@@ -1,14 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { googleLogin, devLogin } from '../api/auth';
+import { googleLogin } from '../api/auth';
 import { WALLPAPERS } from '../components/desktop/DesktopBackground';
 import { Z } from '../styles/tokens';
 import {
   Loader2 as Loader, Sparkles, ArrowRight, X, Check, ChevronDown,
   BookOpen, Brain, Zap, PenTool, Cpu, Repeat,
   Lightbulb, Calculator, MessageSquare, Target, ClipboardCheck,
-  Terminal,
 } from 'lucide-react';
 
 // Two scroll-snap sections, Apple-homepage style:
@@ -72,22 +71,7 @@ export default function LandingPage() {
     else if (window.google?.accounts?.id) window.google.accounts.id.prompt();
   }
 
-  async function handleDevLogin() {
-    setLoading(true);
-    try {
-      const data = await devLogin('Dev User', 'dev@local.dev');
-      if (data.success) {
-        login(data.user, data.token);
-        navigate('/dashboard');
-        return;
-      }
-    } catch (err) {
-      console.error('Dev login failed:', err);
-    }
-    setLoading(false);
-  }
-
-  function scrollTo(idx) {
+function scrollTo(idx) {
     const el = scrollerRef.current;
     if (!el) return;
     const target = el.querySelectorAll('[data-section]')[idx];
@@ -131,7 +115,6 @@ export default function LandingPage() {
         <SignInSection
           loading={loading}
           onSignIn={triggerGoogle}
-          onDevLogin={handleDevLogin}
           onWhyNotGpt={() => setWhyOpen(true)}
         />
       </div>
@@ -464,9 +447,8 @@ function SubjectsSpotlight() {
 
 // ===== Section 6: Sign-in =====
 //
-// Google OAuth is the only real sign-in path. Dev Login bypasses
-// auth for local development by spinning up a throwaway dev account.
-function SignInSection({ loading, onSignIn, onDevLogin, onWhyNotGpt }) {
+// Google OAuth is the only sign-in path.
+function SignInSection({ loading, onSignIn, onWhyNotGpt }) {
   return (
     <section
       data-section="signin"
@@ -514,23 +496,6 @@ function SignInSection({ loading, onSignIn, onDevLogin, onWhyNotGpt }) {
               Continue with Google
             </>
           )}
-        </button>
-
-        {/* Divider */}
-        <div className="flex items-center gap-3 w-full mt-5">
-          <div className="flex-1 h-px bg-white/[0.10]" />
-          <span className="text-[11px] uppercase tracking-[0.14em] text-white/35 font-medium">or</span>
-          <div className="flex-1 h-px bg-white/[0.10]" />
-        </div>
-
-        {/* Dev login — bypass auth for local development */}
-        <button
-          onClick={onDevLogin}
-          disabled={loading}
-          className="mt-4 w-full py-2.5 rounded-lg border border-amber-400/30 bg-amber-500/[0.08] hover:bg-amber-500/[0.14] active:scale-[0.98] text-[13.5px] font-medium text-amber-200/95 transition-all disabled:opacity-50 inline-flex items-center justify-center gap-2"
-        >
-          <Terminal size={14} strokeWidth={2.2} />
-          Dev login
         </button>
 
       </div>

@@ -112,31 +112,6 @@ function AppRouter() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  // ===== DEV BYPASS =====
-  // Hit `/?dev=1` (or any page with that query) to skip OAuth entirely.
-  // Calls /api/auth/dev-login with a non-demo email so the ProtectedRoute
-  // demo-bouncer doesn't immediately log us back out, then reloads to a
-  // clean URL. Safe to ship — the dev-login endpoint already exists in
-  // server.js and is gated by it being a dev tool, not by anything new
-  // here. Only runs once per page load and only when there's no token.
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    if (!params.has('dev')) return;
-    if (localStorage.getItem('covalent-token')) return;
-    (async () => {
-      try {
-        const { devLogin } = await import('./api/auth');
-        await devLogin('Dev User', 'dev@local.dev');
-        const url = new URL(window.location.href);
-        url.searchParams.delete('dev');
-        window.location.replace(url.toString());
-      } catch (err) {
-        console.error('Dev bypass failed:', err);
-      }
-    })();
-  }, []);
-
   // When the user returns from Stripe Checkout the URL gets ?upgraded=1.
   // Ping /api/billing/sync so Pro activates immediately even if the
   // webhook isn't configured (which is the default in dev).

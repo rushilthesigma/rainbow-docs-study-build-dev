@@ -7,7 +7,6 @@ import { AuthContext } from '../../context/AuthContext';
 import { WindowManagerProvider } from '../../context/WindowManagerContext';
 import { DemoModeProvider } from '../../context/DemoModeContext';
 import { setToken } from '../../api/client';
-import { devLogin } from '../../api/auth';
 import AppWindow from '../desktop/AppWindow';
 import { InlineProgress } from '../shared/ProgressBar';
 
@@ -53,30 +52,11 @@ function DemoAuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let cancelled = false;
-    async function bootstrap() {
-      try {
-        // Each tab gets its own demo user so activity doesn't collide.
-        let email = sessionStorage.getItem('covalent-demo-email');
-        if (!email) {
-          email = `demo-landing-${Math.random().toString(36).slice(2, 10)}@covalent.test`;
-          sessionStorage.setItem('covalent-demo-email', email);
-        }
-        const data = await devLogin('Demo User', email);
-        if (cancelled) return;
-        if (data?.user && data?.token) {
-          // devLogin already called setToken; be explicit for safety.
-          setToken(data.token);
-          setUser(data.user);
-        }
-      } catch (e) {
-        console.warn('Demo session bootstrap failed:', e.message);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    bootstrap();
-    return () => { cancelled = true; };
+    // Landing-page guest demo was wired to the now-removed
+    // /api/auth/dev-login endpoint. The mini-OS still renders so the
+    // page composes — actual backend-driven apps will 401 until a
+    // proper guest-session endpoint is added.
+    setLoading(false);
   }, []);
 
   const login = useCallback((userData, token) => {
