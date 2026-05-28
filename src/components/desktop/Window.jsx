@@ -6,22 +6,17 @@ import { useUIPreference } from '../../context/UIPreferenceContext';
 // Windows 11 is the only window style. macOS traffic-light + ChromeOS /
 // Linux title bars were removed along with the osStyle preference.
 //
-// Slideshow is force-maximized at open time (see OPEN_WINDOW reducer) and
-// its maximize button is hidden — the deck workspace is designed to own
-// the viewport. The minimize and close buttons stay so the user can step
-// away or quit.
-function WindowsTitleBar({ windowId, appId, isActive, title, onDragStart, onDoubleClick }) {
+// (Slides used to hide its maximize button — that app was retired so
+// every window now shows the standard min/max/close triad.)
+function WindowsTitleBar({ windowId, isActive, title, onDragStart, onDoubleClick }) {
   const { closeWindow, minimizeWindow, maximizeWindow } = useWindowManager();
   const dark = document.documentElement.classList.contains('dark');
-  const hideMaximize = appId === 'slides';
   return (
     <div className={`h-8 flex items-center flex-shrink-0 ${isActive ? (dark ? 'bg-[#1f1f1f]' : 'bg-white') : (dark ? 'bg-[#2d2d2d]' : 'bg-[#f0f0f0]')}`} onPointerDown={onDragStart} onDoubleClick={onDoubleClick} data-titlebar={windowId} style={{ borderBottom: dark ? '1px solid #3a3a3a' : '1px solid #e0e0e0' }}>
       <div className={`pl-3 text-xs font-normal truncate flex-1 ${isActive ? (dark ? 'text-white' : 'text-gray-900') : (dark ? 'text-gray-500' : 'text-gray-400')}`}>{title}</div>
       <div className="flex items-center h-full">
         <button onClick={e => { e.stopPropagation(); minimizeWindow(windowId); }} className={`h-full px-3 flex items-center justify-center ${dark ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-gray-200 text-gray-600'}`}><Minus size={12} /></button>
-        {!hideMaximize && (
-          <button onClick={e => { e.stopPropagation(); maximizeWindow(windowId); }} className={`h-full px-3 flex items-center justify-center ${dark ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-gray-200 text-gray-600'}`}><Square size={10} /></button>
-        )}
+        <button onClick={e => { e.stopPropagation(); maximizeWindow(windowId); }} className={`h-full px-3 flex items-center justify-center ${dark ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-gray-200 text-gray-600'}`}><Square size={10} /></button>
         <button onClick={e => { e.stopPropagation(); closeWindow(windowId); }} className="h-full px-3 flex items-center justify-center hover:bg-red-500 hover:text-white text-gray-400"><X size={14} /></button>
       </div>
     </div>

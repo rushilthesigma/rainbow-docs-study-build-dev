@@ -11,7 +11,7 @@ export default function Toggle({ label, description, checked, onChange }) {
         aria-checked={checked}
         onClick={() => onChange(!checked)}
         className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0 ${
-          checked ? 'bg-white/30 border border-white/[0.35]' : 'bg-white/[0.08] border border-white/[0.10]'
+          checked ? 'bg-blue-600 border border-blue-500/50' : 'bg-white/[0.08] border border-white/[0.10]'
         }`}
       >
         <span

@@ -110,7 +110,8 @@ export default function Modal({
         aria-labelledby={title ? titleId : undefined}
         aria-describedby={description ? descId : undefined}
         tabIndex={-1}
-        className={`bg-white/[0.08] backdrop-blur-xl rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.4)] w-full ${widthClass} mx-4 p-6 border border-white/[0.14] outline-none max-h-[90vh] overflow-y-auto`}
+        data-modal-surface
+        className={`backdrop-blur-xl rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.4)] w-full ${widthClass} mx-4 p-6 outline-none max-h-[90vh] overflow-y-auto bg-white text-gray-900 border border-gray-200 dark:bg-[#1a1a26] dark:text-white dark:border-white/[0.14]`}
       >
         {(title || onClose) && (
           <div className="flex items-center justify-between mb-4">

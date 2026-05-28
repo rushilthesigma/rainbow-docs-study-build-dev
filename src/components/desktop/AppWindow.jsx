@@ -1,8 +1,7 @@
 import CurriculaApp from './apps/CurriculaApp';
-import SlideshowApp from './apps/SlideshowApp';
 import LessonsApp from './apps/LessonsApp';
 import NotesApp from './apps/NotesApp';
-import SocialApp from './apps/SocialApp';
+import NoteMapApp from './apps/NoteMapApp';
 import AdminApp from './apps/AdminApp';
 import QuizBowlApp from './apps/QuizBowlApp';
 import MathTutorApp from './apps/MathTutorApp';
@@ -11,60 +10,66 @@ import StudyPage from '../../pages/StudyPage';
 import SettingsPage from '../../pages/SettingsPage';
 import DebatePanel from '../study/DebatePanel';
 import ErrorBoundary from '../shared/ErrorBoundary';
+import { useUIPreference } from '../../context/UIPreferenceContext';
 
 // The standalone Assessments app was retired — per-curriculum quizzes
 // (CurriculumAssessmentPage) still exist inside lessons; the
 // generic "make a quiz on any topic" surface is gone.
 // Dev Forum was also retired — the AI-collaboration board got removed
 // along with its server endpoints.
+// Slides was axed too — the deck-builder is no longer mounted here.
 const APP_COMPONENTS = {
   curricula: CurriculaApp,
   lessons: LessonsApp,
   study: StudyPage,
   notes: NotesApp,
+  notemap: NoteMapApp,
   mathtutor: MathTutorApp,
-  social: SocialApp,
   quizbowl: QuizBowlApp,
   admin: AdminApp,
-  slides: SlideshowApp,
   mobilepreview: MobilePreview,
   settings: SettingsPage,
   debate: DebatePanel,
 };
 
 // Apps that need flex container without scroll (they manage their own scrolling)
-const FLEX_APPS = new Set(['notes', 'study', 'debate', 'mathtutor', 'social', 'mobilepreview']);
+const FLEX_APPS = new Set(['notes', 'notemap', 'study', 'debate', 'mathtutor', 'mobilepreview']);
 
-// Slides gets a full-bleed container: no padding, no overflow-hidden so
-// floating dropdowns (theme picker etc.) are not clipped by the window edge.
-// The SlideshowApp component manages its own padding per view.
-const FULLBLEED_APPS = new Set(['slides']);
+// Full-bleed apps (no padding, no overflow-hidden) — empty now that
+// slides is gone, but kept as a registration point so future apps can
+// opt in without re-introducing the special case inline.
+const FULLBLEED_APPS = new Set();
 
-export default function AppWindow({ appId }) {
+export default function AppWindow({ appId, meta = {} }) {
   const Component = APP_COMPONENTS[appId];
+  const { theme } = useUIPreference();
+  // The desktop apps are written dark-first with `text-white/X` and
+  // `bg-white/X` classes baked in. Tagging the window root with
+  // data-app-theme="light" triggers the global shim in index.css that
+  // remaps those whites to legible dark tones — so the app pages don't
+  // each have to thread a theme prop through their entire tree.
+  const themeAttr = theme === 'light' ? 'light' : 'dark';
+
   if (!Component) return <div className="flex items-center justify-center h-full text-gray-400 text-sm">Unknown app</div>;
 
-  // Per-app ErrorBoundary so a crash in (e.g.) the slideshow renderer
-  // doesn't blank the entire desktop. The shell keeps running and the
-  // user can close the window or try again.
   const safe = (
     <ErrorBoundary label={`The ${appId} app crashed`}>
-      <Component />
+      <Component {...meta} />
     </ErrorBoundary>
   );
 
   if (FULLBLEED_APPS.has(appId)) {
-    return <div className="h-full flex flex-col">{safe}</div>;
+    return <div data-app-theme={themeAttr} className="h-full flex flex-col">{safe}</div>;
   }
 
   if (FLEX_APPS.has(appId)) {
     return (
-      <div className="h-full overflow-hidden p-4 md:p-5 flex flex-col">{safe}</div>
+      <div data-app-theme={themeAttr} className="h-full overflow-hidden p-4 md:p-5 flex flex-col">{safe}</div>
     );
   }
 
   return (
-    <div className="h-full overflow-y-auto overflow-x-hidden p-4 md:p-5 flex flex-col">
+    <div data-app-theme={themeAttr} className="h-full overflow-y-auto overflow-x-hidden p-4 md:p-5 flex flex-col">
       {safe}
     </div>
   );

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Moon, Sun, LogOut, ChevronRight, Shield, Sparkles, X, Check, User as UserIcon } from 'lucide-react';
+import { LogOut, ChevronRight, Shield, Sparkles, X, Check, User as UserIcon, PanelBottom, Users } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useUIPreference } from '../../context/UIPreferenceContext';
 import { syncData } from '../../api/auth';
@@ -19,8 +19,17 @@ const MODEL_OPTIONS = [
 
 export default function MobileSettings() {
   const { user, fetchUser, logout } = useAuth();
-  const { theme, setTheme } = useUIPreference();
-  const dark = theme === 'dark';
+  const parent = user?.data?.parent;
+  const hasProfiles = parent?.enabled && parent?.students?.length > 0;
+  const activeChild = hasProfiles && parent.activeStudentId
+    ? parent.students.find(s => s.id === parent.activeStudentId)
+    : null;
+
+  function handleSwitchProfile() {
+    try { sessionStorage.removeItem('cov-profile-picked'); } catch {}
+    window.location.reload();
+  }
+  const { bottomBarTransparent, setBottomBarTransparent } = useUIPreference();
   const [modelTier, setModelTier] = useState(() => user?.data?.preferences?.modelTier || 'pro');
   const [pickerOpen, setPickerOpen] = useState(null); // null | 'model'
 
@@ -44,23 +53,36 @@ export default function MobileSettings() {
     >
       {/* Profile card */}
       <div className="rounded-2xl border border-gray-200 dark:border-white/[0.06] bg-white dark:bg-[#13131f] p-4 mb-4 flex items-center gap-3">
-        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 grid place-items-center text-white text-[16px] font-bold">
-          {(user?.name || user?.email || '?')[0]?.toUpperCase()}
-        </div>
+        {activeChild ? (
+          <div
+            className="w-12 h-12 rounded-full grid place-items-center text-white text-[16px] font-bold"
+            style={{ backgroundColor: activeChild.color || '#3B82F6' }}
+          >
+            {activeChild.avatar || activeChild.name[0]?.toUpperCase()}
+          </div>
+        ) : (
+          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 grid place-items-center text-white text-[16px] font-bold">
+            {(user?.name || user?.email || '?')[0]?.toUpperCase()}
+          </div>
+        )}
         <div className="flex-1 min-w-0">
-          <p className="text-[14px] font-bold text-gray-900 dark:text-white truncate">{user?.name || 'Signed in'}</p>
-          <p className="text-[11.5px] text-gray-500 dark:text-gray-400 truncate">{user?.email}</p>
+          <p className="text-[14px] font-bold text-gray-900 dark:text-white truncate">
+            {activeChild ? activeChild.name : (user?.name || 'Signed in')}
+          </p>
+          <p className="text-[11.5px] text-gray-500 dark:text-gray-400 truncate">
+            {activeChild ? 'Student profile' : user?.email}
+          </p>
         </div>
       </div>
 
       <SectionLabel>Appearance</SectionLabel>
       <Group>
         <Row
-          icon={dark ? <Moon size={17} /> : <Sun size={17} />}
-          tone="indigo"
-          title="Theme"
-          value={dark ? 'Dark' : 'Light'}
-          onClick={() => setTheme(dark ? 'light' : 'dark')}
+          icon={<PanelBottom size={17} />}
+          tone="blue"
+          title="Bottom bar blur"
+          value={bottomBarTransparent ? 'On' : 'Off'}
+          onClick={() => setBottomBarTransparent(!bottomBarTransparent)}
         />
       </Group>
 
@@ -78,6 +100,15 @@ export default function MobileSettings() {
 
       <SectionLabel>Session</SectionLabel>
       <Group>
+        {hasProfiles && (
+          <Row
+            icon={<Users size={17} />}
+            tone="blue"
+            title="Switch Profile"
+            value={activeChild ? activeChild.name : 'Parent'}
+            onClick={handleSwitchProfile}
+          />
+        )}
         <Row
           icon={<LogOut size={17} />}
           tone="rose"

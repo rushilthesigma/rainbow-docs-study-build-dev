@@ -22,14 +22,12 @@ export default function ContextMenu({ onSpotlight }) {
         return;
       }
 
-      // Only show desktop context menu if clicking on background (not on windows/dock)
+      // Only show desktop context menu if clicking on background (not on windows/dock/widgets)
       const onWindow = e.target.closest('.absolute.flex.flex-col');
       const onDock = e.target.closest('.dock-icon');
-      // MenuBar tags itself with data-menubar so we don't have to
-      // match a brittle class string — keeps the z-index token system
-      // (see styles/tokens.js) as the single source of truth.
       const onMenuBar = e.target.closest('[data-menubar]');
-      if (onWindow || onDock || onMenuBar) return;
+      const onWidget = e.target.closest('[data-widget]');
+      if (onWindow || onDock || onMenuBar || onWidget) return;
 
       e.preventDefault();
       setMenu({ x: e.clientX, y: e.clientY });

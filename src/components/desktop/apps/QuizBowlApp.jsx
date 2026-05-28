@@ -1,16 +1,28 @@
-import { useState, useEffect, useRef } from 'react';
-import { Zap, Play, Check, X, Loader2, Lightbulb, Users, BookOpen, Sparkles, Settings, ArrowRight } from 'lucide-react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { Zap, Play, Check, X, Loader2, Lightbulb, Users, BookOpen, Sparkles, Settings, ArrowRight, Target, TrendingDown, Clock, History, Flame, ChevronRight, Trophy, Swords, RefreshCw } from 'lucide-react';
+import TrialSession from '../../trial/TrialSession';
 import { apiFetch } from '../../../api/client';
-import { fetchQBReaderTossups } from '../../../api/quizMatch';
+import { fetchQBReaderTossups, saveQuizBowlSet, fetchQuizBowlHistory, fetchQuizBowlRecommendations, fetchQuizBowlPatterns } from '../../../api/quizMatch';
 import { useWindowManager } from '../../../context/WindowManagerContext';
 import { setPendingLesson } from '../../../utils/pendingLesson';
 import useBrowserBack from '../../../hooks/useBrowserBack';
 import { useAuth } from '../../../context/AuthContext';
 import QuizBowlMatch from './QuizBowlMatch';
-import { InlineProgress } from '../../shared/ProgressBar';
+import ProgressBar, { InlineProgress } from '../../shared/ProgressBar';
 
 const DIFFICULTIES = ['Easy', 'Medium', 'Hard', 'Tournament'];
 const CATEGORIES = ['Science', 'History', 'Literature', 'Geography', 'Math', 'Art', 'Music', 'Philosophy', 'Pop Culture', 'Mixed'];
+const QB_LOBBY_CATEGORIES = ['History', 'American History', 'World History', 'European History', 'Science', 'Literature', 'Geography', 'Math', 'Art', 'Music', 'Philosophy', 'Mixed'];
+const BOT_ROSTER = [
+  { id: 'biscuit', name: 'Player 2', label: 'Newbie',       stars: 1, color: 'slate',   buzzAt: 0.90, accuracy: 0.40, thinkMs: 3000 },
+  { id: 'alex',    name: 'Player 3', label: 'Amateur',      stars: 2, color: 'emerald', buzzAt: 0.80, accuracy: 0.58, thinkMs: 1800 },
+  { id: 'sam',     name: 'Player 4', label: 'Varsity',      stars: 3, color: 'amber',   buzzAt: 0.62, accuracy: 0.74, thinkMs: 1100 },
+  { id: 'jordan',  name: 'Player 5', label: 'Collegiate',   stars: 3, color: 'sky',     buzzAt: 0.50, accuracy: 0.82, thinkMs: 800  },
+  { id: 'quinn',   name: 'Player 6', label: 'Invitational', stars: 4, color: 'violet',  buzzAt: 0.36, accuracy: 0.90, thinkMs: 600  },
+  { id: 'morgan',  name: 'Player 7', label: 'National',     stars: 4, color: 'orange',  buzzAt: 0.22, accuracy: 0.94, thinkMs: 350  },
+  { id: 'cipher',  name: 'Player 8', label: 'Pro',          stars: 5, color: 'rose',    buzzAt: 0.12, accuracy: 0.98, thinkMs: 150  },
+];
+const DEFAULT_BOT_NAMES = Object.fromEntries(BOT_ROSTER.map(b => [b.id, b.name]));
 
 const SYSTEM_PROMPT = `You are a quiz bowl question writer. Write pyramidal quiz bowl tossup questions.
 
@@ -73,8 +85,10 @@ export default function QuizBowlApp() {
     setPendingLesson({ topic, difficulty: 'beginner' });
     openApp('lessons', 'Lessons');
   }
-  const [view, setView] = useState('setup');
-  useBrowserBack(view !== 'setup', () => setView('setup'));
+  // 'hub' is the new landing screen (stats + recommendations + history).
+  // 'custom' is the old setup form, still available for fine control.
+  const [view, setView] = useState('hub');
+  useBrowserBack(view !== 'hub', () => setView(view === 'custom' ? 'hub' : 'hub'));
   const { user } = useAuth();
   const [questions, setQuestions] = useState([]);
   const [currentQ, setCurrentQ] = useState(0);
@@ -88,6 +102,31 @@ export default function QuizBowlApp() {
   const [revealSpeedMs, setRevealSpeedMs] = useState(140);
   const [questionSource, setQuestionSource] = useState('qbreader');
   const [playingSource, setPlayingSource] = useState('ai');
+
+  // Hub: history + recommendations from the server. Loaded on first
+  // mount and refreshed whenever the user returns to the hub from a
+  // completed set so the new entry shows up immediately.
+  const [history, setHistory] = useState(null); // { sets, stats } | null
+  const [recs, setRecs] = useState([]);
+  const [patterns, setPatterns] = useState(null);
+  const [hubLoading, setHubLoading] = useState(true);
+  const setStartedAtRef = useRef(null);     // ms timestamp when current set began
+  const savedSetIdRef = useRef(null);       // guard so we save each set exactly once
+
+  async function loadHub() {
+    setHubLoading(true);
+    try {
+      const [h, r, p] = await Promise.all([
+        fetchQuizBowlHistory().catch(() => ({ sets: [], stats: { sets: 0, accuracy: 0, studyMs: 0, categoryStats: {} } })),
+        fetchQuizBowlRecommendations().catch(() => ({ recommendations: [] })),
+        fetchQuizBowlPatterns().catch(() => ({ patterns: null })),
+      ]);
+      setHistory(h);
+      setRecs(r.recommendations || []);
+      setPatterns(p.patterns || null);
+    } finally { setHubLoading(false); }
+  }
+  useEffect(() => { loadHub(); }, []);
 
   const [buzzed, setBuzzed] = useState(false);
   const [answer, setAnswer] = useState('');
@@ -104,6 +143,55 @@ export default function QuizBowlApp() {
   const q = questions[currentQ];
   const { revealed, done, stop, wordIndex, totalWords } = useWordReveal(q?.text || '', revealSpeedMs, reading && !buzzed && view === 'playing');
 
+  // Reset the per-set tracker each time a fresh round kicks off so the
+  // save effect below doesn't think the previous set is still active.
+  function beginNewSet() {
+    setStartedAtRef.current = Date.now();
+    savedSetIdRef.current = null;
+  }
+
+  // Launch a set with explicit category/difficulty/source — used by the
+  // hub's "Train weakness" / "Recommended" / "Replay last" CTAs so the
+  // user can skip the setup form when the choice is already implied.
+  // Pass `customInstructions` to focus AI-generated questions on a niche topic.
+  async function launchSet({ category: cat, difficulty: diff, source = 'qbreader', customInstructions: customInstr = '' }) {
+    setCategory(cat);
+    setDifficulty(diff);
+    setQuestionSource(source);
+    // Run the same fetch logic handleGenerate() does, inline so the
+    // state updates above settle into the closure.
+    setGenerating(true); setError(null);
+    try {
+      if (source === 'qbreader') {
+        const data = await fetchQBReaderTossups({ count: QB_BATCH_SIZE, category: cat, difficulty: diff });
+        const tossups = data?.tossups || [];
+        if (!tossups.length) { setError('No questions for that combo.'); setGenerating(false); return; }
+        setQuestions(tossups);
+        setPlayingSource('qbreader');
+      } else {
+        const result = await apiFetch('/api/chat', {
+          method: 'POST',
+          body: JSON.stringify({
+            system: SYSTEM_PROMPT,
+            messages: [{ role: 'user', content: generatePrompt(cat, diff, 10, customInstr) }],
+            max_tokens: 8192,
+          }),
+        });
+        const text = result.content?.[0]?.text || '';
+        let parsed;
+        try { parsed = JSON.parse(text); } catch { const m = text.match(/\{[\s\S]*\}/); if (m) parsed = JSON.parse(m[0]); }
+        if (!parsed?.questions?.length) { setError('Generation failed.'); setGenerating(false); return; }
+        setQuestions(parsed.questions);
+        setPlayingSource('ai');
+      }
+      setCurrentQ(0); setScores([]); setBuzzed(false); setShowResult(false); setReading(true);
+      fetchingMoreRef.current = false;
+      beginNewSet();
+      setView('playing');
+    } catch (err) { setError(err.message || 'Failed to load.'); }
+    setGenerating(false);
+  }
+
   async function handleGenerate() {
     setGenerating(true);
     setError(null);
@@ -118,6 +206,7 @@ export default function QuizBowlApp() {
           setPlayingSource('qbreader');
           setCurrentQ(0); setScores([]); setBuzzed(false); setShowResult(false); setReading(true);
           fetchingMoreRef.current = false;
+          beginNewSet();
           setView('playing');
         }
       } catch (err) {
@@ -142,6 +231,7 @@ export default function QuizBowlApp() {
         setQuestions(parsed.questions);
         setPlayingSource('ai');
         setCurrentQ(0); setScores([]); setBuzzed(false); setShowResult(false); setReading(true);
+        beginNewSet();
         setView('playing');
       } else setError('Generation failed. Try again.');
     } catch (err) { setError(err.message || 'Generation failed'); }
@@ -221,6 +311,51 @@ export default function QuizBowlApp() {
       return () => clearTimeout(t);
     }
   }, [done, buzzed, view]);
+
+  // Save the set once when the user hits the review screen. Wrapped in
+  // a ref guard so re-renders or going back into review don't double-
+  // submit. We tag each per-question record with its source category
+  // (QBReader tossups carry their own category metadata; AI-generated
+  // ones inherit the set's category).
+  useEffect(() => {
+    if (view !== 'review') return;
+    if (savedSetIdRef.current) return;
+    if (!scores.length) return;
+    const startedAt = setStartedAtRef.current || Date.now();
+    const durationMs = Math.max(0, Date.now() - startedAt);
+    const perQuestion = scores.map((s, i) => {
+      const q = questions[i] || {};
+      // QBReader tossups expose `category` directly; fall back to the
+      // set's selected category for AI rounds.
+      const qcat = q.category || (category === 'Mixed' ? 'Mixed' : category);
+      return {
+        category: qcat,
+        correct: !!s.correct,
+        buzzWord: s.buzzWord,
+        totalWords: s.totalWords,
+        answer: s.answer,
+        correctAnswer: s.correctAnswer,
+      };
+    });
+    const score = scores.filter(s => s.correct).length;
+    const total = scores.length;
+    // Mark as saved synchronously so re-entries don't fire a duplicate.
+    savedSetIdRef.current = 'pending';
+    saveQuizBowlSet({
+      category, difficulty,
+      source: playingSource === 'qbreader' ? 'qbreader' : 'ai',
+      score, total, durationMs,
+      perQuestion,
+    }).then(r => {
+      savedSetIdRef.current = r?.set?.id || 'saved';
+      // Quietly refresh the hub data so the next time the user returns
+      // there, the new set + updated weakness data shows up.
+      loadHub();
+    }).catch(err => {
+      console.warn('Failed to save QB set:', err);
+      savedSetIdRef.current = null; // allow a retry next time
+    });
+  }, [view, scores, questions, category, difficulty, playingSource]);
 
   function nextQuestion() {
     const isInfinite = playingSource === 'qbreader';
@@ -387,7 +522,7 @@ export default function QuizBowlApp() {
           {!buzzed && (
             <>
               <button onClick={handleBuzz}
-                className="w-full py-4 rounded-2xl bg-red-600 hover:bg-red-500 text-white text-[15px] font-bold uppercase tracking-[0.15em] active:scale-[0.98] transition-all shadow-[0_0_24px_rgba(239,68,68,0.25)]">
+                className="w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white text-[15px] font-bold uppercase tracking-[0.15em] active:scale-[0.98] transition-all shadow-[0_0_24px_rgba(59,130,246,0.25)]">
                 BUZZ
               </button>
               <p className="text-[10px] text-white/35 text-center">Space to buzz</p>
@@ -434,88 +569,512 @@ export default function QuizBowlApp() {
     );
   }
 
-  // ===== MULTIPLAYER =====
-  if (view === 'multiplayer') {
-    return <QuizBowlMatch user={user} onExit={() => setView('setup')} />;
+  // ===== AI LOBBY =====
+  if (view === 'ai-lobby') {
+    return <AILobbyView onExit={() => { setView('hub'); loadHub(); }} />;
   }
 
-  // ===== SETUP =====
+  // ===== MULTIPLAYER =====
+  if (view === 'multiplayer') {
+    return <QuizBowlMatch user={user} onExit={() => setView('hub')} />;
+  }
+
+  // ===== CUSTOM SETUP (legacy form — opened from hub) =====
+  if (view === 'custom') {
+    return (
+      <div className="h-full overflow-y-auto bg-transparent">
+        <div className="p-5 pb-8 space-y-3">
+          <button onClick={() => setView('hub')} className="text-[11px] text-white/40 hover:text-white/70 inline-flex items-center gap-1 mb-1">
+            <ChevronRight size={12} className="rotate-180" /> Hub
+          </button>
+
+          {error && <p className="text-[11px] text-rose-400 px-3 py-2 rounded-xl bg-rose-500/10 border border-rose-500/20 text-center">{error}</p>}
+
+          {/* Source */}
+          <div className="grid grid-cols-2 gap-2">
+            <GlassTile active={questionSource === 'qbreader'} icon={<BookOpen size={14} />} label="Past QB" sub="qbreader.org" onClick={() => setQuestionSource('qbreader')} />
+            <GlassTile active={questionSource === 'ai'} icon={<Sparkles size={14} />} label="AI" sub="Gemini" onClick={() => setQuestionSource('ai')} />
+          </div>
+
+          {/* Category */}
+          <div className="flex flex-wrap gap-1.5">
+            {CATEGORIES.map(c => <GlassPill key={c} active={category === c} onClick={() => setCategory(c)}>{c}</GlassPill>)}
+          </div>
+
+          {/* Difficulty */}
+          <div className="grid grid-cols-4 gap-1.5">
+            {DIFFICULTIES.map(d => <GlassPill key={d} active={difficulty === d} onClick={() => setDifficulty(d)}>{d}</GlassPill>)}
+          </div>
+
+          {/* Count (AI only) */}
+          {questionSource === 'ai' && (
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[10px] text-white/50 uppercase tracking-wider">Questions</span>
+                <span className="text-[11px] font-mono text-white/70">{questionCount}</span>
+              </div>
+              <input type="range" min="5" max="30" step="5" value={questionCount}
+                onChange={e => setQuestionCount(Number(e.target.value))} className="w-full accent-blue-400" />
+            </div>
+          )}
+
+          {/* Speed */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] text-white/50 uppercase tracking-wider">Speed</span>
+              <span className="text-[11px] font-mono text-white/70">{revealSpeedMs}ms</span>
+            </div>
+            <input type="range" min="60" max="400" step="10" value={revealSpeedMs}
+              onChange={e => setRevealSpeedMs(Number(e.target.value))} className="w-full accent-blue-400" />
+          </div>
+
+          {/* Custom instructions (AI only) */}
+          {questionSource === 'ai' && (
+            <textarea value={customInstructions} onChange={e => setCustomInstructions(e.target.value)}
+              placeholder="Custom instructions…" rows={2}
+              className="w-full px-3 py-2.5 rounded-xl border border-white/8 bg-white/[0.04] text-[12px] text-white/80 placeholder-white/20 resize-none outline-none focus:border-white/15 transition-colors" />
+          )}
+
+          {/* Start */}
+          <button onClick={handleGenerate} disabled={generating}
+            className="w-full py-3.5 rounded-2xl bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 backdrop-blur-sm disabled:opacity-40 text-white text-[14px] font-bold inline-flex items-center justify-center gap-2 transition-all border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_18px_rgba(59,130,246,0.40)]">
+            {generating
+              ? <><InlineProgress active /> {questionSource === 'qbreader' ? 'Loading…' : 'Generating…'}</>
+              : <><Play size={15} /> Start</>}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ===== LOADING (between hub launch and 'playing') =====
+  // Gemini generation typically takes 10-20s; qbreader is faster but
+  // can stall. A simulated progress bar reads better than a bare
+  // spinner — the user sees forward motion and knows roughly how
+  // close they are.
+  if (view === 'hub' && generating) {
+    const isFetch = questionSource === 'qbreader';
+    return (
+      <div className="h-full flex flex-col bg-transparent">
+        <div className="flex-1 flex flex-col items-center justify-center px-5">
+          <div className="w-full max-w-sm">
+            <ProgressBar
+              active
+              duration={isFetch ? 4000 : 14000}
+              label={isFetch ? `Fetching ${category} tossups` : `Generating ${category} questions`}
+              hint={isFetch ? 'Pulling from QBReader…' : 'The AI is writing fresh tossups for this set.'}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ===== HUB (default) — stats, recommendations, history =====
+  return (
+    <QuizBowlHub
+      hubLoading={hubLoading}
+      history={history}
+      recs={recs}
+      patterns={patterns}
+      error={error}
+      generating={generating}
+      onLaunch={launchSet}
+      onMultiplayer={() => setView('multiplayer')}
+      onCustom={() => setView('custom')}
+      onAILobby={() => setView('ai-lobby')}
+    />
+  );
+}
+
+// ============================================================
+// HUB
+// ============================================================
+function QuizBowlHub({ hubLoading, history, recs, patterns, error, generating, onLaunch, onMultiplayer, onCustom, onAILobby }) {
+  const stats = history?.stats || { sets: 0, accuracy: 0, studyMs: 0, categoryStats: {} };
+  const sets = history?.sets || [];
+
+  // Pre-compute weakness ranking from category stats. We surface up to
+  // three weakest categories with at least 3 attempts so a single bad
+  // round doesn't dominate the list.
+  const weaknesses = useMemo(() => {
+    return Object.entries(stats.categoryStats || {})
+      .filter(([, v]) => v.total >= 3)
+      .map(([cat, v]) => ({ cat, acc: Math.round((v.correct / v.total) * 100), total: v.total }))
+      .sort((a, b) => a.acc - b.acc)
+      .slice(0, 3);
+  }, [stats.categoryStats]);
+
   return (
     <div className="h-full overflow-y-auto bg-transparent">
-      <div className="p-5 pb-8 space-y-3">
-        {/* Multiplayer */}
-        <button onClick={() => setView('multiplayer')}
-          className="w-full py-2.5 rounded-2xl border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] text-white/50 hover:text-white/80 text-[13px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
-          <Users size={14} /> Head-to-head
-        </button>
-
-        <div className="flex items-center gap-3">
-          <div className="flex-1 h-px bg-white/[0.06]" />
-          <span className="text-[10px] text-white/35 uppercase tracking-wider">solo</span>
-          <div className="flex-1 h-px bg-white/[0.06]" />
+      <div className="p-5 pb-8 space-y-4">
+        {/* Top stat row */}
+        <div className="grid grid-cols-3 gap-2">
+          <HubStat icon={<Target size={12} />} label="Sets" value={stats.sets} />
+          <HubStat icon={<TrendingDown size={12} />} label="Accuracy" value={`${stats.accuracy}%`} accent={stats.accuracy >= 75 ? 'emerald' : stats.accuracy >= 50 ? 'amber' : 'rose'} />
+          <HubStat icon={<Clock size={12} />} label="Study time" value={formatDuration(stats.studyMs)} />
         </div>
 
         {error && <p className="text-[11px] text-rose-400 px-3 py-2 rounded-xl bg-rose-500/10 border border-rose-500/20 text-center">{error}</p>}
 
-        {/* Source */}
-        <div className="grid grid-cols-2 gap-2">
-          <GlassTile active={questionSource === 'qbreader'} icon={<BookOpen size={14} />} label="Past QB" sub="qbreader.org" onClick={() => setQuestionSource('qbreader')} />
-          <GlassTile active={questionSource === 'ai'} icon={<Sparkles size={14} />} label="AI" sub="Gemini" onClick={() => setQuestionSource('ai')} />
-        </div>
+        {/* Buzz patterns — shows when there's enough data */}
+        {patterns && <BuzzPatterns patterns={patterns} />}
 
-        {/* Category */}
-        <div className="flex flex-wrap gap-1.5">
-          {CATEGORIES.map(c => <GlassPill key={c} active={category === c} onClick={() => setCategory(c)}>{c}</GlassPill>)}
-        </div>
-
-        {/* Difficulty */}
-        <div className="grid grid-cols-4 gap-1.5">
-          {DIFFICULTIES.map(d => <GlassPill key={d} active={difficulty === d} onClick={() => setDifficulty(d)}>{d}</GlassPill>)}
-        </div>
-
-        {/* Count (AI only) */}
-        {questionSource === 'ai' && (
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[10px] text-white/50 uppercase tracking-wider">Questions</span>
-              <span className="text-[11px] font-mono text-white/70">{questionCount}</span>
+        {/* Train weaknesses CTA — only when we have enough data */}
+        {weaknesses.length > 0 && (
+          <button
+            onClick={() => onLaunch({ category: weaknesses[0].cat, difficulty: 'Medium', source: 'qbreader' })}
+            disabled={generating}
+            className="w-full text-left rounded-2xl border border-rose-400/30 bg-gradient-to-br from-rose-500/20 via-rose-500/10 to-transparent p-4 hover:border-rose-400/55 hover:from-rose-500/30 transition-all disabled:opacity-40"
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <span className="inline-flex w-7 h-7 rounded-lg bg-rose-500/25 border border-rose-400/40 items-center justify-center"><Flame size={14} className="text-rose-300" /></span>
+              <span className="text-[10px] uppercase tracking-[0.18em] font-bold text-rose-300/90">Train weaknesses</span>
             </div>
-            <input type="range" min="5" max="30" step="5" value={questionCount}
-              onChange={e => setQuestionCount(Number(e.target.value))} className="w-full accent-blue-400" />
-          </div>
+            <p className="text-[15px] font-bold text-white/95 mb-0.5">Practice {weaknesses[0].cat}</p>
+            <p className="text-[11px] text-white/55">
+              You're at <span className="text-rose-300 font-semibold">{weaknesses[0].acc}%</span> over {weaknesses[0].total} questions. The AI will keep feeding you {weaknesses[0].cat} tossups until you climb back.
+            </p>
+          </button>
         )}
 
-        {/* Speed */}
-        <div>
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[10px] text-white/50 uppercase tracking-wider">Speed</span>
-            <span className="text-[11px] font-mono text-white/70">{revealSpeedMs}ms</span>
+        {/* Play vs AI CTA */}
+        <button
+          onClick={onAILobby}
+          className="w-full text-left rounded-2xl border border-blue-500/30 bg-gradient-to-br from-blue-500/20 via-blue-500/10 to-transparent p-4 hover:border-blue-400/55 hover:from-blue-500/30 transition-all"
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <span className="inline-flex w-7 h-7 rounded-lg bg-blue-500/25 border border-blue-400/40 items-center justify-center"><Users size={14} className="text-blue-300" /></span>
+            <span className="text-[10px] uppercase tracking-[0.18em] font-bold text-blue-300/90">Play vs AI</span>
           </div>
-          <input type="range" min="60" max="400" step="10" value={revealSpeedMs}
-            onChange={e => setRevealSpeedMs(Number(e.target.value))} className="w-full accent-blue-400" />
-        </div>
-
-        {/* Custom instructions (AI only) */}
-        {questionSource === 'ai' && (
-          <textarea value={customInstructions} onChange={e => setCustomInstructions(e.target.value)}
-            placeholder="Custom instructions…" rows={2}
-            className="w-full px-3 py-2.5 rounded-xl border border-white/8 bg-white/[0.04] text-[12px] text-white/80 placeholder-white/20 resize-none outline-none focus:border-white/15 transition-colors" />
-        )}
-
-        {/* Start */}
-        <button onClick={handleGenerate} disabled={generating}
-          className="w-full py-3.5 rounded-2xl bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 backdrop-blur-sm disabled:opacity-40 text-white text-[14px] font-bold inline-flex items-center justify-center gap-2 transition-all border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_18px_rgba(59,130,246,0.40)]">
-          {generating
-            ? <><InlineProgress active /> {questionSource === 'qbreader' ? 'Loading…' : 'Generating…'}</>
-            : <><Play size={15} /> Start</>}
+          <p className="text-[15px] font-bold text-white/95 mb-0.5">Compete in a Lobby</p>
+          <p className="text-[11px] text-white/55">Join a lobby of 8 or go 1v1. Buzz against AI opponents with real tournament timing across niche history and more.</p>
         </button>
 
-        {scores.length > 0 && (
-          <p className="text-center text-[11px] text-white/40">Last: {scores.filter(s => s.correct).length}/{scores.length}</p>
+        {/* Quick access: head-to-head + custom set */}
+        <div className="grid grid-cols-2 gap-2">
+          <button onClick={onMultiplayer}
+            className="py-2.5 rounded-2xl border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] text-white/70 hover:text-white/95 text-[12px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
+            <Users size={13} /> Head-to-head
+          </button>
+          <button onClick={onCustom}
+            className="py-2.5 rounded-2xl border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] text-white/70 hover:text-white/95 text-[12px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
+            <Settings size={13} /> Custom set
+          </button>
+        </div>
+
+        {/* Recommendations */}
+        {recs.length > 0 && (
+          <div>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <Sparkles size={11} className="text-white/40" />
+              <span className="text-[10px] uppercase tracking-[0.16em] font-bold text-white/40">Recommended for you</span>
+            </div>
+            <div className="space-y-1.5">
+              {recs.map((r, i) => (
+                <button key={i}
+                  onClick={() => onLaunch({ category: r.category, difficulty: r.difficulty, source: r.source || 'qbreader', customInstructions: r.customInstructions || '' })}
+                  disabled={generating}
+                  className="group w-full text-left rounded-xl border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.07] hover:border-white/[0.16] p-3 transition-colors disabled:opacity-40 flex items-center gap-3"
+                >
+                  <span className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                    r.kind === 'niche'         ? 'bg-violet-500/15 text-violet-300 border border-violet-400/30' :
+                    r.kind === 'train-weakness'? 'bg-rose-500/15 text-rose-300 border border-rose-400/30' :
+                    r.kind === 'explore'       ? 'bg-blue-500/15 text-blue-300 border border-blue-400/30' :
+                                                 'bg-amber-500/15 text-amber-300 border border-amber-400/30'
+                  }`}>
+                    {r.kind === 'niche'          ? <Sparkles size={14} /> :
+                     r.kind === 'train-weakness' ? <Target size={14} /> :
+                     r.kind === 'explore'        ? <Sparkles size={14} /> :
+                                                   <Play size={14} />}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-semibold text-white/90">
+                      {r.topic || r.category}
+                      <span className="text-white/35 font-normal"> · {r.difficulty}</span>
+                    </p>
+                    <p className="text-[11px] text-white/45 truncate">
+                      {r.topic && <span className="text-white/25">{r.category} · </span>}{r.reason}
+                    </p>
+                  </div>
+                  <ChevronRight size={14} className="text-white/25 group-hover:text-white/55 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Past sets */}
+        {sets.length > 0 && (
+          <div>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <History size={11} className="text-white/40" />
+              <span className="text-[10px] uppercase tracking-[0.16em] font-bold text-white/40">Past sets</span>
+              <span className="text-[10px] text-white/30">· {sets.length}</span>
+            </div>
+            <div className="space-y-1">
+              {sets.slice(0, 10).map((s) => {
+                const pct = s.total ? Math.round((s.score / s.total) * 100) : 0;
+                const ago = formatRelative(Date.now() - new Date(s.finishedAt).getTime());
+                const scoreCls = pct >= 75 ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/25'
+                  : pct >= 50 ? 'text-white/80 bg-white/[0.06] border-white/[0.12]'
+                  : 'text-rose-300 bg-rose-500/10 border-rose-500/25';
+                return (
+                  <div key={s.id} className="flex items-center gap-3 rounded-lg px-3 py-2 bg-white/[0.02] border border-white/[0.05] hover:border-white/[0.10] transition-colors">
+                    <div className={`min-w-[40px] px-2 py-1 rounded-md border text-center text-[11px] font-bold tabular-nums ${scoreCls}`}>
+                      {s.score}/{s.total}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[12px] font-medium text-white/85 truncate">{s.category} <span className="text-white/35">· {s.difficulty}</span></p>
+                      <p className="text-[10px] text-white/35">{ago} · {s.source === 'ai' ? 'AI' : 'QBReader'} · {formatDuration(s.durationMs)}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Category breakdown */}
+        {weaknesses.length > 0 && (
+          <div>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <TrendingDown size={11} className="text-white/40" />
+              <span className="text-[10px] uppercase tracking-[0.16em] font-bold text-white/40">By category</span>
+            </div>
+            <div className="space-y-1">
+              {Object.entries(stats.categoryStats || {})
+                .map(([cat, v]) => ({ cat, acc: v.total ? Math.round((v.correct / v.total) * 100) : 0, total: v.total }))
+                .sort((a, b) => a.acc - b.acc)
+                .map(({ cat, acc, total }) => {
+                  const barCls = acc >= 75 ? 'bg-emerald-400/70' : acc >= 50 ? 'bg-amber-400/70' : 'bg-rose-400/70';
+                  return (
+                    <button key={cat}
+                      onClick={() => onLaunch({ category: cat, difficulty: 'Medium', source: 'qbreader' })}
+                      disabled={generating}
+                      className="w-full grid grid-cols-[80px_1fr_56px] items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.02] border border-white/[0.05] hover:bg-white/[0.05] hover:border-white/[0.10] transition-colors text-left disabled:opacity-40"
+                    >
+                      <span className="text-[11px] text-white/75 font-medium truncate">{cat}</span>
+                      <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+                        <div className={`h-full rounded-full ${barCls}`} style={{ width: `${Math.max(4, acc)}%` }} />
+                      </div>
+                      <span className="text-[10px] text-white/45 tabular-nums text-right">{acc}% · {total}</span>
+                    </button>
+                  );
+                })}
+            </div>
+          </div>
+        )}
+
+        {/* Empty state for new players */}
+        {hubLoading ? (
+          <div className="py-6 text-center text-[11px] text-white/35">Loading your stats…</div>
+        ) : sets.length === 0 && (
+          <div className="rounded-2xl border border-dashed border-white/[0.10] bg-white/[0.02] p-5 text-center">
+            <Zap size={22} className="text-white/30 mx-auto mb-2" />
+            <p className="text-[13px] font-semibold text-white/80">No sets yet</p>
+            <p className="text-[11px] text-white/40 mt-1 mb-3">Start a recommended round above, or pick your own filters in Custom.</p>
+          </div>
         )}
       </div>
     </div>
   );
+}
+
+function HubStat({ icon, label, value, accent }) {
+  const accentCls = accent === 'emerald' ? 'text-emerald-300'
+    : accent === 'amber' ? 'text-amber-300'
+    : accent === 'rose' ? 'text-rose-300'
+    : 'text-white/90';
+  return (
+    <div className="rounded-xl border border-white/[0.07] bg-white/[0.03] px-3 py-2.5">
+      <div className="flex items-center gap-1.5 text-[9.5px] uppercase tracking-[0.16em] font-bold text-white/35 mb-1">
+        <span className="text-white/45">{icon}</span>
+        <span>{label}</span>
+      </div>
+      <div className={`text-[17px] font-bold tabular-nums leading-none ${accentCls}`}>{value}</div>
+    </div>
+  );
+}
+
+// ============================================================
+// BUZZ PATTERNS — analytics about when/how the user buzzes.
+// Shows a visual sparkline of recent buzz positions, accuracy
+// by buzz timing (early/mid/late), per-category buzz habits,
+// optimal zone, and trend.
+// ============================================================
+function BuzzPatterns({ patterns }) {
+  const p = patterns;
+  if (!p) return null;
+
+  // Insight text based on the data.
+  const insights = [];
+  if (p.early.count > 0 && p.early.accuracy >= 70) {
+    insights.push({ tone: 'emerald', text: `Your early buzzes hit ${p.early.accuracy}% of the time. You read questions well.` });
+  } else if (p.early.count > 0 && p.early.accuracy < 50) {
+    insights.push({ tone: 'amber', text: `Early buzzes only land ${p.early.accuracy}%. Try waiting for one more clue before committing.` });
+  }
+  if (p.timeoutRate > 30) {
+    insights.push({ tone: 'rose', text: `You time out on ${p.timeoutRate}% of questions. Try buzzing even if you're not 100% sure.` });
+  }
+  if (p.trend > 10) {
+    insights.push({ tone: 'emerald', text: `You're buzzing ${p.trend}% earlier in recent sets. Your pattern recognition is improving.` });
+  } else if (p.trend < -10) {
+    insights.push({ tone: 'amber', text: `Recent buzzes are ${Math.abs(p.trend)}% later than your average. Might be tougher categories.` });
+  }
+  if (p.optimalZone) {
+    insights.push({ tone: 'blue', text: `Your sweet spot is ${p.optimalZone.start}–${p.optimalZone.end}% through the question (${p.optimalZone.accuracy}% accuracy there).` });
+  }
+
+  return (
+    <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] overflow-hidden">
+      {/* Header */}
+      <div className="px-4 pt-3 pb-2 flex items-center gap-2">
+        <span className="w-6 h-6 rounded-lg bg-violet-500/20 border border-violet-400/30 grid place-items-center">
+          <Zap size={12} className="text-violet-300" />
+        </span>
+        <span className="text-[11px] uppercase tracking-[0.16em] font-bold text-white/50">Buzz Patterns</span>
+        <div className="flex-1" />
+        <span className="text-[10px] text-white/30 tabular-nums">{p.totalBuzzes} buzzes</span>
+      </div>
+
+      {/* Sparkline — recent 20 buzzes as dots on a timeline */}
+      {p.recentBuzzes?.length > 3 && (
+        <div className="px-4 py-2">
+          <div className="relative h-8 rounded-lg bg-white/[0.03] border border-white/[0.04] overflow-hidden">
+            {/* Zone markers */}
+            <div className="absolute inset-0 flex">
+              <div className="flex-1 border-r border-white/[0.04]" />
+              <div className="flex-1 border-r border-white/[0.04]" />
+              <div className="flex-1" />
+            </div>
+            <div className="absolute bottom-0 left-0 right-0 flex justify-between px-1 text-[7px] text-white/20 font-mono">
+              <span>early</span><span>mid</span><span>late</span>
+            </div>
+            {/* Dots */}
+            {p.recentBuzzes.map((b, i) => (
+              <div
+                key={i}
+                className={`absolute w-1.5 h-1.5 rounded-full ${b.correct ? 'bg-emerald-400' : 'bg-rose-400'}`}
+                style={{
+                  left: `${Math.max(2, Math.min(98, b.position))}%`,
+                  top: `${4 + (i % 3) * 8}px`,
+                  opacity: 0.5 + (i / p.recentBuzzes.length) * 0.5,
+                }}
+                title={`${b.category}: ${b.position}% — ${b.correct ? 'correct' : 'wrong'}`}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Timing breakdown: early / mid / late */}
+      <div className="grid grid-cols-3 gap-px bg-white/[0.04] mx-4 rounded-lg overflow-hidden mb-3">
+        <TimingCell label="Early" sub="0–33%" count={p.early.count} accuracy={p.early.accuracy} tone="emerald" />
+        <TimingCell label="Mid" sub="33–66%" count={p.mid.count} accuracy={p.mid.accuracy} tone="blue" />
+        <TimingCell label="Late" sub="66–100%" count={p.late.count} accuracy={p.late.accuracy} tone="amber" />
+      </div>
+
+      {/* Avg buzz position + timeout rate */}
+      <div className="grid grid-cols-2 gap-2 px-4 mb-3">
+        <div className="rounded-lg bg-white/[0.03] border border-white/[0.05] px-3 py-2">
+          <div className="text-[9px] uppercase tracking-[0.14em] font-bold text-white/35 mb-0.5">Avg buzz point</div>
+          <div className="text-[15px] font-bold text-white/90 tabular-nums">{p.avgBuzzPosition}%</div>
+          <div className="mt-1 h-1 rounded-full bg-white/[0.06] overflow-hidden">
+            <div className="h-full rounded-full bg-violet-400/70" style={{ width: `${p.avgBuzzPosition}%` }} />
+          </div>
+        </div>
+        <div className="rounded-lg bg-white/[0.03] border border-white/[0.05] px-3 py-2">
+          <div className="text-[9px] uppercase tracking-[0.14em] font-bold text-white/35 mb-0.5">Timeout rate</div>
+          <div className={`text-[15px] font-bold tabular-nums ${p.timeoutRate > 25 ? 'text-rose-300' : 'text-white/90'}`}>{p.timeoutRate}%</div>
+          <div className="mt-1 h-1 rounded-full bg-white/[0.06] overflow-hidden">
+            <div className={`h-full rounded-full ${p.timeoutRate > 25 ? 'bg-rose-400/70' : 'bg-white/20'}`} style={{ width: `${Math.min(100, p.timeoutRate)}%` }} />
+          </div>
+        </div>
+      </div>
+
+      {/* Per-category buzz habits */}
+      {p.categoryPatterns?.length > 0 && (
+        <div className="px-4 mb-3">
+          <div className="text-[9px] uppercase tracking-[0.14em] font-bold text-white/30 mb-1.5">Category buzz habits</div>
+          <div className="space-y-1">
+            {p.categoryPatterns.map(c => {
+              const barColor = c.accuracy >= 75 ? 'bg-emerald-400/60' : c.accuracy >= 50 ? 'bg-blue-400/60' : 'bg-rose-400/60';
+              return (
+                <div key={c.category} className="flex items-center gap-2">
+                  <span className="text-[10px] text-white/60 w-[70px] truncate">{c.category}</span>
+                  <div className="flex-1 h-1.5 rounded-full bg-white/[0.05] overflow-hidden relative">
+                    {/* Buzz position marker */}
+                    <div
+                      className="absolute top-0 bottom-0 w-0.5 bg-white/50 z-10"
+                      style={{ left: `${c.avgBuzzPosition}%` }}
+                    />
+                    <div className={`h-full rounded-full ${barColor}`} style={{ width: `${c.accuracy}%` }} />
+                  </div>
+                  <span className="text-[9px] text-white/40 tabular-nums w-14 text-right">
+                    {c.avgBuzzPosition}% · {c.accuracy}%
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* AI insights */}
+      {insights.length > 0 && (
+        <div className="px-4 pb-3 space-y-1.5">
+          {insights.map((ins, i) => {
+            const toneCls = ins.tone === 'emerald' ? 'border-emerald-500/25 bg-emerald-500/8 text-emerald-200'
+              : ins.tone === 'amber' ? 'border-amber-500/25 bg-amber-500/8 text-amber-200'
+              : ins.tone === 'rose' ? 'border-rose-500/25 bg-rose-500/8 text-rose-200'
+              : 'border-blue-500/25 bg-blue-500/8 text-blue-200';
+            return (
+              <div key={i} className={`rounded-lg border px-3 py-2 text-[11px] leading-relaxed ${toneCls}`}>
+                {ins.text}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TimingCell({ label, sub, count, accuracy, tone }) {
+  const accentCls = tone === 'emerald' ? 'text-emerald-300'
+    : tone === 'blue' ? 'text-blue-300'
+    : 'text-amber-300';
+  return (
+    <div className="bg-white/[0.02] px-3 py-2 text-center">
+      <div className="text-[10px] font-bold text-white/55">{label}</div>
+      <div className="text-[8px] text-white/25 mb-1">{sub}</div>
+      <div className={`text-[14px] font-bold tabular-nums ${count > 0 ? accentCls : 'text-white/25'}`}>
+        {count > 0 ? `${accuracy}%` : '--'}
+      </div>
+      <div className="text-[8px] text-white/30 tabular-nums">{count} buzz{count !== 1 ? 'es' : ''}</div>
+    </div>
+  );
+}
+
+function formatDuration(ms) {
+  const total = Math.round((ms || 0) / 1000);
+  if (total < 60) return `${total}s`;
+  const min = Math.floor(total / 60);
+  if (min < 60) return `${min}m`;
+  const h = Math.floor(min / 60);
+  return `${h}h ${min % 60}m`;
+}
+
+function formatRelative(deltaMs) {
+  const m = Math.floor(deltaMs / 60_000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return `${d}d ago`;
+  return new Date(Date.now() - deltaMs).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 function GlassTile({ active, icon, label, sub, onClick }) {
@@ -545,5 +1104,426 @@ function GlassPill({ active, onClick, children }) {
       }`}>
       {children}
     </button>
+  );
+}
+
+// ── Room-strength scaling for the 8-player lobby ─────────────────────────
+const ROOM_LEVELS = [
+  { id: 'casual',  label: 'Casual',  accMul: 0.58, buzzShift: +0.18, thinkMul: 1.55 },
+  { id: 'club',    label: 'Club',    accMul: 0.80, buzzShift: +0.09, thinkMul: 1.20 },
+  { id: 'varsity', label: 'Varsity', accMul: 1.00, buzzShift:  0.00, thinkMul: 1.00 },
+  { id: 'elite',   label: 'Elite',   accMul: 1.06, buzzShift: -0.10, thinkMul: 0.62 },
+];
+function scaleRoster(bots, levelId) {
+  const m = ROOM_LEVELS.find(l => l.id === levelId) || ROOM_LEVELS[2];
+  return bots.map(b => ({
+    ...b,
+    accuracy: Math.max(0.08, Math.min(0.99, b.accuracy * m.accMul)),
+    buzzAt:   Math.max(0.05, Math.min(0.96, b.buzzAt + m.buzzShift)),
+    thinkMs:  Math.round(b.thinkMs * m.thinkMul),
+  }));
+}
+
+// Map slider (0-100) ↔ buzzAt (0.05-0.95)
+const BUZZ_MIN = 0.05, BUZZ_MAX = 0.95;
+function sliderToBuzzAt(v) { return BUZZ_MIN + (v / 100) * (BUZZ_MAX - BUZZ_MIN); }
+function buzzAtToSlider(b) { return Math.round(((b - BUZZ_MIN) / (BUZZ_MAX - BUZZ_MIN)) * 100); }
+// Map slider (0-100) ↔ thinkMs (100-3200)
+const THINK_MIN = 100, THINK_MAX = 3200;
+function sliderToThink(v) { return Math.round(THINK_MIN + (v / 100) * (THINK_MAX - THINK_MIN)); }
+function thinkToSlider(ms) { return Math.round(((ms - THINK_MIN) / (THINK_MAX - THINK_MIN)) * 100); }
+
+// ============================================================
+// AI LOBBY — compete against AI bots in a lobby of 8 or 1v1
+// ============================================================
+function AILobbyView({ onExit }) {
+  const [screen, setScreen]             = useState('setup');
+  const [lobbyType, setLobbyType]       = useState('lobby');
+  const [category, setCategory]         = useState('History');
+  const [difficulty, setDifficulty]     = useState('medium');
+  const [source, setSource]             = useState('qbreader');
+  const [questions, setQuestions]       = useState([]);
+  const [sessionBots, setSessionBots]   = useState(null);
+  const [matchMode, setMatchMode]       = useState(false);
+  const [lobbyMode, setLobbyMode]       = useState(false);
+  const [error, setError]               = useState(null);
+  const [topic, setTopic]               = useState('');
+  const [lobbyCustomInstr, setLobbyCustomInstr] = useState('');
+  const [botOverrides, setBotOverrides] = useState({});
+  const [botNames, setBotNames] = useState(DEFAULT_BOT_NAMES);
+
+  // Lobby of 8: room competition level
+  const [roomLevel, setRoomLevel]       = useState('varsity');
+
+  // 1v1: which preset bot + fine-tune sliders
+  const [selectedBotIdx, setSelectedBotIdx] = useState(2);
+  const selectedPreset = BOT_ROSTER[selectedBotIdx];
+  const [buzzSlider,  setBuzzSlider]  = useState(() => buzzAtToSlider(BOT_ROSTER[2].buzzAt));
+  const [accSlider,   setAccSlider]   = useState(() => Math.round(BOT_ROSTER[2].accuracy * 100));
+  const [thinkSlider, setThinkSlider] = useState(() => thinkToSlider(BOT_ROSTER[2].thinkMs));
+
+  // Reset fine-tune to preset whenever a different bot is picked
+  useEffect(() => {
+    const b = BOT_ROSTER[selectedBotIdx];
+    setBuzzSlider(buzzAtToSlider(b.buzzAt));
+    setAccSlider(Math.round(b.accuracy * 100));
+    setThinkSlider(thinkToSlider(b.thinkMs));
+  }, [selectedBotIdx]);
+
+  // Reset per-bot overrides when competition level changes
+  useEffect(() => { setBotOverrides({}); }, [roomLevel]);
+
+  const diffMap = { easy: 'Easy', medium: 'Medium', hard: 'Hard' };
+
+  // Effective bots that will be passed to TrialSession
+  const effectiveLobbyBots = useMemo(() => {
+    const scaled = scaleRoster(BOT_ROSTER, roomLevel);
+    return scaled.map(bot => {
+      const ov = botOverrides[bot.id];
+      if (!ov) return bot;
+      return {
+        ...bot,
+        buzzAt:   ov.buzzSlider != null ? sliderToBuzzAt(ov.buzzSlider) : bot.buzzAt,
+        accuracy: ov.accSlider  != null ? ov.accSlider / 100            : bot.accuracy,
+      };
+    });
+  }, [roomLevel, botOverrides]);
+  const effective1v1Bot = useMemo(() => ({
+    ...selectedPreset,
+    buzzAt:  sliderToBuzzAt(buzzSlider),
+    accuracy: accSlider / 100,
+    thinkMs:  sliderToThink(thinkSlider),
+  }), [selectedPreset, buzzSlider, accSlider, thinkSlider]);
+
+  async function startSession() {
+    setError(null);
+    setScreen('loading');
+    try {
+      let qs;
+      if (source === 'qbreader') {
+        const data = await fetchQBReaderTossups({ count: 15, category, difficulty: diffMap[difficulty] });
+        const raw = data?.tossups || [];
+        if (!raw.length) throw new Error('No questions found. Try a different category or switch to AI.');
+        qs = raw.map(t => ({ ...t, question: t.text || t.question }));
+      } else {
+        const nicheHint = topic
+          ? `Focus specifically on: "${topic}". Use niche, specific clues.`
+          : category.includes('History')
+            ? `Focus on very specific, niche sub-topics and events within ${category} — obscure battles, treaties, minor figures, turning points.`
+            : `Focus on specific niche sub-topics within ${category}.`;
+        const combinedInstr = [nicheHint, lobbyCustomInstr].filter(Boolean).join('\n');
+        const result = await apiFetch('/api/chat', {
+          method: 'POST',
+          body: JSON.stringify({
+            system: SYSTEM_PROMPT,
+            messages: [{ role: 'user', content: generatePrompt(category, diffMap[difficulty], 15, combinedInstr) }],
+            max_tokens: 8192,
+          }),
+        });
+        const text = result.content?.[0]?.text || '';
+        let parsed;
+        try { parsed = JSON.parse(text); } catch { const m = text.match(/\{[\s\S]*\}/); if (m) parsed = JSON.parse(m[0]); }
+        if (!parsed?.questions?.length) throw new Error('Generation failed. Try again.');
+        qs = parsed.questions.map(q => ({ ...q, question: q.text || q.question }));
+      }
+
+      if (lobbyType === 'lobby') {
+        setSessionBots(effectiveLobbyBots);
+        setMatchMode(false);
+        setLobbyMode(true);
+      } else {
+        setSessionBots([effective1v1Bot]);
+        setMatchMode(true);
+        setLobbyMode(false);
+      }
+      setQuestions(qs);
+      setScreen('session');
+    } catch (e) {
+      setError(e.message || 'Failed to load questions.');
+      setScreen('setup');
+    }
+  }
+
+  if (screen === 'loading') {
+    const isFetch = source === 'qbreader';
+    return (
+      <div className="h-full flex flex-col">
+        <div className="px-5 pt-4 pb-2 flex-shrink-0">
+          <button onClick={onExit} className="text-[11px] text-white/40 hover:text-white/70 inline-flex items-center gap-1">
+            <ChevronRight size={12} className="rotate-180" /> Hub
+          </button>
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center px-5">
+          <div className="w-full max-w-sm">
+            <ProgressBar
+              active
+              duration={isFetch ? 4000 : 14000}
+              label={isFetch ? `Fetching ${category} tossups` : `Generating ${category} questions`}
+              hint={isFetch ? 'Pulling from QBReader…' : 'The AI is writing fresh tossups for this set.'}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (screen === 'session') {
+    return (
+      <div className="h-full flex flex-col min-h-0">
+        <TrialSession
+          questions={questions}
+          difficulty={difficulty}
+          bots={sessionBots}
+          matchMode={matchMode}
+          lobbyMode={lobbyMode}
+          botNames={botNames}
+          onComplete={onExit}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full overflow-y-auto bg-transparent">
+      <div className="p-5 pb-8 space-y-4">
+        <button onClick={onExit} className="text-[11px] text-white/40 hover:text-white/70 inline-flex items-center gap-1">
+          <ChevronRight size={12} className="rotate-180" /> Hub
+        </button>
+
+        {/* ── Mode ── */}
+        <div className="grid grid-cols-2 gap-2">
+          <button onClick={() => setLobbyType('lobby')}
+            className={`rounded-2xl border p-4 text-left transition-all ${lobbyType === 'lobby' ? 'border-blue-500/40 bg-blue-500/15 ring-1 ring-white/10' : 'border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06]'}`}>
+            <Users size={16} className={`mb-2 ${lobbyType === 'lobby' ? 'text-blue-400' : 'text-white/30'}`} />
+            <div className={`font-semibold text-[13px] ${lobbyType === 'lobby' ? 'text-blue-300' : 'text-white/60'}`}>Lobby of 8</div>
+            <div className="text-[11px] text-white/35 mt-0.5">8 players · tournament room</div>
+          </button>
+          <button onClick={() => setLobbyType('1v1')}
+            className={`rounded-2xl border p-4 text-left transition-all ${lobbyType === '1v1' ? 'border-rose-500/40 bg-rose-500/15 ring-1 ring-white/10' : 'border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06]'}`}>
+            <Swords size={16} className={`mb-2 ${lobbyType === '1v1' ? 'text-rose-400' : 'text-white/30'}`} />
+            <div className={`font-semibold text-[13px] ${lobbyType === '1v1' ? 'text-rose-300' : 'text-white/60'}`}>1v1 Match</div>
+            <div className="text-[11px] text-white/35 mt-0.5">Head-to-head · first to 10</div>
+          </button>
+        </div>
+
+        {/* ── Lobby: room level + player preview ── */}
+        {lobbyType === 'lobby' && (
+          <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/40">Competition level</span>
+            </div>
+            <div className="grid grid-cols-4 gap-1.5">
+              {ROOM_LEVELS.map(l => (
+                <button key={l.id} onClick={() => setRoomLevel(l.id)}
+                  className={`py-1.5 rounded-xl text-[11px] font-semibold transition-all border ${
+                    roomLevel === l.id
+                      ? 'bg-blue-500/20 text-blue-200 border-blue-400/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]'
+                      : 'bg-white/[0.04] text-white/50 border-transparent hover:bg-white/[0.08] hover:text-white/70'
+                  }`}>
+                  {l.label}
+                </button>
+              ))}
+            </div>
+            {/* Player roster — draggable per-bot sliders */}
+            <div className="space-y-2.5 pt-1">
+              {effectiveLobbyBots.map((bot) => {
+                const buzzSl = buzzAtToSlider(bot.buzzAt);
+                const accSl  = Math.round(bot.accuracy * 100);
+                return (
+                  <div key={bot.id} className="space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <input
+                          type="text"
+                          value={botNames[bot.id] ?? ''}
+                          onChange={e => setBotNames(prev => ({ ...prev, [bot.id]: e.target.value }))}
+                          maxLength={20}
+                          className="bg-transparent text-[11px] font-medium text-white/80 outline-none border-b border-transparent hover:border-white/15 focus:border-white/30 transition-colors min-w-0 max-w-[7rem] px-0 py-0"
+                        />
+                        <span className="text-[9px] uppercase tracking-wider text-white/30">{bot.label}</span>
+                      </div>
+                      <span className="text-[8px] text-white/20">{'★'.repeat(bot.stars)}</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <div className="flex items-center justify-between mb-0.5">
+                          <span className="text-[9px] text-sky-400/60">Speed</span>
+                          <span className="text-[9px] text-white/30 tabular-nums">{Math.round((1 - bot.buzzAt) * 100)}%</span>
+                        </div>
+                        <input type="range" min="5" max="95" step="1" value={buzzSl}
+                          onChange={e => setBotOverrides(prev => ({
+                            ...prev,
+                            [bot.id]: { ...prev[bot.id], buzzSlider: Number(e.target.value) },
+                          }))}
+                          className="w-full accent-sky-400" style={{ height: '4px' }} />
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between mb-0.5">
+                          <span className="text-[9px] text-amber-400/60">Accuracy</span>
+                          <span className="text-[9px] text-white/30 tabular-nums">{accSl}%</span>
+                        </div>
+                        <input type="range" min="10" max="99" step="1" value={accSl}
+                          onChange={e => setBotOverrides(prev => ({
+                            ...prev,
+                            [bot.id]: { ...prev[bot.id], accSlider: Number(e.target.value) },
+                          }))}
+                          className="w-full accent-amber-400" style={{ height: '4px' }} />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── 1v1: opponent picker + fine-tune ── */}
+        {lobbyType === '1v1' && (
+          <div className="space-y-3">
+            {/* Preset picker */}
+            <div>
+              <p className="text-[10px] text-white/35 uppercase tracking-widest mb-2 font-medium">Opponent</p>
+              <div className="grid grid-cols-2 gap-1.5">
+                {BOT_ROSTER.map((bot, i) => (
+                  <button key={bot.id} onClick={() => setSelectedBotIdx(i)}
+                    className={`rounded-xl border p-2.5 text-left transition-all ${selectedBotIdx === i ? 'border-rose-400/40 bg-rose-500/10 ring-1 ring-white/10' : 'border-white/[0.07] bg-white/[0.02] hover:border-white/[0.14]'}`}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[12px] font-semibold text-white/80">{bot.label}</span>
+                      <span className="text-[9px] text-white/25">{'★'.repeat(bot.stars)}</span>
+                    </div>
+                    <div className="text-[10px] text-white/35 mt-0.5 tabular-nums">
+                      {Math.round((1 - bot.buzzAt) * 100)}% speed · {Math.round(bot.accuracy * 100)}% acc
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Fine-tune sliders */}
+            <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4 space-y-3.5">
+              <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/40">Fine-tune</span>
+
+              {/* Buzz timing */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[11px] text-white/55">Buzz timing</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-white/30">{buzzSlider < 40 ? 'Early' : buzzSlider > 65 ? 'Late' : 'Mid'}</span>
+                    <span className="text-[11px] font-mono text-white/55 tabular-nums">{Math.round(sliderToBuzzAt(buzzSlider) * 100)}%</span>
+                  </div>
+                </div>
+                <input type="range" min="5" max="95" step="1" value={buzzSlider}
+                  onChange={e => setBuzzSlider(Number(e.target.value))}
+                  className="w-full accent-rose-400 h-1 rounded-full" />
+                <div className="flex justify-between text-[9px] text-white/20 mt-1">
+                  <span>Buzzes early</span><span>Buzzes late</span>
+                </div>
+              </div>
+
+              {/* Accuracy */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[11px] text-white/55">Accuracy</span>
+                  <span className="text-[11px] font-mono text-white/55 tabular-nums">{accSlider}%</span>
+                </div>
+                <input type="range" min="10" max="99" step="1" value={accSlider}
+                  onChange={e => setAccSlider(Number(e.target.value))}
+                  className="w-full accent-rose-400 h-1 rounded-full" />
+                <div className="flex justify-between text-[9px] text-white/20 mt-1">
+                  <span>Low</span><span>High</span>
+                </div>
+              </div>
+
+              {/* Think speed */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[11px] text-white/55">Think speed</span>
+                  <span className="text-[11px] font-mono text-white/55 tabular-nums">{(sliderToThink(thinkSlider) / 1000).toFixed(1)}s</span>
+                </div>
+                <input type="range" min="0" max="100" step="1" value={thinkSlider}
+                  onChange={e => setThinkSlider(Number(e.target.value))}
+                  className="w-full accent-rose-400 h-1 rounded-full" />
+                <div className="flex justify-between text-[9px] text-white/20 mt-1">
+                  <span>Instant</span><span>Slow</span>
+                </div>
+              </div>
+
+              {/* Reset to preset */}
+              <button
+                onClick={() => {
+                  setBuzzSlider(buzzAtToSlider(selectedPreset.buzzAt));
+                  setAccSlider(Math.round(selectedPreset.accuracy * 100));
+                  setThinkSlider(thinkToSlider(selectedPreset.thinkMs));
+                }}
+                className="text-[10px] text-white/30 hover:text-white/55 transition-colors">
+                Reset to preset defaults
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Source ── */}
+        <div className="grid grid-cols-2 gap-2">
+          <GlassTile active={source === 'qbreader'} icon={<BookOpen size={14} />} label="Past QB" sub="qbreader.org" onClick={() => setSource('qbreader')} />
+          <GlassTile active={source === 'ai'} icon={<Sparkles size={14} />} label="AI" sub="Gemini · niche topics" onClick={() => setSource('ai')} />
+        </div>
+
+        {/* ── Category ── */}
+        <div className="flex flex-wrap gap-1.5">
+          {QB_LOBBY_CATEGORIES.map(c => <GlassPill key={c} active={category === c} onClick={() => setCategory(c)}>{c}</GlassPill>)}
+        </div>
+
+        {/* ── Question difficulty ── */}
+        <div>
+          <p className="text-[10px] text-white/35 uppercase tracking-widest mb-2 font-medium">Question difficulty</p>
+          <div className="grid grid-cols-3 gap-1.5">
+            {[['easy', 'Easy'], ['medium', 'Medium'], ['hard', 'Hard']].map(([id, label]) => (
+              <GlassPill key={id} active={difficulty === id} onClick={() => setDifficulty(id)}>{label}</GlassPill>
+            ))}
+          </div>
+        </div>
+
+        {/* ── Topic ── */}
+        <div>
+          <p className="text-[10px] text-white/35 uppercase tracking-widest mb-1.5 font-medium">
+            Topic <span className="normal-case tracking-normal text-white/20 font-normal">(optional)</span>
+          </p>
+          <input
+            type="text"
+            value={topic}
+            onChange={e => setTopic(e.target.value)}
+            placeholder="e.g. French Revolution, Thermodynamics, Shakespeare…"
+            className="w-full px-3 py-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-[12px] text-white/80 placeholder-white/20 outline-none focus:border-white/[0.15] transition-colors"
+          />
+        </div>
+
+        {/* ── Custom instructions ── (AI only) */}
+        {source === 'ai' && (
+          <div>
+            <p className="text-[10px] text-white/35 uppercase tracking-widest mb-1.5 font-medium">
+              Custom instructions <span className="normal-case tracking-normal text-white/20 font-normal">(optional)</span>
+            </p>
+            <textarea
+              value={lobbyCustomInstr}
+              onChange={e => setLobbyCustomInstr(e.target.value)}
+              placeholder="e.g. Focus on 20th century events, avoid questions about leaders…"
+              rows={2}
+              className="w-full px-3 py-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-[12px] text-white/80 placeholder-white/20 resize-none outline-none focus:border-white/[0.15] transition-colors"
+            />
+          </div>
+        )}
+
+        {error && <p className="text-[11px] text-rose-400 px-3 py-2 rounded-xl bg-rose-500/10 border border-rose-500/20 text-center">{error}</p>}
+
+        <button onClick={startSession}
+          className={`w-full py-3.5 rounded-2xl text-white text-[14px] font-bold inline-flex items-center justify-center gap-2 transition-all border ${
+            lobbyType === 'lobby'
+              ? 'bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_18px_rgba(59,130,246,0.40)]'
+              : 'bg-gradient-to-b from-rose-500 to-rose-600 hover:from-rose-400 hover:to-rose-500 border-rose-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_18px_rgba(239,68,68,0.40)]'
+          }`}>
+          {lobbyType === 'lobby' ? <><Users size={15} /> Enter Lobby</> : <><Swords size={15} /> Start Match</>}
+        </button>
+      </div>
+    </div>
   );
 }

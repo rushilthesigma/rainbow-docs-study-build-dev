@@ -19,7 +19,7 @@ const QUICK_PROMPTS = [
   { icon: Compass,    label: 'What\'s a good thing to study right now?', prompt: 'What should I work on right now?' },
 ];
 
-export default function StudyModePanel({ className = '', flush = false, initialMessage }) {
+export default function StudyModePanel({ className = '', flush = false, initialMessage, initialSources }) {
   const toast = useToast();
   const [messages, setMessages] = useState([]);
   const [streamingContent, setStreamingContent] = useState('');
@@ -123,6 +123,23 @@ export default function StudyModePanel({ className = '', flush = false, initialM
     if (streaming) return;
     doSend(text, { images });
   }, [streaming, sessionId]);
+
+  // Seed sources from a parent page (e.g. "Study this note" launches the
+  // panel with the note text pre-attached as a source). Only runs once on
+  // mount so manual edits aren't clobbered.
+  const sourcesSeeded = useRef(false);
+  useEffect(() => {
+    if (sourcesSeeded.current) return;
+    if (Array.isArray(initialSources) && initialSources.length > 0) {
+      sourcesSeeded.current = true;
+      setSources(initialSources.map((s) => ({
+        id: s.id || (crypto.randomUUID?.() || String(Date.now() + Math.random())),
+        title: s.title || s.name || 'Source',
+        url: s.url || null,
+        content: s.content || s.text || '',
+      })));
+    }
+  }, [initialSources]);
 
   useEffect(() => {
     if (initialMessage && !initialSent.current) {

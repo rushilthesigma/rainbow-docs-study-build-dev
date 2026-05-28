@@ -20,7 +20,7 @@ export default function AdminApp() {
   const [isAdmin, setIsAdmin] = useState(null);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState('list'); // list | detail | chat
+  const [view, setView] = useState('list'); // list | analytics | detail | chat
   const [selectedUser, setSelectedUser] = useState(null);
   const [conv, setConv] = useState(null);
 
@@ -155,6 +155,17 @@ export default function AdminApp() {
     );
   }
 
+  if (view === 'analytics') {
+    return (
+      <AnalyticsPanel
+        users={users}
+        total={users.length}
+        onClose={() => setView('list')}
+        standalone
+      />
+    );
+  }
+
   return (
     <UserList
       users={filtered}
@@ -165,6 +176,7 @@ export default function AdminApp() {
       includeDemo={includeDemo} setIncludeDemo={setIncludeDemo}
       onOpen={openUser}
       onRefresh={refreshList}
+      onAnalytics={() => setView('analytics')}
     />
   );
 }
@@ -172,63 +184,78 @@ export default function AdminApp() {
 function sumMsgs(u) { return (u.chatMessages?.study || 0) + (u.chatMessages?.lessons || 0) + (u.chatMessages?.curriculum || 0); }
 
 /* ====================== USER LIST ====================== */
-function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, sort, setSort, includeDemo, setIncludeDemo, onOpen, onRefresh }) {
-  // "Secret" analytics panel — toggled by five fast taps on the
-  // Admin Panel title. The header keeps the public-facing vanity
-  // counts (56 weekly / 12 daily); the hidden panel computes the
-  // REAL numbers from the loaded users list (MAU/WAU/DAU, plan split,
-  // churn signal, etc.) and overlays the user list while open.
-  const [showAnalytics, setShowAnalytics] = useState(false);
-  const tapsRef = useRef({ count: 0, last: 0 });
-  function onTitleTap() {
-    const now = Date.now();
-    if (now - tapsRef.current.last > 1500) tapsRef.current.count = 0;
-    tapsRef.current.count += 1;
-    tapsRef.current.last = now;
-    if (tapsRef.current.count >= 5) {
-      tapsRef.current.count = 0;
-      setShowAnalytics(true);
-    }
-  }
+function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, sort, setSort, includeDemo, setIncludeDemo, onOpen, onRefresh, onAnalytics }) {
+  const DAY = 86_400_000;
+  const HOUR = 3_600_000;
+  const now = Date.now();
+
+  // Helper to resolve a user's "last seen" timestamp uniformly.
+  const lastSeen = (u) => {
+    const v = u.lastVisitAt ?? u.lastActiveAt;
+    if (!v) return 0;
+    return typeof v === 'number' ? v : Date.parse(v) || 0;
+  };
+
+  const dau = users.filter(u => { const t = lastSeen(u); return t && (now - t) < DAY; }).length;
+  const wau = users.filter(u => { const t = lastSeen(u); return t && (now - t) < 7 * DAY; }).length;
+  const activeNow = users.filter(u => { const t = lastSeen(u); return t && (now - t) < HOUR; }).length;
+  const proCount = users.filter(u => u.plan === 'pro').length;
+  const bannedCount = users.filter(u => u.banned).length;
+  const demoCount = users.filter(u => u.isDemo).length;
+  const totalMsgs = users.reduce((s, u) => s + sumMsgs(u), 0);
+
   return (
     <div>
-      <div className="flex items-center gap-2 mb-4">
-        <div className="w-8 h-8 rounded-xl bg-white/[0.08] border border-white/[0.10] flex items-center justify-center text-white/50 flex-shrink-0">
+      {/* Header strip — keeps the icon + title compact and pushes the
+          action cluster to the right. Stats live in their own dense card
+          row below so the title bar stays scannable. */}
+      <div className="flex items-center gap-2 mb-3">
+        <div className="w-8 h-8 rounded-xl bg-white/[0.08] border border-white/[0.10] flex items-center justify-center text-white/55 flex-shrink-0">
           <Shield size={15} />
         </div>
-        <h2
-          onClick={onTitleTap}
-          className="text-[15px] font-bold text-white/90 cursor-default select-none"
-          title=""
-        >
-          Admin Panel
-        </h2>
-        <span className="inline-flex items-center gap-1.5 text-[11px] text-white/55 ml-1 flex-wrap">
-          <span className="inline-flex items-center gap-1">
-            <span className="font-semibold tabular-nums text-white/80">{total}</span>
-            <span className="text-white/45">total</span>
+        <h2 className="text-[15px] font-bold text-white/90">Admin Panel</h2>
+        {activeNow > 0 && (
+          <span className="inline-flex items-center gap-1.5 ml-1 px-2 py-0.5 rounded-full bg-emerald-500/[0.12] border border-emerald-500/25 text-[10px] font-semibold text-emerald-300">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.7)] animate-pulse" />
+            {activeNow} active now
           </span>
-          <span className="text-white/20">·</span>
-          <span className="inline-flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.7)]" />
-            <span className="font-semibold tabular-nums text-white/80">56</span>
-            <span className="text-white/45">weekly active</span>
-          </span>
-          <span className="text-white/20">·</span>
-          <span className="inline-flex items-center gap-1">
-            <span className="font-semibold tabular-nums text-white/80">12</span>
-            <span className="text-white/45">daily active</span>
-          </span>
-        </span>
-        <div className="ml-auto">
+        )}
+        <div className="ml-auto flex items-center gap-1">
+          <label className="flex items-center gap-1.5 text-[11px] text-white/45 hover:text-white/70 px-2 py-1.5 rounded-lg hover:bg-white/[0.05] cursor-pointer transition-colors">
+            <input
+              type="checkbox"
+              checked={includeDemo}
+              onChange={e => setIncludeDemo(e.target.checked)}
+              className="w-3 h-3 accent-blue-500"
+            />
+            Demo
+          </label>
+          <button
+            onClick={onAnalytics}
+            className="flex items-center gap-1 text-white/35 hover:text-white/75 px-2.5 py-1.5 rounded-lg hover:bg-white/[0.06] transition-colors text-[11px] font-medium"
+            title="Analytics"
+          >
+            <BarChart3 size={13} /> Analytics
+          </button>
           <button
             onClick={onRefresh}
-            className="text-white/30 hover:text-white/65 p-1.5 rounded-lg hover:bg-white/[0.06] transition-colors"
+            className="text-white/35 hover:text-white/75 p-1.5 rounded-lg hover:bg-white/[0.06] transition-colors"
             title="Refresh"
           >
             <RefreshCw size={14} />
           </button>
         </div>
+      </div>
+
+      {/* Stat card row — six glanceable tiles. The accent dot color
+          encodes status: green = activity, amber = paid, rose = blocked. */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-4">
+        <AdminStatCard label="Total users" value={total} />
+        <AdminStatCard label="Daily active" value={dau} sub={total ? `${Math.round((dau/total)*100)}%` : null} dot="emerald" />
+        <AdminStatCard label="Weekly active" value={wau} sub={total ? `${Math.round((wau/total)*100)}%` : null} dot="emerald" />
+        <AdminStatCard label="Pro" value={proCount} sub={total ? `${Math.round((proCount/total)*100)}%` : null} dot="amber" />
+        <AdminStatCard label="Total messages" value={totalMsgs.toLocaleString()} icon={<MessageSquare size={11} />} />
+        <AdminStatCard label="Blocked" value={bannedCount} sub={demoCount ? `${demoCount} demo` : null} dot={bannedCount ? 'rose' : null} />
       </div>
 
       {/* Toolbar */}
@@ -255,37 +282,98 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
       </div>
 
       <div className="space-y-1.5">
-        {users.length === 0 && <p className="text-xs text-white/30 text-center py-8">No matches.</p>}
-        {users.map(u => (
-          <div
-            key={u.id}
-            onClick={() => onOpen(u.id)}
-            className="group flex items-center gap-3 bg-white/[0.03] rounded-xl border border-white/[0.07] px-4 py-2.5 cursor-pointer hover:bg-white/[0.05] hover:border-white/[0.13] transition-colors"
-          >
-            <div className="w-8 h-8 rounded-full bg-white/[0.10] border border-white/[0.15] flex items-center justify-center text-[11px] font-bold text-white/70 flex-shrink-0">
-              {(u.name || u.email || '?')[0]?.toUpperCase()}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <p className="text-sm font-medium text-white/90 truncate">{u.name || u.email}</p>
-                {isAdvisorEmail(u.email) ? <AdvisorBadge /> : (u.plan === 'pro' && <ProPill />)}
-                {u.banned && <span className="px-1.5 py-0.5 rounded bg-rose-900/30 text-rose-400 text-[10px] font-medium">Banned</span>}
-                {u.isDemo && <span className="px-1.5 py-0.5 rounded bg-amber-900/20 text-amber-400 text-[10px] font-bold uppercase tracking-wider">Demo</span>}
-              </div>
-              <p className="text-[10px] text-white/35 truncate">
-                {u.handle ? `@${u.handle} · ` : ''}{u.email} · L{u.level} · {u.visitCount || 0} visits · {sumMsgs(u)} msgs · {u.curriculaCount} curr · {u.studySessionCount} study · {u.lessonCount} lessons
-              </p>
-            </div>
-            <ChevronRight size={14} className="text-white/20 group-hover:text-white/50 transition-colors flex-shrink-0" />
+        {users.length === 0 && (
+          <div className="text-center py-12 rounded-xl border border-dashed border-white/[0.08] bg-white/[0.02]">
+            <Search size={22} className="text-white/20 mx-auto mb-2" />
+            <p className="text-xs text-white/35">No users match the current filter.</p>
+            {query && (
+              <button onClick={() => setQuery('')} className="text-[11px] text-blue-400 hover:text-blue-300 mt-2">Clear search</button>
+            )}
           </div>
-        ))}
+        )}
+        {users.map(u => {
+          const t = lastSeen(u);
+          const isActiveNow = t && (now - t) < HOUR;
+          const isActiveToday = t && (now - t) < DAY;
+          return (
+            <div
+              key={u.id}
+              onClick={() => onOpen(u.id)}
+              className="group flex items-center gap-3 bg-white/[0.03] rounded-xl border border-white/[0.07] px-4 py-2.5 cursor-pointer hover:bg-white/[0.05] hover:border-white/[0.13] transition-colors"
+            >
+              <div className="relative flex-shrink-0">
+                <div className="w-8 h-8 rounded-full bg-white/[0.10] border border-white/[0.15] flex items-center justify-center text-[11px] font-bold text-white/70">
+                  {(u.name || u.email || '?')[0]?.toUpperCase()}
+                </div>
+                {/* Presence dot — lit green when seen in the last hour,
+                    dim when active today, hidden otherwise. */}
+                {(isActiveNow || isActiveToday) && (
+                  <span
+                    className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-[#161622] ${
+                      isActiveNow ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.7)]' : 'bg-emerald-700'
+                    }`}
+                    title={isActiveNow ? 'Active in the last hour' : 'Active today'}
+                  />
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-sm font-medium text-white/90 truncate">{u.name || u.email}</p>
+                  {isAdvisorEmail(u.email) ? <AdvisorBadge /> : (u.plan === 'pro' && <ProPill />)}
+                  {u.banned && <span className="px-1.5 py-0.5 rounded bg-rose-900/30 text-rose-400 text-[10px] font-medium">Banned</span>}
+                  {u.isDemo && <span className="px-1.5 py-0.5 rounded bg-amber-900/20 text-amber-400 text-[10px] font-bold uppercase tracking-wider">Demo</span>}
+                </div>
+                <p className="text-[10px] text-white/35 truncate">
+                  {u.handle ? `@${u.handle} · ` : ''}{u.email} · L{u.level} · {u.visitCount || 0} visits · {sumMsgs(u)} msgs · {u.curriculaCount} curr · {u.studySessionCount} study · {u.lessonCount} lessons
+                </p>
+              </div>
+              {/* Compact last-seen timestamp + chevron */}
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {t ? (
+                  <span className="text-[10px] text-white/35 tabular-nums hidden md:inline">{formatRelativeShort(now - t)}</span>
+                ) : null}
+                <ChevronRight size={14} className="text-white/20 group-hover:text-white/50 transition-colors" />
+              </div>
+            </div>
+          );
+        })}
       </div>
 
-      {showAnalytics && (
-        <AnalyticsPanel users={users} total={total} onClose={() => setShowAnalytics(false)} />
-      )}
     </div>
   );
+}
+
+// Stat card: dense, glanceable tile with an optional accent dot + sub-line.
+function AdminStatCard({ label, value, sub, dot, icon }) {
+  const dotCls = dot === 'emerald' ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]'
+    : dot === 'amber' ? 'bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.55)]'
+    : dot === 'rose' ? 'bg-rose-400 shadow-[0_0_6px_rgba(251,113,133,0.55)]'
+    : null;
+  return (
+    <div className="rounded-xl border border-white/[0.07] bg-white/[0.03] px-3 py-2.5">
+      <div className="flex items-center gap-1.5 text-[9.5px] uppercase tracking-[0.16em] font-bold text-white/35 mb-1">
+        {dotCls && <span className={`w-1.5 h-1.5 rounded-full ${dotCls}`} />}
+        {icon && <span className="text-white/40">{icon}</span>}
+        <span className="truncate">{label}</span>
+      </div>
+      <div className="flex items-baseline gap-1.5">
+        <span className="text-[18px] font-bold text-white/90 tabular-nums leading-none">{value}</span>
+        {sub && <span className="text-[10px] text-white/35 tabular-nums">{sub}</span>}
+      </div>
+    </div>
+  );
+}
+
+// "5m ago" / "2h" / "3d" / "Jan 12" — kept terse for the user-list density.
+function formatRelativeShort(deltaMs) {
+  const m = Math.floor(deltaMs / 60_000);
+  if (m < 1) return 'now';
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return `${d}d`;
+  return new Date(Date.now() - deltaMs).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 function TabChips({ options, value, onChange }) {
@@ -319,7 +407,7 @@ function ProPill() {
  * stickiness ratio, churn signal, plan split, signup cohorts,
  * power users, time-on-site proxy (avg visits).
  * =====================================================*/
-function AnalyticsPanel({ users, total, onClose }) {
+function AnalyticsPanel({ users, total, onClose, standalone }) {
   const stats = useMemo(() => {
     const now = Date.now();
     const DAY = 86_400_000;
@@ -391,23 +479,26 @@ function AnalyticsPanel({ users, total, onClose }) {
   }, [users]);
 
   return (
-    <div className="absolute inset-0 z-30 bg-black/80 backdrop-blur-md overflow-y-auto p-5" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className={standalone ? undefined : 'absolute inset-0 z-30 bg-black/80 backdrop-blur-md overflow-y-auto p-5'} onClick={standalone ? undefined : (e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="max-w-3xl mx-auto">
+        {standalone ? (
+          <button onClick={onClose} className="flex items-center gap-2 text-sm text-white/40 hover:text-white/70 mb-4 transition-colors">
+            <ArrowLeft size={16} /> Users
+          </button>
+        ) : null}
         <div className="flex items-center gap-2 mb-4">
           <div className="w-8 h-8 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-200 flex-shrink-0">
             <BarChart3 size={15} />
           </div>
           <div className="flex-1 min-w-0">
             <h2 className="text-[15px] font-bold text-white/90">Analytics</h2>
-            <p className="text-[10.5px] text-white/40">Real numbers — computed from the {total} non-demo accounts</p>
+            <p className="text-[10.5px] text-white/40">Computed from {total} accounts</p>
           </div>
-          <button
-            onClick={onClose}
-            className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-white/55 hover:text-white hover:bg-white/[0.06] transition-colors"
-            title="Close"
-          >
-            <X size={14} />
-          </button>
+          {!standalone && (
+            <button onClick={onClose} className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-white/55 hover:text-white hover:bg-white/[0.06] transition-colors">
+              <X size={14} />
+            </button>
+          )}
         </div>
 
         {/* Top-line stats */}

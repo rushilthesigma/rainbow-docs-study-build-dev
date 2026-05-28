@@ -88,21 +88,24 @@ export function useToast() {
   return ctx;
 }
 
+// Toast surfaces need solid theme-aware backgrounds — the previous
+// `bg-white/[0.08]` was invisible against a light wallpaper. Each variant
+// uses a tinted but solid surface in both modes so toasts always pop.
 const variantStyles = {
   info: {
-    border: 'border-white/[0.12]',
-    bg: 'bg-white/[0.08]',
-    icon: <Info size={14} className="text-blue-300/90" />,
+    border: 'border-gray-200 dark:border-white/[0.12]',
+    bg: 'bg-white/95 dark:bg-[#1a1a26]/95',
+    icon: <Info size={14} className="text-blue-500 dark:text-blue-300/90" />,
   },
   success: {
-    border: 'border-emerald-400/25',
-    bg: 'bg-emerald-500/[0.08]',
-    icon: <CheckCircle2 size={14} className="text-emerald-300/90" />,
+    border: 'border-emerald-300 dark:border-emerald-400/25',
+    bg: 'bg-emerald-50/95 dark:bg-emerald-500/[0.08]',
+    icon: <CheckCircle2 size={14} className="text-emerald-600 dark:text-emerald-300/90" />,
   },
   error: {
-    border: 'border-rose-400/25',
-    bg: 'bg-rose-500/[0.08]',
-    icon: <AlertCircle size={14} className="text-rose-300/90" />,
+    border: 'border-rose-300 dark:border-rose-400/25',
+    bg: 'bg-rose-50/95 dark:bg-rose-500/[0.08]',
+    icon: <AlertCircle size={14} className="text-rose-600 dark:text-rose-300/90" />,
   },
 };
 
@@ -121,16 +124,16 @@ function ToastViewport({ toasts, onDismiss }) {
           <div
             key={t.id}
             role={t.variant === 'error' ? 'alert' : 'status'}
-            className={`pointer-events-auto flex items-start gap-2 min-w-[240px] max-w-sm px-3 py-2 rounded-xl backdrop-blur-xl shadow-[0_8px_24px_rgba(0,0,0,0.35)] border ${v.border} ${v.bg} text-[12.5px] text-white/85 animate-fade-in`}
+            className={`pointer-events-auto flex items-start gap-2 min-w-[240px] max-w-sm px-3 py-2 rounded-xl backdrop-blur-xl shadow-[0_8px_24px_rgba(0,0,0,0.18)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.35)] border ${v.border} ${v.bg} text-[12.5px] text-gray-800 dark:text-white/85 animate-fade-in`}
           >
             <span className="mt-0.5 shrink-0">{v.icon}</span>
             <div className="flex-1 leading-snug">
-              {t.title && <div className="font-semibold text-white/90">{t.title}</div>}
-              <div className="text-white/80">{t.message}</div>
+              {t.title && <div className="font-semibold text-gray-900 dark:text-white/90">{t.title}</div>}
+              <div className="text-gray-700 dark:text-white/80">{t.message}</div>
             </div>
             <button
               onClick={() => onDismiss(t.id)}
-              className="shrink-0 p-0.5 rounded text-white/40 hover:text-white/80 hover:bg-white/[0.07] transition-colors"
+              className="shrink-0 p-0.5 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:text-white/40 dark:hover:text-white/80 dark:hover:bg-white/[0.07] transition-colors"
               aria-label="Dismiss notification"
             >
               <X size={12} />

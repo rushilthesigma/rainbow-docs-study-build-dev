@@ -6,10 +6,9 @@ import MobileHome from './MobileHome';
 import MobileCurricula from './MobileCurricula';
 import MobileLessons from './MobileLessons';
 import MobileNotes from './MobileNotes';
-import MobileQuizBowl from './MobileQuizBowl';
 import MobileSettings from './MobileSettings';
 import MobileStudy from './MobileStudy';
-
+import MobileQuizBowl from './MobileQuizBowl';
 // Page registry for the mobile shell.
 //   - `hideHeader`   → suppresses MobileHeader (page renders its own).
 //   - `manageLayout` → page owns its own scrolling + flex layout
@@ -31,7 +30,7 @@ const PAGE_MAP = {
   settings:    { title: 'Settings',  component: MobileSettings,                  hideHeader: true  },
   // Reachable via Home tiles only:
   study:       { title: 'Study',        component: MobileStudy,        hideHeader: true, manageLayout: true },
-  quizbowl:    { title: 'Quiz Bowl',    component: MobileQuizBowl,     hideHeader: true },
+  quizbowl:    { title: 'Quiz Bowl',    component: MobileQuizBowl,      hideHeader: true },
 };
 
 const MAIN_TABS = ['home', 'curricula', 'lessons', 'notes', 'settings'];

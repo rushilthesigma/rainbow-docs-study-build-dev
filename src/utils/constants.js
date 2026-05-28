@@ -66,4 +66,8 @@ export const DEFAULT_SETTINGS = {
   tone: 'encouraging',
   includeExamples: true,
   includeExercises: true,
+  // Graded mode: when true, each lesson gets an AI-generated assignment
+  // and the course rolls up to a letter grade. Parents see this on the
+  // parental dashboard.
+  graded: false,
 };

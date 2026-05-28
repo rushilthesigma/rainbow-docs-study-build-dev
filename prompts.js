@@ -44,11 +44,14 @@ const TEMPO_GUIDES = {
 
 function buildPrefsContext(prefs = {}) {
   const parts = [];
+  // Custom instructions are ABSOLUTE — always first, override everything else
+  if (prefs.customInstructions?.trim()) {
+    parts.push(`ABSOLUTE USER INSTRUCTIONS — obey these exactly, always, above all other guidance. They override personality, tone, rigor, tempo, and every other directive in this prompt:\n${prefs.customInstructions.trim()}`);
+  }
   if (prefs.aiPersonality && PERSONALITY_GUIDES[prefs.aiPersonality]) parts.push(PERSONALITY_GUIDES[prefs.aiPersonality]);
   if (prefs.fluffLevel && FLUFF_GUIDES[prefs.fluffLevel]) parts.push(FLUFF_GUIDES[prefs.fluffLevel]);
   if (prefs.rigor && RIGOR_GUIDES[prefs.rigor]) parts.push(RIGOR_GUIDES[prefs.rigor]);
   if (prefs.lessonTempo && TEMPO_GUIDES[prefs.lessonTempo]) parts.push(TEMPO_GUIDES[prefs.lessonTempo]);
-  if (prefs.customInstructions) parts.push(`Custom instructions from the student: ${prefs.customInstructions}`);
   return parts.join('\n');
 }
 
@@ -158,7 +161,16 @@ Output ONLY valid JSON with no markdown formatting, no code fences, no explanati
     ? `\n\nSOURCE MATERIAL (the student attached these — base the curriculum on them):\n${sources.map((s, i) => `\n[${i + 1}] ${s.title}${s.url ? ` (${s.url})` : ''} — ${s.kind}\n"""\n${(s.content || '').slice(0, 12000)}\n"""`).join('\n')}\n\nIMPORTANT: The curriculum's units and lessons must align to the source material above. Don't invent topics the sources don't cover; do call out terminology and key examples from the sources directly.`
     : '';
 
-  const user = `Create a comprehensive, rigorous curriculum outline for: "${settings.topic}"${sourcesBlock}
+  // Refinements: optional Q&A answers from the pre-generation clarifying
+  // step (/api/curriculum/refine). Folded in as plain English so the model
+  // anchors the syllabus to what the student actually wants instead of
+  // guessing from the topic alone.
+  const refinements = Array.isArray(settings.refinements) ? settings.refinements.filter(r => r?.question && r?.answer) : [];
+  const refinementsBlock = refinements.length
+    ? `\n\nSTUDENT CLARIFICATIONS (these are authoritative — design the course around them, not against them):\n${refinements.map(r => `- ${r.question} → ${r.answer}`).join('\n')}`
+    : '';
+
+  const user = `Create a comprehensive, rigorous curriculum outline for: "${settings.topic}"${sourcesBlock}${refinementsBlock}
 
 Requirements:
 - Difficulty level: ${settings.difficulty} (treat this as the FLOOR — design slightly above it).
@@ -1380,11 +1392,24 @@ export function buildLessonPrompt(settings, unitTitle, lesson, previousLessons) 
     'project-based': 'Frame concepts around a practical project.',
     socratic: 'Use questions to guide discovery.',
   };
-  const system = `You are an expert teacher creating a lesson. Write conversationally.
-Style: ${toneGuide[settings.tone] || toneGuide.encouraging}
+  // Reading assignments used to be terse "academic" text that students bounced
+  // off of. The rules below force the lesson to be parseable on first pass:
+  // hook → plain definitions → analogies → bolded key terms → takeaways.
+  const system = `You are an expert teacher writing a reading assignment a student should be able to understand on the FIRST pass — not after re-reading.
+
+Hard rules:
+- Open with a 1-2 sentence "What you'll learn" hook in plain English. No jargon in this hook.
+- Use short sentences (aim ~15 words). Break compound thoughts into multiple sentences.
+- Define every term the first time you use it, in parentheses or a short clause. Treat the reader as smart but new to this vocabulary.
+- Prefer concrete analogies and worked examples over abstract definitions. If you state a rule, immediately show it in action.
+- Bold the 3-6 most important phrases with **markdown bold**.
+- Use short paragraphs (2-4 sentences). Use bullet lists when listing more than 2 things.
+- End with a "Key takeaways" section: a 2-4 item bullet list of the things the student should remember.
+
+Tone: ${toneGuide[settings.tone] || toneGuide.encouraging}
 Approach: ${styleGuide[settings.learningStyle] || styleGuide.conceptual}
 Format in markdown. Target length: ${wordCount} words.`;
   const previousContext = previousLessons.length > 0 ? `\nPrevious lessons covered: ${previousLessons.join(', ')}.` : '';
-  const user = `Write a lesson for: Unit "${unitTitle}", Lesson "${lesson.title}" — ${lesson.description}${previousContext}`;
+  const user = `Write a reading assignment for: Unit "${unitTitle}", Lesson "${lesson.title}" — ${lesson.description}${previousContext}`;
   return { system, user };
 }

@@ -8,6 +8,7 @@ export default defineConfig({
     include: ['jspdf', 'pptxgenjs', 'html-to-image'],
   },
   server: {
+    port: 5190,
     proxy: {
       '/api': {
         target: 'http://localhost:3002',

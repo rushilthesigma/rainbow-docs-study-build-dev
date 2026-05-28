@@ -321,10 +321,21 @@ function createDefaultData() {
     goals: [],
     flashcardDecks: [],
     notes: [],
+    // Obsidian-style knowledge graph over the user's notes. Nodes either
+    // mirror an existing note (source='note', noteId set) or are AI/manual
+    // topic placeholders (source='ai' | 'topic'). Edges are undirected and
+    // identified by the unordered pair (a, b). Positions persist so the
+    // canvas comes back exactly how the user left it.
+    noteGraph: { nodes: [], edges: [] },
     studySessions: [],
     assessmentHistory: [],
     lessons: [],
-    slideshows: [],               // AI-generated slide decks
+    slideshows: [],               // AI-generated slide decks (legacy field — Slides was retired)
+    // Each entry: { id, category, difficulty, source: 'qbreader'|'ai',
+    //   score, total, durationMs, finishedAt, categoryStats: { [cat]: {correct, total} },
+    //   perQuestion: [{category, correct, buzzWord, totalWords, answer, correctAnswer}] }
+    // Newest-first. Capped at 200 sets server-side.
+    quizbowlSets: [],
 
 
     // ----- Billing / plan state -----
@@ -335,6 +346,21 @@ function createDefaultData() {
     stripeSubscriptionId: null,
     // Usage counters — reset by helper when the date / week changes
     usage: { day: null, messages: 0, quizBowlGames: 0, week: null, curricula: 0, debates: 0 },
+
+    // ----- Parent mode (parental controls + child profiles) -----
+    // When `enabled`, the account owner is treated as a parent. Curricula
+    // are namespaced under a `studentId` (one of `students[].id`), and the
+    // active child is selected via `activeStudentId`. Parents enter a PIN
+    // to leave child-locked mode and access the parental dashboard.
+    parent: {
+      enabled: false,
+      pinHash: null,            // bcrypt hash of 4-6 digit PIN (null until setup)
+      students: [],             // [{ id, name, color, avatar, grade, createdAt, controls }]
+      adults: [],               // [{ id, name, color, avatar, createdAt }] — full-access family members
+      activeStudentId: null,    // currently-selected child (null = family-manager / adult view)
+      activeAdultId: null,      // currently-selected adult member
+      lastParentUnlockAt: null, // ISO — when parent last entered PIN
+    },
   };
 }
 
@@ -350,6 +376,14 @@ function migrateUserData(data) {
   if (data.preferences) {
     for (const key of Object.keys(defaults.preferences)) {
       if (data.preferences[key] === undefined) data.preferences[key] = defaults.preferences[key];
+    }
+  }
+  // Backfill parent block — older accounts predate the parent-mode feature.
+  if (!data.parent || typeof data.parent !== 'object') {
+    data.parent = defaults.parent;
+  } else {
+    for (const key of Object.keys(defaults.parent)) {
+      if (data.parent[key] === undefined) data.parent[key] = defaults.parent[key];
     }
   }
   // Migrate old top-level fields into preferences
@@ -510,34 +544,130 @@ function parseAIJson(text) {
 
 // ===== AUTH ROUTES =====
 
+// Email + password signup — creates a brand-new account.
+app.post('/api/auth/signup', async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: 'Name, email, and password are required' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+    const trimEmail = email.trim().toLowerCase();
+    const users = loadUsers();
+    if (users[trimEmail]) {
+      return res.status(409).json({ error: 'An account with this email already exists' });
+    }
+
+    const hashed = await bcrypt.hash(password, 10);
+    const userId = crypto.randomUUID();
+    users[trimEmail] = {
+      id: userId,
+      email: trimEmail,
+      name: name.trim(),
+      password: hashed,
+      verified: true,
+      createdAt: new Date().toISOString(),
+      data: createDefaultData(),
+    };
+    saveUsers(users);
+
+    const token = generateToken();
+    sessions[token] = { id: userId, email: trimEmail };
+    saveSessions();
+
+    res.json({
+      success: true,
+      token,
+      user: { id: userId, email: trimEmail, name: name.trim(), data: users[trimEmail].data },
+    });
+  } catch (e) {
+    console.error('Signup error:', e);
+    res.status(500).json({ error: 'Signup failed' });
+  }
+});
+
+// Email + password login
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+    const trimEmail = email.trim().toLowerCase();
+    const users = loadUsers();
+    const user = users[trimEmail];
+    if (!user) {
+      return res.status(401).json({ error: 'No account found with this email' });
+    }
+    if (!user.password) {
+      return res.status(401).json({ error: 'This account uses Google sign-in. Please sign in with Google.' });
+    }
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) {
+      return res.status(401).json({ error: 'Incorrect password' });
+    }
+
+    const token = generateToken();
+    sessions[token] = { id: user.id, email: trimEmail };
+    saveSessions();
+
+    res.json({
+      success: true,
+      token,
+      user: { id: user.id, email: trimEmail, name: user.name, data: user.data || {} },
+    });
+  } catch (e) {
+    console.error('Login error:', e);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
 // Dev login (for testing without Google OAuth configured)
-app.post('/api/auth/dev-login', (req, res) => {
+app.post('/api/auth/dev-login', async (req, res) => {
   const { name, email } = req.body;
   const devEmail = email || 'dev@covalent.test';
   const devName = name || 'Dev User';
 
   const users = loadUsers();
   if (!users[devEmail]) {
+    const defaultData = createDefaultData();
+    defaultData.preferences.onboarded = true;
     users[devEmail] = {
       id: crypto.randomUUID(),
       email: devEmail,
       name: devName,
-      password: null,
+      password: '$2b$10$HfkHMN4epGa7NjmwAduRwOYtyQ0O8RfjrXCg1brJ5/NVDMy734y9.',
       verified: true,
       createdAt: new Date().toISOString(),
-      data: createDefaultData(),
+      data: defaultData,
     };
-    saveUsers(users);
+  } else if (!users[devEmail].data?.preferences?.onboarded) {
+    users[devEmail].data.preferences.onboarded = true;
   }
 
+  // Auto-enable parent mode with PIN 1111 for dev convenience.
+  // Idempotent: only sets up if not already enabled.
+  const devUser = users[devEmail];
+  devUser.data = migrateUserData(devUser.data);
+  if (!devUser.data.parent.enabled) {
+    devUser.data.parent.enabled = true;
+    devUser.data.parent.pinHash = await hashPin('1111');
+    devUser.data.parent.lastParentUnlockAt = new Date().toISOString();
+  } else if (!devUser.data.parent.pinHash) {
+    devUser.data.parent.pinHash = await hashPin('1111');
+  }
+  saveUsers(users);
+
   const token = generateToken();
-  sessions[token] = { id: users[devEmail].id, email: devEmail };
+  sessions[token] = { id: devUser.id, email: devEmail };
   saveSessions();
 
   res.json({
     success: true,
     token,
-    user: { id: users[devEmail].id, email: devEmail, name: users[devEmail].name, data: users[devEmail].data },
+    user: { id: devUser.id, email: devEmail, name: devUser.name, data: devUser.data },
   });
 });
 
@@ -668,6 +798,8 @@ app.get('/api/auth/me', authMiddleware, (req, res) => {
         isOwner: isOwner(email),
         isAdvisor: isAdvisor(email),
         isBeta: canSeeBeta(email),
+        // Always strip the PIN hash before it leaves the server.
+        parent: sanitizeParent(user.data.parent),
       },
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -685,6 +817,779 @@ app.post('/api/auth/sync', authMiddleware, (req, res) => {
     res.json({ success: true, data: users[email].data });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// =================================================================
+// PARENT MODE
+//
+// A parent enables parent mode by setting a PIN. They can then create
+// child profiles (students), switch between them, and view a parental
+// dashboard showing each child's curricula + grades + recent activity.
+//
+// `activeStudentId` on user.data.parent gates which curricula are
+// shown by /api/curriculum (a student-scoped view). Setting it to null
+// returns to the unscoped parent view.
+//
+// Endpoints:
+//   POST   /api/parent/setup            — first-time enable: set PIN + initial students
+//   POST   /api/parent/verify-pin       — verify PIN to unlock parent view
+//   GET    /api/parent/status           — current state (enabled, students, activeStudentId)
+//   POST   /api/parent/students         — add a child (requires PIN)
+//   DELETE /api/parent/students/:sid    — remove a child (requires PIN)
+//   POST   /api/parent/students/:sid/switch — switch active child (requires PIN)
+//   POST   /api/parent/exit-child       — leave child view (requires PIN)
+//   GET    /api/parent/dashboard        — parental dashboard rollup
+// =================================================================
+
+function makeStudentId() { return 'st-' + crypto.randomBytes(6).toString('hex'); }
+
+function isValidPin(pin) {
+  return typeof pin === 'string' && /^[0-9]{4,6}$/.test(pin);
+}
+
+// Per-child parental controls. Stored on each student object as
+// `student.controls`. Backfilled lazily by `ensureStudentControls()` so
+// older students still get sane defaults the first time they're read.
+//
+// Fields:
+//   blockedApps:     app ids the child can't see on the dock
+//                    (e.g. ['debate', 'quizbowl']).
+//   requireGraded:   when true, every new curriculum the child generates
+//                    is forced into graded mode server-side, regardless
+//                    of what the form sent.
+//   difficultyFloor: minimum difficulty the child can pick when creating
+//                    a new curriculum ('beginner' | 'intermediate' |
+//                    'advanced' | 'expert' | null = no floor).
+//   allowChats:      can the child use the open-ended Study Mode chat?
+//                    Lesson chats stay on regardless — they're the
+//                    teaching surface, not free-form chat.
+function defaultStudentControls() {
+  return {
+    blockedApps: [],
+    requireGraded: false,
+    difficultyFloor: null,
+    allowChats: true,
+    socraticMode: false,
+    blockAnswerHints: false,
+  };
+}
+
+// Returns extra system-prompt text that enforces a child's anti-cheat
+// guardrails. Empty string when no guardrails are active.
+function buildChildGuardrails(child) {
+  if (!child) return '';
+  ensureStudentControls(child);
+  const lines = [];
+  if (child.controls.socraticMode) {
+    lines.push(
+      '⚠️ PARENTAL GUARDRAIL — SOCRATIC MODE: This is a child account. You MUST teach through guided questions only. Never state the answer to a homework or assignment problem directly. Instead, ask probing questions that help the student discover the answer themselves. If the student asks you to "just tell me the answer", respond with another question that moves them closer without revealing it.',
+    );
+  }
+  if (child.controls.blockAnswerHints) {
+    lines.push(
+      '⚠️ PARENTAL GUARDRAIL — NO ANSWER HINTS: This is a child account. During graded assessments and practice problems you must NOT give hints, partial answers, or reveal the correct answer in any form. If the student asks for a hint on an assessment question, gently decline and encourage them to try their best on their own.',
+    );
+  }
+  return lines.length ? '\n\n' + lines.join('\n\n') : '';
+}
+
+function ensureStudentControls(student) {
+  if (!student.controls || typeof student.controls !== 'object') {
+    student.controls = defaultStudentControls();
+    return;
+  }
+  const def = defaultStudentControls();
+  for (const k of Object.keys(def)) {
+    if (student.controls[k] === undefined) student.controls[k] = def[k];
+  }
+}
+
+async function hashPin(pin) {
+  return bcrypt.hash(String(pin), 10);
+}
+
+async function checkPin(user, pin) {
+  if (!user?.data?.parent?.pinHash) return false;
+  if (!isValidPin(pin)) return false;
+  try {
+    return await bcrypt.compare(String(pin), user.data.parent.pinHash);
+  } catch { return false; }
+}
+
+// Aggregates per-student progress from the curricula list.
+// A curriculum belongs to a student when its `studentId` matches.
+// Returns { totalCurricula, totalLessons, completedLessons, avgGrade, recentAssignments }
+function summarizeStudent(user, studentId) {
+  const curricula = (user?.data?.curricula || []).filter(c => c.studentId === studentId);
+  let totalLessons = 0, completedLessons = 0, gradeSum = 0, gradeCount = 0;
+  const recentAssignments = [];
+  for (const c of curricula) {
+    const courseGrade = computeCourseGrade(c);
+    if (courseGrade.gradedCount > 0) {
+      gradeSum += courseGrade.percent;
+      gradeCount++;
+    }
+    for (const u of c.units || []) {
+      for (const l of u.lessons || []) {
+        totalLessons++;
+        if (l.isCompleted) completedLessons++;
+        if (l.assignment?.submission?.gradedAt) {
+          recentAssignments.push({
+            curriculumId: c.id,
+            curriculumTitle: c.title,
+            lessonId: l.id,
+            lessonTitle: l.title,
+            score: l.assignment.submission.score,
+            letter: l.assignment.submission.letter,
+            gradedAt: l.assignment.submission.gradedAt,
+          });
+        }
+      }
+    }
+  }
+  recentAssignments.sort((a, b) => new Date(b.gradedAt) - new Date(a.gradedAt));
+  return {
+    totalCurricula: curricula.length,
+    totalLessons,
+    completedLessons,
+    avgGrade: gradeCount > 0 ? Math.round(gradeSum / gradeCount) : null,
+    recentAssignments: recentAssignments.slice(0, 8),
+    courses: curricula.map(c => ({
+      id: c.id,
+      title: c.title,
+      ...computeCourseGrade(c),
+      totalLessons: (c.units || []).reduce((s, u) => s + (u.lessons || []).length, 0),
+      completedLessons: (c.units || []).reduce((s, u) => s + (u.lessons || []).filter(l => l.isCompleted).length, 0),
+    })),
+  };
+}
+
+// Weighted-average grade across all graded assignments in a curriculum.
+// Each assignment is worth `weight` (default 1). Returns percent + letter +
+// counts. Lessons without a graded assignment are skipped — they don't drag
+// the average down until the student submits.
+function computeCourseGrade(curriculum) {
+  let total = 0, weightSum = 0, gradedCount = 0;
+  for (const u of curriculum?.units || []) {
+    for (const l of u.lessons || []) {
+      const sub = l?.assignment?.submission;
+      if (!sub || typeof sub.score !== 'number') continue;
+      const w = Number(l.assignment.weight) || 1;
+      total += sub.score * w;
+      weightSum += w;
+      gradedCount++;
+    }
+  }
+  const percent = weightSum > 0 ? Math.round(total / weightSum) : null;
+  return {
+    percent,
+    letter: percent == null ? null : percentToLetter(percent),
+    gradedCount,
+    graded: curriculum?.settings?.graded === true,
+  };
+}
+
+function percentToLetter(p) {
+  if (p >= 97) return 'A+';
+  if (p >= 93) return 'A';
+  if (p >= 90) return 'A-';
+  if (p >= 87) return 'B+';
+  if (p >= 83) return 'B';
+  if (p >= 80) return 'B-';
+  if (p >= 77) return 'C+';
+  if (p >= 73) return 'C';
+  if (p >= 70) return 'C-';
+  if (p >= 67) return 'D+';
+  if (p >= 63) return 'D';
+  if (p >= 60) return 'D-';
+  return 'F';
+}
+
+// First-time enable: set PIN, optionally create initial students.
+app.post('/api/parent/setup', authMiddleware, async (req, res) => {
+  try {
+    const { pin, students } = req.body || {};
+    if (!isValidPin(pin)) return res.status(400).json({ error: 'PIN must be 4–6 digits' });
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const user = users[email];
+    user.data = migrateUserData(user.data);
+    user.data.parent.pinHash = await hashPin(pin);
+    user.data.parent.enabled = true;
+    user.data.parent.lastParentUnlockAt = new Date().toISOString();
+    const initial = Array.isArray(students) ? students : [];
+    for (const s of initial.slice(0, 6)) {
+      if (!s?.name || typeof s.name !== 'string') continue;
+      user.data.parent.students.push({
+        id: makeStudentId(),
+        name: s.name.slice(0, 40),
+        color: s.color || pickColor(user.data.parent.students.length),
+        grade: s.grade ? String(s.grade).slice(0, 20) : '',
+        avatar: s.name.charAt(0).toUpperCase(),
+        controls: defaultStudentControls(),
+        createdAt: new Date().toISOString(),
+      });
+    }
+    saveUsers(users);
+    res.json({ parent: sanitizeParent(user.data.parent) });
+  } catch (e) { console.error('parent/setup:', e); res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/parent/verify-pin', authMiddleware, async (req, res) => {
+  try {
+    const { pin } = req.body || {};
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const user = users[email];
+    user.data = migrateUserData(user.data);
+    const ok = await checkPin(user, pin);
+    if (!ok) return res.status(403).json({ error: 'Incorrect PIN' });
+    user.data.parent.lastParentUnlockAt = new Date().toISOString();
+    user.data.parent.activeStudentId = null;
+    saveUsers(users);
+    res.json({ success: true, parent: sanitizeParent(user.data.parent) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/parent/status', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    res.json({ parent: sanitizeParent(users[email].data.parent) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/parent/students', authMiddleware, async (req, res) => {
+  try {
+    const { pin, name, color, grade } = req.body || {};
+    if (!name || typeof name !== 'string' || name.trim().length < 1) {
+      return res.status(400).json({ error: 'name required' });
+    }
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const user = users[email];
+    user.data = migrateUserData(user.data);
+    if (!user.data.parent.enabled) return res.status(400).json({ error: 'Parent mode not set up' });
+    const ok = await checkPin(user, pin);
+    if (!ok) return res.status(403).json({ error: 'Incorrect PIN' });
+    if (user.data.parent.students.length >= 8) {
+      return res.status(400).json({ error: 'Maximum 8 child profiles' });
+    }
+    const student = {
+      id: makeStudentId(),
+      name: name.trim().slice(0, 40),
+      color: color || pickColor(user.data.parent.students.length),
+      grade: grade ? String(grade).slice(0, 20) : '',
+      avatar: name.trim().charAt(0).toUpperCase(),
+      controls: defaultStudentControls(),
+      createdAt: new Date().toISOString(),
+    };
+    user.data.parent.students.push(student);
+    saveUsers(users);
+    res.json({ student, parent: sanitizeParent(user.data.parent) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/parent/students/:sid', authMiddleware, async (req, res) => {
+  try {
+    const pin = req.headers['x-parent-pin'] || req.body?.pin;
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const user = users[email];
+    user.data = migrateUserData(user.data);
+    const ok = await checkPin(user, pin);
+    if (!ok) return res.status(403).json({ error: 'Incorrect PIN' });
+    const before = user.data.parent.students.length;
+    user.data.parent.students = user.data.parent.students.filter(s => s.id !== req.params.sid);
+    if (user.data.parent.activeStudentId === req.params.sid) {
+      user.data.parent.activeStudentId = null;
+    }
+    if (user.data.parent.students.length === before) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+    saveUsers(users);
+    res.json({ parent: sanitizeParent(user.data.parent) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Switch into a child profile. Doesn't require PIN — children should be
+// able to swap between their own profiles freely (think: family iPad).
+// Leaving child mode (back to parent view) DOES require PIN.
+app.post('/api/parent/students/:sid/switch', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const user = users[email];
+    user.data = migrateUserData(user.data);
+    if (!user.data.parent.enabled) return res.status(400).json({ error: 'Parent mode not set up' });
+    const student = user.data.parent.students.find(s => s.id === req.params.sid);
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+    user.data.parent.activeStudentId = student.id;
+    user.data.parent.activeAdultId = null; // clear any active adult
+    saveUsers(users);
+    res.json({ activeStudentId: student.id, student });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Select the parent admin profile from the ProfilePicker (or any "switch
+// to admin" UI). When parent mode is enabled this REQUIRES the PIN —
+// otherwise a child could just click "Parent Admin Panel" to escape
+// restrictions. When parent mode is NOT yet set up, no PIN is needed and
+// we send back `requiresSetup` so the client can route to the setup form.
+//
+// On success clears `activeStudentId` so the dock/sidebar/feature filters
+// all fall back to the unrestricted parent view.
+app.post('/api/parent/select-admin', authMiddleware, async (req, res) => {
+  try {
+    const { pin } = req.body || {};
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const user = users[email];
+    user.data = migrateUserData(user.data);
+
+    if (!user.data.parent.enabled) {
+      user.data.parent.activeStudentId = null;
+      user.data.parent.activeAdultId = null;
+      saveUsers(users);
+      return res.json({ success: true, requiresSetup: true });
+    }
+
+    if (user.data.parent.pinHash) {
+      const ok = await checkPin(user, pin);
+      if (!ok) return res.status(403).json({ error: 'Incorrect PIN' });
+    }
+
+    user.data.parent.activeStudentId = null;
+    user.data.parent.activeAdultId = null;
+    user.data.parent.lastParentUnlockAt = new Date().toISOString();
+    saveUsers(users);
+    res.json({ success: true, activeStudentId: null, activeAdultId: null });
+  } catch (e) { console.error('parent/select-admin:', e); res.status(500).json({ error: e.message }); }
+});
+
+
+// ===== ADULT FAMILY MEMBERS =====
+// Adults have full app access (no restrictions) but need PIN to enter the
+// family manager panel. No PIN is needed to switch TO an adult profile.
+
+// Add an adult family member (PIN-gated, family manager only).
+app.post('/api/parent/adults', authMiddleware, async (req, res) => {
+  try {
+    const { pin, name, color } = req.body || {};
+    if (!name || typeof name !== 'string') return res.status(400).json({ error: 'Name required' });
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const user = users[email];
+    user.data = migrateUserData(user.data);
+    if (!user.data.parent.enabled) return res.status(400).json({ error: 'Parent mode not set up' });
+    const ok = await checkPin(user, pin);
+    if (!ok) return res.status(403).json({ error: 'Incorrect PIN' });
+    if ((user.data.parent.adults || []).length >= 8) return res.status(400).json({ error: 'Max 8 adult profiles' });
+    const adult = {
+      id: crypto.randomUUID(),
+      name: name.slice(0, 40),
+      color: color || pickColor((user.data.parent.adults || []).length),
+      avatar: name.charAt(0).toUpperCase(),
+      createdAt: new Date().toISOString(),
+    };
+    user.data.parent.adults = user.data.parent.adults || [];
+    user.data.parent.adults.push(adult);
+    saveUsers(users);
+    res.json({ adult, parent: sanitizeParent(user.data.parent) });
+  } catch (e) { console.error('parent/adults post:', e); res.status(500).json({ error: e.message }); }
+});
+
+// Remove an adult family member (PIN-gated).
+app.delete('/api/parent/adults/:aid', authMiddleware, async (req, res) => {
+  try {
+    const pin = req.headers['x-parent-pin'] || req.query?.pin;
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const user = users[email];
+    user.data = migrateUserData(user.data);
+    const ok = await checkPin(user, pin);
+    if (!ok) return res.status(403).json({ error: 'Incorrect PIN' });
+    user.data.parent.adults = (user.data.parent.adults || []).filter(a => a.id !== req.params.aid);
+    if (user.data.parent.activeAdultId === req.params.aid) user.data.parent.activeAdultId = null;
+    saveUsers(users);
+    res.json({ parent: sanitizeParent(user.data.parent) });
+  } catch (e) { console.error('parent/adults delete:', e); res.status(500).json({ error: e.message }); }
+});
+
+// Switch to an adult profile. No PIN required — adults are trusted.
+app.post('/api/parent/adults/:aid/switch', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const user = users[email];
+    user.data = migrateUserData(user.data);
+    if (!user.data.parent.enabled) return res.status(400).json({ error: 'Parent mode not set up' });
+    const adult = (user.data.parent.adults || []).find(a => a.id === req.params.aid);
+    if (!adult) return res.status(404).json({ error: 'Adult not found' });
+    user.data.parent.activeAdultId = adult.id;
+    user.data.parent.activeStudentId = null; // clear any active child
+    saveUsers(users);
+    res.json({ activeAdultId: adult.id, adult });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Exit adult profile mode. No PIN required.
+app.post('/api/parent/exit-adult', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const user = users[email];
+    user.data = migrateUserData(user.data);
+    user.data.parent.activeAdultId = null;
+    saveUsers(users);
+    res.json({ success: true, activeAdultId: null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Change the parent PIN. Authenticates with the OLD pin so a kid who
+// somehow gets a session can't rotate the PIN out from under the parent.
+app.post('/api/parent/change-pin', authMiddleware, async (req, res) => {
+  try {
+    const { oldPin, newPin } = req.body || {};
+    if (!isValidPin(newPin)) return res.status(400).json({ error: 'New PIN must be 4–6 digits' });
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const user = users[email];
+    user.data = migrateUserData(user.data);
+    if (!user.data.parent.enabled) return res.status(400).json({ error: 'Parent mode not enabled' });
+    const ok = await checkPin(user, oldPin);
+    if (!ok) return res.status(403).json({ error: 'Current PIN is incorrect' });
+    user.data.parent.pinHash = await hashPin(newPin);
+    user.data.parent.lastParentUnlockAt = new Date().toISOString();
+    saveUsers(users);
+    res.json({ success: true, parent: sanitizeParent(user.data.parent) });
+  } catch (e) { console.error('parent/change-pin:', e); res.status(500).json({ error: e.message }); }
+});
+
+// Disable parent mode entirely. Wipes PIN + students + activeStudentId.
+// Existing curricula stay where they are — just stop being scoped per
+// student. PIN-gated so a child can't disable restrictions themselves.
+app.post('/api/parent/disable', authMiddleware, async (req, res) => {
+  try {
+    const { pin } = req.body || {};
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const user = users[email];
+    user.data = migrateUserData(user.data);
+    if (!user.data.parent.enabled) return res.json({ success: true });
+    const ok = await checkPin(user, pin);
+    if (!ok) return res.status(403).json({ error: 'Incorrect PIN' });
+    user.data.parent = {
+      enabled: false,
+      pinHash: null,
+      students: [],
+      activeStudentId: null,
+      lastParentUnlockAt: null,
+    };
+    saveUsers(users);
+    res.json({ success: true });
+  } catch (e) { console.error('parent/disable:', e); res.status(500).json({ error: e.message }); }
+});
+
+// Aggregate activity feed across ALL children. Used by the admin panel
+// for a single-pane view of what every kid has been doing. Newest first,
+// capped at 30 events to keep the response small.
+app.get('/api/parent/activity', authMiddleware, async (req, res) => {
+  try {
+    const pin = req.headers['x-parent-pin'] || req.query?.pin;
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const user = users[email];
+    user.data = migrateUserData(user.data);
+    if (!user.data.parent.enabled) return res.status(400).json({ error: 'Parent mode not enabled' });
+    const ok = await checkPin(user, pin);
+    if (!ok) return res.status(403).json({ error: 'Incorrect PIN' });
+
+    const events = [];
+    const studentsById = Object.fromEntries((user.data.parent.students || []).map(s => [s.id, s]));
+    for (const c of (user.data.curricula || [])) {
+      const student = studentsById[c.studentId];
+      if (!student) continue;
+      events.push({
+        kind: 'curriculum_created',
+        studentId: student.id,
+        studentName: student.name,
+        studentColor: student.color,
+        curriculumId: c.id,
+        title: c.title,
+        at: c.createdAt,
+      });
+      for (const u of c.units || []) {
+        for (const l of u.lessons || []) {
+          if (l.isCompleted && l.completedAt) {
+            events.push({
+              kind: 'lesson_completed',
+              studentId: student.id,
+              studentName: student.name,
+              studentColor: student.color,
+              curriculumId: c.id,
+              curriculumTitle: c.title,
+              lessonId: l.id,
+              lessonTitle: l.title,
+              score: l.score,
+              at: l.completedAt,
+            });
+          }
+          if (l.assignment?.submission?.gradedAt) {
+            events.push({
+              kind: 'assignment_graded',
+              studentId: student.id,
+              studentName: student.name,
+              studentColor: student.color,
+              curriculumId: c.id,
+              curriculumTitle: c.title,
+              lessonId: l.id,
+              lessonTitle: l.title,
+              score: l.assignment.submission.score,
+              letter: l.assignment.submission.letter,
+              at: l.assignment.submission.gradedAt,
+            });
+          }
+        }
+      }
+    }
+    for (const sess of (user.data.studySessions || [])) {
+      if (!sess.studentId) continue;
+      const student = studentsById[sess.studentId];
+      if (!student) continue;
+      events.push({
+        kind: 'study_session',
+        studentId: student.id,
+        studentName: student.name,
+        studentColor: student.color,
+        sessionId: sess.id,
+        title: sess.title || 'Study session',
+        messageCount: (sess.messages || []).length,
+        at: sess.lastMessageAt || sess.startedAt,
+      });
+    }
+    events.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+    res.json({ events: events.slice(0, 30) });
+  } catch (e) { console.error('parent/activity:', e); res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/parent/exit-child', authMiddleware, async (req, res) => {
+  try {
+    const { pin } = req.body || {};
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const user = users[email];
+    user.data = migrateUserData(user.data);
+    const ok = await checkPin(user, pin);
+    if (!ok) return res.status(403).json({ error: 'Incorrect PIN' });
+    user.data.parent.activeStudentId = null;
+    user.data.parent.lastParentUnlockAt = new Date().toISOString();
+    saveUsers(users);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/parent/dashboard', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const user = users[email];
+    user.data = migrateUserData(user.data);
+    if (!user.data.parent.enabled) return res.status(400).json({ error: 'Parent mode not set up' });
+    const students = user.data.parent.students.map(s => ({
+      ...s,
+      summary: summarizeStudent(user, s.id),
+    }));
+    res.json({ students });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Update a child's controls. PIN-gated — the child can't lift their own
+// restrictions. Accepts a partial controls object; unspecified keys keep
+// their previous value.
+app.put('/api/parent/students/:sid/controls', authMiddleware, async (req, res) => {
+  try {
+    const { pin, controls } = req.body || {};
+    if (!controls || typeof controls !== 'object') {
+      return res.status(400).json({ error: 'controls object required' });
+    }
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const user = users[email];
+    user.data = migrateUserData(user.data);
+    const ok = await checkPin(user, pin);
+    if (!ok) return res.status(403).json({ error: 'Incorrect PIN' });
+    const student = user.data.parent.students.find(s => s.id === req.params.sid);
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+    ensureStudentControls(student);
+
+    // Validate + merge each field defensively.
+    const def = defaultStudentControls();
+    if (Array.isArray(controls.blockedApps)) {
+      // Cap + dedupe + only allow known app ids. The list mirrors
+      // appRegistry — we don't import the JS module so we keep a
+      // server-side allowlist instead.
+      const ALLOWED = ['curricula', 'lessons', 'study', 'notes', 'mathtutor', 'debate', 'quizbowl'];
+      student.controls.blockedApps = [...new Set(controls.blockedApps.filter(a => ALLOWED.includes(a)))].slice(0, ALLOWED.length);
+    }
+    if (typeof controls.requireGraded === 'boolean') student.controls.requireGraded = controls.requireGraded;
+    if (typeof controls.allowChats === 'boolean') student.controls.allowChats = controls.allowChats;
+    if (typeof controls.socraticMode === 'boolean') student.controls.socraticMode = controls.socraticMode;
+    if (typeof controls.blockAnswerHints === 'boolean') student.controls.blockAnswerHints = controls.blockAnswerHints;
+    if (controls.difficultyFloor === null || ['beginner', 'intermediate', 'advanced', 'expert'].includes(controls.difficultyFloor)) {
+      student.controls.difficultyFloor = controls.difficultyFloor;
+    }
+
+    saveUsers(users);
+    res.json({ student, parent: sanitizeParent(user.data.parent) });
+  } catch (e) { console.error('parent/controls:', e); res.status(500).json({ error: e.message }); }
+});
+
+// List a child's chats (PIN-gated). Returns lesson chats AND study sessions
+// in a single feed. Each entry is a metadata stub — the full transcript is
+// fetched separately via the next endpoint to keep the list response small.
+app.get('/api/parent/students/:sid/chats', authMiddleware, async (req, res) => {
+  try {
+    const pin = req.headers['x-parent-pin'] || req.query?.pin;
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const user = users[email];
+    user.data = migrateUserData(user.data);
+    const ok = await checkPin(user, pin);
+    if (!ok) return res.status(403).json({ error: 'Incorrect PIN' });
+    const student = user.data.parent.students.find(s => s.id === req.params.sid);
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+
+    const chats = [];
+    // Lesson chats — pulled from every lesson in every curriculum owned
+    // by this child.
+    for (const c of (user.data.curricula || [])) {
+      if (c.studentId !== student.id) continue;
+      for (const u of c.units || []) {
+        for (const l of u.lessons || []) {
+          if (!Array.isArray(l.chatHistory) || l.chatHistory.length === 0) continue;
+          const last = l.chatHistory[l.chatHistory.length - 1];
+          chats.push({
+            kind: 'lesson',
+            id: `${c.id}::${l.id}`,
+            curriculumId: c.id,
+            curriculumTitle: c.title,
+            lessonId: l.id,
+            lessonTitle: l.title,
+            messageCount: l.chatHistory.length,
+            lastActivity: last?.timestamp || l.completedAt || null,
+            preview: lastUserPreview(l.chatHistory),
+          });
+        }
+      }
+    }
+    // Study sessions — open-ended chats outside the curriculum.
+    for (const sess of (user.data.studySessions || [])) {
+      if (sess.studentId && sess.studentId !== student.id) continue;
+      // Legacy sessions without studentId belong to the parent, not a child —
+      // skip them so a parent's own study chats don't leak into the child's
+      // viewer.
+      if (!sess.studentId) continue;
+      chats.push({
+        kind: 'study',
+        id: sess.id,
+        title: sess.title || 'Untitled study session',
+        messageCount: (sess.messages || []).length,
+        lastActivity: sess.updatedAt || sess.createdAt || null,
+        preview: lastUserPreview(sess.messages),
+      });
+    }
+    chats.sort((a, b) => new Date(b.lastActivity || 0) - new Date(a.lastActivity || 0));
+    res.json({ chats });
+  } catch (e) { console.error('parent/chats list:', e); res.status(500).json({ error: e.message }); }
+});
+
+function lastUserPreview(messages) {
+  if (!Array.isArray(messages)) return '';
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === 'user' && messages[i]?.content) {
+      return String(messages[i].content).slice(0, 140);
+    }
+  }
+  return '';
+}
+
+// Full transcript for one chat. `kind=lesson` expects id = "curriculumId::lessonId".
+// `kind=study` expects a session id.
+app.get('/api/parent/students/:sid/chats/:kind/:id', authMiddleware, async (req, res) => {
+  try {
+    const pin = req.headers['x-parent-pin'] || req.query?.pin;
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const user = users[email];
+    user.data = migrateUserData(user.data);
+    const ok = await checkPin(user, pin);
+    if (!ok) return res.status(403).json({ error: 'Incorrect PIN' });
+    const student = user.data.parent.students.find(s => s.id === req.params.sid);
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+
+    if (req.params.kind === 'lesson') {
+      const [cid, lid] = String(req.params.id).split('::');
+      const curriculum = (user.data.curricula || []).find(c => c.id === cid && c.studentId === student.id);
+      if (!curriculum) return res.status(404).json({ error: 'Lesson not found' });
+      const found = findLessonInCurriculum(curriculum, lid);
+      if (!found) return res.status(404).json({ error: 'Lesson not found' });
+      return res.json({
+        kind: 'lesson',
+        title: `${found.lesson.title} (${curriculum.title})`,
+        messages: found.lesson.chatHistory || [],
+      });
+    }
+    if (req.params.kind === 'study') {
+      const sess = (user.data.studySessions || []).find(s => s.id === req.params.id && s.studentId === student.id);
+      if (!sess) return res.status(404).json({ error: 'Study session not found' });
+      return res.json({
+        kind: 'study',
+        title: sess.title || 'Study session',
+        messages: sess.messages || [],
+      });
+    }
+    res.status(400).json({ error: 'Unknown chat kind' });
+  } catch (e) { console.error('parent/chats get:', e); res.status(500).json({ error: e.message }); }
+});
+
+// Strip pinHash before sending parent state to the client. Also backfills
+// per-student controls on the way out so the UI always gets a populated
+// `controls` object even on legacy student records.
+function sanitizeParent(parent) {
+  if (!parent) return null;
+  const { pinHash, ...safe } = parent;
+  safe.students = (safe.students || []).map(s => {
+    ensureStudentControls(s);
+    return s;
+  });
+  safe.adults = safe.adults || [];
+  return { ...safe, hasPin: !!pinHash };
+}
+
+function pickColor(i) {
+  const palette = ['#3B82F6', '#A855F7', '#EC4899', '#F59E0B', '#10B981', '#EF4444', '#06B6D4', '#8B5CF6'];
+  return palette[i % palette.length];
+}
 
 // ===== AI CHAT (generic) =====
 // Convert Claude-style messages [{role:'user'|'assistant', content:'...', images?:[...]}]
@@ -935,9 +1840,13 @@ function extractLessonDoneJson(text) {
 
 app.post('/api/chat', async (req, res) => {
   try {
-    const { messages, system, model, max_tokens, sourced } = req.body;
+    const { messages, system, model, max_tokens, sourced, jsonMode, disableThinking } = req.body;
     const systemPrompt = system || 'You are a helpful AI assistant.';
-    const result = await callGemini(systemPrompt, messages, model, max_tokens || 4096, { enableWebSearch: !!sourced });
+    const result = await callGemini(systemPrompt, messages, model, max_tokens || 4096, {
+      enableWebSearch: !!sourced,
+      jsonMode: !!jsonMode,
+      disableThinking: !!disableThinking,
+    });
     if (result.success) return res.json(result.data);
     return res.status(result.status || 500).json({ error: result.error });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1149,10 +2058,70 @@ app.post('/api/demo/lesson/stream', async (req, res) => {
 // ===== CURRICULUM ROUTES =====
 
 // Generate a new curriculum
+// Ask 3-4 clarifying questions about a topic before generation. The
+// student's answers (sent back as `settings.refinements`) anchor the
+// syllabus to what they actually want — scope, prior background, goal.
+app.post('/api/curriculum/refine', authMiddleware, async (req, res) => {
+  try {
+    const { topic, difficulty, audience } = req.body || {};
+    if (!topic || typeof topic !== 'string' || topic.trim().length < 2) {
+      return res.status(400).json({ error: 'topic required' });
+    }
+    const system = `You output strict JSON. Given a study topic, produce 3-4 short clarifying questions a curriculum designer should ask before building a course. Each question is one plain-English sentence with 3-4 multiple-choice answer options that span the realistic spread (not a fake "all of the above"). Questions should disambiguate scope, prior background, and the student's goal.
+
+Output schema (no markdown, no prose):
+{ "questions": [ { "id": "kebab-case", "question": "...", "options": ["...", "...", "..."] } ] }`;
+    const user = `Topic: "${String(topic).slice(0, 200)}"
+Difficulty hint: ${difficulty || 'unspecified'}
+Audience hint: ${audience || 'unspecified'}
+
+Generate 3-4 clarifying questions.`;
+    const result = await callGemini(system, [{ role: 'user', content: user }], GEMINI_FLASH_LITE, 900, {
+      jsonMode: true, disableThinking: true, temperature: 0.4,
+    });
+    if (!result.success) return res.status(500).json({ error: result.error });
+    const text = result.data.content?.[0]?.text || '';
+    const parsed = parseAIJson(text);
+    if (!parsed?.questions || !Array.isArray(parsed.questions)) {
+      return res.status(500).json({ error: 'Failed to parse refinement questions.' });
+    }
+    const questions = parsed.questions.slice(0, 4).map((q, i) => ({
+      id: String(q.id || `q-${i + 1}`),
+      question: String(q.question || '').slice(0, 240),
+      options: Array.isArray(q.options) ? q.options.slice(0, 4).map(o => String(o).slice(0, 120)) : [],
+    })).filter(q => q.question && q.options.length >= 2);
+    res.json({ questions });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
   try {
     const { settings, sources: rawSources } = req.body;
     if (!settings?.topic) return res.status(400).json({ error: 'Topic is required' });
+
+    // Parental controls: if the request is on behalf of an active child,
+    // apply their controls BEFORE running the AI. This is the server-side
+    // backstop — the client UI also reflects the same rules, but we
+    // can't trust client-only enforcement.
+    {
+      const usersCC = loadUsers();
+      const emailCC = findEmailById(usersCC, req.userId);
+      const activeChildId = usersCC?.[emailCC]?.data?.parent?.activeStudentId;
+      const activeChild = activeChildId
+        ? usersCC[emailCC].data.parent.students.find(s => s.id === activeChildId)
+        : null;
+      if (activeChild) {
+        ensureStudentControls(activeChild);
+        if (activeChild.controls.requireGraded) settings.graded = true;
+        const floor = activeChild.controls.difficultyFloor;
+        if (floor) {
+          const order = ['beginner', 'intermediate', 'advanced', 'expert'];
+          const cur = order.indexOf(settings.difficulty);
+          const min = order.indexOf(floor);
+          if (cur < min) settings.difficulty = floor;
+        }
+      }
+    }
 
     // Sources: optional array of { title, kind: 'pdf'|'text'|'url', content, url? }.
     // Already-extracted text — files come from /api/files/extract and URLs
@@ -1237,6 +2206,24 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
     curriculum.createdAt = new Date().toISOString();
     curriculum.settings = { ...settings };
     curriculum.linkedGoalIds = [];
+
+    // Scope this curriculum to the active child profile (if parent mode
+    // is active). Falls back to null = "belongs to the parent / unscoped".
+    const ownerParent = usersC[emailC]?.data?.parent;
+    const activeStudent = ownerParent?.enabled ? (ownerParent.activeStudentId || null) : null;
+    curriculum.studentId = activeStudent;
+
+    // Graded mode metadata. When enabled, each lesson gets an assignment
+    // generated lazily on first visit (see /assignment/generate endpoint),
+    // and a course-level grade is computed as a weighted average.
+    curriculum.graded = settings.graded === true;
+    curriculum.gradingPolicy = curriculum.graded
+      ? {
+          scale: 'percent+letter',
+          assignmentDefaultWeight: 1,
+          autoAssign: true,
+        }
+      : null;
     // Persist the source materials the user attached — minus their full
     // content (kept only metadata, since the content is already baked
     // into every generated lesson via the prompt). Frontend uses this
@@ -1355,18 +2342,29 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
   }
 });
 
-// List all curricula (summaries)
+// List all curricula (summaries). When parent mode is active AND a student
+// is selected, only that student's courses are returned. When no student
+// is selected (parent view), all courses are returned with their studentId
+// so the parental dashboard can group them.
 app.get('/api/curriculum', authMiddleware, (req, res) => {
   try {
     const users = loadUsers();
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
-    const curricula = (users[email].data?.curricula || []).map(c => ({
+    users[email].data = migrateUserData(users[email].data);
+    const parent = users[email].data.parent;
+    const activeStudentId = parent?.enabled ? parent.activeStudentId : null;
+    let raw = users[email].data?.curricula || [];
+    if (activeStudentId) raw = raw.filter(c => c.studentId === activeStudentId);
+    const curricula = raw.map(c => ({
       id: c.id,
       title: c.title,
       description: c.description,
       createdAt: c.createdAt,
       settings: c.settings,
+      studentId: c.studentId || null,
+      graded: c.graded === true,
+      courseGrade: computeCourseGrade(c),
       totalLessons: (c.units || []).reduce((sum, u) => sum + (u.lessons || []).length, 0),
       completedLessons: (c.units || []).reduce((sum, u) => sum + (u.lessons || []).filter(l => l.isCompleted).length, 0),
       unitCount: (c.units || []).length,
@@ -2014,7 +3012,14 @@ SOURCE MODE — NON-NEGOTIABLE RULES:
       // 32k output cap. The previous 8k limit silently truncated long lessons
       // (intro phase + 6 sections + quiz block routinely hit 9-10k). Gemini
       // 2.5 / 3.x both support 32k+ output.
-      generationConfig: { maxOutputTokens: 32768, temperature: 0.7 },
+      // disableThinking: callers that want snappy first-token latency (study
+      // chat, simple Q&A) pass this true. Lessons / curriculum gen leave it
+      // off so the model can plan multi-section structured output.
+      generationConfig: {
+        maxOutputTokens: 32768,
+        temperature: 0.7,
+        ...(opts.disableThinking ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+      },
     });
 
     if (enableWebSearch) {
@@ -2185,12 +3190,16 @@ app.post('/api/curriculum/:id/lesson/:lessonId/chat', authMiddleware, requireMes
     // prompt builder can compose a "course memory" block — what was already
     // taught (with scores + summaries), what's coming up, where this lesson
     // sits — so the AI builds on prior lessons instead of re-teaching them.
+    const _activeChildLC = (() => {
+      const aid = users[email].data?.parent?.activeStudentId;
+      return aid ? (users[email].data.parent.students || []).find(s => s.id === aid) : null;
+    })();
     const systemPrompt = buildLessonChatPrompt(
       lesson.phase, lesson, unit, curriculum.settings,
       users[email].data.profile, users[email].data.preferences, lesson.chatHistory,
       users[email].data.assessmentHistory || [],
       curriculum
-    );
+    ) + buildChildGuardrails(_activeChildLC);
 
     // Build messages from chat history. Attach the current turn's images to
     // the last user message so Gemini sees them as inline_data parts.
@@ -2326,6 +3335,206 @@ function findLessonInCurriculum(curriculum, lessonId) {
   }
   return null;
 }
+
+// =================================================================
+// GRADED MODE — per-lesson assignments + AI grading
+//
+// When a curriculum is created with `settings.graded === true`, each
+// lesson can have an `assignment` attached: a small prompt + rubric that
+// the student responds to in writing. Submissions are graded by the AI
+// (rubric-based) and the score rolls up into a course grade.
+//
+// Lesson shape additions:
+//   lesson.assignment = {
+//     prompt: string,        // the assignment prompt
+//     rubric: [{ label, weight, criterion }],
+//     weight: number,        // weight in course grade (default 1)
+//     generatedAt: ISO,
+//     submission: {          // null until the student submits
+//       text: string,
+//       submittedAt: ISO,
+//       score: number 0-100,
+//       letter: 'A'..'F',
+//       feedback: string,
+//       perRubric: [{ label, score, note }],
+//       gradedAt: ISO,
+//     } | null,
+//   }
+// =================================================================
+
+// Lazy generation: called when the student first opens the assignment view
+// for a graded lesson. Idempotent — if `assignment` already exists, return it.
+app.post('/api/curriculum/:id/lesson/:lessonId/assignment/generate', authMiddleware, async (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const curriculum = findUserCurriculum(users, email, req.params.id);
+    if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
+    if (curriculum.graded !== true) return res.status(400).json({ error: 'Curriculum is not in graded mode' });
+    const found = findLessonInCurriculum(curriculum, req.params.lessonId);
+    if (!found) return res.status(404).json({ error: 'Lesson not found' });
+
+    // Already generated — return as-is.
+    if (found.lesson.assignment?.prompt) {
+      return res.json({ assignment: found.lesson.assignment });
+    }
+
+    const system = `You design rigorous short-form assignments for a graded online course. Output STRICT JSON only. The assignment should make the student demonstrate ACTUAL understanding of the lesson — not just recall a definition.
+
+The student will write a 150-400 word response. The rubric is what the AI uses to grade them. Each rubric criterion is concrete and observable (e.g. "Correctly identifies the bias-variance tradeoff and applies it to the example"), not vague (e.g. "Shows understanding").`;
+    const user = `Design ONE assignment for the lesson:
+Unit: "${found.unit.title}"
+Lesson: "${found.lesson.title}"
+Lesson description: "${found.lesson.description || ''}"
+Course: "${curriculum.title}"
+Difficulty: ${curriculum.settings?.difficulty || 'intermediate'}
+
+Return JSON:
+{
+  "prompt": "The assignment prompt — 1-3 sentences, ends with a clear ask. Should require synthesis or application, not just recall.",
+  "rubric": [
+    { "label": "<2-4 word criterion name>", "weight": <int 1-3>, "criterion": "<one sentence describing what an A response demonstrates for this criterion>" }
+  ]
+}
+
+Rubric should have 3-4 criteria. Weights are relative (3 = most important). Do NOT wrap the JSON in markdown.`;
+
+    const result = await callGemini(system, [{ role: 'user', content: user }], modelForUser(users[email], email), 1200, {
+      jsonMode: true, temperature: 0.7,
+    });
+    if (!result.success) return res.status(500).json({ error: result.error });
+    const text = result.data.content?.[0]?.text || '';
+    const parsed = parseAIJson(text);
+    if (!parsed?.prompt || !Array.isArray(parsed.rubric)) {
+      return res.status(500).json({ error: 'Failed to generate assignment' });
+    }
+
+    found.lesson.assignment = {
+      prompt: String(parsed.prompt).slice(0, 1200),
+      rubric: parsed.rubric.slice(0, 5).map(r => ({
+        label: String(r.label || 'Criterion').slice(0, 60),
+        weight: Math.max(1, Math.min(3, Number(r.weight) || 1)),
+        criterion: String(r.criterion || '').slice(0, 400),
+      })),
+      weight: 1,
+      generatedAt: new Date().toISOString(),
+      submission: null,
+    };
+    saveUsers(users);
+    res.json({ assignment: found.lesson.assignment });
+  } catch (e) {
+    console.error('assignment/generate failed:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/curriculum/:id/lesson/:lessonId/assignment/submit', authMiddleware, async (req, res) => {
+  try {
+    const { text } = req.body || {};
+    if (!text || typeof text !== 'string' || text.trim().length < 20) {
+      return res.status(400).json({ error: 'Submission must be at least 20 characters' });
+    }
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const curriculum = findUserCurriculum(users, email, req.params.id);
+    if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
+    const found = findLessonInCurriculum(curriculum, req.params.lessonId);
+    if (!found) return res.status(404).json({ error: 'Lesson not found' });
+    const assignment = found.lesson.assignment;
+    if (!assignment?.prompt) return res.status(400).json({ error: 'Assignment not generated yet' });
+
+    const rubricLines = (assignment.rubric || [])
+      .map((r, i) => `${i + 1}. [weight ${r.weight}] ${r.label}: ${r.criterion}`)
+      .join('\n');
+    const system = `You are a rigorous but fair teacher grading a short-form assignment. Score each rubric criterion 0–100 based on what the student actually demonstrated. Be specific in feedback — quote the student where useful, point to what's missing, and say what an A-grade response would have added.
+
+Output STRICT JSON only. No markdown fences.`;
+    const userMsg = `LESSON: "${found.lesson.title}" (unit: "${found.unit.title}")
+COURSE: "${curriculum.title}"
+
+ASSIGNMENT PROMPT:
+"""
+${assignment.prompt}
+"""
+
+RUBRIC (grade each criterion 0-100; weights are relative):
+${rubricLines}
+
+STUDENT SUBMISSION:
+"""
+${String(text).slice(0, 6000)}
+"""
+
+Return JSON:
+{
+  "perRubric": [
+    { "label": "<must match rubric label>", "score": <0-100>, "note": "<1-2 sentence justification, specific to what the student wrote>" }
+  ],
+  "feedback": "<3-5 sentences of overall feedback addressed to the student. Mention 1 strength, 1-2 specific gaps, and one concrete next step.>"
+}`;
+
+    const result = await callGemini(system, [{ role: 'user', content: userMsg }], modelForUser(users[email], email), 1600, {
+      jsonMode: true, temperature: 0.4,
+    });
+    if (!result.success) return res.status(500).json({ error: result.error });
+    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
+    if (!parsed || !Array.isArray(parsed.perRubric)) {
+      return res.status(500).json({ error: 'Failed to grade submission' });
+    }
+
+    // Weighted average across the rubric.
+    let total = 0, weightSum = 0;
+    const perRubric = (assignment.rubric || []).map(r => {
+      const match = parsed.perRubric.find(p => String(p.label).toLowerCase() === r.label.toLowerCase());
+      const score = match ? Math.max(0, Math.min(100, Number(match.score) || 0)) : 0;
+      total += score * r.weight;
+      weightSum += r.weight;
+      return {
+        label: r.label,
+        score,
+        note: match?.note ? String(match.note).slice(0, 500) : '',
+      };
+    });
+    const finalScore = weightSum > 0 ? Math.round(total / weightSum) : 0;
+
+    assignment.submission = {
+      text: String(text).slice(0, 6000),
+      submittedAt: new Date().toISOString(),
+      score: finalScore,
+      letter: percentToLetter(finalScore),
+      feedback: String(parsed.feedback || '').slice(0, 1200),
+      perRubric,
+      gradedAt: new Date().toISOString(),
+    };
+    // Submitting an assignment marks the lesson complete.
+    found.lesson.isCompleted = true;
+    if (found.lesson.score == null) found.lesson.score = finalScore;
+    saveUsers(users);
+
+    res.json({
+      submission: assignment.submission,
+      courseGrade: computeCourseGrade(curriculum),
+    });
+  } catch (e) {
+    console.error('assignment/submit failed:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/curriculum/:id/grade', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const curriculum = findUserCurriculum(users, email, req.params.id);
+    if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
+    res.json({ courseGrade: computeCourseGrade(curriculum) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+
 function stampBlock(lessonId, b, i, opts = {}) {
   const blockId = `${lessonId}-b${i}`;
   const base = {
@@ -2775,10 +3984,36 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
     if (!email) return res.status(404).json({ error: 'User not found' });
     users[email].data = migrateUserData(users[email].data);
 
+    // Parental block: if the active child has Study Mode disabled, refuse
+    // at the API layer — the client also hides the icon, but this is the
+    // backstop in case a child opens the URL directly.
+    {
+      const activeId = users[email].data?.parent?.activeStudentId;
+      if (activeId) {
+        const child = users[email].data.parent.students.find(s => s.id === activeId);
+        if (child) {
+          ensureStudentControls(child);
+          if (!child.controls.allowChats || child.controls.blockedApps.includes('study')) {
+            return res.status(403).json({ error: 'Study mode is disabled for this profile.' });
+          }
+        }
+      }
+    }
+
     // Find or create session
     let session = sessionId ? (users[email].data.studySessions || []).find(s => s.id === sessionId) : null;
+    // Stamp the active child id onto new sessions so the parent chat
+    // viewer can filter to "Maya's chats" vs "Leo's chats".
+    const activeChildIdSC = users[email].data?.parent?.activeStudentId || null;
     if (!session) {
-      session = { id: crypto.randomUUID(), startedAt: new Date().toISOString(), lastMessageAt: null, messages: [], context: context || {} };
+      session = {
+        id: crypto.randomUUID(),
+        startedAt: new Date().toISOString(),
+        lastMessageAt: null,
+        messages: [],
+        context: context || {},
+        studentId: activeChildIdSC,
+      };
       users[email].data.studySessions.unshift(session);
     } else if (context && (context.curriculumId !== undefined || context.sources !== undefined)) {
       // Mid-session context updates: caller flipped on curriculum
@@ -2790,12 +4025,16 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
     session.messages.push({ role: 'user', content: message, timestamp: new Date().toISOString() });
     session.lastMessageAt = new Date().toISOString();
 
+    const _activeChildSM = (() => {
+      const aid = users[email].data?.parent?.activeStudentId;
+      return aid ? (users[email].data.parent.students || []).find(s => s.id === aid) : null;
+    })();
     const systemPrompt = buildStudyModePrompt(
       users[email].data.profile, users[email].data.goals,
       users[email].data.curricula, users[email].data.preferences,
       users[email].data.assessmentHistory || [],
       session.context || null
-    );
+    ) + buildChildGuardrails(_activeChildSM);
 
     const aiMessages = session.messages.map(m => ({ role: m.role, content: m.content }));
     if (req.images.length && aiMessages.length && aiMessages[aiMessages.length - 1].role === 'user') {
@@ -2836,7 +4075,11 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
       }
 
       saveUsers(users);
-    }, tierModel, { enableWebSearch: !!req.sourced });
+      // disableThinking: study chat is the "ask a question, get a quick
+      // answer" surface — first-token latency dominates the perceived
+      // speed. Web-search mode keeps thinking on so the model can plan
+      // its searches; everything else skips the hidden CoT phase.
+    }, tierModel, { enableWebSearch: !!req.sourced, disableThinking: !req.sourced });
   } catch (e) {
     console.error('Study chat error:', e);
     if (!res.headersSent) res.status(500).json({ error: e.message });
@@ -3233,7 +4476,9 @@ app.post('/api/notes/:nid/generate-cues', authMiddleware, async (req, res) => {
     if (!note.mainNotes) return res.status(400).json({ error: 'No notes to generate cues from' });
 
     const { system, user } = buildCueGenerationPrompt(note.mainNotes);
-    const result = await callGemini(system, [{ role: 'user', content: user }], DEFAULT_MODEL, 1024, { jsonMode: true, temperature: 0.4 });
+    // Flash-Lite + disableThinking: cues are a fixed-shape, short JSON list;
+    // Gemini 3's CoT here just burns latency without improving the keywords.
+    const result = await callGemini(system, [{ role: 'user', content: user }], GEMINI_FLASH_LITE, 1024, { jsonMode: true, temperature: 0.4, disableThinking: true });
     if (result.success) {
       const parsed = parseAIJson(result.data.content?.[0]?.text || '');
       if (parsed?.cues) {
@@ -3257,7 +4502,8 @@ app.post('/api/notes/:nid/generate-summary', authMiddleware, async (req, res) =>
     if (!note.mainNotes) return res.status(400).json({ error: 'No notes to summarize' });
 
     const { system, user } = buildSummaryPrompt(note.cues, note.mainNotes);
-    const result = await callGemini(system, [{ role: 'user', content: user }], DEFAULT_MODEL, 1024, { jsonMode: true, temperature: 0.4 });
+    // Same speed trick as cue gen: tight summary, no need for CoT.
+    const result = await callGemini(system, [{ role: 'user', content: user }], GEMINI_FLASH_LITE, 1024, { jsonMode: true, temperature: 0.4, disableThinking: true });
     if (result.success) {
       const parsed = parseAIJson(result.data.content?.[0]?.text || '');
       if (parsed?.summary) {
@@ -3271,26 +4517,249 @@ app.post('/api/notes/:nid/generate-summary', authMiddleware, async (req, res) =>
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ===== NOTE GRAPH (Obsidian-style knowledge map) =====
+//
+// One graph per user, stored on user.data.noteGraph. Every existing note
+// is auto-mirrored as a node on first read so the canvas isn't empty for
+// users who have notes but haven't opened the map. Manual/AI nodes carry
+// source='topic' | 'ai' and don't need a backing note.
+
+const GRAPH_PALETTE = ['#60a5fa', '#a78bfa', '#34d399', '#fbbf24', '#f472b6', '#22d3ee', '#fb7185', '#c084fc'];
+
+function ensureNoteGraph(userData) {
+  if (!userData.noteGraph || typeof userData.noteGraph !== 'object') {
+    userData.noteGraph = { nodes: [], edges: [] };
+  }
+  if (!Array.isArray(userData.noteGraph.nodes)) userData.noteGraph.nodes = [];
+  if (!Array.isArray(userData.noteGraph.edges)) userData.noteGraph.edges = [];
+  return userData.noteGraph;
+}
+
+// Mirror every existing note as a graph node if it isn't there yet.
+// Drops note-backed nodes whose note has been deleted. Mutates the
+// graph in place and returns true when something changed (so callers
+// can decide whether to persist).
+function syncGraphWithNotes(userData) {
+  const graph = ensureNoteGraph(userData);
+  const notes = Array.isArray(userData.notes) ? userData.notes : [];
+  let changed = false;
+
+  const liveNoteIds = new Set(notes.map(n => n.id));
+  const beforeLen = graph.nodes.length;
+  graph.nodes = graph.nodes.filter(n => n.source !== 'note' || liveNoteIds.has(n.noteId));
+  if (graph.nodes.length !== beforeLen) changed = true;
+
+  const knownNoteIds = new Set(graph.nodes.filter(n => n.source === 'note').map(n => n.noteId));
+
+  // Lay out new note-nodes on a soft spiral around (0,0) so they don't
+  // all stack on one point — the client's force-layout will spread
+  // things out, but a good starting position avoids the initial pile-up.
+  let spiralIdx = graph.nodes.length;
+  for (const note of notes) {
+    if (knownNoteIds.has(note.id)) continue;
+    const angle = spiralIdx * 0.9;
+    const radius = 90 + spiralIdx * 28;
+    graph.nodes.push({
+      id: `note_${note.id}`,
+      noteId: note.id,
+      label: note.title || 'Untitled Note',
+      source: 'note',
+      color: GRAPH_PALETTE[spiralIdx % GRAPH_PALETTE.length],
+      x: Math.cos(angle) * radius,
+      y: Math.sin(angle) * radius,
+    });
+    spiralIdx += 1;
+    changed = true;
+  }
+
+  // Refresh the label on note-backed nodes if the title changed downstream.
+  const byNoteId = new Map(notes.map(n => [n.id, n]));
+  for (const node of graph.nodes) {
+    if (node.source !== 'note') continue;
+    const n = byNoteId.get(node.noteId);
+    if (n && n.title && node.label !== n.title) {
+      node.label = n.title;
+      changed = true;
+    }
+  }
+
+  // Drop any edge that references a now-missing node.
+  const liveNodeIds = new Set(graph.nodes.map(n => n.id));
+  const beforeEdges = graph.edges.length;
+  graph.edges = graph.edges.filter(e => liveNodeIds.has(e.from) && liveNodeIds.has(e.to));
+  if (graph.edges.length !== beforeEdges) changed = true;
+
+  return changed;
+}
+
+app.get('/api/note-graph', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const changed = syncGraphWithNotes(users[email].data);
+    if (changed) saveUsers(users);
+    res.json({ graph: users[email].data.noteGraph });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/note-graph', authMiddleware, (req, res) => {
+  try {
+    const { nodes, edges } = req.body || {};
+    if (!Array.isArray(nodes) || !Array.isArray(edges)) {
+      return res.status(400).json({ error: 'nodes and edges must be arrays' });
+    }
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+
+    // Sanitize: only keep the fields we own. Drops user-injected keys.
+    const safeNodes = nodes.slice(0, 500).map(n => ({
+      id: String(n.id || crypto.randomUUID()).slice(0, 80),
+      noteId: n.noteId ? String(n.noteId).slice(0, 80) : null,
+      label: String(n.label || 'Untitled').slice(0, 120),
+      source: (n.source === 'note' || n.source === 'ai' || n.source === 'topic') ? n.source : 'topic',
+      color: typeof n.color === 'string' ? n.color.slice(0, 24) : GRAPH_PALETTE[0],
+      x: Number.isFinite(n.x) ? Number(n.x) : 0,
+      y: Number.isFinite(n.y) ? Number(n.y) : 0,
+    }));
+    const liveIds = new Set(safeNodes.map(n => n.id));
+    const seenEdgeKey = new Set();
+    const safeEdges = [];
+    for (const e of edges.slice(0, 2000)) {
+      const a = String(e.from || '');
+      const b = String(e.to || '');
+      if (!a || !b || a === b) continue;
+      if (!liveIds.has(a) || !liveIds.has(b)) continue;
+      const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+      if (seenEdgeKey.has(key)) continue;
+      seenEdgeKey.add(key);
+      safeEdges.push({ from: a, to: b, label: e.label ? String(e.label).slice(0, 60) : '' });
+    }
+
+    users[email].data.noteGraph = { nodes: safeNodes, edges: safeEdges };
+    saveUsers(users);
+    res.json({ graph: users[email].data.noteGraph });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Ask Gemini for N new related concepts to add to the map. We hand it
+// the existing labels (so it doesn't propose duplicates) and any
+// optional focus text from the user, and expect back a small JSON list
+// of { label, rationale, connectTo[] } where connectTo references
+// existing labels the new node should link to.
+app.post('/api/note-graph/suggest', authMiddleware, async (req, res) => {
+  try {
+    const { focus, focusNodeId, count } = req.body || {};
+    const n = Math.max(2, Math.min(8, Number(count) || 4));
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    syncGraphWithNotes(users[email].data);
+
+    const graph = users[email].data.noteGraph;
+    if (graph.nodes.length === 0 && !focus) {
+      return res.status(400).json({ error: 'Add a note or a focus topic first.' });
+    }
+
+    // Pull a few sentences of context from any note-backed nodes so the
+    // suggestions are grounded in what the student is actually studying.
+    const notesById = new Map((users[email].data.notes || []).map(nt => [nt.id, nt]));
+    const contextBlobs = [];
+    for (const node of graph.nodes.slice(0, 30)) {
+      if (node.source !== 'note' || !node.noteId) continue;
+      const note = notesById.get(node.noteId);
+      if (!note) continue;
+      const body = String(note.mainNotes || '').slice(0, 400);
+      if (body) contextBlobs.push(`- ${node.label}: ${body.replace(/\s+/g, ' ').trim()}`);
+    }
+
+    const existingLabels = graph.nodes.map(n => n.label);
+    const focusNode = focusNodeId ? graph.nodes.find(n => n.id === focusNodeId) : null;
+
+    const system = 'You expand a student\'s study knowledge graph. Output ONLY valid JSON, no markdown, no preamble.';
+    const userPrompt = [
+      `Suggest ${n} NEW concept nodes to add to the graph.`,
+      focusNode ? `Anchor the suggestions around the existing node "${focusNode.label}".` : '',
+      focus && String(focus).trim() ? `Student wants more depth on: ${String(focus).trim()}` : '',
+      existingLabels.length ? `Do NOT propose anything that duplicates an existing label. Existing labels:\n${existingLabels.map(l => `- ${l}`).join('\n')}` : '',
+      contextBlobs.length ? `Excerpts from existing notes (use as context):\n${contextBlobs.join('\n')}` : '',
+      '',
+      'Return this exact JSON shape and nothing else:',
+      '{"suggestions":[{"label":"short concept name (<=40 chars)","rationale":"one short sentence on why it belongs","connectTo":["label of existing node it relates to", "..."]}]}',
+      'Each connectTo entry MUST exactly match an existing label. 1-3 connections per suggestion.',
+    ].filter(Boolean).join('\n\n');
+
+    const result = await callGemini(
+      system,
+      [{ role: 'user', content: userPrompt }],
+      GEMINI_FLASH_LITE,
+      1024,
+      { jsonMode: true, temperature: 0.7, disableThinking: true },
+    );
+    if (!result.success) return res.status(500).json({ error: 'AI call failed' });
+    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
+    if (!parsed || !Array.isArray(parsed.suggestions)) {
+      return res.status(500).json({ error: 'AI did not return suggestions' });
+    }
+
+    const existingByLabel = new Map(graph.nodes.map(node => [node.label.toLowerCase(), node]));
+    const suggestions = parsed.suggestions.slice(0, n).map((s, i) => {
+      const rawLabel = String(s?.label || '').trim().slice(0, 60);
+      if (!rawLabel) return null;
+      // Skip duplicates the model proposed despite our instructions.
+      if (existingByLabel.has(rawLabel.toLowerCase())) return null;
+      const rawConnect = Array.isArray(s?.connectTo) ? s.connectTo : [];
+      const connectIds = [];
+      for (const targetLabel of rawConnect) {
+        const m = existingByLabel.get(String(targetLabel || '').toLowerCase().trim());
+        if (m) connectIds.push(m.id);
+      }
+      // Always link new suggestions back to the focus node when one is set
+      // and the AI didn't already wire it up.
+      if (focusNode && !connectIds.includes(focusNode.id)) connectIds.unshift(focusNode.id);
+      return {
+        tempId: `sugg_${Date.now()}_${i}`,
+        label: rawLabel,
+        rationale: String(s?.rationale || '').slice(0, 200),
+        connectTo: connectIds,
+      };
+    }).filter(Boolean);
+
+    res.json({ suggestions });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ===== ASSESSMENTS =====
 
 // One Flash-Lite call. Tight inline prompt that bypasses the verbose
 // buildAssessmentPrompt helper. Retries once on parse failure with a
 // shorter prompt so a single bad response doesn't surface as an error
 // to the user.
-async function generateAssessmentOnce({ topic, type, questionCount, difficulty }) {
+async function generateAssessmentOnce({ topic, type, questionCount, difficulty, context }) {
   const isEssay = type === 'essay';
   const sys = 'Output ONLY valid JSON. No markdown, no preamble, no commentary. Just the JSON object.';
+  // Optional note/source context — when present, the quiz must be grounded
+  // in this text rather than the model's general knowledge of the topic.
+  const ctxBlock = context && String(context).trim()
+    ? `\n\nGROUND THE QUESTIONS IN THIS SOURCE MATERIAL — do NOT pull from outside knowledge. Every question must be answerable from the text below:\n"""\n${String(context).slice(0, 12000)}\n"""\n`
+    : '';
   const usr = isEssay
-    ? `Create an essay assessment on "${topic}" (${difficulty} level).
+    ? `Create an essay assessment on "${topic}" (${difficulty} level).${ctxBlock}
 Return this exact JSON:
 {"title":"Essay: ${topic}","type":"essay","prompt":"the essay question (1-2 sentences)","rubric":[{"criterion":"...","maxScore":5,"description":"..."},{"criterion":"...","maxScore":5,"description":"..."},{"criterion":"...","maxScore":5,"description":"..."}]}`
-    : `Create ${questionCount} multiple-choice questions on "${topic}" (${difficulty} level). Each option starts with "A) ", "B) ", "C) ", or "D) ". The "correct" field is just the letter.
+    : `Create ${questionCount} multiple-choice questions on "${topic}" (${difficulty} level). Each option starts with "A) ", "B) ", "C) ", or "D) ". The "correct" field is just the letter.${ctxBlock}
 Return this exact JSON:
 {"title":"Quiz: ${topic}","type":"quiz","questions":[{"id":"q1","question":"...","options":["A) ...","B) ...","C) ...","D) ..."],"correct":"A","explanation":"why A is right"}]}`;
 
   // Tight maxOutputTokens — 2k is plenty for 5 short MCQs and forces
   // the model to wrap quickly instead of padding explanations.
-  const result = await callGemini(sys, [{ role: 'user', content: usr }], GEMINI_FLASH_LITE, 2048, { jsonMode: true, temperature: 0.5 });
+  // disableThinking: Gemini 3's CoT on a one-shot JSON quiz add ~3-8s of
+  // hidden-token latency without measurably improving question quality.
+  const result = await callGemini(sys, [{ role: 'user', content: usr }], GEMINI_FLASH_LITE, 2048, { jsonMode: true, temperature: 0.5, disableThinking: true });
   if (!result.success) return null;
   const parsed = parseAIJson(result.data.content?.[0]?.text || '');
   if (!parsed) return null;
@@ -3306,14 +4775,14 @@ Return this exact JSON:
 
 app.post('/api/assessment/generate', authMiddleware, async (req, res) => {
   try {
-    const { topic, type = 'quiz', questionCount = 5, difficulty = 'beginner' } = req.body;
+    const { topic, type = 'quiz', questionCount = 5, difficulty = 'beginner', context = '' } = req.body;
     if (!topic) return res.status(400).json({ error: 'Topic required' });
 
     // First attempt.
-    let parsed = await generateAssessmentOnce({ topic, type, questionCount, difficulty });
+    let parsed = await generateAssessmentOnce({ topic, type, questionCount, difficulty, context });
     // One retry if the first response didn't parse cleanly. Catches
     // the rare jsonMode hiccup without making the user click again.
-    if (!parsed) parsed = await generateAssessmentOnce({ topic, type, questionCount, difficulty });
+    if (!parsed) parsed = await generateAssessmentOnce({ topic, type, questionCount, difficulty, context });
     if (!parsed) return res.status(502).json({ error: 'Could not generate. Try again.' });
 
     const assessment = { id: crypto.randomUUID(), ...parsed, createdAt: new Date().toISOString() };
@@ -7075,6 +8544,402 @@ async function fetchQBReaderTossups({ count = 10, category = 'Mixed', difficulty
   return tossups;
 }
 
+// ===== QUIZ BOWL HISTORY / RECOMMENDATIONS =====
+//
+// `quizbowlSets` lives on user.data — each completed solo set is saved
+// here so the QuizBowl hub view can show past sets, category-level
+// performance, and recommend training rounds against the player's
+// weakest categories. Multiplayer matches are not saved here (those
+// have their own lifecycle in the in-memory match registry).
+
+const QB_CATEGORIES = ['Science', 'History', 'Literature', 'Geography', 'Math', 'Art', 'Music', 'Philosophy', 'Pop Culture', 'Mixed'];
+
+// Build a category accuracy map from a user's saved sets. Mixed gets
+// split into its per-question categories so a single mixed round
+// counts against every category it touched.
+function computeQBCategoryStats(sets) {
+  const out = {};
+  for (const s of sets || []) {
+    for (const q of s.perQuestion || []) {
+      const cat = q.category || s.category || 'Mixed';
+      if (!out[cat]) out[cat] = { correct: 0, total: 0 };
+      out[cat].total++;
+      if (q.correct) out[cat].correct++;
+    }
+  }
+  return out;
+}
+
+// POST /api/quizbowl/sets — save a completed solo set. Body shape
+// matches the on-disk record above; we backfill `id` + `finishedAt`
+// so the client doesn't have to.
+app.post('/api/quizbowl/sets', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const { category, difficulty, source, score, total, durationMs, perQuestion = [], categoryStats = null } = req.body || {};
+    if (!Number.isFinite(total) || total <= 0) return res.status(400).json({ error: 'Invalid set' });
+
+    const entry = {
+      id: crypto.randomUUID(),
+      category: category || 'Mixed',
+      difficulty: difficulty || 'Medium',
+      source: source === 'ai' ? 'ai' : 'qbreader',
+      score: Number(score) || 0,
+      total: Number(total) || 0,
+      durationMs: Number(durationMs) || 0,
+      finishedAt: new Date().toISOString(),
+      perQuestion: Array.isArray(perQuestion) ? perQuestion.slice(0, 50) : [],
+      categoryStats: categoryStats && typeof categoryStats === 'object' ? categoryStats : null,
+    };
+
+    users[email].data.quizbowlSets = users[email].data.quizbowlSets || [];
+    users[email].data.quizbowlSets.unshift(entry);
+    if (users[email].data.quizbowlSets.length > 200) {
+      users[email].data.quizbowlSets = users[email].data.quizbowlSets.slice(0, 200);
+    }
+
+    // Roll category accuracy into profile.topicScores so other surfaces
+    // (study mode strength prompts, dashboard, AI recommendations)
+    // know this user is weak / strong in this area.
+    const prof = users[email].data.profile;
+    prof.topicScores = prof.topicScores || {};
+    for (const q of entry.perQuestion) {
+      const key = ('qb-' + (q.category || entry.category || 'mixed')).toLowerCase().replace(/[^a-z0-9-]/g, '-');
+      const existing = prof.topicScores[key] || { score: 0, attempts: 0 };
+      existing.attempts++;
+      const pct = q.correct ? 100 : 0;
+      existing.score = Math.round((existing.score * (existing.attempts - 1) + pct) / existing.attempts);
+      existing.lastAttempt = new Date().toISOString();
+      prof.topicScores[key] = existing;
+    }
+    // Refresh strengths/weaknesses derived lists (top + bottom topicScores)
+    const allScores = Object.entries(prof.topicScores);
+    prof.strengths = allScores.filter(([, v]) => (v.attempts || 0) >= 3 && v.score >= 75).map(([k]) => k).slice(0, 5);
+    prof.weaknesses = allScores.filter(([, v]) => (v.attempts || 0) >= 3 && v.score < 60).map(([k]) => k).slice(0, 5);
+
+    saveUsers(users);
+    res.json({ ok: true, set: entry });
+  } catch (e) {
+    console.error('QB save set error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/quizbowl/sets — history with aggregate stats. Returns
+// { sets, stats } so the client doesn't have to compute the rollups.
+app.get('/api/quizbowl/sets', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const sets = users[email].data.quizbowlSets || [];
+    const categoryStats = computeQBCategoryStats(sets);
+    const totalQuestions = sets.reduce((s, x) => s + (x.total || 0), 0);
+    const totalCorrect = sets.reduce((s, x) => s + (x.score || 0), 0);
+    const totalDurationMs = sets.reduce((s, x) => s + (x.durationMs || 0), 0);
+    res.json({
+      sets,
+      stats: {
+        sets: sets.length,
+        totalQuestions,
+        totalCorrect,
+        accuracy: totalQuestions ? Math.round((totalCorrect / totalQuestions) * 100) : 0,
+        studyMs: totalDurationMs,
+        categoryStats,
+        lastPlayedAt: sets[0]?.finishedAt || null,
+      },
+    });
+  } catch (e) {
+    console.error('QB list sets error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/quizbowl/recommendations — Gemini picks 3 specific niche sub-topics
+// to drill based on the student's category history. Each recommendation launches
+// an AI-generated set focused on that exact topic. Falls back to static logic
+// if Gemini is unavailable.
+app.get('/api/quizbowl/recommendations', authMiddleware, async (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const sets = users[email].data.quizbowlSets || [];
+    const cats = computeQBCategoryStats(sets);
+
+    const playedSet = new Set(Object.keys(cats));
+    const unplayed = QB_CATEGORIES.filter(c => c !== 'Mixed' && !playedSet.has(c));
+    const lastDiff = sets[0]?.difficulty || 'Medium';
+
+    // Build a compact performance summary for Gemini's context.
+    const perfLines = Object.entries(cats)
+      .map(([cat, v]) => `${cat}: ${Math.round((v.correct / v.total) * 100)}% (${v.total} questions)`)
+      .join(', ');
+    const contextBlock = sets.length
+      ? `Performance: ${perfLines || 'none'}. Unplayed categories: ${unplayed.join(', ') || 'none'}. Last difficulty used: ${lastDiff}.`
+      : 'New student with no history. Suggest beginner-friendly entry points.';
+
+    const NICHE_HISTORY_TOPICS = [
+      'Congress of Vienna', 'Peloponnesian War', 'Meiji Restoration', 'Haitian Revolution',
+      'Tang Dynasty', 'Byzantine Iconoclasm', 'Thirty Years War', 'Fall of Constantinople',
+      'Scramble for Africa', 'Indian Partition 1947', 'Weimar Republic', 'Mughal Empire',
+      'French Wars of Religion', 'Reconquista', 'Seven Years War', 'Opium Wars',
+    ];
+    const historyTopic = NICHE_HISTORY_TOPICS[Math.floor(Math.random() * NICHE_HISTORY_TOPICS.length)];
+
+    const prompt = `You are a quiz bowl coach. ${contextBlock}
+
+Recommend exactly 3 specific niche sub-topics for pyramidal quiz bowl tossup practice. Be concrete and specific — "Krebs Cycle" not "Biology", "Congress of Vienna" not "History", "Waiting for Godot" not "Literature".
+
+IMPORTANT: At least one recommendation MUST be a specific niche History topic (world history, American history, or European history). Good examples: "${historyTopic}", "Reconstruction Era", "Punic Wars". Avoid broad topics like "History" or "World War II" — go deeper.
+
+Return ONLY valid JSON with no markdown:
+{"recommendations":[{"topic":"Specific Topic Name","category":"Science|History|Literature|Geography|Math|Art|Music|Philosophy|Pop Culture","difficulty":"Easy|Medium|Hard","reason":"One punchy sentence on why to drill this now"}]}
+
+Rules:
+- Each topic must be specific enough to anchor 8–10 tossup questions
+- At least 1 of the 3 must be a niche History sub-topic
+- Prioritise gaps and weak categories; explore unplayed ones too
+- Match difficulty to the student's level (default Medium if no history)
+- Do NOT suggest broad categories as topics`;
+
+    const result = await callGemini(null, [{ role: 'user', content: prompt }], GEMINI_FLASH, 512, { jsonMode: true, temperature: 0.85 });
+    if (result.success) {
+      let parsed;
+      try { parsed = typeof result.text === 'string' ? JSON.parse(result.text) : result.text; } catch {}
+      if (parsed?.recommendations?.length) {
+        let recs = parsed.recommendations.slice(0, 3).map(r => ({
+          kind: 'niche',
+          topic: r.topic,
+          category: r.category || 'Mixed',
+          difficulty: r.difficulty || 'Medium',
+          reason: r.reason || '',
+          source: 'ai',
+          customInstructions: `Focus every question specifically on: ${r.topic}`,
+        }));
+        // Guarantee at least one History rec — inject if Gemini missed it.
+        const hasHistory = recs.some(r => r.category === 'History');
+        if (!hasHistory) {
+          recs[recs.length - 1] = {
+            kind: 'niche',
+            topic: historyTopic,
+            category: 'History',
+            difficulty: lastDiff || 'Medium',
+            reason: `Niche history deep-dive — a great QB staple worth mastering.`,
+            source: 'ai',
+            customInstructions: `Focus every question specifically on: ${historyTopic}`,
+          };
+        }
+        return res.json({ recommendations: recs });
+      }
+    }
+
+    // Fallback: static recommendations — always include a niche history set.
+    const recs = [];
+    const played = Object.entries(cats)
+      .filter(([, v]) => v.total >= 3)
+      .map(([cat, v]) => ({ cat, acc: v.correct / v.total, total: v.total }))
+      .sort((a, b) => a.acc - b.acc);
+    if (played[0]) {
+      recs.push({ kind: 'train-weakness', category: played[0].cat, difficulty: 'Medium', source: 'qbreader', reason: `Your weakest category — ${Math.round(played[0].acc * 100)}% over ${played[0].total} Q` });
+    }
+    // Always add a niche history AI set.
+    recs.push({
+      kind: 'niche', topic: historyTopic, category: 'History',
+      difficulty: lastDiff || 'Medium', source: 'ai',
+      reason: `Niche history set — great for building depth in QB.`,
+      customInstructions: `Focus every question specifically on: ${historyTopic}`,
+    });
+    if (unplayed.length) {
+      const pick = unplayed.find(c => c !== 'History') || unplayed[0];
+      recs.push({ kind: 'explore', category: pick, difficulty: 'Easy', source: 'qbreader', reason: `New for you — try ${pick}` });
+    } else {
+      recs.push({ kind: 'mixed', category: 'Mixed', difficulty: lastDiff, source: 'qbreader', reason: sets.length ? `Continue from last (${lastDiff})` : 'Warm-up round' });
+    }
+    res.json({ recommendations: recs.slice(0, 3) });
+  } catch (e) {
+    console.error('QB recommendations error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/quizbowl/patterns — compute buzz timing analytics from the
+// user's history. Returns insights about when the user tends to buzz,
+// how that correlates with accuracy, and per-category buzz habits.
+app.get('/api/quizbowl/patterns', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const sets = users[email].data.quizbowlSets || [];
+
+    // Flatten all per-question records that have valid buzz data.
+    const allQs = [];
+    for (const s of sets) {
+      for (const q of (s.perQuestion || [])) {
+        if (typeof q.buzzWord === 'number' && typeof q.totalWords === 'number' && q.totalWords > 0) {
+          allQs.push({ ...q, setCategory: s.category, setDifficulty: s.difficulty });
+        }
+      }
+    }
+
+    if (!allQs.length) {
+      return res.json({ patterns: null, message: 'Not enough data yet. Play a few sets first.' });
+    }
+
+    const buzzed = allQs.filter(q => q.buzzWord >= 0);
+    const timedOut = allQs.filter(q => q.buzzWord < 0);
+
+    // Buzz position as fraction (0 = first word, 1 = last word).
+    const positions = buzzed.map(q => q.buzzWord / q.totalWords);
+    const avgPosition = positions.length ? positions.reduce((a, b) => a + b, 0) / positions.length : 0;
+
+    // Thirds: early (0–33%), mid (33–66%), late (66–100%).
+    const early = buzzed.filter(q => q.buzzWord / q.totalWords < 0.33);
+    const mid = buzzed.filter(q => { const p = q.buzzWord / q.totalWords; return p >= 0.33 && p < 0.66; });
+    const late = buzzed.filter(q => q.buzzWord / q.totalWords >= 0.66);
+
+    function accOf(arr) {
+      if (!arr.length) return 0;
+      return Math.round((arr.filter(q => q.correct).length / arr.length) * 100);
+    }
+
+    // Per-category buzz habits.
+    const catMap = {};
+    for (const q of buzzed) {
+      const cat = q.category || q.setCategory || 'Mixed';
+      if (!catMap[cat]) catMap[cat] = { buzzes: [], correct: 0, total: 0 };
+      catMap[cat].buzzes.push(q.buzzWord / q.totalWords);
+      catMap[cat].total++;
+      if (q.correct) catMap[cat].correct++;
+    }
+    const categoryPatterns = Object.entries(catMap)
+      .filter(([, v]) => v.total >= 2)
+      .map(([cat, v]) => ({
+        category: cat,
+        avgBuzzPosition: Math.round((v.buzzes.reduce((a, b) => a + b, 0) / v.buzzes.length) * 100),
+        accuracy: Math.round((v.correct / v.total) * 100),
+        total: v.total,
+      }))
+      .sort((a, b) => a.avgBuzzPosition - b.avgBuzzPosition);
+
+    // Trend: last 5 sets vs all-time. Compares avg buzz position.
+    const recentQs = [];
+    for (const s of sets.slice(0, 5)) {
+      for (const q of (s.perQuestion || [])) {
+        if (typeof q.buzzWord === 'number' && q.buzzWord >= 0 && typeof q.totalWords === 'number' && q.totalWords > 0) {
+          recentQs.push(q.buzzWord / q.totalWords);
+        }
+      }
+    }
+    const recentAvg = recentQs.length ? recentQs.reduce((a, b) => a + b, 0) / recentQs.length : avgPosition;
+    const trend = avgPosition > 0 ? Math.round(((avgPosition - recentAvg) / avgPosition) * 100) : 0;
+    // Positive trend means recent buzzes are earlier (improving).
+
+    // Optimal buzz zone: the position range where accuracy is highest.
+    // Bucket into 10 bins and find the one with the best accuracy.
+    const BINS = 10;
+    const bins = Array.from({ length: BINS }, () => ({ correct: 0, total: 0 }));
+    for (const q of buzzed) {
+      const bin = Math.min(BINS - 1, Math.floor((q.buzzWord / q.totalWords) * BINS));
+      bins[bin].total++;
+      if (q.correct) bins[bin].correct++;
+    }
+    const optimalBin = bins
+      .map((b, i) => ({ bin: i, acc: b.total >= 2 ? b.correct / b.total : 0, total: b.total }))
+      .filter(b => b.total >= 2)
+      .sort((a, b) => b.acc - a.acc)[0];
+    const optimalZone = optimalBin
+      ? { start: Math.round((optimalBin.bin / BINS) * 100), end: Math.round(((optimalBin.bin + 1) / BINS) * 100), accuracy: Math.round(optimalBin.acc * 100) }
+      : null;
+
+    res.json({
+      patterns: {
+        totalBuzzes: buzzed.length,
+        totalTimeouts: timedOut.length,
+        avgBuzzPosition: Math.round(avgPosition * 100), // percent through the question
+        overallAccuracy: accOf(buzzed),
+        early: { count: early.length, accuracy: accOf(early) },
+        mid: { count: mid.length, accuracy: accOf(mid) },
+        late: { count: late.length, accuracy: accOf(late) },
+        timeoutRate: allQs.length ? Math.round((timedOut.length / allQs.length) * 100) : 0,
+        categoryPatterns,
+        trend, // positive = getting faster (earlier buzzes recently)
+        optimalZone,
+        // Recent 20 buzzes for the sparkline chart.
+        recentBuzzes: buzzed.slice(-20).map(q => ({
+          position: Math.round((q.buzzWord / q.totalWords) * 100),
+          correct: !!q.correct,
+          category: q.category || q.setCategory || 'Mixed',
+        })),
+      },
+    });
+  } catch (e) {
+    console.error('QB patterns error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/quizbowl/niche-recommendations — ask Gemini to suggest specific
+// niche sub-topics within a category for targeted AI drilling. Useful when
+// the student wants to go deeper than a broad QB category allows.
+// ?category=Science&difficulty=Medium
+app.get('/api/quizbowl/niche-recommendations', authMiddleware, async (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+
+    const category = req.query.category || 'Science';
+    const difficulty = req.query.difficulty || 'Medium';
+
+    const sets = users[email].data.quizbowlSets || [];
+    const cats = computeQBCategoryStats(sets);
+    const catStats = cats[category];
+
+    const contextLine = catStats
+      ? `The student has answered ${catStats.total} ${category} questions and got ${Math.round((catStats.correct / catStats.total) * 100)}% right.`
+      : `The student is exploring ${category} for the first time.`;
+
+    const prompt = `You are a quiz bowl coach. Suggest 6 specific niche sub-topics within the ${category} category for a student to drill as pyramidal quiz bowl tossup questions at ${difficulty} level.
+
+${contextLine}
+
+Return ONLY valid JSON with no markdown:
+{"niches":[{"topic":"Specific Sub-topic Name","reason":"One sentence why this is worth drilling"}]}
+
+Requirements:
+- Topics must be specific enough to generate focused tossups (e.g. "Krebs Cycle" not "Biology", "Thirty Years War" not "European History")
+- Cover a range of difficulty within ${difficulty} level
+- Stay within standard quiz bowl ${category} territory
+- Make the reasons brief and motivating`;
+
+    const result = await callGemini(null, [{ role: 'user', content: prompt }], GEMINI_FLASH, 600, { jsonMode: true, temperature: 0.85 });
+    if (!result.success) return res.status(500).json({ error: result.error || 'Gemini failed' });
+
+    let parsed;
+    try {
+      parsed = typeof result.text === 'string' ? JSON.parse(result.text) : result.text;
+    } catch {
+      const m = (result.text || '').match(/\{[\s\S]*\}/);
+      if (m) { try { parsed = JSON.parse(m[0]); } catch {} }
+    }
+    if (!parsed?.niches?.length) return res.status(500).json({ error: 'No suggestions generated' });
+
+    res.json({ niches: parsed.niches.slice(0, 6) });
+  } catch (e) {
+    console.error('QB niche-recommendations error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/quizbowl/tossups — pull real tossups from QBReader by
 // category + difficulty + count. Used by solo Quiz Bowl. The match
 // flow (multiplayer) has its own AI generation path; this endpoint
@@ -8883,6 +10748,149 @@ app.get('/api/debate/history/:id', authMiddleware, (req, res) => {
   const entry = history.find(h => h.finishedAt === id);
   if (!entry) return res.status(404).json({ error: 'Not found' });
   res.json({ entry });
+});
+
+// ═══════════════════════════════════════════════════════
+// TRIAL MODE — QB-style tossup + spaced repetition (SM-2)
+// ═══════════════════════════════════════════════════════
+
+function sm2Update(card, quality) {
+  let { ease = 2.5, interval = 1, reps = 0 } = card;
+  if (quality < 3) { reps = 0; interval = 1; }
+  else {
+    if (reps === 0) interval = 1;
+    else if (reps === 1) interval = 6;
+    else interval = Math.round(interval * ease);
+    reps += 1;
+  }
+  ease = Math.max(1.3, ease + 0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
+  const nextDue = new Date();
+  nextDue.setDate(nextDue.getDate() + interval);
+  return { ...card, ease: Math.round(ease * 100) / 100, interval, reps, nextDue: nextDue.toISOString(), lastReviewed: new Date().toISOString() };
+}
+
+// Generate QB-style tossup questions
+app.post('/api/trial/generate', authMiddleware, async (req, res) => {
+  try {
+    const { topic = 'Science', count = 5, difficulty = 'medium' } = req.body;
+    const diffMap = { easy: 'introductory/middle-school', medium: 'high-school varsity', hard: 'college/national championship' };
+    const diffLabel = diffMap[difficulty] || diffMap.medium;
+
+    const systemPrompt = `You are a quiz bowl question writer specializing in ${diffLabel}-level tossups. Output ONLY valid JSON, no markdown or fences.`;
+    const userPrompt = `Write ${count} tossup questions on the topic "${topic}" at ${diffLabel} difficulty.
+
+Each tossup must:
+- Be 4-8 sentences long, starting with obscure clues and ending with the most obvious giveaway
+- Use the classic pyramid structure (hard clues → easy giveaway)
+- Cover different specific sub-topics within "${topic}"
+- Have a clear, concise answer (a specific name, term, work, or event)
+
+Return JSON:
+{
+  "questions": [
+    {
+      "question": "Full tossup text as a single continuous paragraph...",
+      "answer": "Short canonical answer (1-5 words)",
+      "topic": "${topic}",
+      "difficulty": "${difficulty}"
+    }
+  ]
+}`;
+
+    const result = await callGemini(systemPrompt, [{ role: 'user', content: userPrompt }], DEFAULT_MODEL, 8192, { jsonMode: true, temperature: 0.8 });
+    if (!result.success) return res.status(500).json({ error: 'AI generation failed' });
+
+    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
+    if (!parsed?.questions) return res.status(500).json({ error: 'Invalid AI response' });
+
+    const questions = parsed.questions.map(q => ({
+      id: crypto.randomUUID(),
+      question: q.question,
+      answer: q.answer,
+      topic: q.topic || topic,
+      difficulty: q.difficulty || difficulty,
+    }));
+
+    res.json({ questions });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get SRS queue for the current user
+app.get('/api/trial/queue', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const items = users[email].data?.trialItems || [];
+    res.json({ items });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Save trial session results — updates SM-2 state per item
+app.post('/api/trial/save', authMiddleware, (req, res) => {
+  try {
+    const { results } = req.body;
+    if (!Array.isArray(results)) return res.status(400).json({ error: 'results must be an array' });
+
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+
+    if (!Array.isArray(users[email].data.trialItems)) users[email].data.trialItems = [];
+    if (!users[email].data.trialStats) users[email].data.trialStats = { totalSessions: 0, totalXP: 0, totalCorrect: 0, totalQuestions: 0 };
+
+    const itemMap = {};
+    for (const item of users[email].data.trialItems) itemMap[item.id] = item;
+
+    let sessionXP = 0;
+    let sessionCorrect = 0;
+
+    for (const r of results) {
+      const { questionId, question, quality, correct, buzzRatio } = r;
+      if (!questionId || !question) continue;
+
+      const existing = itemMap[questionId] || {
+        id: questionId,
+        question: question.question,
+        answer: question.answer,
+        topic: question.topic,
+        difficulty: question.difficulty,
+        ease: 2.5, interval: 1, reps: 0, nextDue: new Date().toISOString(),
+      };
+
+      const updated = sm2Update(existing, quality ?? (correct ? 4 : 1));
+      itemMap[questionId] = updated;
+
+      if (correct) {
+        sessionCorrect++;
+        sessionXP += Math.round(10 * Math.max(0.5, 2 - (buzzRatio || 1)));
+      }
+    }
+
+    users[email].data.trialItems = Object.values(itemMap);
+    users[email].data.trialStats.totalSessions += 1;
+    users[email].data.trialStats.totalXP += sessionXP;
+    users[email].data.trialStats.totalCorrect += sessionCorrect;
+    users[email].data.trialStats.totalQuestions += results.length;
+
+    saveUsers(users);
+    res.json({ success: true, xpEarned: sessionXP });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get trial statistics
+app.get('/api/trial/stats', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const stats = users[email].data?.trialStats || { totalSessions: 0, totalXP: 0, totalCorrect: 0, totalQuestions: 0 };
+    const items = users[email].data?.trialItems || [];
+    const now = new Date();
+    const dueCount = items.filter(i => !i.nextDue || new Date(i.nextDue) <= now).length;
+    res.json({ ...stats, dueCount, totalItems: items.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // SPA fallback (Express 5 syntax)

@@ -14,8 +14,9 @@ const RETIRED_WALLPAPERS = new Set(['desert', 'cherry']);
 //
 // windowOpacity / titlebarOpacity are stored as opacity percentages
 // where 100 = fully opaque. The "transparency %" the user sees in the
-// Settings panel is `100 - opacity`, so 80 / 65 here surfaces as
-// "20% transparency" on windows and "35%" on the titlebar.
+// Settings panel is `100 - opacity`, so 100 here surfaces as
+// "0% transparency" — i.e. fully solid windows out of the box. Users
+// who want frosted-glass chrome can still dial it down in Settings.
 const DEFAULTS = {
   theme: 'dark',
   wallpaper: 'aurora',
@@ -25,8 +26,9 @@ const DEFAULTS = {
   uiMode: 'desktop',
   // osStyle was removed — the shell is Windows 11 only now. Any legacy
   // value in `user.data.preferences.osStyle` is ignored at read time.
-  windowOpacity: 80,
-  titlebarOpacity: 65,
+  windowOpacity: 100,
+  titlebarOpacity: 100,
+  bottomBarTransparent: true,
 };
 
 // All UI preferences are persisted server-side under
@@ -44,42 +46,20 @@ export function UIPreferenceProvider({ children }) {
   // Resolve effective values — server pref first, defaults second.
   const rawWallpaper = prefs.wallpaper || DEFAULTS.wallpaper;
   const wallpaper = RETIRED_WALLPAPERS.has(rawWallpaper) ? DEFAULTS.wallpaper : rawWallpaper;
-  const theme        = prefs.theme       || DEFAULTS.theme;
+  // Theme is locked to dark — light mode is not supported.
+  const theme = 'dark';
   const dockSize     = prefs.dockSize    || DEFAULTS.dockSize;
   const iconStyle    = prefs.iconStyle   || DEFAULTS.iconStyle;
   const dockPosition    = prefs.dockPosition    || DEFAULTS.dockPosition;
   const uiMode          = prefs.uiMode          || DEFAULTS.uiMode;
-  const windowOpacity       = prefs.windowOpacity       ?? DEFAULTS.windowOpacity;
-  const titlebarOpacity     = prefs.titlebarOpacity     ?? DEFAULTS.titlebarOpacity;
+  const windowOpacity           = prefs.windowOpacity           ?? DEFAULTS.windowOpacity;
+  const titlebarOpacity         = prefs.titlebarOpacity         ?? DEFAULTS.titlebarOpacity;
+  const bottomBarTransparent    = prefs.bottomBarTransparent    ?? DEFAULTS.bottomBarTransparent;
 
-  // Apply theme to <html> whenever it changes — covers initial render
-  // (server-side load), subsequent setTheme calls, and post-fetchUser
-  // refreshes after sign-in.
+  // Theme is always dark — ensure the class is set on mount and stays set.
   useEffect(() => {
-    if (theme === 'dark') document.documentElement.classList.add('dark');
-    else document.documentElement.classList.remove('dark');
-  }, [theme]);
-
-  // One-time forced migration: every legacy user still pinned to the
-  // light theme gets auto-flipped to dark on their next session. The new
-  // UI was designed dark-first; light leaves blue accents and toggles
-  // rendering on a flat white background without the polish work that
-  // was done in dark, so the experience is meaningfully worse there.
-  // Once migrated, the user can still flip back manually if they really
-  // want — we only force once per session, keyed by user id so a switch
-  // to another account triggers the check again.
-  const migratedRef = useRef(null);
-  useEffect(() => {
-    if (!user) return;
-    if (migratedRef.current === user.id) return;
-    migratedRef.current = user.id;
-    if (prefs.theme === 'light') {
-      // Apply immediately so the page repaints in dark before the
-      // server roundtrip completes.
-      document.documentElement.classList.add('dark');
-      setPref('theme', 'dark').catch(() => {});
-    }
-  }, [user, prefs.theme]); // eslint-disable-line react-hooks/exhaustive-deps
+    document.documentElement.classList.add('dark');
+  }, []);
 
   // ----- Mutator -----
   //
@@ -110,19 +90,17 @@ export function UIPreferenceProvider({ children }) {
     }
   }, [user, fetchUser]);
 
-  const setTheme        = useCallback((v) => {
-    // Apply immediately for snappy feedback; server sync follows.
-    if (v === 'dark') document.documentElement.classList.add('dark');
-    else document.documentElement.classList.remove('dark');
-    return setPref('theme', v);
-  }, [setPref]);
+  // setTheme is a no-op — dark mode is permanent.
+  // eslint-disable-next-line no-unused-vars
+  const setTheme = useCallback((_v) => {}, []);
   const setWallpaper    = useCallback((v) => setPref('wallpaper', v),    [setPref]);
   const setDockSize     = useCallback((v) => setPref('dockSize', v),     [setPref]);
   const setIconStyle    = useCallback((v) => setPref('iconStyle', v),    [setPref]);
   const setDockPosition    = useCallback((v) => setPref('dockPosition', v),    [setPref]);
   const setUiMode          = useCallback((v) => setPref('uiMode', v),          [setPref]);
-  const setWindowOpacity       = useCallback((v) => setPref('windowOpacity', v),       [setPref]);
-  const setTitlebarOpacity     = useCallback((v) => setPref('titlebarOpacity', v),     [setPref]);
+  const setWindowOpacity           = useCallback((v) => setPref('windowOpacity', v),           [setPref]);
+  const setTitlebarOpacity         = useCallback((v) => setPref('titlebarOpacity', v),         [setPref]);
+  const setBottomBarTransparent    = useCallback((v) => setPref('bottomBarTransparent', v),    [setPref]);
 
   // Mobile mode is inferred from viewport, not persisted — narrow
   // viewports always get the mobile shell regardless of user pref.
@@ -144,6 +122,7 @@ export function UIPreferenceProvider({ children }) {
       theme, setTheme,
       windowOpacity, setWindowOpacity,
       titlebarOpacity, setTitlebarOpacity,
+      bottomBarTransparent, setBottomBarTransparent,
     }}>
       {children}
     </UIPreferenceContext.Provider>

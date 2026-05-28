@@ -24,6 +24,32 @@ export const fetchQBReaderTossups = ({ count = 10, category = 'Mixed', difficult
   return apiFetch(`/api/quizbowl/tossups?${params.toString()}`);
 };
 
+// ===== Solo set history + recommendations =====
+// Saves a completed solo set so the QuizBowl hub can show past sets +
+// category accuracy, and so the AI can target the player's weak spots.
+export const saveQuizBowlSet = (payload) => apiFetch('/api/quizbowl/sets', {
+  method: 'POST',
+  body: JSON.stringify(payload),
+});
+
+// Returns { sets, stats: { sets, totalQuestions, totalCorrect, accuracy,
+// studyMs, categoryStats, lastPlayedAt } }
+export const fetchQuizBowlHistory = () => apiFetch('/api/quizbowl/sets');
+
+// Returns { recommendations: [{ kind, category, difficulty, reason }] }
+export const fetchQuizBowlRecommendations = () => apiFetch('/api/quizbowl/recommendations');
+
+// Returns { patterns: { totalBuzzes, avgBuzzPosition, early, mid, late,
+// categoryPatterns, trend, optimalZone, recentBuzzes } }
+export const fetchQuizBowlPatterns = () => apiFetch('/api/quizbowl/patterns');
+
+// Returns { niches: [{ topic, reason }] } — Gemini-suggested niche sub-topics
+// within a category for targeted AI drilling.
+export const fetchQuizBowlNiches = ({ category, difficulty = 'Medium' } = {}) => {
+  const params = new URLSearchParams({ category, difficulty });
+  return apiFetch(`/api/quizbowl/niche-recommendations?${params.toString()}`);
+};
+
 // Subscribe to an SSE stream of match events.
 // handlers: { onSnapshot, onPlayerJoined, onQuestionStart, onBuzz, onAnswerResult, onMatchEnd, onPlayerLeft, onError }
 export function streamMatch(code, handlers) {

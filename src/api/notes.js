@@ -27,3 +27,18 @@ export async function generateCues(id) {
 export async function generateSummary(id) {
   return apiFetch(`/api/notes/${id}/generate-summary`, { method: 'POST' });
 }
+
+export async function getNoteGraph() {
+  return apiFetch('/api/note-graph');
+}
+
+export async function saveNoteGraph(nodes, edges) {
+  return apiFetch('/api/note-graph', { method: 'PUT', body: JSON.stringify({ nodes, edges }) });
+}
+
+export async function suggestGraphNodes({ focus, focusNodeId, count } = {}) {
+  return apiFetch('/api/note-graph/suggest', {
+    method: 'POST',
+    body: JSON.stringify({ focus, focusNodeId, count }),
+  });
+}

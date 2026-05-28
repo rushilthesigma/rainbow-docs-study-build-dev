@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Trash2 } from 'lucide-react';
-import { getCurriculum, deleteCurriculum } from '../api/curriculum';
+import { ArrowLeft, Trash2, Award } from 'lucide-react';
+import { getCurriculum, deleteCurriculum, getCourseGrade } from '../api/curriculum';
 import UnitAccordion from '../components/curriculum/UnitAccordion';
 import StatCards from '../components/curriculum/StatCards';
 import ProgressBar from '../components/curriculum/ProgressBar';
@@ -12,6 +12,7 @@ export default function CurriculumPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [curriculum, setCurriculum] = useState(null);
+  const [courseGrade, setCourseGrade] = useState(null);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
 
@@ -20,6 +21,9 @@ export default function CurriculumPage() {
       try {
         const data = await getCurriculum(id);
         setCurriculum(data.curriculum);
+        if (data.curriculum?.graded) {
+          getCourseGrade(id).then(g => setCourseGrade(g.courseGrade)).catch(() => {});
+        }
       } catch (err) {
         console.error('Failed to load curriculum:', err);
       }
@@ -109,6 +113,28 @@ export default function CurriculumPage() {
               {curriculum.settings.tone}
             </span>
           )}
+          {curriculum.graded && (
+            <span className="px-2.5 py-1 rounded-full bg-blue-500/[0.14] border border-blue-400/[0.25] text-blue-200 text-xs font-semibold inline-flex items-center gap-1">
+              <Award size={11} /> Graded
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Course-grade card — only shown in graded mode. Hidden until at
+          least one assignment is submitted so it doesn't dangle an empty
+          "—" at the top of a brand new course. */}
+      {curriculum.graded && courseGrade?.percent != null && (
+        <div className="mt-2 mb-6 rounded-xl border border-blue-400/[0.20] bg-blue-500/[0.06] backdrop-blur-sm p-4 flex items-center gap-4">
+          <div className="w-12 h-12 rounded-lg bg-blue-500/[0.15] border border-blue-400/[0.25] flex items-center justify-center text-[18px] font-bold text-blue-200">
+            {courseGrade.letter}
+          </div>
+          <div className="flex-1">
+            <div className="text-[11px] uppercase tracking-wide text-blue-300/70">Course grade</div>
+            <div className="text-[18px] font-semibold text-white/90">
+              {courseGrade.percent}% <span className="text-[12px] font-normal text-white/45">across {courseGrade.gradedCount} graded assignment{courseGrade.gradedCount === 1 ? '' : 's'}</span>
+            </div>
+          </div>
         </div>
       )}
 

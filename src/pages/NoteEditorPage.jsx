@@ -4,6 +4,7 @@ import { ArrowLeft, Sparkles } from 'lucide-react';
 import { getNote, updateNote, generateCues, generateSummary } from '../api/notes';
 import Button from '../components/shared/Button';
 import LoadingSpinner from '../components/shared/LoadingSpinner';
+import NoteActions from '../components/notes/NoteActions';
 
 export default function NoteEditorPage() {
   const { id } = useParams();
@@ -70,6 +71,11 @@ export default function NoteEditorPage() {
         className="w-full text-xl font-bold bg-transparent border-none outline-none text-gray-900 dark:text-white placeholder-gray-400 mb-3 flex-shrink-0"
         placeholder="Note title..."
       />
+
+      {/* Create-from-note actions: study session, quiz, curriculum */}
+      <div className="mb-3 flex-shrink-0">
+        <NoteActions note={note} />
+      </div>
 
       {isCornell ? (
         /* Cornell layout */

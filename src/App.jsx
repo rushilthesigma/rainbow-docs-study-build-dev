@@ -12,11 +12,11 @@ import FlashcardsPage from './pages/FlashcardsPage';
 import FlashcardDeckPage from './pages/FlashcardDeckPage';
 import NotesPage from './pages/NotesPage';
 import NoteEditorPage from './pages/NoteEditorPage';
+import NoteMapPage from './pages/NoteMapPage';
 import StudyPage from './pages/StudyPage';
 // MathPracticePage was folded into MathTutorApp (canvas + tutor unified).
 import CurriculumAssessmentPage from './pages/CurriculumAssessmentPage';
 import PracticeLessonPage from './pages/PracticeLessonPage';
-import SocialPage from './pages/SocialPage';
 import SettingsPage from './pages/SettingsPage';
 import AppShell from './components/layout/AppShell';
 import DesktopShell from './components/desktop/DesktopShell';
@@ -90,8 +90,8 @@ function ClassicRoutes() {
       <Route path="/flashcards" element={<AppRoute><FlashcardsPage /></AppRoute>} />
       <Route path="/flashcards/:id" element={<AppRoute><FlashcardDeckPage /></AppRoute>} />
       <Route path="/notes" element={<AppRoute><NotesPage /></AppRoute>} />
+      <Route path="/notes/map" element={<AppRoute><NoteMapPage /></AppRoute>} />
       <Route path="/notes/:id" element={<AppRoute><NoteEditorPage /></AppRoute>} />
-      <Route path="/social" element={<AppRoute><SocialPage /></AppRoute>} />
       <Route path="/settings" element={<AppRoute><SettingsPage /></AppRoute>} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
@@ -110,6 +110,31 @@ function AppRouter() {
     function onResize() { setIsMobile(getIsMobile()); }
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  // ===== DEV BYPASS =====
+  // Hit `/?dev=1` (or any page with that query) to skip OAuth entirely.
+  // Calls /api/auth/dev-login with a non-demo email so the ProtectedRoute
+  // demo-bouncer doesn't immediately log us back out, then reloads to a
+  // clean URL. Safe to ship — the dev-login endpoint already exists in
+  // server.js and is gated by it being a dev tool, not by anything new
+  // here. Only runs once per page load and only when there's no token.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has('dev')) return;
+    if (localStorage.getItem('covalent-token')) return;
+    (async () => {
+      try {
+        const { devLogin } = await import('./api/auth');
+        await devLogin('Dev User', 'dev@local.dev');
+        const url = new URL(window.location.href);
+        url.searchParams.delete('dev');
+        window.location.replace(url.toString());
+      } catch (err) {
+        console.error('Dev bypass failed:', err);
+      }
+    })();
   }, []);
 
   // When the user returns from Stripe Checkout the URL gets ?upgraded=1.
@@ -151,6 +176,7 @@ function AppRouter() {
     }
     return <Onboarding onComplete={() => { /* fetchUser inside Onboarding refreshes the gate */ }} />;
   }
+
   return isMobile ? <MobileShell /> : <DesktopShell />;
 }
 

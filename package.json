@@ -8,6 +8,7 @@
   "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
+    "dev:full": "node server.js & vite",
     "server": "node server.js",
     "start": "node server.js",
     "build": "vite build",

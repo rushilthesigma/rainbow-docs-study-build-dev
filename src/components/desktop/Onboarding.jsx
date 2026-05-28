@@ -1,74 +1,32 @@
 import { useState } from 'react';
-import { ChevronRight, ChevronLeft, Moon, Sun, Sparkles, Check, ArrowRight, AtSign, Loader2 } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Sparkles, Check, ArrowRight } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useUIPreference } from '../../context/UIPreferenceContext';
 import { syncData } from '../../api/auth';
 import { WALLPAPERS } from './DesktopBackground';
-import { setProfile, getMyProfile } from '../../api/social';
 import { Z } from '../../styles/tokens';
 
-// macOS Setup-Assistant-style onboarding. Five steps with full-screen
+// macOS Setup-Assistant-style onboarding. Three steps with full-screen
 // transitions, Apple-flavored typography, and a back / continue chrome
 // at the bottom.
 //
 //   1. Welcome   — big "Hello" + brand mark, sets the tone.
-//   2. Appearance — Light / Dark theme picker with live previews.
-//   3. Wallpaper — pick a desktop background.
-//   4. Handle    — pick a Social @handle so DMs / friends work out
-//                  of the box.
-//   5. Tour      — offer the guided tour.
-const STEPS = ['welcome', 'appearance', 'wallpaper', 'handle', 'tour'];
+//   2. Wallpaper — pick a desktop background.
+//   3. Tour      — offer the guided tour.
+const STEPS = ['welcome', 'wallpaper', 'tour'];
 
 export default function Onboarding({ onComplete }) {
   const [step, setStep] = useState(0);
   const { user, fetchUser } = useAuth();
-  const { theme, setTheme, wallpaper, setWallpaper } = useUIPreference();
-  const dark = theme === 'dark';
-
-  // Handle step state. Auto-suggests a handle from the user's first
-  // name; user can edit. Submitted server-side as their Social profile.
-  const initialHandle = (user?.name || user?.email || '')
-    .split(/[\s@]/)[0]
-    .toLowerCase()
-    .replace(/[^a-z0-9_]/g, '');
-  const [handle, setHandle] = useState(initialHandle);
-  const [handleError, setHandleError] = useState('');
-  const [handleSaving, setHandleSaving] = useState(false);
+  const { wallpaper, setWallpaper } = useUIPreference();
+  const dark = true; // always dark
 
   // Wallpaper picks for the onboarding grid — subset of the full
   // catalog so the choice doesn't feel overwhelming. Includes the
   // canonical default (lavender) at the top.
   const PICKS = ['lavender', 'forest', 'aurora', 'ocean', 'galaxy', 'milkyway', 'cosmos', 'nebula'];
 
-  // Continue from any step. The handle step has its own validation
-  // path — we save the profile server-side before advancing so a
-  // dupe handle bounces the user back with an error instead of
-  // silently leaving Social profile-less.
-  async function next() {
-    if (STEPS[step] === 'handle') {
-      const h = handle.trim();
-      if (!h) { setHandleError('Pick a handle so friends can find you.'); return; }
-      if (!/^[a-z0-9_]{3,20}$/i.test(h)) {
-        setHandleError('3-20 chars, letters/numbers/underscore only.');
-        return;
-      }
-      setHandleSaving(true);
-      setHandleError('');
-      try {
-        // Skip if a profile already exists with this handle (e.g.
-        // user re-ran onboarding). Otherwise create.
-        const existing = await getMyProfile().catch(() => null);
-        if (!existing?.profile?.handle || existing.profile.handle.toLowerCase() !== h.toLowerCase()) {
-          await setProfile(h, user?.name || h);
-        }
-        setStep((s) => Math.min(STEPS.length - 1, s + 1));
-      } catch (err) {
-        setHandleError(err?.message || 'Could not save that handle. Try another.');
-      } finally {
-        setHandleSaving(false);
-      }
-      return;
-    }
+  function next() {
     setStep((s) => Math.min(STEPS.length - 1, s + 1));
   }
   function back() { setStep((s) => Math.max(0, s - 1)); }
@@ -110,20 +68,8 @@ export default function Onboarding({ onComplete }) {
           {STEPS[step] === 'welcome' && (
             <Welcome name={firstName} dark={dark} />
           )}
-          {STEPS[step] === 'appearance' && (
-            <Appearance theme={theme} setTheme={setTheme} dark={dark} />
-          )}
           {STEPS[step] === 'wallpaper' && (
             <WallpaperPick wallpaper={wallpaper} setWallpaper={setWallpaper} picks={PICKS} dark={dark} />
-          )}
-          {STEPS[step] === 'handle' && (
-            <HandlePick
-              handle={handle}
-              setHandle={(v) => { setHandle(v); setHandleError(''); }}
-              error={handleError}
-              saving={handleSaving}
-              dark={dark}
-            />
           )}
           {STEPS[step] === 'tour' && (
             <Tour onSkip={() => finish(false)} onTour={() => finish(true)} dark={dark} />
@@ -147,12 +93,9 @@ export default function Onboarding({ onComplete }) {
         {STEPS[step] !== 'tour' && (
           <button
             onClick={next}
-            disabled={handleSaving && STEPS[step] === 'handle'}
-            className="inline-flex items-center gap-2 px-6 py-2.5 rounded-md bg-gradient-to-br from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 active:scale-[0.98] disabled:opacity-60 text-white text-[13.5px] font-semibold transition-all border border-blue-400/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),inset_0_-1px_0_rgba(0,0,0,0.18),0_4px_14px_rgba(99,102,241,0.40)]"
+            className="inline-flex items-center gap-2 px-6 py-2.5 rounded-md bg-gradient-to-br from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 active:scale-[0.98] text-white text-[13.5px] font-semibold transition-all border border-blue-400/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),inset_0_-1px_0_rgba(0,0,0,0.18),0_4px_14px_rgba(99,102,241,0.40)]"
           >
-            {STEPS[step] === 'handle' && handleSaving
-              ? <><Loader2 size={14} className="animate-spin" /> Saving</>
-              : <>Continue <ChevronRight size={14} /></>}
+            Continue <ChevronRight size={14} />
           </button>
         )}
       </div>
@@ -218,68 +161,7 @@ function Welcome({ name, dark }) {
   );
 }
 
-// ===== Step 2: Appearance =====
-function Appearance({ theme, setTheme, dark }) {
-  return (
-    <div>
-      <Header
-        title="Choose your look"
-        sub="Light is crisp, dark is calm. You can change this any time in Settings."
-        dark={dark}
-      />
-      <div className="mt-8 grid grid-cols-2 gap-4 max-w-md mx-auto">
-        <ThemeCard
-          active={theme === 'light'}
-          onClick={() => setTheme('light')}
-          label="Light"
-          icon={<Sun size={20} className="text-amber-500" strokeWidth={2.2} />}
-          preview={
-            <div className="w-full aspect-[4/3] rounded-xl bg-[#f0f4ff] border border-gray-200 grid place-items-center">
-              <div className="w-2/3 h-2 rounded-full bg-gray-300" />
-            </div>
-          }
-        />
-        <ThemeCard
-          active={theme === 'dark'}
-          onClick={() => setTheme('dark')}
-          label="Dark"
-          icon={<Moon size={20} className="text-blue-400" strokeWidth={2.2} />}
-          preview={
-            <div className="w-full aspect-[4/3] rounded-xl bg-[#0D0D14] border border-white/10 grid place-items-center">
-              <div className="w-2/3 h-2 rounded-full bg-white/15" />
-            </div>
-          }
-        />
-      </div>
-    </div>
-  );
-}
-
-function ThemeCard({ active, onClick, label, icon, preview }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`relative rounded-md p-3 border transition-all text-left ${
-        active
-          ? 'border-blue-500 bg-blue-500/10 ring-2 ring-blue-500/25 shadow-[0_4px_14px_rgba(99,102,241,0.30)]'
-          : 'border-white/15 dark:border-white/15 bg-white/[0.04] hover:bg-white/[0.08]'
-      }`}
-    >
-      {preview}
-      <div className="mt-3 flex items-center gap-2">
-        {icon}
-        <span className="text-[14px] font-semibold text-gray-900 dark:text-white">{label}</span>
-        {active && (
-          <span className="ml-auto w-5 h-5 rounded-sm bg-gradient-to-br from-blue-500 to-indigo-600 grid place-items-center text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.25)]">
-            <Check size={11} strokeWidth={3} />
-          </span>
-        )}
-      </div>
-    </button>
-  );
-}
-
-// ===== Step 3: Wallpaper =====
+// ===== Step 2: Wallpaper =====
 function WallpaperPick({ wallpaper, setWallpaper, picks, dark }) {
   return (
     <div>
@@ -323,50 +205,7 @@ function WallpaperPick({ wallpaper, setWallpaper, picks, dark }) {
   );
 }
 
-// ===== Step 4: Handle =====
-//
-// Picks the user's Social @handle so DMs and friend requests work
-// the moment they land on the desktop. Validates client-side
-// (3-20 chars, alphanumeric + underscore) and posts to /api/social
-// /profile via setProfile. Server enforces uniqueness; collisions
-// surface as a red error under the input.
-function HandlePick({ handle, setHandle, error, saving, dark }) {
-  return (
-    <div>
-      <Header
-        title="Pick a handle"
-        sub="Your Social handle is how friends find you. You can change it later."
-        dark={dark}
-      />
-      <div className="mt-8 max-w-sm mx-auto">
-        <div
-          className={`flex items-center gap-2 px-4 py-3 rounded-md border transition-colors ${
-            error
-              ? 'border-rose-400/70 bg-rose-500/[0.05]'
-              : dark
-                ? 'border-white/15 bg-white/[0.04] focus-within:border-blue-400/70 shadow-[inset_0_1px_2px_rgba(0,0,0,0.25)]'
-                : 'border-gray-300 bg-white focus-within:border-blue-500 shadow-[inset_0_1px_2px_rgba(0,0,0,0.08)]'
-          }`}
-        >
-          <AtSign size={16} className={dark ? 'text-white/45' : 'text-gray-400'} />
-          <input
-            value={handle}
-            onChange={(e) => setHandle(e.target.value.replace(/[^a-zA-Z0-9_]/g, '').slice(0, 20))}
-            placeholder="yourhandle"
-            autoFocus
-            disabled={saving}
-            className={`flex-1 bg-transparent text-[16px] outline-none disabled:opacity-60 ${dark ? 'text-white' : 'text-gray-900'}`}
-          />
-        </div>
-        {error
-          ? <p className="text-[12px] text-rose-400 mt-2 px-1">{error}</p>
-          : <p className={`text-[12px] mt-2 px-1 ${dark ? 'text-white/45' : 'text-gray-500'}`}>3-20 characters. Letters, numbers, underscores.</p>}
-      </div>
-    </div>
-  );
-}
-
-// ===== Step 5: Tour =====
+// ===== Step 4: Tour =====
 function Tour({ onSkip, onTour, dark }) {
   return (
     <div className="text-center">
@@ -427,9 +266,6 @@ const STEP_BG_DARK = {
   wallpaper:  'radial-gradient(at 20% 30%, #0e7490 0%, transparent 55%),' +
               'radial-gradient(at 80% 75%, #1e3a8a 0%, transparent 55%),' +
               'linear-gradient(135deg, #04081a 0%, #061227 50%, #0a0f1f 100%)',
-  handle:     'radial-gradient(at 25% 30%, #4338ca 0%, transparent 55%),' +
-              'radial-gradient(at 75% 75%, #0891b2 0%, transparent 55%),' +
-              'linear-gradient(135deg, #060a1f 0%, #08152a 50%, #0a0e1f 100%)',
   tour:       'radial-gradient(at 25% 30%, #047857 0%, transparent 55%),' +
               'radial-gradient(at 75% 75%, #1e40af 0%, transparent 55%),' +
               'linear-gradient(135deg, #051613 0%, #08182a 50%, #0a0e1f 100%)',
@@ -444,9 +280,6 @@ const STEP_BG_LIGHT = {
   wallpaper:  'radial-gradient(at 20% 30%, #cffafe 0%, transparent 55%),' +
               'radial-gradient(at 80% 75%, #c7d2fe 0%, transparent 55%),' +
               'linear-gradient(135deg, #f8fafc 0%, #ecfeff 50%, #eef2ff 100%)',
-  handle:     'radial-gradient(at 25% 30%, #c7d2fe 0%, transparent 55%),' +
-              'radial-gradient(at 75% 75%, #cffafe 0%, transparent 55%),' +
-              'linear-gradient(135deg, #f8fafc 0%, #eef2ff 50%, #ecfeff 100%)',
   tour:       'radial-gradient(at 25% 30%, #d1fae5 0%, transparent 55%),' +
               'radial-gradient(at 75% 75%, #c7d2fe 0%, transparent 55%),' +
               'linear-gradient(135deg, #f8fafc 0%, #ecfdf5 50%, #eef2ff 100%)',

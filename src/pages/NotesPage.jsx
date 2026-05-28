@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileText, Plus, Trash2, Layout } from 'lucide-react';
+import { FileText, Plus, Trash2, Layout, Network } from 'lucide-react';
 import { listNotes, createNote, deleteNote } from '../api/notes';
 import Button from '../components/shared/Button';
 import LoadingSpinner from '../components/shared/LoadingSpinner';
@@ -39,7 +39,10 @@ export default function NotesPage() {
           <h1 className="text-[20px] font-bold text-white/90">Notes</h1>
           <p className="text-[13px] text-white/35">{notes.length} note{notes.length !== 1 ? 's' : ''}</p>
         </div>
-        <Button onClick={() => setShowCreate(true)} size="sm"><Plus size={16} /> New</Button>
+        <div className="flex items-center gap-2">
+          <Button onClick={() => navigate('/notes/map')} size="sm" variant="secondary"><Network size={16} /> Map</Button>
+          <Button onClick={() => setShowCreate(true)} size="sm"><Plus size={16} /> New</Button>
+        </div>
       </div>
 
       <Modal open={showCreate} onClose={() => setShowCreate(false)} title="New note">

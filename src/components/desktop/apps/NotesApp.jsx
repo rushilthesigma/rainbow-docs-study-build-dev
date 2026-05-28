@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, FileText, Plus, Trash2, Layout, Sparkles, Wand2, Loader2, BookOpen } from 'lucide-react';
+import { ArrowLeft, FileText, Plus, Trash2, Layout, Sparkles, Wand2, Loader2, BookOpen, Network } from 'lucide-react';
 import { InlineProgress } from '../../shared/ProgressBar';
 import { listNotes, createNote, deleteNote, getNote, updateNote, generateCues, generateSummary } from '../../../api/notes';
 import { apiFetch } from '../../../api/client';
@@ -8,6 +8,8 @@ import Button from '../../shared/Button';
 import LoadingSpinner from '../../shared/LoadingSpinner';
 import Modal from '../../shared/Modal';
 import useBrowserBack from '../../../hooks/useBrowserBack';
+import NoteActions from '../../notes/NoteActions';
+import { useWindowManagerOptional } from '../../../context/WindowManagerContext';
 
 function NoteEditor({ noteId, onBack }) {
   const [note, setNote] = useState(null);
@@ -66,6 +68,10 @@ function NoteEditor({ noteId, onBack }) {
         placeholder="Title"
       />
 
+      <div className="mb-3 flex-shrink-0">
+        <NoteActions note={note} />
+      </div>
+
       {isCornell ? (
         <div className="flex flex-col flex-1 min-h-0 gap-3">
           <div className="flex-1 min-h-0 grid grid-cols-[200px_1fr] bg-white/[0.02] rounded-2xl border border-white/[0.07] overflow-hidden">
@@ -120,8 +126,11 @@ function NoteEditor({ noteId, onBack }) {
   );
 }
 
-export default function NotesApp() {
-  const [view, setView] = useState('list');
+export default function NotesApp({ initialNoteId = null } = {}) {
+  // Optional meta prop from the desktop window manager — when the Note Map
+  // opens a note, it spawns the Notes window with this set so we jump
+  // straight into the editor instead of forcing another click.
+  const [view, setView] = useState(initialNoteId ? 'editor' : 'list');
   // Back button returns to the notes list instead of leaving the site.
   useBrowserBack(view !== 'list', () => setView('list'));
   const [notes, setNotes] = useState([]);
@@ -139,7 +148,12 @@ export default function NotesApp() {
   const [curriculumDetail, setCurriculumDetail] = useState(null);
   const [selectedLessonIds, setSelectedLessonIds] = useState([]); // [] = whole curriculum
   const [curriculumLoading, setCurriculumLoading] = useState(false);
-  const [selectedNoteId, setSelectedNoteId] = useState(null);
+  const [selectedNoteId, setSelectedNoteId] = useState(initialNoteId);
+  // Desktop shell-only: lets us spawn / focus the Note Map window from
+  // here. Returns null when this component is rendered outside the
+  // window manager (e.g. mobile shell uses this same component), so the
+  // Map button just won't render in that case.
+  const wm = useWindowManagerOptional();
 
   useEffect(() => {
     listNotes().then(d => { setNotes(d.notes || []); setLoading(false); }).catch(() => setLoading(false));
@@ -291,6 +305,11 @@ export default function NotesApp() {
       <div className="flex items-center justify-between mb-5">
         <h2 className="text-lg font-bold text-white/90">Notes</h2>
         <div className="flex items-center gap-2">
+          {wm && (
+            <Button size="sm" variant="secondary" onClick={() => wm.openApp('notemap', 'Note Map', true)}>
+              <Network size={14} /> Map
+            </Button>
+          )}
           <Button size="sm" variant="secondary" onClick={() => setShowAI(true)}>
             <Wand2 size={14} /> AI
           </Button>

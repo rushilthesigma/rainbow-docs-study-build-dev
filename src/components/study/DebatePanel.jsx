@@ -30,49 +30,128 @@ const QUICK_TOPICS = [
   'Self-driving cars are safer than humans',
 ];
 
+// Subject categories — clicking one filters TopicChips to a specific
+// area instead of forcing users into the generic six. Each category
+// carries a handful of concrete debate-ready topics so users in the
+// h2h lobby actually have specific things to argue about, not just the
+// usual "social media is harmful" filler.
+const TOPIC_CATEGORIES = [
+  { id: 'all',       label: 'All',       topics: null }, // null = use the QUICK_TOPICS defaults
+  { id: 'tech',      label: 'Tech',      topics: [
+    'AI will replace most jobs',
+    'Self-driving cars are safer than humans',
+    'Social media should be banned for under-16s',
+    'Cryptocurrency is a net negative for society',
+    'Open-source AI models do more good than harm',
+  ] },
+  { id: 'education', label: 'Education', topics: [
+    'College is worth the cost',
+    'Standardized testing should be abolished',
+    'Homework should be eliminated in K-12',
+    'Trade school is a better option than university',
+    'AI should be allowed for student essays',
+  ] },
+  { id: 'science',   label: 'Science',   topics: [
+    'Space exploration matters',
+    'Nuclear power is essential for the climate transition',
+    'Genetic engineering of human embryos should be legal',
+    'Animal testing should be banned',
+    'Mars colonization should be a global priority',
+  ] },
+  { id: 'society',   label: 'Society',   topics: [
+    'Social media is harmful',
+    'Voting should be mandatory',
+    'A universal basic income would work',
+    'Capitalism causes more harm than good',
+    'Cancel culture has gone too far',
+  ] },
+  { id: 'sports',    label: 'Sports',    topics: [
+    'The NCAA should pay college athletes',
+    'Olympic athletes should be allowed to use PEDs',
+    'Soccer is more skillful than American football',
+    'Replay review ruins live sports',
+    'Esports deserves Olympic status',
+  ] },
+];
+
 // Reusable topic chip row used by every debate setup screen (solo,
 // 1v1 lobby, tournament setup). Starts with the QUICK_TOPICS defaults
 // plus an "AI" button that swaps in 6 fresh AI-picked topics from the
 // /api/debate/suggest-topics endpoint. Hitting AI again re-rolls.
-function TopicChips({ onPick, max = null }) {
+function TopicChips({ onPick, max = null, showCategories = false }) {
   const [aiTopics, setAiTopics] = useState(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiErr, setAiErr] = useState(null);
-  const defaults = max ? QUICK_TOPICS.slice(0, max) : QUICK_TOPICS;
+  // Currently selected subject category. 'all' = show QUICK_TOPICS;
+  // anything else swaps in that category's concrete topic list so users
+  // can pick a specific debate instead of the generic six.
+  const [category, setCategory] = useState('all');
+  const categoryTopics = TOPIC_CATEGORIES.find(c => c.id === category)?.topics;
+  const baseTopics = categoryTopics || QUICK_TOPICS;
+  const defaults = max ? baseTopics.slice(0, max) : baseTopics;
   const chips = aiTopics || defaults;
   async function fetchAi() {
     setAiBusy(true); setAiErr(null);
     try {
       const r = await apiFetch('/api/debate/suggest-topics', {
         method: 'POST',
-        body: JSON.stringify({ exclude: chips }),
+        // Pass the active category as a hint so the AI suggests topics
+        // in that subject area, not the generic catch-all.
+        body: JSON.stringify({ exclude: chips, category: category === 'all' ? null : category }),
       });
       if (Array.isArray(r.topics) && r.topics.length) setAiTopics(r.topics);
       else setAiErr('No topics');
     } catch (e) { setAiErr(e.message || 'Failed'); }
     setAiBusy(false);
   }
+  function pickCategory(id) {
+    setCategory(id);
+    setAiTopics(null);  // reset AI-rolled list when category changes
+    setAiErr(null);
+  }
   return (
-    <div className="flex flex-wrap gap-1.5 items-center">
-      {chips.map(t => (
+    <div className="space-y-1.5">
+      {showCategories && (
+        <div className="flex flex-wrap gap-1 items-center">
+          {TOPIC_CATEGORIES.map(c => {
+            const active = c.id === category;
+            return (
+              <button
+                key={c.id}
+                onClick={() => pickCategory(c.id)}
+                className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border transition-colors ${
+                  active
+                    ? 'bg-blue-500/25 border-blue-400/60 text-blue-100'
+                    : 'bg-transparent border-blue-500/15 text-blue-300/55 hover:text-blue-200 hover:border-blue-500/40'
+                }`}
+              >
+                {c.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <div className="flex flex-wrap gap-1.5 items-center">
+        {chips.map(t => (
+          <button
+            key={t}
+            onClick={() => onPick(t)}
+            className="px-2.5 py-1 rounded-md bg-blue-500/10 border border-blue-500/30 text-[11px] font-medium text-blue-300 hover:bg-blue-500/20 hover:border-blue-500/50 hover:text-blue-200 transition-colors"
+          >
+            {t}
+          </button>
+        ))}
         <button
-          key={t}
-          onClick={() => onPick(t)}
-          className="px-2.5 py-1 rounded-md bg-blue-500/10 border border-blue-500/30 text-[11px] font-medium text-blue-300 hover:bg-blue-500/20 hover:border-blue-500/50 hover:text-blue-200 transition-colors"
+          onClick={fetchAi}
+          disabled={aiBusy}
+          title={aiTopics ? 'Re-roll AI suggestions' : 'AI-suggest fresh topics'}
+          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-gradient-to-b from-blue-500/30 to-blue-600/20 border border-blue-400/45 text-[11px] font-semibold text-blue-100 hover:from-blue-500/40 hover:to-blue-600/25 disabled:opacity-50 transition-colors"
         >
-          {t}
+          {aiBusy ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
+          {aiTopics ? 'Re-roll' : 'AI'}
         </button>
-      ))}
-      <button
-        onClick={fetchAi}
-        disabled={aiBusy}
-        title={aiTopics ? 'Re-roll AI suggestions' : 'AI-suggest fresh topics'}
-        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-gradient-to-b from-blue-500/30 to-blue-600/20 border border-blue-400/45 text-[11px] font-semibold text-blue-100 hover:from-blue-500/40 hover:to-blue-600/25 disabled:opacity-50 transition-colors"
-      >
-        {aiBusy ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
-        {aiTopics ? 'Re-roll' : 'AI'}
-      </button>
-      {aiErr && <span className="text-[10px] text-rose-300/85">· {aiErr}</span>}
+        {aiErr && <span className="text-[10px] text-rose-300/85">· {aiErr}</span>}
+      </div>
     </div>
   );
 }
@@ -1473,7 +1552,7 @@ function Singleplayer({ mode, setMode, onExit }) {
           className="w-full px-3 py-2 rounded-lg border border-blue-500/30 bg-white/50 dark:bg-white/[0.06] text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/60 mb-3"
         />
         <div className="mb-5">
-          <TopicChips onPick={setTopic} />
+          <TopicChips onPick={setTopic} showCategories />
         </div>
         {topic.trim() && (
           <>
@@ -1715,6 +1794,23 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
     timeoutFiredRef.current = null;
   }, [match?.turnStartedAt]);
 
+  // Auto-submit on clock expiry. Lives in an effect (not inline render
+  // code) so it fires once per turn — the timeoutFiredRef inside
+  // handleTimeout still guards re-entry, but moving the call here means
+  // we don't even attempt it on every render.
+  useEffect(() => {
+    if (!match?.timedMode || match.state !== 'playing') return;
+    if (match.turnOf !== myId) return;
+    const remaining = (match.turnLimitMs || 120000) - (nowTick - (match.turnStartedAt || 0));
+    if (remaining > 0) return;
+    if (submittingMove) return;
+    handleTimeout();
+    // handleTimeout reads `argument` / `argImages` via closure; we
+    // intentionally don't list them as deps — once the clock hits 0 we
+    // want to submit whatever's in the box at that exact moment.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nowTick, match?.timedMode, match?.state, match?.turnOf, match?.turnStartedAt, match?.turnLimitMs, myId, submittingMove]);
+
   // Live-typing broadcast — only in timed mode, only on the active
   // player's side, debounced ~400ms so we're not hammering the server
   // with one POST per keystroke. The opponent reads match.draftText
@@ -1791,12 +1887,23 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
   // Time-expired auto-submit. Sends whatever's in the textbox (plus any
   // attached images) with a timedOut marker so the server can grade what
   // they had instead of stalling — empty drafts still fall back to 0/0/0.
-  // Idempotent per turn via a ref keyed on the turn's start time.
+  //
+  // Three guards keep this idempotent — the bug was that any one of them
+  // alone leaked a second POST under realistic timing:
+  //   1. `timeoutFiredRef` keyed on the turn start time so multiple
+  //      renders during the await all bail.
+  //   2. `submittingMove` flips to true synchronously so the manual Send
+  //      button (which only checks `submittingMove`) goes disabled the
+  //      instant the timer fires — closes the window where a panicked
+  //      user click would land a second POST.
+  //   3. The async fetch and the cleanup are in try/finally so a network
+  //      error doesn't strand the button in a permanently-disabled state.
   async function handleTimeout() {
     if (!match || !code) return;
     const turnKey = match.turnStartedAt || 0;
     if (timeoutFiredRef.current === turnKey) return;
     timeoutFiredRef.current = turnKey;
+    setSubmittingMove(true);
     try {
       const r = await apiFetch(`/api/debate/match/${code}/move`, {
         method: 'POST',
@@ -1812,6 +1919,8 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
     } catch (e) {
       // Server may reject (already-not-your-turn etc.) — swallow.
       console.warn('Timeout submit failed:', e?.message);
+    } finally {
+      setSubmittingMove(false);
     }
   }
 
@@ -1996,7 +2105,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
               className="w-full px-3 py-2 mb-2 rounded-lg border border-blue-500/25 bg-white/50 dark:bg-white/[0.06] text-sm text-gray-900 dark:text-white placeholder-gray-400 outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/45"
             />
             <div className="mb-4">
-              <TopicChips onPick={setTopicInput} max={4} />
+              <TopicChips onPick={setTopicInput} showCategories />
             </div>
             <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2">Your side</p>
             <div className="grid grid-cols-2 gap-2 mb-3">
@@ -2063,9 +2172,23 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
             </button>
           </>
         ) : (
-          <p className="text-xs text-blue-300/50 text-center italic py-4">
-            {!allReady ? 'Ready up to start…' : 'Waiting for the host to start…'}
-          </p>
+          <>
+            <p className="text-xs text-blue-300/50 text-center italic py-4">
+              {!allReady ? 'Ready up to start…' : 'Waiting for the host to pick a topic and start…'}
+            </p>
+            {/* Joiner used to be locked out of topic discovery entirely — gave
+                them zero agency. Now they can browse the same category-filtered
+                topic chips as the host; clicking one copies it to clipboard so
+                they can tell the host "let's debate X" in chat / voice. */}
+            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2 mt-3">Topic ideas</p>
+            <p className="text-[10.5px] text-blue-300/40 mb-2">Click a topic to copy it — share with the host.</p>
+            <TopicChips
+              showCategories
+              onPick={async (t) => {
+                try { await navigator.clipboard.writeText(t); } catch { /* ignore */ }
+              }}
+            />
+          </>
         )}
 
         {error && <p className="mt-3 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/25 rounded-lg px-3 py-2">{error}</p>}
@@ -2089,9 +2212,9 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
     const remainingMs = match.timedMode && match.turnStartedAt
       ? Math.max(0, (match.turnLimitMs || 120000) - (nowTick - match.turnStartedAt))
       : null;
-    if (match.timedMode && myTurn && remainingMs === 0 && !submittingMove) {
-      handleTimeout();
-    }
+    // Auto-submit on timeout is handled in a useEffect below — calling
+    // an async setter from render fires once per render and was the
+    // reason scores were getting double-counted under the old code.
     const formatClock = (ms) => {
       const s = Math.max(0, Math.ceil(ms / 1000));
       const mm = Math.floor(s / 60);

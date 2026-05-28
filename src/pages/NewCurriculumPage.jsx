@@ -1,5 +1,5 @@
-import { useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useRef, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Sparkles, ArrowLeft } from 'lucide-react';
 import { generateCurriculum } from '../api/curriculum';
 import { DEFAULT_SETTINGS, DIFFICULTY_OPTIONS, LEARNING_STYLE_OPTIONS, LESSON_LENGTH_OPTIONS, TONE_OPTIONS } from '../utils/constants';
@@ -12,11 +12,31 @@ import { usePanels } from '../context/PanelContext';
 
 export default function NewCurriculumPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { addPanel, updatePanel, removePanel } = usePanels();
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const generatingRef = useRef(false);
+
+  // Sources passed in from a launching page (e.g. NoteEditor handing the
+  // note text over). Server-side `/api/curriculum/generate` already
+  // grounds the syllabus in attached sources when present.
+  const [seedSources, setSeedSources] = useState([]);
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (seeded.current) return;
+    const seedTopic = location.state?.seedTopic;
+    const incoming = location.state?.seedSources;
+    if (seedTopic) {
+      seeded.current = true;
+      setSettings((prev) => ({ ...prev, topic: seedTopic }));
+    }
+    if (Array.isArray(incoming) && incoming.length > 0) {
+      seeded.current = true;
+      setSeedSources(incoming);
+    }
+  }, [location.state]);
 
   function update(key, value) {
     setSettings(prev => ({ ...prev, [key]: value }));
@@ -46,7 +66,7 @@ export default function NewCurriculumPage() {
     navigate('/dashboard');
 
     try {
-      const data = await generateCurriculum(settings);
+      const data = await generateCurriculum(settings, seedSources);
       if (data.curriculum) {
         updatePanel(panelId, {
           title: `Ready: ${data.curriculum.title}`,
@@ -85,6 +105,18 @@ export default function NewCurriculumPage() {
           </div>
         </div>
 
+        {seedSources.length > 0 && (
+          <div className="mb-5 rounded-lg border border-emerald-300 bg-emerald-50 dark:border-emerald-500/20 dark:bg-emerald-500/[0.06] px-4 py-3 flex items-start gap-3">
+            <Sparkles size={14} className="text-emerald-600 dark:text-emerald-400 mt-0.5 flex-shrink-0" />
+            <div className="text-[12px] text-emerald-900 dark:text-emerald-200/90 leading-relaxed">
+              <span className="font-semibold">{seedSources.length} source{seedSources.length === 1 ? '' : 's'} attached</span>
+              <span className="text-emerald-700/80 dark:text-emerald-200/55"> — the AI will ground this curriculum in </span>
+              <span className="text-emerald-900 dark:text-emerald-200/85">"{seedSources[0].title || 'your note'}"</span>
+              {seedSources.length > 1 && <span className="text-emerald-700/80 dark:text-emerald-200/55"> and {seedSources.length - 1} more.</span>}
+            </div>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-5">
           <Input label="What do you want to learn?" placeholder="e.g., Quantum Mechanics, Python, Music Theory..." value={settings.topic} onChange={e => update('topic', e.target.value)} required />
           <Input label="Target audience (optional)" placeholder="e.g., high school students, professionals..." value={settings.audience} onChange={e => update('audience', e.target.value)} />
@@ -95,6 +127,12 @@ export default function NewCurriculumPage() {
           <div className="space-y-3 pt-2">
             <Toggle label="Include examples" checked={settings.includeExamples} onChange={v => update('includeExamples', v)} />
             <Toggle label="Include exercises" checked={settings.includeExercises} onChange={v => update('includeExercises', v)} />
+            <Toggle
+              label="Graded mode"
+              description="Each lesson gets an AI-assigned task with a rubric. Submissions are graded and roll up to a course grade — visible to parents."
+              checked={settings.graded}
+              onChange={v => update('graded', v)}
+            />
           </div>
 
           {error && (

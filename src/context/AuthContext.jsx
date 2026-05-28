@@ -2,9 +2,6 @@ import { createContext, useContext, useState, useEffect, useCallback } from 'rea
 import { getMe, logout as apiLogout } from '../api/auth';
 import { getToken, setToken } from '../api/client';
 
-// Exported so demo surfaces (e.g. the landing-page mini OS) can render a
-// local AuthContext.Provider with a demo user, bypassing the top-level
-// auth flow without actually signing the real user in.
 export const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
@@ -28,6 +25,7 @@ export function AuthProvider({ children }) {
     setLoading(false);
   }, []);
 
+  // One-time bootstrap on mount
   useEffect(() => { fetchUser(); }, [fetchUser]);
 
   const login = useCallback((userData, token) => {

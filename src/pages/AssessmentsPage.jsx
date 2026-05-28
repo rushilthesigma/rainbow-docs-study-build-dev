@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { ClipboardCheck, Plus, CheckCircle2, XCircle, Clock, ArrowRight, TrendingUp, Trophy, Target } from 'lucide-react';
 import { generateAssessment, gradeAssessment, getAssessmentHistory } from '../api/assessments';
 import Button from '../components/shared/Button';
@@ -10,6 +11,7 @@ import Modal from '../components/shared/Modal';
 import MathText from '../components/shared/MathText';
 
 export default function AssessmentsPage() {
+  const location = useLocation();
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -24,17 +26,40 @@ export default function AssessmentsPage() {
   const [grading, setGrading] = useState(false);
   const [selectedAnswer, setSelectedAnswer] = useState(null);
   const [genError, setGenError] = useState(null);
+  // Optional source text (e.g. a note's body) passed through router state.
+  // The server-side prompt grounds questions in this text instead of the
+  // model's general knowledge of the topic.
+  const [seedContext, setSeedContext] = useState('');
+  const [seedSourceTitle, setSeedSourceTitle] = useState('');
 
   useEffect(() => {
     getAssessmentHistory().then(d => { setHistory(d.history || []); setLoading(false); }).catch(() => setLoading(false));
   }, []);
+
+  // Seed from a launching page (e.g. NoteEditor "Make Quiz"). Auto-opens
+  // the create modal pre-filled with the note title + content. Runs once.
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (seeded.current) return;
+    const s = location.state || {};
+    if (s.seedTopic || s.seedContext) {
+      seeded.current = true;
+      if (s.seedTopic) setTopic(s.seedTopic);
+      if (s.seedContext) setSeedContext(s.seedContext);
+      if (s.seedSourceTitle) setSeedSourceTitle(s.seedSourceTitle);
+      if (s.seedDifficulty) setDifficulty(s.seedDifficulty);
+      if (s.seedQuestionCount) setQuestionCount(s.seedQuestionCount);
+      // Auto-open the create modal so the user just hits "Generate"
+      setShowCreate(true);
+    }
+  }, [location.state]);
 
   async function handleGenerate(e) {
     e?.preventDefault?.();
     if (!topic.trim()) return;
     setGenerating(true); setShowCreate(false); setGenError(null);
     try {
-      const data = await generateAssessment(topic.trim(), 'quiz', questionCount, difficulty);
+      const data = await generateAssessment(topic.trim(), 'quiz', questionCount, difficulty, seedContext);
       setQuiz(data.assessment); setAnswers({}); setResults(null); setCurrentQ(0); setSelectedAnswer(null);
     } catch (err) { setGenError(err.message || 'Failed to generate quiz'); }
     setGenerating(false);
@@ -257,24 +282,35 @@ export default function AssessmentsPage() {
 
       <Modal open={showCreate} onClose={() => setShowCreate(false)} title="New quiz">
         <form onSubmit={handleGenerate} className="flex flex-col gap-4">
+          {seedContext && (
+            <div className="rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-500/20 dark:bg-emerald-500/[0.06] dark:text-emerald-200/90 px-3 py-2 text-[12px] leading-relaxed">
+              <span className="font-semibold">Grounded in your note</span>
+              {seedSourceTitle && <span className="text-emerald-700/80 dark:text-emerald-200/55"> · </span>}
+              {seedSourceTitle && <span className="text-emerald-900 dark:text-emerald-200/85">"{seedSourceTitle}"</span>}
+            </div>
+          )}
           <Input label="Topic" placeholder="Calculus, WW2, etc." value={topic} onChange={e => setTopic(e.target.value)} required />
           <PillGroup label="Difficulty" options={DIFFICULTY_OPTIONS} value={difficulty} onChange={setDifficulty} />
           <div>
-            <label className="block text-[10px] font-black uppercase tracking-[0.18em] text-white/35 mb-2">Questions</label>
+            <label className="block text-[10px] font-black uppercase tracking-[0.18em] text-gray-500 dark:text-white/35 mb-2">Questions</label>
             <div className="flex gap-2">
-              {[3, 5, 10, 15, 20].map(n => (
-                <button
-                  key={n}
-                  type="button"
-                  onClick={() => setQuestionCount(n)}
-                  className="px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-colors"
-                  style={questionCount === n
-                    ? { background: 'rgba(255,255,255,0.14)', color: 'rgba(255,255,255,0.90)', border: '1px solid rgba(255,255,255,0.22)' }
-                    : { background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.40)', border: '1px solid rgba(255,255,255,0.08)' }}
-                >
-                  {n}
-                </button>
-              ))}
+              {[3, 5, 10, 15, 20].map(n => {
+                const active = questionCount === n;
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setQuestionCount(n)}
+                    className={`px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-colors border ${
+                      active
+                        ? 'bg-gray-900 text-white border-gray-900 dark:bg-white/15 dark:text-white/90 dark:border-white/20'
+                        : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200 hover:text-gray-700 dark:bg-white/[0.04] dark:text-white/40 dark:border-white/[0.08] dark:hover:bg-white/[0.08] dark:hover:text-white/65'
+                    }`}
+                  >
+                    {n}
+                  </button>
+                );
+              })}
             </div>
           </div>
           <Button type="submit" loading={generating} className="w-full">

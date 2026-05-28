@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  BookOpen, Lightbulb, MessageSquare, Zap, FileText, Settings,
+  BookOpen, Lightbulb, MessageSquare, Zap, FileText, Settings, Users,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { listCurricula } from '../../api/curriculum';
@@ -72,6 +72,7 @@ export default function MobileHome({ onNavigate }) {
       <div className="grid grid-cols-2 gap-3">
         <Action tone="blue"     icon={<BookOpen size={28} />}      title="Build a course" onClick={() => onNavigate('curricula')} />
         <Action tone="amber"    icon={<Lightbulb size={28} />}     title="Quick lesson"   onClick={() => onNavigate('lessons')} />
+        <Action tone="cyan"     icon={<Users size={28} />}         title="Play vs AI"     onClick={() => onNavigate('quizbowl')} />
         <Action tone="orange"   icon={<Zap size={28} />}           title="Quiz Bowl"      onClick={() => onNavigate('quizbowl')} />
         <Action tone="sky"      icon={<MessageSquare size={28} />} title="Study chat"     onClick={() => onNavigate('study')} />
         <Action tone="emerald"  icon={<FileText size={28} />}      title="Notes"          onClick={() => onNavigate('notes')} />

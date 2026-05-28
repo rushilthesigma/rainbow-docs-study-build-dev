@@ -11,6 +11,16 @@ export async function generateCurriculum(settings, sources = []) {
   });
 }
 
+// Ask the AI to produce 3-4 short clarifying questions about a topic before
+// the full curriculum is generated. The answers get folded back into the
+// generation prompt so the syllabus actually matches what the student wants.
+export async function refineCurriculum(topic, difficulty, audience) {
+  return apiFetch('/api/curriculum/refine', {
+    method: 'POST',
+    body: JSON.stringify({ topic, difficulty, audience }),
+  });
+}
+
 // Pull plain text out of a public web URL (server-side fetch — bypasses
 // CORS). Returns { url, title, kind:'url', content, chars }.
 export async function extractSourceUrl(url) {
@@ -138,6 +148,27 @@ export async function getLessonHistory(curriculumId, lessonId) {
 
 export async function resetLesson(curriculumId, lessonId) {
   return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/reset`, { method: 'POST' });
+}
+
+// ===== GRADED MODE — assignments + course grade =====
+// Lazy-generate the assignment prompt + rubric on first open. Idempotent.
+export async function generateAssignment(curriculumId, lessonId) {
+  return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/assignment/generate`, {
+    method: 'POST',
+  });
+}
+
+// Submit a written response for grading. AI grades against the rubric and
+// returns { submission, courseGrade }.
+export async function submitAssignment(curriculumId, lessonId, text) {
+  return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/assignment/submit`, {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  });
+}
+
+export async function getCourseGrade(curriculumId) {
+  return apiFetch(`/api/curriculum/${curriculumId}/grade`);
 }
 
 // Generic SSE streaming helper

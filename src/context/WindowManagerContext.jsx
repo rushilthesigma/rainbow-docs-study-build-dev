@@ -62,18 +62,14 @@ function reducer(state, action) {
       const size = getDefaultSize(action.appId);
       const position = getCascadePos(state.cascadeOffset);
       const fixedSize = isFixedSize(action.appId);
-      // Slideshow auto-maximizes on open — the deck workspace is designed
-      // to own the viewport. Its title-bar maximize button is also hidden
-      // (see Window.jsx WindowsTitleBar), so the only way out is close /
-      // minimize. preMaximize stays at the cascade position so if the
-      // user ever does restore via keyboard shortcut, the float lands in
-      // a sane place.
-      const openMaximized = action.appId === 'slides';
+      // (Slides used to force-open maximized; that app is gone now so
+      // every window opens at its cascade position.)
+      const openMaximized = false;
       return {
         ...state,
         windows: {
           ...state.windows,
-          [id]: { id, appId: action.appId, title: action.title || action.appId, position, size, zIndex: state.nextZIndex, isMinimized: false, isMaximized: openMaximized, isClosing: false, preMaximize: openMaximized ? { position, size } : null, fixedSize },
+          [id]: { id, appId: action.appId, title: action.title || action.appId, meta: action.meta || {}, position, size, zIndex: state.nextZIndex, isMinimized: false, isMaximized: openMaximized, isClosing: false, preMaximize: openMaximized ? { position, size } : null, fixedSize },
         },
         nextZIndex: state.nextZIndex + 1,
         activeWindowId: id,
@@ -181,8 +177,13 @@ export function WindowManagerProvider({ children }) {
   // `focusIfOpen=true` (3rd arg) when you want the legacy "single
   // instance per app" behaviour — used by the Dock click handler so
   // the user can refocus a running app without spawning duplicates.
-  const openApp = useCallback((appId, title, focusIfOpen = false) =>
-    dispatch({ type: 'OPEN_WINDOW', appId, title, focusIfOpen }), []);
+  // metaOrFocus: pass `true` for single-instance focus-if-open (Dock),
+  // or pass an object `{ initialMessage, ... }` to seed the app with data.
+  const openApp = useCallback((appId, title, metaOrFocus = false) => {
+    const focusIfOpen = metaOrFocus === true;
+    const meta = (metaOrFocus && typeof metaOrFocus === 'object') ? metaOrFocus : {};
+    dispatch({ type: 'OPEN_WINDOW', appId, title, focusIfOpen, meta });
+  }, []);
   const closeWindow = useCallback((windowId) => dispatch({ type: 'CLOSE_WINDOW', windowId }), []);
   const removeWindow = useCallback((windowId) => dispatch({ type: 'REMOVE_WINDOW', windowId }), []);
   const minimizeWindow = useCallback((windowId) => dispatch({ type: 'MINIMIZE_WINDOW', windowId }), []);
@@ -204,4 +205,11 @@ export function useWindowManager() {
   const ctx = useContext(WindowManagerContext);
   if (!ctx) throw new Error('useWindowManager must be inside WindowManagerProvider');
   return ctx;
+}
+
+// Like useWindowManager but returns null instead of throwing when used
+// outside the provider — for shared components that work in both the
+// desktop shell (windowed) and the mobile/classic shells (router-based).
+export function useWindowManagerOptional() {
+  return useContext(WindowManagerContext);
 }

@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { MessageSquare, BookOpen, Layers, FileText, MoreHorizontal, Target, ClipboardCheck, Swords, Users, GraduationCap, Settings, ArrowLeft, Moon, Sun, Send, Plus, ChevronRight, Trash2, RotateCcw, Check, X, History, Search, LogOut, Loader2 } from 'lucide-react';
+import { MessageSquare, BookOpen, Layers, FileText, MoreHorizontal, Target, ClipboardCheck, Swords, GraduationCap, Settings, ArrowLeft, Send, Plus, ChevronRight, Trash2, RotateCcw, Check, X, History, Search, LogOut, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useAuth } from '../../context/AuthContext';
@@ -13,7 +13,6 @@ import { DEFAULT_SETTINGS, DIFFICULTY_OPTIONS, LEARNING_STYLE_OPTIONS } from '..
 import GoalsPage from '../../pages/GoalsPage';
 import AssessmentsPage from '../../pages/AssessmentsPage';
 import SettingsPage from '../../pages/SettingsPage';
-import SocialApp from '../desktop/apps/SocialApp';
 import Button from '../shared/Button';
 import Input from '../shared/Input';
 import PillGroup from '../shared/PillGroup';
@@ -347,19 +346,11 @@ function MobileNotes() {
 // ============ MOBILE MORE PAGE ============
 function MobileMore({ onNavigate }) {
   const { logout } = useAuth();
-  const dark = document.documentElement.classList.contains('dark');
   const items = [
     { id: 'goals', label: 'Goals', icon: Target, color: 'text-amber-500', bg: 'bg-amber-50 dark:bg-amber-900/20' },
     { id: 'assessments', label: 'Assessments', icon: ClipboardCheck, color: 'text-rose-500', bg: 'bg-rose-50 dark:bg-rose-900/20' },
-    { id: 'social', label: 'Social', icon: Users, color: 'text-cyan-500', bg: 'bg-cyan-50 dark:bg-cyan-900/20' },
-    { id: 'settings', label: 'Settings', icon: Settings, color: 'text-gray-500', bg: 'bg-gray-50 dark:bg-gray-800/30' },
+{ id: 'settings', label: 'Settings', icon: Settings, color: 'text-gray-500', bg: 'bg-gray-50 dark:bg-gray-800/30' },
   ];
-
-  function toggleTheme() {
-    if (dark) { document.documentElement.classList.remove('dark'); localStorage.setItem('covalent-theme', 'light'); }
-    else { document.documentElement.classList.add('dark'); localStorage.setItem('covalent-theme', 'dark'); }
-    window.location.reload();
-  }
 
   return (
     <div className="flex flex-col h-full">
@@ -382,10 +373,6 @@ function MobileMore({ onNavigate }) {
           })}
         </div>
         <div className="space-y-2">
-          <button onClick={toggleTheme} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-white dark:bg-[#161622] border border-gray-200 dark:border-[#2A2A40]">
-            {dark ? <Sun size={18} className="text-amber-500" /> : <Moon size={18} className="text-indigo-500" />}
-            <span className="text-sm text-gray-900 dark:text-white">{dark ? 'Light Mode' : 'Dark Mode'}</span>
-          </button>
           <button onClick={logout} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-white dark:bg-[#161622] border border-rose-200 dark:border-rose-900/30">
             <LogOut size={18} className="text-rose-500" />
             <span className="text-sm text-rose-500">Log Out</span>

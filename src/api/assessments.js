@@ -5,10 +5,10 @@ export async function getLessonAssessment(curriculumId, lessonId, refresh = fals
   return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/assessment${qs}`);
 }
 
-export async function generateAssessment(topic, type, questionCount, difficulty) {
+export async function generateAssessment(topic, type, questionCount, difficulty, context = '') {
   return apiFetch('/api/assessment/generate', {
     method: 'POST',
-    body: JSON.stringify({ topic, type, questionCount, difficulty }),
+    body: JSON.stringify({ topic, type, questionCount, difficulty, context }),
   });
 }
 

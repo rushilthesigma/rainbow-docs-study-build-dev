@@ -1,4 +1,5 @@
 import { Home, BookOpen, Lightbulb, FileText, Settings } from 'lucide-react';
+import { useUIPreference } from '../../context/UIPreferenceContext';
 
 // Five primary tabs. `More` is gone — secondary surfaces (Study,
 // Quiz Bowl) are reachable from the Home tiles, and Settings lives
@@ -16,9 +17,14 @@ const TABS = [
 // `bottom` offset accounts for the controls height (32) + the iOS
 // home-indicator inset.
 export default function BottomTabs({ active, onSelect }) {
+  const { bottomBarTransparent } = useUIPreference();
   return (
     <nav
-      className="fixed left-0 right-0 z-30 bg-white/85 dark:bg-[#0c0c16]/85 backdrop-blur-xl border-t border-gray-200/70 dark:border-white/[0.06]"
+      className={`fixed left-0 right-0 z-30 border-t border-gray-200/70 dark:border-white/[0.06] ${
+        bottomBarTransparent
+          ? 'bg-white/85 dark:bg-[#0c0c16]/85 backdrop-blur-xl'
+          : 'bg-white dark:bg-[#0c0c16]'
+      }`}
       style={{ bottom: 'calc(32px + env(safe-area-inset-bottom, 0px))' }}
     >
       <div className="relative flex items-stretch h-[58px] px-2">
@@ -31,30 +37,37 @@ export default function BottomTabs({ active, onSelect }) {
               onClick={() => onSelect(tab.id)}
               aria-label={tab.label}
               aria-current={isActive ? 'page' : undefined}
-              className="group relative flex-1 flex flex-col items-center justify-center gap-0.5 active:scale-[0.96] transition-transform"
+              className="group relative flex-1 flex flex-col items-center justify-center gap-0.5 active:scale-[0.94] transition-transform select-none"
             >
-              {/* Pill behind the active icon */}
+              {/* Active indicator: thin top accent bar (Apple-style) — instantly
+                  legible at a glance and works without a colored background. */}
               <span
-                className={`absolute top-1 w-12 h-9 rounded-2xl transition-all duration-200 ${
+                className={`absolute top-0 left-1/2 -translate-x-1/2 h-[3px] rounded-b-full transition-all duration-200 ${
+                  isActive ? 'w-8 bg-blue-500 dark:bg-blue-400 opacity-100' : 'w-0 opacity-0'
+                }`}
+              />
+              {/* Soft pill behind the icon */}
+              <span
+                className={`absolute top-2 w-11 h-9 rounded-2xl transition-all duration-200 ${
                   isActive
-                    ? 'bg-blue-500/15 dark:bg-blue-400/20 scale-100 opacity-100'
+                    ? 'bg-blue-500/12 dark:bg-blue-400/15 scale-100 opacity-100'
                     : 'scale-90 opacity-0'
                 }`}
               />
               <Icon
-                size={21}
-                strokeWidth={isActive ? 2.3 : 1.8}
-                className={`relative transition-colors ${
+                size={22}
+                strokeWidth={isActive ? 2.4 : 1.9}
+                className={`relative transition-all ${
                   isActive
-                    ? 'text-blue-600 dark:text-blue-300'
-                    : 'text-gray-500 dark:text-gray-500 group-hover:text-gray-700 dark:group-hover:text-gray-300'
+                    ? 'text-blue-600 dark:text-blue-300 scale-[1.05]'
+                    : 'text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-200'
                 }`}
               />
               <span
                 className={`relative text-[10px] font-semibold tracking-tight transition-colors ${
                   isActive
                     ? 'text-blue-600 dark:text-blue-300'
-                    : 'text-gray-500 dark:text-gray-500'
+                    : 'text-gray-500 dark:text-gray-400'
                 }`}
               >
                 {tab.label}

@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Plus, X, Menu, Moon, Sun, PanelRight } from 'lucide-react';
+import { Plus, X, Menu, PanelRight } from 'lucide-react';
 import { useTabs } from '../../context/TabContext';
 import { useSplitView } from '../../context/SplitViewContext';
 
@@ -9,21 +9,6 @@ export default function TabBar({ onToggleSidebar, showHamburger = false }) {
   const { isActive: splitActive, openSplit, closeSplit } = useSplitView();
   const location = useLocation();
   const isMathPage = location.pathname === '/math';
-
-  const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'));
-
-  useEffect(() => {
-    if (dark) document.documentElement.classList.add('dark');
-    else document.documentElement.classList.remove('dark');
-    localStorage.setItem('covalent-theme', dark ? 'dark' : 'light');
-  }, [dark]);
-
-  useEffect(() => {
-    const saved = localStorage.getItem('covalent-theme');
-    if (saved === 'dark') setDark(true);
-    else if (saved === 'light') setDark(false);
-    else if (window.matchMedia('(prefers-color-scheme: dark)').matches) setDark(true);
-  }, []);
 
   useEffect(() => {
     if (isMathPage && splitActive) closeSplit();
@@ -99,13 +84,6 @@ export default function TabBar({ onToggleSidebar, showHamburger = false }) {
             {splitActive ? <X size={15} /> : <PanelRight size={15} />}
           </button>
         )}
-        <button
-          onClick={() => setDark(!dark)}
-          className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200/60 dark:hover:bg-white/[0.06] transition-colors"
-          title={dark ? 'Light mode' : 'Dark mode'}
-        >
-          {dark ? <Sun size={15} /> : <Moon size={15} />}
-        </button>
       </div>
     </div>
   );

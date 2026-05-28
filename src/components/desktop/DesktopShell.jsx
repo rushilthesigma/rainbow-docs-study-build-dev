@@ -1,5 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { WindowManagerProvider, useWindowManager } from '../../context/WindowManagerContext';
+import { WidgetProvider, useWidgets } from '../../context/WidgetContext';
 import DesktopBackground from './DesktopBackground';
 import MenuBar from './MenuBar';
 import Dock from './Dock';
@@ -9,6 +11,7 @@ import Spotlight from './Spotlight';
 import ContextMenu from './ContextMenu';
 import GuidedTour from './GuidedTour';
 import ShortcutsHelp from './ShortcutsHelp';
+import DesktopWidgets from './DesktopWidgets';
 
 // Windows 11 is the only desktop shell. macOS / ChromeOS / Linux paths
 // were removed along with the OS-style picker. The HTML root gets a
@@ -16,34 +19,16 @@ import ShortcutsHelp from './ShortcutsHelp';
 // apply uniformly. The component is still named MacOSContent for
 // historical churn-minimization; rename is a separate task.
 function MacOSContent() {
-  const { state, minimizeWindow, restoreWindow } = useWindowManager();
+  const { state } = useWindowManager();
+  const { toggleSnapGrid } = useWidgets();
   const [spotlightOpen, setSpotlightOpen] = useState(false);
   const toggleSpotlight = useCallback(() => setSpotlightOpen(prev => !prev), []);
 
-  // When the slides window is maximized, hide all other windows so the
-  // presentation gets an uncluttered full-screen. When it un-maximizes,
-  // restore exactly the windows that were visible before.
-  const prevSlidesMaxRef = useRef(false);
-  const hiddenForSlidesRef = useRef([]);
-  useEffect(() => {
-    const wins = Object.values(state.windows);
-    const slidesWin = wins.find(w => w.appId === 'slides');
-    const nowMax = !!(slidesWin?.isMaximized && !slidesWin?.isMinimized && !slidesWin?.isClosing);
-    if (nowMax === prevSlidesMaxRef.current) return;
-    const wasMax = prevSlidesMaxRef.current;
-    prevSlidesMaxRef.current = nowMax;
-    if (nowMax && !wasMax) {
-      const toHide = wins
-        .filter(w => w.appId !== 'slides' && !w.isMinimized && !w.isClosing)
-        .map(w => w.id);
-      hiddenForSlidesRef.current = toHide;
-      toHide.forEach(id => minimizeWindow(id));
-    } else if (!nowMax && wasMax) {
-      const toRestore = hiddenForSlidesRef.current;
-      hiddenForSlidesRef.current = [];
-      setTimeout(() => toRestore.forEach(id => { if (state.windows[id]) restoreWindow(id); }), 250);
-    }
-  }, [state.windows, minimizeWindow, restoreWindow]);
+  // Slides-specific full-screen takeover logic lived here. It minimized
+  // every other visible window when the slides deck went maximized and
+  // restored them on exit. Now that slides is gone, the shell behaves
+  // like every other app — maximize fills the workspace but doesn't
+  // touch siblings.
 
   useEffect(() => {
     function handleKey(e) {
@@ -52,10 +37,12 @@ function MacOSContent() {
       const isDigit1 = e.code === 'Digit1' || e.key === '1' || e.key === '!' || e.keyCode === 49;
       if (cmdish && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); toggleSpotlight(); }
       else if (cmdish && e.shiftKey && isDigit1) { e.preventDefault(); toggleSpotlight(); }
+      // ⌘⇧H → toggle widget snap dock
+      else if (cmdish && e.shiftKey && (e.key === 'h' || e.key === 'H')) { e.preventDefault(); toggleSnapGrid(); }
     }
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [toggleSpotlight]);
+  }, [toggleSpotlight, toggleSnapGrid]);
 
   const windows = Object.values(state.windows);
   // Any visible (not minimized / not closing) window in the maximized
@@ -67,9 +54,10 @@ function MacOSContent() {
     <div className="h-screen w-screen overflow-hidden relative">
       <DesktopBackground />
       {!anyMaximized && <MenuBar onSpotlight={toggleSpotlight} />}
+      <DesktopWidgets />
       {windows.map(win => (
         <Window key={win.id} win={win} isActive={win.id === state.activeWindowId}>
-          <AppWindow appId={win.appId} />
+          <AppWindow appId={win.appId} meta={win.meta} />
         </Window>
       ))}
       {/* Dock stays visible even when a window is maximized — Windows-
@@ -82,9 +70,41 @@ function MacOSContent() {
   );
 }
 
+// Maps known URL paths to the dock app id they should open. When the
+// router navigates to one of these (e.g. /parent from the ProfilePicker),
+// DesktopShell opens the matching app window — the desktop doesn't use
+// ClassicRoutes, so without this hook the URL change is silent.
+const PATH_TO_APP = {
+  '/settings':    { appId: 'settings',  title: 'Settings' },
+  '/study':       { appId: 'study',     title: 'Study Mode' },
+  '/notes':       { appId: 'notes',     title: 'Notes' },
+  '/notes/map':   { appId: 'notemap',   title: 'Note Map' },
+};
+
 function ShellContent() {
-  const { state, closeWindow, minimizeWindow, focusWindow, restoreWindow } = useWindowManager();
+  const { state, openApp, closeWindow, minimizeWindow, focusWindow, restoreWindow } = useWindowManager();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [helpOpen, setHelpOpen] = useState(false);
+
+  // URL → window bridge. On mount AND whenever the path changes, if the
+  // path matches a known app, open (or focus) that app's window. After
+  // dispatching we rewrite the URL back to /dashboard so the same path
+  // can be triggered again later (e.g. parent → kid → parent).
+  useEffect(() => {
+    const match = PATH_TO_APP[location.pathname];
+    if (!match) return;
+    const existing = Object.values(state.windows).find(w => w.appId === match.appId && !w.isClosing);
+    if (existing) {
+      if (existing.isMinimized) restoreWindow(existing.id);
+      else focusWindow(existing.id);
+    } else {
+      openApp(match.appId, match.title, true);
+    }
+    // Rewrite the URL without firing another effect cycle.
+    navigate('/dashboard', { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
 
   // Tag <html> with `os-windows` so the Fluent-scoped CSS rules in
   // index.css kick in. The shell is Win11-only now — no more dynamic
@@ -162,7 +182,9 @@ function ShellContent() {
 export default function DesktopShell() {
   return (
     <WindowManagerProvider>
-      <ShellContent />
+      <WidgetProvider>
+        <ShellContent />
+      </WidgetProvider>
     </WindowManagerProvider>
   );
 }

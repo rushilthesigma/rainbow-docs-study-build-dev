@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { ArrowLeft, Plus, Sparkles, Loader2, BookOpen, ChevronDown, ChevronRight, CheckCircle2, Circle, Lock, ClipboardCheck, PenTool, FileText, Check, X, Trophy, Wand2, Paperclip, Upload, Calculator, GraduationCap, Atom, Sigma, Map as MapIcon, List } from 'lucide-react';
-import { listCurricula, generateCurriculum, getCurriculum, sendLessonMessage, getLessonHistory, editCurriculumWithAI, extractSourceUrl, extractFiles } from '../../../api/curriculum';
+import { listCurricula, generateCurriculum, getCurriculum, sendLessonMessage, getLessonHistory, editCurriculumWithAI, extractSourceUrl, extractFiles, refineCurriculum } from '../../../api/curriculum';
 import { apiFetch } from '../../../api/client';
 import { useWindowManager } from '../../../context/WindowManagerContext';
 import { useDemoMode } from '../../../context/DemoModeContext';
@@ -29,7 +29,11 @@ import { InlineProgress } from '../../shared/ProgressBar';
 const TYPE_ICONS = { lesson: BookOpen, math_tutor: Calculator, practice: PenTool, essay: FileText, unit_test: ClipboardCheck };
 const TYPE_COLORS = { lesson: 'text-white/50', math_tutor: 'text-white/50', practice: 'text-white/50', essay: 'text-amber-400', unit_test: 'text-rose-400' };
 
-export default function CurriculaApp() {
+// When opened from another app (e.g. NotesApp's "Build Curriculum from
+// note" action), the window-manager `meta` is spread as props. We use
+// `seedView` to jump straight to the new-curriculum form and `seedTopic`
+// / `seedSources` to pre-fill the topic field and attached sources.
+export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) {
   const { user } = useAuth();
   const isBeta = !!user?.data?.isBeta;
   // Trail view (BETA) — gamifies the curriculum into a Duolingo-style
@@ -45,7 +49,11 @@ export default function CurriculaApp() {
       return next;
     });
   }
-  const [view, setView] = useState('list');
+  // Seed the view from `seedView` prop (passed via window meta when another
+  // app — e.g. NotesApp — opens this one with "Build Curriculum from this
+  // note"). Safe to use directly as the initial state now that useBrowserBack
+  // below skips 'new'/'pausd' (see comment there).
+  const [view, setView] = useState(seedView || 'list');
   const [curricula, setCurricula] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedCurriculum, setSelectedCurriculum] = useState(null);
@@ -58,7 +66,10 @@ export default function CurriculaApp() {
 
   // Browser Back navigates up one level inside the curriculum stack instead
   // of leaving the SPA. lesson / math_tutor / assessment → detail → list.
-  useBrowserBack(view !== 'list', () => {
+  // Excludes 'new' and 'pausd' — those are top-level sibling views to
+  // 'list', not drill-downs, and intercepting Back for them caused a
+  // StrictMode race that flipped a seeded 'new' view back to 'list'.
+  useBrowserBack(view !== 'list' && view !== 'new' && view !== 'pausd', () => {
     if (view === 'lesson') setView('detail');
     else if (view === 'assessment') setView('detail');
     else if (view === 'math_tutor') setView('detail');
@@ -78,14 +89,38 @@ export default function CurriculaApp() {
   const abortRef = useRef(null);
   const autoStarted = useRef(false);
 
-  // New curriculum
-  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  // New curriculum — seeded topic (e.g. a note title) goes into the
+  // settings on first mount.
+  const [settings, setSettings] = useState(() => (
+    seedTopic ? { ...DEFAULT_SETTINGS, topic: seedTopic } : DEFAULT_SETTINGS
+  ));
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState(null);
+  // 'questions' = fetching/asking clarifying questions before build; 'building'
+  // = the actual curriculum-generation call is in flight; null = idle/form.
+  const [genPhase, setGenPhase] = useState(null);
+  // AI-generated clarifying questions for the current topic, plus the
+  // student's chosen answers. Fed into the generation prompt so the
+  // curriculum matches the actual ask, not just the topic string.
+  const [refineQuestions, setRefineQuestions] = useState([]); // [{ id, question, options[] }]
+  const [refineAnswers, setRefineAnswers] = useState({});      // { [id]: answer }
   // Source material attached to a new curriculum: textbooks (PDF / text)
   // and websites (URL → server-fetched + HTML-stripped). Each entry:
   //   { id, title, kind: 'pdf' | 'text' | 'url', content, url?, chars }
-  const [sources, setSources] = useState([]);
+  // Seeded from `seedSources` (e.g. a note handed off from NotesApp) when
+  // the window opens.
+  const [sources, setSources] = useState(() => (
+    Array.isArray(seedSources) && seedSources.length > 0
+      ? seedSources.map((s) => ({
+          id: s.id || (crypto.randomUUID?.() || String(Date.now() + Math.random())),
+          title: s.title || s.name || 'Source',
+          kind: s.kind || 'text',
+          content: s.content || s.text || '',
+          url: s.url || null,
+          chars: (s.content || s.text || '').length,
+        }))
+      : []
+  ));
   const [sourceUrlInput, setSourceUrlInput] = useState('');
   const [sourceBusy, setSourceBusy] = useState(false);
   const [sourceError, setSourceError] = useState('');
@@ -141,18 +176,64 @@ export default function CurriculaApp() {
   async function handleGenerate() {
     if (!settings.topic.trim() || generating) return;
     setGenerating(true); setGenError(null);
+
+    // Always pause to ask clarifying questions before building — keeps the
+    // curriculum aligned with the student's actual ask, not just the bare
+    // topic string. If they already pre-answered some via the Refine panel
+    // (refineQuestions populated), skip the fetch and jump straight to build.
+    if (refineQuestions.length === 0) {
+      setGenPhase('questions');
+      try {
+        const { questions } = await refineCurriculum(settings.topic, settings.difficulty, settings.audience);
+        const list = Array.isArray(questions) ? questions : [];
+        setRefineQuestions(list);
+        if (list.length === 0) {
+          // API returned no questions — nothing to ask, build immediately.
+          await runBuild();
+        }
+        // Otherwise wait for the user to answer + click "Build curriculum".
+      } catch (err) {
+        // Couldn't fetch questions — surface a soft warning and build anyway
+        // so the user isn't stuck.
+        setGenError(`Couldn't fetch clarifying questions: ${err?.message || 'unknown error'}. Building with your settings…`);
+        await runBuild();
+      }
+      return;
+    }
+
+    await runBuild();
+  }
+
+  async function runBuild() {
+    setGenPhase('building');
     try {
       // Strip the local id (used only for React keys + remove-button) before
       // sending — server doesn't care about it.
       const cleanSources = sources.map(({ id, ...rest }) => rest); // eslint-disable-line no-unused-vars
-      const data = await generateCurriculum(settings, cleanSources);
+      // Fold the Q&A from the refine step into settings so the prompt can
+      // anchor the curriculum to the student's actual ask.
+      const refinements = refineQuestions
+        .map(q => ({ question: q.question, answer: refineAnswers[q.id] }))
+        .filter(r => r.answer);
+      const augmented = { ...settings, ...(refinements.length ? { refinements } : {}) };
+      const data = await generateCurriculum(augmented, cleanSources);
       setCurricula(prev => [data.curriculum, ...prev]);
       setSelectedCurriculum(data.curriculum);
       setView('detail');
       setSettings(DEFAULT_SETTINGS);
       setSources([]);
+      setRefineQuestions([]); setRefineAnswers({});
     } catch (err) { setGenError(err.message || 'Failed'); }
     setGenerating(false);
+    setGenPhase(null);
+  }
+
+  function cancelGenerate() {
+    setGenerating(false);
+    setGenPhase(null);
+    setRefineQuestions([]);
+    setRefineAnswers({});
+    setGenError(null);
   }
 
   async function handleAddSourceUrl(e) {
@@ -506,7 +587,70 @@ export default function CurriculaApp() {
       <div>
         <button onClick={() => setView('list')} className="flex items-center gap-2 text-sm text-white/40 hover:text-white/90 mb-4"><ArrowLeft size={16} /> Back</button>
         <h2 className="text-lg font-bold text-white mb-4">New curriculum</h2>
-        {generating ? (
+        {generating && genPhase === 'questions' ? (
+          <div className="py-6 px-2 max-w-xl mx-auto w-full">
+            <div className="flex items-center gap-2 mb-1">
+              <Wand2 size={14} className="text-white/65" />
+              <h3 className="text-sm font-semibold text-white">A few quick questions</h3>
+            </div>
+            <p className="text-[12px] text-white/45 mb-4">
+              So the curriculum for <span className="text-white/70">{settings.topic}</span> matches what you actually want — pick the option that fits, or skip the ones you don't have an opinion on.
+            </p>
+            {genError && (
+              <div className="px-3 py-2 mb-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-300">
+                {genError}
+              </div>
+            )}
+            {refineQuestions.length === 0 ? (
+              <div className="flex items-center gap-2 text-[12px] text-white/55 py-4">
+                <Loader2 size={14} className="animate-spin" />
+                Thinking of good questions to ask…
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {refineQuestions.map(q => (
+                  <div key={q.id}>
+                    <p className="text-[13px] text-white/85 mb-2">{q.question}</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {q.options.map(opt => {
+                        const active = refineAnswers[q.id] === opt;
+                        return (
+                          <button
+                            key={opt}
+                            onClick={() => setRefineAnswers(p => ({ ...p, [q.id]: opt }))}
+                            className={`px-2.5 py-1 rounded-md text-[11px] border transition-colors ${
+                              active
+                                ? 'bg-white/[0.14] text-white border-white/[0.22]'
+                                : 'bg-white/[0.03] text-white/55 border-white/[0.08] hover:text-white/85 hover:border-white/[0.16]'
+                            }`}
+                          >
+                            {opt}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between pt-2">
+                  <p className="text-[10px] text-white/35">
+                    {Object.keys(refineAnswers).length}/{refineQuestions.length} answered — unanswered questions are skipped.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={cancelGenerate}
+                      className="px-3 py-1.5 rounded-lg text-[12px] text-white/55 hover:text-white/90 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <Button onClick={runBuild}>
+                      <Sparkles size={14} /> Build curriculum
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : generating ? (
           <div className="py-10 px-2 max-w-xl mx-auto w-full">
             <LoadingProgress
               active

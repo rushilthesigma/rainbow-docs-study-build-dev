@@ -292,20 +292,10 @@ export default function SettingsPage() {
 
         <Textarea
           label="Custom instructions"
-          placeholder="How should the AI behave for you?"
+          placeholder="e.g. Always respond in bullet points. Never explain what you're about to do — just do it."
           value={prefs.customInstructions || ''}
           onChange={e => update('customInstructions', e.target.value)}
-          rows={3}
-        />
-      </Section>
-
-      {/* Slides */}
-      <Section title="Slides">
-        <Toggle
-          label="Auto-generate slide images"
-          description="~30s extra per deck."
-          checked={prefs.slideshowImageGen ?? true}
-          onChange={v => update('slideshowImageGen', v)}
+          rows={4}
         />
       </Section>
 

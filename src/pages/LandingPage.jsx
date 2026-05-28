@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { googleLogin } from '../api/auth';
+import { googleLogin, devLogin } from '../api/auth';
 import { WALLPAPERS } from '../components/desktop/DesktopBackground';
 import { Z } from '../styles/tokens';
 import {
   Loader2 as Loader, Sparkles, ArrowRight, X, Check, ChevronDown,
   BookOpen, Brain, Zap, PenTool, Cpu, Repeat,
   Lightbulb, Calculator, MessageSquare, Target, ClipboardCheck,
+  Terminal,
 } from 'lucide-react';
 
 // Two scroll-snap sections, Apple-homepage style:
@@ -71,11 +72,19 @@ export default function LandingPage() {
     else if (window.google?.accounts?.id) window.google.accounts.id.prompt();
   }
 
-  function newAccount() {
-    if (window.google?.accounts?.id) {
-      try { window.google.accounts.id.disableAutoSelect(); } catch {}
+  async function handleDevLogin() {
+    setLoading(true);
+    try {
+      const data = await devLogin('Dev User', 'dev@local.dev');
+      if (data.success) {
+        login(data.user, data.token);
+        navigate('/dashboard');
+        return;
+      }
+    } catch (err) {
+      console.error('Dev login failed:', err);
     }
-    triggerGoogle();
+    setLoading(false);
   }
 
   function scrollTo(idx) {
@@ -122,7 +131,7 @@ export default function LandingPage() {
         <SignInSection
           loading={loading}
           onSignIn={triggerGoogle}
-          onNewAccount={newAccount}
+          onDevLogin={handleDevLogin}
           onWhyNotGpt={() => setWhyOpen(true)}
         />
       </div>
@@ -455,23 +464,15 @@ function SubjectsSpotlight() {
 
 // ===== Section 6: Sign-in =====
 //
-// Styled like the Onboarding "Welcome" step — same gradient blue brand
-// mark sized at 20x20, the same italic "hello"-style gradient headline
-// treatment for the wordmark, and the same blue→indigo CTA pill so the
-// landing handshake and the first-login flow read as one continuous
-// experience.
-function SignInSection({ loading, onSignIn, onNewAccount, onWhyNotGpt }) {
+// Google OAuth is the only real sign-in path. Dev Login bypasses
+// auth for local development by spinning up a throwaway dev account.
+function SignInSection({ loading, onSignIn, onDevLogin, onWhyNotGpt }) {
   return (
     <section
       data-section="signin"
-      className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative"
+      className="snap-start min-h-screen w-full flex flex-col items-center justify-center px-6 py-16 relative"
     >
-      {/* Uniform bg-black/35 scrim — same opacity as every other section,
-          so the boundary between Subjects ↑ and the welcome ↓ doesn't
-          read as a hard line. */}
       <div className="absolute inset-0 bg-black/35" />
-      {/* Onboarding-style colored cast on top — gives the welcome its
-          blue/indigo character without darkening more than its neighbors. */}
       <div
         className="absolute inset-0"
         style={{
@@ -481,47 +482,60 @@ function SignInSection({ loading, onSignIn, onNewAccount, onWhyNotGpt }) {
         }}
       />
 
-      <div className="relative z-10 flex flex-col items-center text-center animate-fade-up">
-        {/* RushilAI brand mark — Fluent rounded-xl shape, cool blue→
-            indigo gradient kept so it still pops; inner highlight +
-            outer glow for "raised" Windows depth. */}
-        <div className="relative w-20 h-20 rounded-xl bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 grid place-items-center shadow-[0_10px_30px_rgba(99,102,241,0.45),inset_0_1px_0_rgba(255,255,255,0.25),inset_0_-1px_0_rgba(0,0,0,0.18)] ring-1 ring-blue-400/40">
-          <Sparkles size={38} className="text-white drop-shadow-lg" strokeWidth={2.2} />
+      <div className="relative z-10 flex flex-col items-center w-full max-w-sm animate-fade-up">
+        {/* Brand mark */}
+        <div className="relative w-16 h-16 rounded-xl bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 grid place-items-center shadow-[0_10px_30px_rgba(99,102,241,0.45),inset_0_1px_0_rgba(255,255,255,0.25)] ring-1 ring-blue-400/40">
+          <Sparkles size={30} className="text-white drop-shadow-lg" strokeWidth={2.2} />
         </div>
 
-        {/* Windows Segoe-flavored title — flat, semibold, lighter
-            tracking. Replaces the italic gradient (very macOS) with a
-            crisp white wordmark in Fluent's Display style. */}
-        <h1
-          className="mt-6 text-[40px] sm:text-[52px] leading-[1.05] font-semibold tracking-[-0.02em] text-white"
-        >
-          Welcome
+        <h1 className="mt-5 text-[32px] sm:text-[40px] leading-[1.05] font-semibold tracking-[-0.02em] text-white">
+          Sign in
         </h1>
-        <p className="mt-4 text-[16px] sm:text-[17px] text-white/80 drop-shadow-md">
-          Sign in to start your first curriculum.
+        <p className="mt-2 text-[14px] text-white/65">
+          Continue with your Google account to start learning.
         </p>
 
-        {/* Primary sign-in CTA — same shape + gradient as Onboarding's
-            "Continue" pill. */}
+        {/* Google OAuth — primary (and only) sign-in path */}
         <button
           onClick={onSignIn}
           disabled={loading}
-          className="group mt-8 inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-md bg-gradient-to-br from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 active:scale-[0.98] text-white text-[13.5px] font-semibold transition-all disabled:opacity-60 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),inset_0_-1px_0_rgba(0,0,0,0.18),0_4px_14px_rgba(99,102,241,0.40)] border border-blue-400/50"
+          className="mt-8 w-full py-3 rounded-lg bg-white hover:bg-white/95 active:scale-[0.98] text-[14px] font-semibold text-slate-800 transition-all disabled:opacity-50 shadow-[0_4px_14px_rgba(0,0,0,0.25)] inline-flex items-center justify-center gap-2.5"
         >
-          {loading
-            ? <><Loader size={14} className="animate-spin" /> Signing in…</>
-            : <>Sign in with Google <ArrowRight size={14} className="group-hover:translate-x-0.5 transition-transform" /></>}
+          {loading ? (
+            <span className="inline-flex items-center gap-2"><Loader size={14} className="animate-spin" /> Working...</span>
+          ) : (
+            <>
+              <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+                <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+                <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+                <path fill="#FBBC05" d="M10.53 28.59a14.5 14.5 0 0 1 0-9.18l-7.98-6.19a24.1 24.1 0 0 0 0 21.56l7.98-6.19z"/>
+                <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+              </svg>
+              Continue with Google
+            </>
+          )}
         </button>
 
+        {/* Divider */}
+        <div className="flex items-center gap-3 w-full mt-5">
+          <div className="flex-1 h-px bg-white/[0.10]" />
+          <span className="text-[11px] uppercase tracking-[0.14em] text-white/35 font-medium">or</span>
+          <div className="flex-1 h-px bg-white/[0.10]" />
+        </div>
+
+        {/* Dev login — bypass auth for local development */}
         <button
-          onClick={onNewAccount}
-          className="mt-4 text-[13px] font-medium text-white/75 hover:text-white transition-colors"
+          onClick={onDevLogin}
+          disabled={loading}
+          className="mt-4 w-full py-2.5 rounded-lg border border-amber-400/30 bg-amber-500/[0.08] hover:bg-amber-500/[0.14] active:scale-[0.98] text-[13.5px] font-medium text-amber-200/95 transition-all disabled:opacity-50 inline-flex items-center justify-center gap-2"
         >
-          I&apos;m a new user
+          <Terminal size={14} strokeWidth={2.2} />
+          Dev login
         </button>
+
       </div>
 
-      {/* Bottom links: Discord + Why not GPT? */}
+      {/* Bottom links */}
       <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 flex items-center gap-5">
         <a
           href="https://discord.gg/E9YXNj4F"
@@ -529,7 +543,6 @@ function SignInSection({ loading, onSignIn, onNewAccount, onWhyNotGpt }) {
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-white/70 hover:text-white drop-shadow-md transition-colors"
         >
-          {/* Discord logo */}
           <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path d="M20.317 4.492c-1.53-.69-3.17-1.2-4.885-1.49a.075.075 0 0 0-.079.036c-.21.369-.444.85-.608 1.23a18.566 18.566 0 0 0-5.487 0 12.36 12.36 0 0 0-.617-1.23A.077.077 0 0 0 8.562 3c-1.714.29-3.354.8-4.885 1.491a.07.07 0 0 0-.032.027C.533 9.093-.32 13.555.099 17.961a.08.08 0 0 0 .031.055 20.03 20.03 0 0 0 5.993 2.98.078.078 0 0 0 .084-.026c.462-.62.874-1.275 1.226-1.963a.074.074 0 0 0-.041-.104 13.201 13.201 0 0 1-1.872-.878.075.075 0 0 1-.008-.125c.126-.093.252-.19.372-.287a.075.075 0 0 1 .078-.01c3.927 1.764 8.18 1.764 12.061 0a.075.075 0 0 1 .079.009c.12.098.245.195.372.288a.075.075 0 0 1-.006.125c-.598.344-1.22.635-1.873.877a.075.075 0 0 0-.041.105c.36.687.772 1.341 1.225 1.962a.077.077 0 0 0 .084.028 19.963 19.963 0 0 0 6.002-2.981.076.076 0 0 0 .032-.054c.5-5.094-.838-9.52-3.549-13.442a.06.06 0 0 0-.031-.028ZM8.02 15.278c-1.182 0-2.157-1.069-2.157-2.38 0-1.312.956-2.38 2.157-2.38 1.21 0 2.176 1.077 2.157 2.38 0 1.312-.956 2.38-2.157 2.38Zm7.975 0c-1.183 0-2.157-1.069-2.157-2.38 0-1.312.955-2.38 2.157-2.38 1.21 0 2.176 1.077 2.157 2.38 0 1.312-.946 2.38-2.157 2.38Z" />
           </svg>

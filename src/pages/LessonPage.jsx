@@ -7,6 +7,7 @@ import { errorChatMessage } from '../utils/aiErrors';
 import PhaseIndicator from '../components/chat/PhaseIndicator';
 import LoadingSpinner from '../components/shared/LoadingSpinner';
 import Button from '../components/shared/Button';
+import AssignmentCard from '../components/lesson/AssignmentCard';
 
 export default function LessonPage() {
   const { id: curriculumId, lessonId } = useParams();
@@ -217,6 +218,24 @@ export default function LessonPage() {
             <span className="ml-auto text-sm font-bold text-emerald-600">+{completionData.xpEarned || 25} XP</span>
           </div>
           {completionData.summary && <p className="text-sm text-emerald-700 dark:text-emerald-300 mt-1">{completionData.summary}</p>}
+        </div>
+      )}
+
+      {/* Graded-mode assignment — only renders when the course is graded.
+          Sits above the chat so the student sees the assignment + can either
+          submit there or use the chat below to work through the content first. */}
+      {curriculum.graded && currentLesson.type === 'lesson' && (
+        <div className="mb-3 flex-shrink-0">
+          <AssignmentCard
+            curriculumId={curriculumId}
+            lessonId={lessonId}
+            initialAssignment={currentLesson.assignment}
+            onSubmitted={() => {
+              // Re-fetch the curriculum so the completion + grade reflect immediately.
+              getCurriculum(curriculumId).then(d => setCurriculum(d.curriculum)).catch(() => {});
+              setCompleted(true);
+            }}
+          />
         </div>
       )}
 

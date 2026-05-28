@@ -4,8 +4,41 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import { Check, X, Copy, Pencil } from 'lucide-react';
+import { Check, X, Copy, Pencil, FileText } from 'lucide-react';
 import MathText from '../shared/MathText';
+
+// Parse out --- FILE: name --- blocks that were prepended by ChatInput
+// when the user attached a PDF or text file. Returns the extracted
+// filenames and the user's actual text message (stripped of file content).
+function parseUserContent(raw) {
+  if (!raw.includes('--- FILE:')) return { files: [], text: raw };
+
+  const files = [];
+  const headerRx = /^--- FILE: (.+?) ---$/gm;
+  let m;
+  while ((m = headerRx.exec(raw)) !== null) {
+    files.push(m[1]);
+  }
+  if (!files.length) return { files: [], text: raw };
+
+  // The user's message is appended after all file blocks as:
+  //   {file blocks}\n\n{user text or "(see attached file)"}
+  // Find the last \n\n whose following text is NOT another file header.
+  let userText = '';
+  let searchFrom = raw.length;
+  while (searchFrom > 0) {
+    const pos = raw.lastIndexOf('\n\n', searchFrom - 1);
+    if (pos < 0) break;
+    const candidate = raw.slice(pos + 2).trim();
+    if (!candidate.startsWith('--- FILE:')) {
+      userText = candidate === '(see attached file)' ? '' : candidate;
+      break;
+    }
+    searchFrom = pos;
+  }
+
+  return { files, text: userText };
+}
 
 // Normalize LaTeX delimiter variants that remark-math doesn't parse:
 //   \( ... \) and \[ ... \]  →  $ ... $ / $$ ... $$
@@ -38,7 +71,7 @@ function InlineQuiz({ quizJson }) {
         const isWrong = submitted && userAnswer && userAnswer !== q.correct;
         return (
           <div key={i} className={`rounded-lg border p-3 ${submitted ? (isCorrect ? 'border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/10' : isWrong ? 'border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-900/10' : 'border-gray-200 dark:border-[#2A2A40]') : 'border-gray-200 dark:border-[#2A2A40]'}`}>
-            <MathText as="p" className="text-sm font-medium mb-2">{i + 1}. {q.question}</MathText>
+            <MathText as="p" className="text-sm font-medium mb-2">{i + 1}. {q.question.replace(/^\d+[.,)][^\w]*(?=[A-Za-z])/, '')}</MathText>
             <div className="space-y-1">
               {(q.options || []).map(opt => {
                 const letter = opt.charAt(0);
@@ -204,6 +237,9 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
   // The directional alignment alone signals who's talking.
 
   if (isUser) {
+    // Split out any --- FILE: ... --- blocks prepended by ChatInput
+    const { files: attachedFiles, text: userText } = parseUserContent(displayContent);
+
     if (editing) {
       return (
         <div className="flex justify-end mb-3">
@@ -243,8 +279,21 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
                 ))}
               </div>
             )}
-            {displayContent && (
-              <p className="whitespace-pre-wrap text-[13.5px] text-white leading-relaxed">{displayContent}</p>
+            {attachedFiles.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {attachedFiles.map((name, i) => (
+                  <span
+                    key={i}
+                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-white/[0.10] border border-white/[0.18] text-white/80 text-[11px] font-medium max-w-[220px]"
+                  >
+                    <FileText size={11} className="flex-shrink-0 text-white/50" />
+                    <span className="truncate">{name}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+            {userText && (
+              <p className="whitespace-pre-wrap text-[13.5px] text-white leading-relaxed">{userText}</p>
             )}
           </div>
           {!isStreaming && canEdit && (

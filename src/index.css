@@ -58,6 +58,151 @@ body {
   color: var(--color-text-primary-dark);
 }
 
+/* Light-mode shim for desktop chrome built dark-first.
+ *
+ * Many surfaces (widgets, dock contents, app windows) use `text-white/...`,
+ * `bg-white/...`, `border-white/...` classes that are invisible on a light
+ * background. Each surface tags itself with one of these attributes when the
+ * theme is light, and the rules below remap whites to legible dark tones.
+ *
+ * Surfaces opting in:
+ *   • [data-widget-theme="light"]  → individual widget shells
+ *   • [data-dock-theme="light"]    → taskbar / dock chrome + popovers
+ *   • [data-app-theme="light"]     → app window contents (AppWindow)
+ */
+
+/* ── Base color ── */
+[data-widget-theme="light"],
+[data-dock-theme="light"],
+[data-app-theme="light"] {
+  color: #111827;
+}
+
+/* ── Text remapping (opacity tiers) ──
+ * Highest specificity wins, so put strong opacities first.
+ * /9, /8  → near-opaque primary text
+ * /7–/5   → secondary text
+ * /4–/3   → tertiary / muted
+ * /2–/1   → ghost / placeholder
+ */
+[data-widget-theme="light"] [class*="text-white/9"],
+[data-widget-theme="light"] [class*="text-white/8"],
+[data-dock-theme="light"]   [class*="text-white/9"],
+[data-dock-theme="light"]   [class*="text-white/8"],
+[data-app-theme="light"]    [class*="text-white/9"],
+[data-app-theme="light"]    [class*="text-white/8"] {
+  color: rgba(17, 17, 24, 0.92) !important;
+}
+[data-widget-theme="light"] [class*="text-white/7"],
+[data-widget-theme="light"] [class*="text-white/6"],
+[data-widget-theme="light"] [class*="text-white/5"],
+[data-dock-theme="light"]   [class*="text-white/7"],
+[data-dock-theme="light"]   [class*="text-white/6"],
+[data-dock-theme="light"]   [class*="text-white/5"],
+[data-app-theme="light"]    [class*="text-white/7"],
+[data-app-theme="light"]    [class*="text-white/6"],
+[data-app-theme="light"]    [class*="text-white/5"] {
+  color: rgba(17, 17, 24, 0.68) !important;
+}
+[data-widget-theme="light"] [class*="text-white/4"],
+[data-widget-theme="light"] [class*="text-white/3"],
+[data-dock-theme="light"]   [class*="text-white/4"],
+[data-dock-theme="light"]   [class*="text-white/3"],
+[data-app-theme="light"]    [class*="text-white/4"],
+[data-app-theme="light"]    [class*="text-white/3"] {
+  color: rgba(17, 17, 24, 0.48) !important;
+}
+[data-widget-theme="light"] [class*="text-white/2"],
+[data-widget-theme="light"] [class*="text-white/1"],
+[data-dock-theme="light"]   [class*="text-white/2"],
+[data-dock-theme="light"]   [class*="text-white/1"],
+[data-app-theme="light"]    [class*="text-white/2"],
+[data-app-theme="light"]    [class*="text-white/1"] {
+  color: rgba(17, 17, 24, 0.32) !important;
+}
+/* Catch-all for bare text-white (no opacity) */
+[data-widget-theme="light"] [class*="text-white"],
+[data-dock-theme="light"]   [class*="text-white"],
+[data-app-theme="light"]    [class*="text-white"] {
+  color: rgba(17, 17, 24, 0.88) !important;
+}
+
+/* ── Background remapping ──
+ * Three tiers so hover/active states have visible contrast:
+ *   Low   (0.00–0.07)  → very subtle tint  (resting surface)
+ *   Mid   (0.08–0.14)  → soft dark tint     (hover)
+ *   High  (0.15+)      → clear dark tint    (active / selected)
+ */
+[data-widget-theme="light"] [class*="bg-white/"],
+[data-dock-theme="light"]   [class*="bg-white/"],
+[data-app-theme="light"]    [class*="bg-white/"] {
+  background-color: rgba(0, 0, 0, 0.045) !important;
+}
+/* Mid-opacity: hover states */
+[data-widget-theme="light"] [class*="bg-white/[0.08"],
+[data-widget-theme="light"] [class*="bg-white/[0.09"],
+[data-widget-theme="light"] [class*="bg-white/[0.10"],
+[data-widget-theme="light"] [class*="bg-white/[0.11"],
+[data-widget-theme="light"] [class*="bg-white/[0.12"],
+[data-widget-theme="light"] [class*="bg-white/[0.13"],
+[data-widget-theme="light"] [class*="bg-white/[0.14"],
+[data-dock-theme="light"]   [class*="bg-white/[0.08"],
+[data-dock-theme="light"]   [class*="bg-white/[0.09"],
+[data-dock-theme="light"]   [class*="bg-white/[0.10"],
+[data-dock-theme="light"]   [class*="bg-white/[0.11"],
+[data-dock-theme="light"]   [class*="bg-white/[0.12"],
+[data-dock-theme="light"]   [class*="bg-white/[0.13"],
+[data-dock-theme="light"]   [class*="bg-white/[0.14"],
+[data-app-theme="light"]    [class*="bg-white/[0.08"],
+[data-app-theme="light"]    [class*="bg-white/[0.09"],
+[data-app-theme="light"]    [class*="bg-white/[0.10"],
+[data-app-theme="light"]    [class*="bg-white/[0.11"],
+[data-app-theme="light"]    [class*="bg-white/[0.12"],
+[data-app-theme="light"]    [class*="bg-white/[0.13"],
+[data-app-theme="light"]    [class*="bg-white/[0.14"] {
+  background-color: rgba(0, 0, 0, 0.08) !important;
+}
+/* High-opacity: active / selected */
+[data-widget-theme="light"] [class*="bg-white/[0.15"],
+[data-widget-theme="light"] [class*="bg-white/[0.20"],
+[data-widget-theme="light"] [class*="bg-white/[0.25"],
+[data-dock-theme="light"]   [class*="bg-white/[0.15"],
+[data-dock-theme="light"]   [class*="bg-white/[0.20"],
+[data-dock-theme="light"]   [class*="bg-white/[0.25"],
+[data-app-theme="light"]    [class*="bg-white/[0.15"],
+[data-app-theme="light"]    [class*="bg-white/[0.20"],
+[data-app-theme="light"]    [class*="bg-white/[0.25"] {
+  background-color: rgba(0, 0, 0, 0.13) !important;
+}
+
+/* ── Border remapping ── */
+[data-widget-theme="light"] [class*="border-white/"],
+[data-dock-theme="light"]   [class*="border-white/"],
+[data-app-theme="light"]    [class*="border-white/"] {
+  border-color: rgba(0, 0, 0, 0.11) !important;
+}
+
+/* ── Placeholder remapping ── */
+[data-widget-theme="light"] [class*="placeholder-white/"],
+[data-dock-theme="light"]   [class*="placeholder-white/"],
+[data-app-theme="light"]    [class*="placeholder-white/"] {
+  color: rgba(17, 17, 24, 0.32) !important;
+}
+
+/* ── Dock-icon interactive states ──
+ * Explicit rules so hover and active punch through in light mode
+ * without relying on class-string matching for pseudo-states. */
+[data-dock-theme="light"] .dock-icon:hover {
+  background-color: rgba(0, 0, 0, 0.09) !important;
+}
+[data-dock-theme="light"] .dock-icon:active {
+  background-color: rgba(0, 0, 0, 0.06) !important;
+}
+/* App icon labels in the dock keep their gradient backgrounds (those are
+ * inline-style gradients, not bg-white/X), but the white icon glyph on
+ * accent style stays white. The shim above only touches className-based
+ * whites, so inline `color: app.color` still wins. */
+
 ::-webkit-scrollbar {
   width: 6px;
 }
@@ -308,13 +453,13 @@ input[data-spotlight-input]:hover,
 
 /* ===== LIQUID GLASS ===== */
 
-/* Light mode: bright frosted glass */
+/* Light mode: frosted glass with enough contrast to read well */
 .glass-card {
-  background: rgba(255, 255, 255, 0.38);
-  backdrop-filter: blur(32px) saturate(2);
-  -webkit-backdrop-filter: blur(32px) saturate(2);
-  border: 1px solid rgba(255, 255, 255, 0.45) !important;
-  box-shadow: 0 2px 20px rgba(0,0,0,0.06), 0 1px 4px rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,0.85);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(32px) saturate(1.8);
+  -webkit-backdrop-filter: blur(32px) saturate(1.8);
+  border: 1px solid rgba(0, 0, 0, 0.09) !important;
+  box-shadow: 0 2px 20px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.9);
 }
 /* Dark mode: translucent neutral panel with subtle inner glow */
 .dark .glass-card {
@@ -326,9 +471,9 @@ input[data-spotlight-input]:hover,
 }
 
 .glass-card-hover:hover {
-  background: rgba(255, 255, 255, 0.60);
-  border-color: rgba(255, 255, 255, 0.65) !important;
-  box-shadow: 0 4px 28px rgba(0,0,0,0.07), inset 0 1px 0 rgba(255,255,255,0.9);
+  background: rgba(255, 255, 255, 0.88);
+  border-color: rgba(0, 0, 0, 0.12) !important;
+  box-shadow: 0 4px 28px rgba(0,0,0,0.10), inset 0 1px 0 rgba(255,255,255,0.95);
 }
 .dark .glass-card-hover:hover {
   background: rgba(40, 40, 40, 0.62) !important;
@@ -381,11 +526,12 @@ input[data-spotlight-input]:hover,
 
 /* Light input */
 .glass-input {
-  background: rgba(255, 255, 255, 0.65) !important;
+  background: rgba(255, 255, 255, 0.85) !important;
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.55) !important;
-  box-shadow: inset 0 1px 3px rgba(0,0,0,0.05) !important;
+  border: 1px solid rgba(0, 0, 0, 0.12) !important;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.06) !important;
+  color: #111827 !important;
 }
 /* Dark input — neutral well, blue accent only on focus */
 .dark .glass-input {
