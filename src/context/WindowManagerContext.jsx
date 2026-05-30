@@ -14,14 +14,18 @@ function getDefaultSize(appId) {
     // Mobile Preview: window size matches a phone (375×812 + window
     // chrome). The window itself IS the phone — no inner bezel.
     mobilepreview: { w: 380, h: 870 },
+    // Widgets gallery is intentionally small + fixed — it's a picker,
+    // not a workspace.
+    widgets: { w: 420, h: 580 },
   };
   return sizes[appId] || { w: 800, h: 560 };
 }
 
 // Apps whose windows are locked to their default size — no resize, no
-// maximize. Used for the Mobile Preview cutout where changing the
-// dimensions would defeat the point of the preview.
-const FIXED_SIZE_APPS = new Set(['mobilepreview']);
+// maximize. Used for the Mobile Preview cutout (changing the dimensions
+// would defeat the point of the preview) and the Widgets gallery
+// (sized as a tight picker; resizing it would just create empty space).
+const FIXED_SIZE_APPS = new Set(['mobilepreview', 'widgets']);
 function isFixedSize(appId) { return FIXED_SIZE_APPS.has(appId); }
 
 function getCascadePos(offset) {
@@ -29,6 +33,20 @@ function getCascadePos(offset) {
   const x = base.x + (offset % 8) * 30;
   const y = base.y + (offset % 8) * 30;
   return { x: Math.min(x, window.innerWidth - 500), y: Math.min(y, window.innerHeight - 400) };
+}
+
+// Keep an anchored spawn point on-screen — accounts for the menu bar
+// (28px) at the top and a small margin at every edge so the title bar
+// stays grabbable.
+function clampToViewport(pos, size) {
+  const PAD = 8;
+  const TOP = 32;
+  const maxX = window.innerWidth  - size.w - PAD;
+  const maxY = window.innerHeight - size.h - PAD;
+  return {
+    x: Math.max(PAD, Math.min(pos.x, maxX)),
+    y: Math.max(TOP, Math.min(pos.y, maxY)),
+  };
 }
 
 function reducer(state, action) {
@@ -60,7 +78,12 @@ function reducer(state, action) {
       // user double-clicking) each get unique ids.
       const id = `win-${action.appId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       const size = getDefaultSize(action.appId);
-      const position = getCascadePos(state.cascadeOffset);
+      // Caller can pin the spawn point (e.g. the Widgets app anchors
+      // itself above the + button in the dock). Otherwise fall back to
+      // the diagonal cascade.
+      const position = action.position
+        ? clampToViewport(action.position, size)
+        : getCascadePos(state.cascadeOffset);
       const fixedSize = isFixedSize(action.appId);
       // (Slides used to force-open maximized; that app is gone now so
       // every window opens at its cascade position.)
@@ -180,9 +203,15 @@ export function WindowManagerProvider({ children }) {
   // metaOrFocus: pass `true` for single-instance focus-if-open (Dock),
   // or pass an object `{ initialMessage, ... }` to seed the app with data.
   const openApp = useCallback((appId, title, metaOrFocus = false) => {
-    const focusIfOpen = metaOrFocus === true;
-    const meta = (metaOrFocus && typeof metaOrFocus === 'object') ? metaOrFocus : {};
-    dispatch({ type: 'OPEN_WINDOW', appId, title, focusIfOpen, meta });
+    // Legacy shape: third arg is `true` for single-instance focus-if-open.
+    // New shape: third arg is an object — supports `meta.focusIfOpen` AND
+    // `meta.position` for spawn-point pinning (e.g. the dock's +
+    // button placing the Widgets app directly above itself).
+    const isObj = metaOrFocus && typeof metaOrFocus === 'object';
+    const focusIfOpen = isObj ? !!metaOrFocus.focusIfOpen : metaOrFocus === true;
+    const meta = isObj ? metaOrFocus : {};
+    const position = meta.position || null;
+    dispatch({ type: 'OPEN_WINDOW', appId, title, focusIfOpen, meta, position });
   }, []);
   const closeWindow = useCallback((windowId) => dispatch({ type: 'CLOSE_WINDOW', windowId }), []);
   const removeWindow = useCallback((windowId) => dispatch({ type: 'REMOVE_WINDOW', windowId }), []);

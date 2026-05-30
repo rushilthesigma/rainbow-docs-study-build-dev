@@ -4,6 +4,7 @@ import NotesApp from './apps/NotesApp';
 import AdminApp from './apps/AdminApp';
 import QuizBowlApp from './apps/QuizBowlApp';
 import MathTutorApp from './apps/MathTutorApp';
+import WidgetsApp from './apps/WidgetsApp';
 import MobilePreview from '../admin/MobilePreview';
 import StudyPage from '../../pages/StudyPage';
 import SettingsPage from '../../pages/SettingsPage';
@@ -28,15 +29,16 @@ const APP_COMPONENTS = {
   mobilepreview: MobilePreview,
   settings: SettingsPage,
   debate: DebatePanel,
+  widgets: WidgetsApp,
 };
 
 // Apps that need flex container without scroll (they manage their own scrolling)
 const FLEX_APPS = new Set(['notes', 'study', 'debate', 'mathtutor', 'mobilepreview']);
 
-// Full-bleed apps (no padding, no overflow-hidden) — empty now that
-// slides is gone, but kept as a registration point so future apps can
-// opt in without re-introducing the special case inline.
-const FULLBLEED_APPS = new Set();
+// Full-bleed apps (no padding, no overflow-hidden) — widgets gallery
+// owns its own internal padding, so the default p-4/p-5 wrapper would
+// double-pad the layout.
+const FULLBLEED_APPS = new Set(['widgets']);
 
 export default function AppWindow({ appId, meta = {} }) {
   const Component = APP_COMPONENTS[appId];

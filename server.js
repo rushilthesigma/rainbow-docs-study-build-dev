@@ -646,53 +646,6 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// Dev login — bypasses OAuth for local testing. Creates / reuses a
-// dev account (default dev@covalent.test), marks it onboarded, and
-// enables parent mode with PIN 1111 so the parent-flow tests work.
-app.post('/api/auth/dev-login', async (req, res) => {
-  const { name, email } = req.body;
-  const devEmail = email || 'dev@covalent.test';
-  const devName = name || 'Dev User';
-
-  const users = loadUsers();
-  if (!users[devEmail]) {
-    const defaultData = createDefaultData();
-    defaultData.preferences.onboarded = true;
-    users[devEmail] = {
-      id: crypto.randomUUID(),
-      email: devEmail,
-      name: devName,
-      password: '$2b$10$HfkHMN4epGa7NjmwAduRwOYtyQ0O8RfjrXCg1brJ5/NVDMy734y9.',
-      verified: true,
-      createdAt: new Date().toISOString(),
-      data: defaultData,
-    };
-  } else if (!users[devEmail].data?.preferences?.onboarded) {
-    users[devEmail].data.preferences.onboarded = true;
-  }
-
-  const devUser = users[devEmail];
-  devUser.data = migrateUserData(devUser.data);
-  if (!devUser.data.parent.enabled) {
-    devUser.data.parent.enabled = true;
-    devUser.data.parent.pinHash = await hashPin('1111');
-    devUser.data.parent.lastParentUnlockAt = new Date().toISOString();
-  } else if (!devUser.data.parent.pinHash) {
-    devUser.data.parent.pinHash = await hashPin('1111');
-  }
-  saveUsers(users);
-
-  const token = generateToken();
-  sessions[token] = { id: devUser.id, email: devEmail };
-  saveSessions();
-
-  res.json({
-    success: true,
-    token,
-    user: { id: devUser.id, email: devEmail, name: devUser.name, data: devUser.data },
-  });
-});
-
 // Google OAuth
 app.post('/api/auth/google', async (req, res) => {
   try {

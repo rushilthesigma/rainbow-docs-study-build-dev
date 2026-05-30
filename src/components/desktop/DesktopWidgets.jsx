@@ -84,6 +84,15 @@ const CELL_GAP = 10;
 const colsToWidth  = (cols) => cols * CELL_W + (cols - 1) * CELL_GAP;
 const rowsToHeight = (rows) => rows * CELL_H + (rows - 1) * CELL_GAP;
 
+// Linear scale-up that lets widget content grow with the chosen cols/rows
+// preset. At 1×1, returns `base`. Each extra column adds `perCol` (default
+// 8% of base) and each extra row adds `perRow` (default 12%). Tuned to
+// stay subtle — at 5×3 a number grows ~56%, not 100%+. Rounded so inline
+// font-sizes don't end up sub-pixel.
+function scale(base, cols = 1, rows = 1, perCol = 0.08, perRow = 0.12) {
+  return Math.round(base * (1 + (cols - 1) * perCol + (rows - 1) * perRow));
+}
+
 // Widget width presets — visually mapped 1:1 to a grid column span. The two
 // largest sizes (XL/Huge) are wide enough to host AI custom widgets with extra
 // chart/list content.
@@ -510,7 +519,7 @@ function Shell({
 // the clock digits — not the surrounding Shell (drag handler, styles, etc.).
 // Re-rendering the whole widget every second caused intermittent paint
 // glitches where the desktop flashed to bare wallpaper for a frame.
-function ClockBody({ format, showSeconds, showDate }) {
+function ClockBody({ format, showSeconds, showDate, cols, rows }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -520,15 +529,26 @@ function ClockBody({ format, showSeconds, showDate }) {
   const time = now.toLocaleTimeString([], timeOpts);
   const secs = now.toLocaleTimeString([], { second: '2-digit' }).slice(-2);
   const date = now.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
+  const timeSize = scale(38, cols, rows);
+  const secsSize = scale(18, cols, rows);
+  const dateSize = scale(11, cols, rows, 0.10, 0.14);
   return (
     <div className="px-3.5 pb-3.5">
       <div className="flex items-end gap-1">
-        <span className="text-[38px] font-black text-white/92 tabular-nums leading-none tracking-tight">{time}</span>
+        <span
+          className="font-black text-white/92 tabular-nums leading-none tracking-tight"
+          style={{ fontSize: timeSize }}
+        >{time}</span>
         {showSeconds && (
-          <span className="text-[18px] font-bold text-white/30 tabular-nums leading-none mb-1">{secs}</span>
+          <span
+            className="font-bold text-white/30 tabular-nums leading-none mb-1"
+            style={{ fontSize: secsSize }}
+          >{secs}</span>
         )}
       </div>
-      {showDate && <p className="text-[11px] text-white/35 mt-1">{date}</p>}
+      {showDate && (
+        <p className="text-white/35 mt-1" style={{ fontSize: dateSize }}>{date}</p>
+      )}
     </div>
   );
 }
@@ -537,7 +557,7 @@ function ClockWidget({ id, position, cols, rows, accent, opacity, radius, settin
   const { format = '12h', showSeconds = true, showDate = true } = settings;
   return (
     <Shell id={id} position={position} label="Clock" cols={cols} rows={rows} accent={accent} opacity={opacity} radius={radius}>
-      <ClockBody format={format} showSeconds={showSeconds} showDate={showDate} />
+      <ClockBody format={format} showSeconds={showSeconds} showDate={showDate} cols={cols} rows={rows} />
     </Shell>
   );
 }
@@ -564,28 +584,41 @@ function StudyStreakWidget({ id, position, cols, rows, accent, opacity, radius, 
     });
   })();
 
+  const numSize = scale(38, cols, rows);
+  const unitSize = scale(13, cols, rows, 0.06, 0.10);
+  const metaSize = scale(10, cols, rows, 0.06, 0.10);
+  const flameSize = scale(18, cols, rows, 0.08, 0.12);
   return (
     <Shell id={id} position={position} label="Study Streak" cols={cols} rows={rows} accent={accent} opacity={opacity} radius={radius}>
       <div className="px-3.5 pb-3.5">
         <div className="flex items-end gap-2">
-          <Flame size={18} className="text-orange-400/80 mb-1 flex-shrink-0" />
-          <span className="text-[38px] font-black text-white/90 tabular-nums leading-none">{current}</span>
-          <span className="text-[13px] text-white/38 pb-1.5">days</span>
+          <Flame size={flameSize} className="text-orange-400/80 mb-1 flex-shrink-0" />
+          <span
+            className="font-black text-white/90 tabular-nums leading-none"
+            style={{ fontSize: numSize }}
+          >{current}</span>
+          <span className="text-white/38 pb-1.5" style={{ fontSize: unitSize }}>days</span>
         </div>
         {weeklyDots && (
           <div className="flex items-center gap-1 mt-2 mb-1">
             {weeklyDots.map((active, i) => (
               <div
                 key={i}
-                className={`h-1.5 flex-1 rounded-full transition-colors ${active ? 'bg-orange-400/60' : 'bg-white/[0.08]'}`}
+                className={`flex-1 rounded-full transition-colors ${active ? 'bg-orange-400/60' : 'bg-white/[0.08]'}`}
+                style={{ height: Math.max(6, scale(6, cols, rows, 0.06, 0.10)) }}
               />
             ))}
           </div>
         )}
         <div className="flex items-center gap-2 mt-1.5">
-          {showBest && <span className="text-[10px] text-white/28">Best: {longest}d</span>}
+          {showBest && (
+            <span className="text-white/28" style={{ fontSize: metaSize }}>Best: {longest}d</span>
+          )}
           {showStatus && (
-            <span className={`ml-auto text-[9.5px] px-2 py-0.5 rounded-full ${activeToday ? 'bg-emerald-500/15 text-emerald-400/70' : 'bg-white/[0.05] text-white/22'}`}>
+            <span
+              className={`ml-auto px-2 py-0.5 rounded-full ${activeToday ? 'bg-emerald-500/15 text-emerald-400/70' : 'bg-white/[0.05] text-white/22'}`}
+              style={{ fontSize: scale(9.5, cols, rows, 0.06, 0.10) }}
+            >
               {activeToday ? '✓ Active today' : 'Study to continue'}
             </span>
           )}
@@ -706,29 +739,48 @@ function PomodoroWidget({ id, position, cols, rows, accent, opacity, radius, set
 
   const accentColor = phase === 'focus' ? '#f97316' : '#34d399';
 
+  const timerSize = scale(34, cols, rows);
+  const barH = Math.max(3, scale(3, cols, rows, 0.06, 0.12));
+  const btnText = scale(10, cols, rows, 0.06, 0.10);
+  const iconPx = scale(9, cols, rows, 0.06, 0.10);
   return (
     <Shell id={id} position={position} label={phase === 'focus' ? 'Focus' : 'Break'} cols={cols} rows={rows} accent={accent} opacity={opacity} radius={radius}>
       <div className="px-3.5 pb-3.5">
         <div className="flex items-end gap-1.5">
-          <span className="text-[34px] font-black text-white/92 tabular-nums leading-none">
+          <span
+            className="font-black text-white/92 tabular-nums leading-none"
+            style={{ fontSize: timerSize }}
+          >
             {String(mm).padStart(2, '0')}:{String(ss).padStart(2, '0')}
           </span>
         </div>
-        <div className="h-[3px] rounded-full bg-white/[0.08] mt-2 overflow-hidden">
+        <div className="rounded-full bg-white/[0.08] mt-2 overflow-hidden" style={{ height: barH }}>
           <div className="h-full rounded-full transition-[width] duration-200" style={{ width: `${pct * 100}%`, background: accentColor }} />
         </div>
         <div data-nodrag className="flex items-center gap-1.5 mt-2.5">
           {running ? (
-            <button onClick={pause} className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] bg-white/[0.10] text-white/75 hover:bg-white/[0.16] transition-colors">
-              <Pause size={9} /> Pause
+            <button
+              onClick={pause}
+              className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/[0.10] text-white/75 hover:bg-white/[0.16] transition-colors"
+              style={{ fontSize: btnText }}
+            >
+              <Pause size={iconPx} /> Pause
             </button>
           ) : (
-            <button onClick={start} className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] bg-white/[0.10] text-white/75 hover:bg-white/[0.16] transition-colors">
-              <Play size={9} /> Start
+            <button
+              onClick={start}
+              className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/[0.10] text-white/75 hover:bg-white/[0.16] transition-colors"
+              style={{ fontSize: btnText }}
+            >
+              <Play size={iconPx} /> Start
             </button>
           )}
-          <button onClick={reset} className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] bg-white/[0.04] text-white/45 hover:bg-white/[0.10] hover:text-white/70 transition-colors">
-            <RotateCcw size={9} /> Reset
+          <button
+            onClick={reset}
+            className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/[0.04] text-white/45 hover:bg-white/[0.10] hover:text-white/70 transition-colors"
+            style={{ fontSize: btnText }}
+          >
+            <RotateCcw size={iconPx} /> Reset
           </button>
         </div>
       </div>
@@ -751,27 +803,43 @@ function CalendarWidget({ id, position, cols, rows, accent, opacity, radius }) {
   ];
   const dayLetters = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
+  const titleSize = scale(11, cols, rows, 0.08, 0.12);
+  const headSize = scale(8, cols, rows, 0.08, 0.12);
+  const cellSize = scale(9.5, cols, rows, 0.08, 0.14);
+  const cellLine = scale(14, cols, rows, 0.10, 0.18);
+  const cellMin = Math.max(14, scale(14, cols, rows, 0.08, 0.14));
   return (
     <Shell id={id} position={position} label="Calendar" cols={cols} rows={rows} accent={accent} opacity={opacity} radius={radius}>
       <div className="px-3.5 pb-3">
-        <p className="text-[11px] font-semibold text-white/80 mb-1.5">{monthName}</p>
+        <p className="font-semibold text-white/80 mb-1.5" style={{ fontSize: titleSize }}>{monthName}</p>
         <div className="grid grid-cols-7 gap-y-0.5 text-center">
           {dayLetters.map((d, i) => (
-            <span key={`h-${i}`} className="text-[8px] font-bold uppercase text-white/25 tracking-wider">{d}</span>
+            <span
+              key={`h-${i}`}
+              className="font-bold uppercase text-white/25 tracking-wider"
+              style={{ fontSize: headSize }}
+            >{d}</span>
           ))}
           {cells.map((d, i) => {
             const isToday = d === today.getDate();
             return (
               <span
                 key={i}
-                className={`text-[9.5px] tabular-nums leading-[14px] ${
+                className={`tabular-nums ${
                   d == null ? 'text-transparent' :
                   isToday   ? 'text-white font-bold' :
                               'text-white/55'
                 }`}
-                style={isToday ? {
-                  background: 'rgba(96,165,250,0.85)', borderRadius: 4, display: 'inline-block', minWidth: 14,
-                } : undefined}
+                style={{
+                  fontSize: cellSize,
+                  lineHeight: `${cellLine}px`,
+                  ...(isToday ? {
+                    background: 'rgba(96,165,250,0.85)',
+                    borderRadius: 4,
+                    display: 'inline-block',
+                    minWidth: cellMin,
+                  } : {}),
+                }}
               >
                 {d ?? '·'}
               </span>
@@ -821,6 +889,7 @@ function QuickNoteWidget({ id, position, cols, rows, accent, opacity, radius, se
     if (noteId) updateNote(noteId, { mainNotes: local }).catch(() => {});
   }
 
+  const noteFont = scale(12, cols, rows, 0.06, 0.10);
   return (
     <Shell id={id} position={position} label="Note" cols={cols} rows={rows} accent={accent} opacity={opacity} radius={radius}>
       <div className="px-3.5 pb-3" data-nodrag>
@@ -833,12 +902,13 @@ function QuickNoteWidget({ id, position, cols, rows, accent, opacity, radius, se
           // Stop the Shell's mousedown drag handler from preventDefault'ing
           // before the textarea can take focus.
           onMouseDown={e => e.stopPropagation()}
-          className="w-full bg-transparent text-[12px] text-white/80 placeholder-white/25 resize-none outline-none leading-snug"
+          className="w-full bg-transparent text-white/80 placeholder-white/25 resize-none outline-none leading-snug"
           // Textarea grows along with the widget's row span so the bigger
           // canvas is actually usable for longer notes.
           style={{
             minHeight: rows >= 3 ? 410 : rows >= 2 ? 240 : (cols >= 2 ? 92 : 76),
             fontFamily: 'inherit', cursor: 'text', userSelect: 'text',
+            fontSize: noteFont,
           }}
         />
       </div>
@@ -888,20 +958,26 @@ function CalculatorWidget({ id, position, cols, rows, accent, opacity, radius })
     return b;
   }
 
+  const btnH = scale(22, cols, rows, 0.06, 0.16);
+  const btnFont = scale(11, cols, rows, 0.06, 0.10);
+  const displaySize = scale(20, cols, rows);
   const Btn = ({ label, onClick, accentBtn }) => (
     <button
       onClick={onClick}
-      className={`rounded-md text-[11px] font-semibold transition-colors ${
+      className={`rounded-md font-semibold transition-colors ${
         accentBtn ? 'bg-white/[0.14] text-white/85 hover:bg-white/[0.20]' : 'bg-white/[0.05] text-white/75 hover:bg-white/[0.10]'
       }`}
-      style={{ height: 22 }}
+      style={{ height: btnH, fontSize: btnFont }}
     >{label}</button>
   );
 
   return (
     <Shell id={id} position={position} label="Calculator" cols={cols} rows={rows} accent={accent} opacity={opacity} radius={radius}>
       <div className="px-3 pb-3" data-nodrag>
-        <div className="text-right text-[20px] font-black text-white/90 tabular-nums px-1 py-1 truncate">{display}</div>
+        <div
+          className="text-right font-black text-white/90 tabular-nums px-1 py-1 truncate"
+          style={{ fontSize: displaySize }}
+        >{display}</div>
         <div className="grid grid-cols-4 gap-1 mt-1">
           <Btn label="C" onClick={clear} accentBtn />
           <Btn label="÷" onClick={() => setOpOp('÷')} accentBtn />
@@ -943,23 +1019,34 @@ function TodoWidget({ id, position, cols, rows, accent, opacity, radius, setting
   function toggle(i)  { commit(items.map((it, j) => j === i ? { ...it, done: !it.done } : it)); }
   function remove(i)  { commit(items.filter((_, j) => j !== i)); }
 
+  const itemFont = scale(11, cols, rows, 0.06, 0.10);
+  const emptyFont = scale(10.5, cols, rows, 0.06, 0.10);
+  const boxPx = Math.max(12, scale(12, cols, rows, 0.06, 0.12));
+  const xPx = Math.max(9, scale(9, cols, rows, 0.06, 0.10));
+  const inputFont = scale(11, cols, rows, 0.06, 0.10);
   return (
     <Shell id={id} position={position} label="Tasks" cols={cols} rows={rows} accent={accent} opacity={opacity} radius={radius}>
       <div className="px-3 pb-3" data-nodrag>
         <ul className="space-y-1 mb-1.5">
-          {items.length === 0 && <li className="text-[10.5px] text-white/30 italic px-0.5">Nothing yet — add a task.</li>}
+          {items.length === 0 && (
+            <li className="text-white/30 italic px-0.5" style={{ fontSize: emptyFont }}>Nothing yet — add a task.</li>
+          )}
           {items.map((it, i) => (
             <li key={it.id ?? i} className="flex items-center gap-1.5 group">
               <button
                 onClick={() => toggle(i)}
-                className={`w-3 h-3 rounded-[3px] border flex-shrink-0 transition-colors ${
+                className={`rounded-[3px] border flex-shrink-0 transition-colors ${
                   it.done ? 'bg-emerald-400/70 border-emerald-400/70' : 'border-white/30 hover:border-white/55'
                 }`}
+                style={{ width: boxPx, height: boxPx }}
                 aria-label={it.done ? 'Mark not done' : 'Mark done'}
               />
-              <span className={`text-[11px] flex-1 truncate ${it.done ? 'text-white/30 line-through' : 'text-white/80'}`}>{it.text}</span>
+              <span
+                className={`flex-1 truncate ${it.done ? 'text-white/30 line-through' : 'text-white/80'}`}
+                style={{ fontSize: itemFont }}
+              >{it.text}</span>
               <button onClick={() => remove(i)} className="text-white/15 hover:text-white/55 opacity-0 group-hover:opacity-100 transition-opacity">
-                <X size={9} />
+                <X size={xPx} />
               </button>
             </li>
           ))}
@@ -969,7 +1056,8 @@ function TodoWidget({ id, position, cols, rows, accent, opacity, radius, setting
           onChange={e => setDraft(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') add(); }}
           placeholder="Add a task…"
-          className="w-full bg-white/[0.04] border border-white/[0.08] rounded-md px-2 py-1 text-[11px] text-white/75 placeholder-white/22 outline-none focus:border-white/[0.18]"
+          className="w-full bg-white/[0.04] border border-white/[0.08] rounded-md px-2 py-1 text-white/75 placeholder-white/22 outline-none focus:border-white/[0.18]"
+          style={{ fontSize: inputFont }}
         />
       </div>
     </Shell>
@@ -990,11 +1078,13 @@ function QuoteWidget({ id, position, cols, rows, accent, opacity, radius }) {
   // Stable across the day — index from the day-of-year so it rotates daily.
   const day = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0)) / 86400000);
   const q = QUOTES[day % QUOTES.length];
+  const quoteFont = scale(13, cols, rows, 0.06, 0.12);
+  const bylineFont = scale(10, cols, rows, 0.06, 0.10);
   return (
     <Shell id={id} position={position} label="Quote" cols={cols} rows={rows} accent={accent} opacity={opacity} radius={radius}>
       <div className="px-3.5 pb-3.5">
-        <p className="text-[13px] text-white/85 leading-snug italic">&ldquo;{q.text}&rdquo;</p>
-        <p className="text-[10px] text-white/35 mt-1.5">— {q.by}</p>
+        <p className="text-white/85 leading-snug italic" style={{ fontSize: quoteFont }}>&ldquo;{q.text}&rdquo;</p>
+        <p className="text-white/35 mt-1.5" style={{ fontSize: bylineFont }}>— {q.by}</p>
       </div>
     </Shell>
   );

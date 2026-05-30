@@ -1,14 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { googleLogin, devLogin } from '../api/auth';
+import { googleLogin } from '../api/auth';
 import { WALLPAPERS } from '../components/desktop/DesktopBackground';
 import { Z } from '../styles/tokens';
 import {
   Loader2 as Loader, Sparkles, ArrowRight, X, Check, ChevronDown,
   BookOpen, Brain, Zap, PenTool, Cpu, Repeat,
   Lightbulb, Calculator, MessageSquare, Target, ClipboardCheck,
-  Terminal,
 } from 'lucide-react';
 
 // Two scroll-snap sections, Apple-homepage style:
@@ -72,21 +71,6 @@ export default function LandingPage() {
     else if (window.google?.accounts?.id) window.google.accounts.id.prompt();
   }
 
-  async function handleDevLogin() {
-    setLoading(true);
-    try {
-      const data = await devLogin('Dev User', 'dev@local.dev');
-      if (data.success) {
-        login(data.user, data.token);
-        navigate('/dashboard');
-        return;
-      }
-    } catch (err) {
-      console.error('Dev login failed:', err);
-    }
-    setLoading(false);
-  }
-
   function scrollTo(idx) {
     const el = scrollerRef.current;
     if (!el) return;
@@ -112,7 +96,7 @@ export default function LandingPage() {
         <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-black/55 to-transparent" />
       </div>
 
-      <Clock />
+      <MenuBar />
 
       {/* Scroll container. Snap-mandatory between sections, smooth.
           Order: hero, how it works, features grid, numbers strip,
@@ -131,7 +115,6 @@ export default function LandingPage() {
         <SignInSection
           loading={loading}
           onSignIn={triggerGoogle}
-          onDevLogin={handleDevLogin}
           onWhyNotGpt={() => setWhyOpen(true)}
         />
       </div>
@@ -174,7 +157,7 @@ function HeroSection({ onNext }) {
 
         <button
           onClick={onNext}
-          className="mt-10 inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-md bg-gradient-to-br from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 active:scale-[0.98] text-white text-[14.5px] font-semibold transition-all shadow-[inset_0_1px_0_rgba(255,255,255,0.18),inset_0_-1px_0_rgba(0,0,0,0.18),0_4px_18px_rgba(99,102,241,0.45)] border border-blue-400/50"
+          className="mt-10 inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-xl bg-gradient-to-b from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 active:scale-[0.98] text-white text-[14.5px] font-semibold tracking-[-0.005em] transition-all shadow-[inset_0_1px_0_rgba(255,255,255,0.22),inset_0_-1px_0_rgba(0,0,0,0.20),0_8px_24px_rgba(99,102,241,0.45)] border border-blue-400/55"
         >
           Get started <ChevronDown size={15} />
         </button>
@@ -464,9 +447,8 @@ function SubjectsSpotlight() {
 
 // ===== Section 6: Sign-in =====
 //
-// Google OAuth is the primary sign-in path. Dev Login bypasses auth
-// for local development by spinning up a throwaway dev account.
-function SignInSection({ loading, onSignIn, onDevLogin, onWhyNotGpt }) {
+// Google OAuth is the only sign-in path.
+function SignInSection({ loading, onSignIn, onWhyNotGpt }) {
   return (
     <section
       data-section="signin"
@@ -516,23 +498,6 @@ function SignInSection({ loading, onSignIn, onDevLogin, onWhyNotGpt }) {
           )}
         </button>
 
-        {/* Divider */}
-        <div className="flex items-center gap-3 w-full mt-5">
-          <div className="flex-1 h-px bg-white/[0.10]" />
-          <span className="text-[11px] uppercase tracking-[0.14em] text-white/35 font-medium">or</span>
-          <div className="flex-1 h-px bg-white/[0.10]" />
-        </div>
-
-        {/* Dev login — bypass auth for local development */}
-        <button
-          onClick={onDevLogin}
-          disabled={loading}
-          className="mt-4 w-full py-2.5 rounded-lg border border-amber-400/30 bg-amber-500/[0.08] hover:bg-amber-500/[0.14] active:scale-[0.98] text-[13.5px] font-medium text-amber-200/95 transition-all disabled:opacity-50 inline-flex items-center justify-center gap-2"
-        >
-          <Terminal size={14} strokeWidth={2.2} />
-          Dev login
-        </button>
-
       </div>
 
       {/* Bottom links */}
@@ -578,40 +543,63 @@ function WhyNotGptModal({ onClose }) {
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 flex items-start justify-center overflow-y-auto bg-black/70 backdrop-blur-md animate-fade-in" style={{ zIndex: Z.modal }}>
+    <div className="fixed inset-0 flex items-start justify-center overflow-y-auto bg-black/65 backdrop-blur-lg animate-fade-in" style={{ zIndex: Z.modal }}>
       <button
         aria-label="Close"
         onClick={onClose}
         className="absolute inset-0 -z-0"
       />
-      <div className="relative my-12 mx-4 w-full max-w-3xl rounded-lg bg-[#0c0e1c] ring-1 ring-white/[0.10] shadow-[0_24px_48px_rgba(0,0,0,0.55)] overflow-hidden">
+      <div
+        className="relative my-12 mx-4 w-full max-w-3xl rounded-2xl overflow-hidden border border-white/[0.10]"
+        style={{
+          background:
+            'radial-gradient(at 0% 0%, rgba(59,130,246,0.12) 0%, transparent 50%),' +
+            'radial-gradient(at 100% 100%, rgba(139,92,246,0.10) 0%, transparent 55%),' +
+            '#0a0c16',
+          boxShadow:
+            '0 30px 60px -15px rgba(0,0,0,0.65),' +
+            '0 0 0 0.5px rgba(255,255,255,0.05) inset,' +
+            '0 1px 0 rgba(255,255,255,0.06) inset',
+        }}
+      >
+        {/* macOS-style window titlebar — traffic lights left, centered title */}
+        <div className="relative h-9 flex items-center px-4 border-b border-white/[0.07] bg-white/[0.025]">
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={onClose}
+              aria-label="Close"
+              className="group w-3 h-3 rounded-full bg-[#ff5f57] shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.20)] grid place-items-center hover:brightness-110 transition-all"
+            >
+              <X size={7} strokeWidth={3} className="text-[#4d0000] opacity-0 group-hover:opacity-100 transition-opacity" />
+            </button>
+            <span className="w-3 h-3 rounded-full bg-[#febc2e] shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.20)]" />
+            <span className="w-3 h-3 rounded-full bg-[#28c840] shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.20)]" />
+          </div>
+          <div className="absolute inset-x-0 text-center text-[12px] font-medium text-white/55 pointer-events-none">
+            Why not GPT?
+          </div>
+        </div>
+
         {/* Header */}
-        <div className="relative px-7 pt-7 pb-5 border-b border-white/10">
+        <div className="relative px-7 pt-7 pb-5 border-b border-white/[0.07]">
           <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 grid place-items-center">
-              <Sparkles size={18} className="text-white" />
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 grid place-items-center shadow-[0_6px_18px_rgba(99,102,241,0.45),inset_0_1px_0_rgba(255,255,255,0.25)] ring-1 ring-blue-300/30">
+              <Sparkles size={18} className="text-white drop-shadow" />
             </div>
             <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-blue-300">RushilAI vs ChatGPT</span>
           </div>
-          <h2 className="text-[28px] sm:text-[32px] font-bold tracking-[-0.02em] text-white leading-tight">
+          <h2 className="text-[28px] sm:text-[32px] font-semibold tracking-[-0.02em] text-white leading-tight">
             ChatGPT answers questions.
             <br />
-            <span className="bg-gradient-to-br from-blue-400 to-indigo-400 bg-clip-text text-transparent">RushilAI actually teaches you.</span>
+            <span className="bg-gradient-to-br from-blue-300 via-indigo-300 to-fuchsia-300 bg-clip-text text-transparent">RushilAI actually teaches you.</span>
           </h2>
-          <p className="mt-2 text-[13.5px] text-white/65 leading-relaxed max-w-xl">
+          <p className="mt-3 text-[13.5px] text-white/60 leading-relaxed max-w-xl">
             One&apos;s a chatbot. The other walks you through a real course. Here&apos;s what that looks like:
           </p>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="absolute top-5 right-5 w-9 h-9 rounded-full grid place-items-center text-white/60 hover:text-white hover:bg-white/[0.08] transition-colors"
-          >
-            <X size={16} />
-          </button>
         </div>
 
         {/* Comparison rows */}
-        <div className="px-3 sm:px-5 py-4 space-y-1.5">
+        <div className="px-3 sm:px-5 py-4 space-y-1">
           <Row icon={<BookOpen size={15} />} title="It builds the course for you" us="Type a topic and get a real course back — units, lessons, quizzes, even a midterm and final. Takes a few seconds." them="Spits out a wall of text. You'd have to organize it into a course on your own." />
           <Row icon={<Repeat size={15} />}   title="It remembers what you missed" us="When you get something wrong on a quiz, it shows up again on the next one. The final quiz hits all your weak spots." them="Forgets everything the second the chat ends." />
           <Row icon={<Brain size={15} />}    title="It picks up where you left off" us="Your courses, lessons, streaks — all saved. Open it next week and just keep going." them="Every chat starts from scratch. You're the one keeping track of where you are." />
@@ -621,10 +609,11 @@ function WhyNotGptModal({ onClose }) {
         </div>
 
         {/* Footer */}
-        <div className="px-7 py-5 border-t border-white/10 flex items-center justify-end">
+        <div className="px-7 py-4 border-t border-white/[0.07] flex items-center justify-between bg-white/[0.015]">
+          <span className="text-[11.5px] text-white/40">Press <kbd className="px-1.5 py-0.5 rounded bg-white/[0.06] border border-white/[0.10] text-white/70 font-mono text-[10.5px]">Esc</kbd> to close</span>
           <button
             onClick={onClose}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-md bg-gradient-to-br from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 active:scale-[0.98] text-white text-[13px] font-semibold transition-all border border-blue-400/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),inset_0_-1px_0_rgba(0,0,0,0.18)]"
+            className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-b from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 active:scale-[0.98] text-white text-[13px] font-semibold tracking-[-0.005em] transition-all border border-blue-400/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.22),inset_0_-1px_0_rgba(0,0,0,0.18),0_6px_18px_rgba(99,102,241,0.30)]"
           >
             Got it <ArrowRight size={13} />
           </button>
@@ -636,26 +625,26 @@ function WhyNotGptModal({ onClose }) {
 
 function Row({ icon, title, us, them }) {
   return (
-    <div className="rounded-md px-4 py-3 hover:bg-white/[0.03] transition-colors">
-      <div className="flex items-center gap-2 mb-2">
-        <span className="w-7 h-7 rounded-lg bg-blue-500/15 text-blue-300 grid place-items-center">
+    <div className="rounded-xl px-4 py-3 transition-colors hover:bg-white/[0.025]">
+      <div className="flex items-center gap-2.5 mb-2.5">
+        <span className="w-7 h-7 rounded-lg bg-blue-500/15 text-blue-300 grid place-items-center ring-1 ring-blue-400/20">
           {icon}
         </span>
-        <span className="text-[14px] font-bold tracking-tight text-white">{title}</span>
+        <span className="text-[14px] font-semibold tracking-[-0.005em] text-white">{title}</span>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 ml-9">
-        <div className="flex items-start gap-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-3 py-2">
+        <div className="flex items-start gap-2 rounded-xl bg-emerald-500/[0.08] border border-emerald-400/[0.18] px-3 py-2">
           <Check size={13} className="text-emerald-400 mt-0.5 shrink-0" strokeWidth={3} />
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-emerald-300/85 mb-0.5">RushilAI</p>
             <p className="text-[12.5px] leading-relaxed text-white/85">{us}</p>
           </div>
         </div>
-        <div className="flex items-start gap-2 rounded-lg bg-rose-500/[0.07] border border-rose-500/15 px-3 py-2">
-          <X size={13} className="text-rose-400 mt-0.5 shrink-0" strokeWidth={3} />
+        <div className="flex items-start gap-2 rounded-xl bg-white/[0.025] border border-white/[0.06] px-3 py-2">
+          <X size={13} className="text-white/40 mt-0.5 shrink-0" strokeWidth={3} />
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-rose-300/85 mb-0.5">ChatGPT</p>
-            <p className="text-[12.5px] leading-relaxed text-white/65">{them}</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/40 mb-0.5">ChatGPT</p>
+            <p className="text-[12.5px] leading-relaxed text-white/55">{them}</p>
           </div>
         </div>
       </div>
@@ -663,8 +652,11 @@ function Row({ icon, title, us, them }) {
   );
 }
 
-// ===== Clock =====
-function Clock() {
+// ===== Menu bar =====
+// Faux macOS menu bar pinned to the top — slim glass strip with the
+// brand mark on the left and a live date / time on the right. Sets
+// the macOS tone before the user has scrolled to anything.
+function MenuBar() {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 30_000);
@@ -673,9 +665,24 @@ function Clock() {
   const time = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   const date = now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
   return (
-    <div className="absolute top-3 right-5 z-30 flex items-center gap-3 text-[12.5px] font-medium text-white/90 tabular-nums tracking-tight drop-shadow-md">
-      <span>{date}</span>
-      <span>{time}</span>
+    <div
+      className="fixed top-0 inset-x-0 z-40 h-7 flex items-center px-4 border-b border-white/[0.08]"
+      style={{
+        background: 'rgba(8, 10, 18, 0.55)',
+        backdropFilter: 'blur(22px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(22px) saturate(180%)',
+      }}
+    >
+      <div className="flex items-center gap-1.5">
+        <div className="w-4 h-4 rounded-[5px] bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 grid place-items-center shadow-[0_2px_5px_rgba(99,102,241,0.45)] ring-1 ring-blue-300/30">
+          <Sparkles size={9} className="text-white" strokeWidth={2.6} />
+        </div>
+        <span className="text-[12.5px] font-semibold tracking-[-0.005em] text-white/95">RushilAI</span>
+      </div>
+      <div className="ml-auto flex items-center gap-3 text-[12px] font-medium text-white/85 tabular-nums tracking-tight">
+        <span>{date}</span>
+        <span>{time}</span>
+      </div>
     </div>
   );
 }
