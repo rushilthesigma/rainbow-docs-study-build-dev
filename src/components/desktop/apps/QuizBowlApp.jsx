@@ -29,11 +29,12 @@ const SYSTEM_PROMPT = `You are a quiz bowl question writer. Write pyramidal quiz
 RULES:
 - Each question is a single paragraph that starts with hard clues and progressively gets easier
 - The answer should be guessable from the first few clues by experts, but obvious by the end
+- Include exactly one NAQT-style power mark "(*)" placed roughly 60-70% through the question (after the hard clues, before the giveaway). Buzzing before (*) earns +15, after earns +10.
 - Write exactly the number of questions requested
 - Output ONLY valid JSON, no markdown
 
 Format:
-{"questions":[{"text":"Full question text here, starting with obscure clues and ending with obvious giveaway clues.","answer":"Answer"}]}`;
+{"questions":[{"text":"Hard opening clue. More obscure clues. (*) Easier middle clue. Giveaway clue.","answer":"Answer"}]}`;
 
 function generatePrompt(category, difficulty, count, customInstructions) {
   const difficultyGuide = {
@@ -49,6 +50,38 @@ ${difficultyGuide[difficulty] || ''}
 ${customInstructions ? `\nAdditional instructions from the user: ${customInstructions}` : ''}
 Each question must be pyramidal (hardest clues first, easiest giveaway last).
 Return JSON: {"questions":[{"text":"...","answer":"..."}]}`;
+}
+
+// Mirror of the server's NAQT-mark parser. AI-generated tossups arrive
+// raw (with "(*)" embedded); QBReader tossups are already pre-parsed.
+// Strips the mark and returns the word index where it lived so the
+// scorer knows the power cutoff.
+function parseTossupText(raw) {
+  if (!raw || typeof raw !== 'string') return { text: '', powerWordIndex: null };
+  const text = raw.trim();
+  const re = /\s*\(\s*\*\s*\)\s*/;
+  const m = text.match(re);
+  if (!m) return { text, powerWordIndex: null };
+  const before = text.slice(0, m.index).trim();
+  const after = text.slice(m.index + m[0].length).trim();
+  const clean = (before + (after ? ' ' + after : '')).trim();
+  const powerWordIndex = before.split(/\s+/).filter(Boolean).length;
+  return { text: clean, powerWordIndex };
+}
+
+// Real NAQT scoring: +15 power, +10 get, -5 wrong interrupt, 0 wrong-
+// after / timeout. `buzzWord` is the index of the last word revealed at
+// buzz time; -1 means timeout. `totalWords` is the full question length.
+// `powerIdx` is the word index of the power mark, or null if the
+// question wasn't authored with one.
+function naqtPointsFor(correct, buzzWord, powerIdx, totalWords) {
+  if (correct) {
+    if (powerIdx != null && buzzWord >= 0 && buzzWord < powerIdx) return 15;
+    return 10;
+  }
+  // Wrong. -5 if they buzzed while the question was still being read.
+  const interrupted = buzzWord >= 0 && buzzWord < totalWords - 1;
+  return interrupted ? -5 : 0;
 }
 
 function useWordReveal(text, speed = 140, active = false) {
@@ -181,7 +214,8 @@ export default function QuizBowlApp() {
         let parsed;
         try { parsed = JSON.parse(text); } catch { const m = text.match(/\{[\s\S]*\}/); if (m) parsed = JSON.parse(m[0]); }
         if (!parsed?.questions?.length) { setError('Generation failed.'); setGenerating(false); return; }
-        setQuestions(parsed.questions);
+        // Pull NAQT power marks out of AI-authored tossups.
+        setQuestions(parsed.questions.map(q => ({ ...q, ...parseTossupText(q.text || '') })));
         setPlayingSource('ai');
       }
       setCurrentQ(0); setScores([]); setBuzzed(false); setShowResult(false); setReading(true);
@@ -228,7 +262,7 @@ export default function QuizBowlApp() {
       let parsed;
       try { parsed = JSON.parse(text); } catch { const m = text.match(/\{[\s\S]*\}/); if (m) parsed = JSON.parse(m[0]); }
       if (parsed?.questions?.length) {
-        setQuestions(parsed.questions);
+        setQuestions(parsed.questions.map(q => ({ ...q, ...parseTossupText(q.text || '') })));
         setPlayingSource('ai');
         setCurrentQ(0); setScores([]); setBuzzed(false); setShowResult(false); setReading(true);
         beginNewSet();
@@ -297,11 +331,13 @@ export default function QuizBowlApp() {
       ca.split(/[\s,]+/).some(w => w.length > 2 && (a.includes(w) || lev(a, w) <= 1)) ||
       a.split(/[\s,]+/).some(w => w.length > 2 && (ca.includes(w) || lev(ca, w) <= 1));
     setCorrect(isCorrect); setShowResult(true);
-    setScores(prev => [...prev, { question: currentQ, correct: isCorrect, buzzWord: wordIndex, totalWords, answer: answer.trim(), correctAnswer: q.answer }]);
+    const points = naqtPointsFor(isCorrect, wordIndex, q.powerWordIndex, totalWords);
+    setScores(prev => [...prev, { question: currentQ, correct: isCorrect, buzzWord: wordIndex, totalWords, powerWordIndex: q.powerWordIndex ?? null, points, answer: answer.trim(), correctAnswer: q.answer }]);
   }
 
   function handleTimeout() {
-    setScores(prev => [...prev, { question: currentQ, correct: false, buzzWord: -1, totalWords, answer: '', correctAnswer: q.answer }]);
+    const points = naqtPointsFor(false, -1, q.powerWordIndex, totalWords);
+    setScores(prev => [...prev, { question: currentQ, correct: false, buzzWord: -1, totalWords, powerWordIndex: q.powerWordIndex ?? null, points, answer: '', correctAnswer: q.answer }]);
     setShowResult(true); setCorrect(false); setBuzzed(true);
   }
 
@@ -333,18 +369,21 @@ export default function QuizBowlApp() {
         correct: !!s.correct,
         buzzWord: s.buzzWord,
         totalWords: s.totalWords,
+        powerWordIndex: s.powerWordIndex ?? null,
+        points: typeof s.points === 'number' ? s.points : (s.correct ? 10 : 0),
         answer: s.answer,
         correctAnswer: s.correctAnswer,
       };
     });
     const score = scores.filter(s => s.correct).length;
+    const points = perQuestion.reduce((n, q) => n + (q.points || 0), 0);
     const total = scores.length;
     // Mark as saved synchronously so re-entries don't fire a duplicate.
     savedSetIdRef.current = 'pending';
     saveQuizBowlSet({
       category, difficulty,
       source: playingSource === 'qbreader' ? 'qbreader' : 'ai',
-      score, total, durationMs,
+      score, points, total, durationMs,
       perQuestion,
     }).then(r => {
       savedSetIdRef.current = r?.set?.id || 'saved';
@@ -395,14 +434,26 @@ export default function QuizBowlApp() {
     const totalCorrect = scores.filter(s => s.correct).length;
     const earlyBuzzes = scores.filter(s => s.correct && s.buzzWord < s.totalWords * 0.5).length;
     const denom = playingSource === 'qbreader' ? scores.length : questions.length;
+    const naqtTotal = scores.reduce((n, s) => n + (s.points || 0), 0);
+    const powers = scores.filter(s => s.points === 15).length;
+    const gets = scores.filter(s => s.points === 10).length;
+    const negs = scores.filter(s => s.points === -5).length;
     return (
       <div className="h-full overflow-y-auto bg-transparent">
         <div className="p-5">
           <div className="text-center mb-6 pt-4">
-            <div className="text-[42px] font-bold text-white tabular-nums leading-none">{totalCorrect}<span className="text-white/30">/{denom}</span></div>
+            <div className="text-[42px] font-bold text-white tabular-nums leading-none">
+              {naqtTotal}<span className="text-white/30 text-[24px]"> pts</span>
+            </div>
+            <div className="text-[12px] text-white/55 mt-1 tabular-nums">
+              {totalCorrect}/{denom} correct
+              {powers > 0 && <span className="text-amber-300 ml-2">· {powers} power{powers > 1 ? 's' : ''}</span>}
+              {gets > 0 && <span className="text-white/55 ml-2">· {gets} get{gets > 1 ? 's' : ''}</span>}
+              {negs > 0 && <span className="text-rose-300 ml-2">· {negs} neg{negs > 1 ? 's' : ''}</span>}
+            </div>
             <div className="flex items-center justify-center gap-3 mt-2">
               {earlyBuzzes > 0 && <span className="text-[11px] text-white/55 font-medium">{earlyBuzzes} early</span>}
-              <span className="text-[11px] text-white/45">{category} · {difficulty}{playingSource === 'qbreader' ? ' · QB' : ''}</span>
+              <span className="text-[11px] text-white/45">{category} · {difficulty}{playingSource === 'qbreader' ? ' · QB' : ''} · NAQT</span>
             </div>
           </div>
           <div className="space-y-1.5 mb-5">
@@ -415,6 +466,16 @@ export default function QuizBowlApp() {
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] font-bold text-white/75">Q{i + 1}</span>
                     {s.buzzWord >= 0 && <span className="text-[10px] text-white/40">word {s.buzzWord + 1}/{s.totalWords}</span>}
+                    {typeof s.points === 'number' && (
+                      <span className={`text-[10px] font-bold tabular-nums px-1.5 py-0.5 rounded ${
+                        s.points === 15 ? 'bg-amber-500/20 text-amber-300 border border-amber-400/30'
+                        : s.points === 10 ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-400/25'
+                        : s.points === -5 ? 'bg-rose-500/20 text-rose-300 border border-rose-400/30'
+                        : 'bg-white/[0.06] text-white/45 border border-white/[0.10]'
+                      }`}>
+                        {s.points > 0 ? `+${s.points}` : s.points}
+                      </span>
+                    )}
                     <div className="flex-1" />
                     <button
                       onClick={() => openLessonFor(s.correctAnswer)}
@@ -816,17 +877,18 @@ function QuizBowlHub({ hubLoading, history, recs, patterns, error, generating, o
               {sets.slice(0, 10).map((s) => {
                 const pct = s.total ? Math.round((s.score / s.total) * 100) : 0;
                 const ago = formatRelative(Date.now() - new Date(s.finishedAt).getTime());
+                const hasPoints = typeof s.points === 'number';
                 const scoreCls = pct >= 75 ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/25'
                   : pct >= 50 ? 'text-white/80 bg-white/[0.06] border-white/[0.12]'
                   : 'text-rose-300 bg-rose-500/10 border-rose-500/25';
                 return (
                   <div key={s.id} className="flex items-center gap-3 rounded-lg px-3 py-2 bg-white/[0.02] border border-white/[0.05] hover:border-white/[0.10] transition-colors">
-                    <div className={`min-w-[40px] px-2 py-1 rounded-md border text-center text-[11px] font-bold tabular-nums ${scoreCls}`}>
-                      {s.score}/{s.total}
+                    <div className={`min-w-[44px] px-2 py-1 rounded-md border text-center text-[11px] font-bold tabular-nums ${scoreCls}`}>
+                      {hasPoints ? `${s.points} pts` : `${s.score}/${s.total}`}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-[12px] font-medium text-white/85 truncate">{s.category} <span className="text-white/35">· {s.difficulty}</span></p>
-                      <p className="text-[10px] text-white/35">{ago} · {s.source === 'ai' ? 'AI' : 'QBReader'} · {formatDuration(s.durationMs)}</p>
+                      <p className="text-[10px] text-white/35">{ago} · {s.source === 'ai' ? 'AI' : 'QBReader'} · {formatDuration(s.durationMs)} · {s.score}/{s.total} correct</p>
                     </div>
                   </div>
                 );

@@ -8971,6 +8971,24 @@ function qbExtractAllAnswers(answerHtml) {
   }
   return out;
 }
+// Pull the NAQT power mark "(*)" out of a tossup. Returns the cleaned
+// display text plus the word index at the mark — the cutoff for +15
+// vs +10 scoring. If the source has no mark, powerWordIndex is null
+// and the question simply scores +10/-5/0 with no power bonus path.
+// Recognises common variants: "(*)", "( * )", "( *)", "(* )".
+function parseTossupText(raw) {
+  if (!raw || typeof raw !== 'string') return { text: '', powerWordIndex: null };
+  const text = raw.trim();
+  const re = /\s*\(\s*\*\s*\)\s*/;
+  const m = text.match(re);
+  if (!m) return { text, powerWordIndex: null };
+  const before = text.slice(0, m.index).trim();
+  const after = text.slice(m.index + m[0].length).trim();
+  const clean = (before + (after ? ' ' + after : '')).trim();
+  const powerWordIndex = before.split(/\s+/).filter(Boolean).length;
+  return { text: clean, powerWordIndex };
+}
+
 async function fetchQBReaderTossups({ count = 10, category = 'Mixed', difficulty = 'Medium' } = {}) {
   const cats = QB_CATEGORY_MAP[category] || [];
   const diffs = QB_DIFFICULTY_MAP[difficulty] || QB_DIFFICULTY_MAP.Medium;
@@ -8992,11 +9010,13 @@ async function fetchQBReaderTossups({ count = 10, category = 'Mixed', difficulty
   if (!r.ok) throw new Error(`QBReader ${r.status} ${r.statusText}`);
   const data = await r.json();
   const tossups = (data?.tossups || []).map(t => {
-    const text = t.question_sanitized || qbStripHtml(t.question);
+    const rawText = t.question_sanitized || qbStripHtml(t.question);
+    const { text, powerWordIndex } = parseTossupText(rawText);
     const canonical = qbExtractCanonical(t.answer);
     const alternates = qbExtractAllAnswers(t.answer);
     return {
       text,
+      powerWordIndex,
       answer: canonical || qbStripHtml(t.answer_sanitized || t.answer || ''),
       answerHtml: t.answer || '',
       answerAlternates: alternates,
@@ -9246,7 +9266,7 @@ app.post('/api/quizbowl/sets', authMiddleware, (req, res) => {
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
     users[email].data = migrateUserData(users[email].data);
-    const { category, difficulty, source, score, total, durationMs, perQuestion = [], categoryStats = null } = req.body || {};
+    const { category, difficulty, source, score, points, total, durationMs, perQuestion = [], categoryStats = null } = req.body || {};
     if (!Number.isFinite(total) || total <= 0) return res.status(400).json({ error: 'Invalid set' });
 
     const entry = {
@@ -9255,6 +9275,7 @@ app.post('/api/quizbowl/sets', authMiddleware, (req, res) => {
       difficulty: difficulty || 'Medium',
       source: source === 'ai' ? 'ai' : 'qbreader',
       score: Number(score) || 0,
+      points: Number.isFinite(points) ? Number(points) : null,
       total: Number(total) || 0,
       durationMs: Number(durationMs) || 0,
       finishedAt: new Date().toISOString(),
@@ -9887,15 +9908,15 @@ app.post('/api/quizbowl/match', authMiddleware, (req, res) => {
 // strict 1v1 cap so a full tournament room (8 humans) can play together.
 const QUIZBOWL_MAX_PLAYERS = 8;
 
-// Scoring format rules mirroring the client. Two data models coexist:
+// Scoring format rules mirroring the client. Three data models coexist:
+//   - NAQT (the default 'standard'): word-position based — +15 if buzz
+//     word < powerWordIndex, +10 if before end, +0 if after, -5 if wrong
+//     interrupt, 0 if wrong after end. See https://www.naqt.com/rules/
 //   - Flat: `getPts`/`negPts` (+ optional `powerThreshold`/`powerPts`).
-//   - Tiered: `tiers: [{ upTo, pts }]` (ascending) with optional
-//     `afterEndPts`, `negDuring`, `negAfter` — needed for real IAC
-//     Playoff scoring (6/5/4/3 by buzz position).
-// "standard" uses a continuous curve (computed below). IAC values come
-// from the official IAC Bee Rules PDFs on iacompetitions.com.
+//   - Tiered: `tiers: [{ upTo, pts }]` (ascending) with `afterEndPts`,
+//     `negDuring`, `negAfter` — needed for real IAC Playoff (6/5/4/3).
 const QUIZBOWL_FORMATS = {
-  standard:     { powerThreshold: null, powerPts: null, getPts: 10, negPts: -5 },
+  standard:     { naqt: true, powerPts: 15, getPts: 10, afterEndPts: 10, negDuring: -5, negAfter: 0 },
   'iac-prelim': { powerThreshold: null, powerPts: null, getPts: 1,  negPts: -1 },
   'iac-playoff':{
     tiers: [{ upTo: 0.33, pts: 6 }, { upTo: 0.66, pts: 5 }, { upTo: 1.0, pts: 4 }],
@@ -9908,18 +9929,32 @@ const QUIZBOWL_FORMATS = {
 function quizbowlScoreForBuzz(match, { correct }) {
   const fmt = QUIZBOWL_FORMATS[match.scoringFormat] || QUIZBOWL_FORMATS.standard;
   const q = match.questions ? match.questions[match.currentIdx] : null;
-  const words = q ? ((q.text || '').split(/\s+/).filter(Boolean).length || 1) : 1;
-  const totalReadMs = words * (match.revealSpeedMs || 140);
+  const totalWords = q ? ((q.text || '').split(/\s+/).filter(Boolean).length || 1) : 1;
+  const totalReadMs = totalWords * (match.revealSpeedMs || 140);
   const elapsed = (match.buzzAt || Date.now()) - (match.questionStartedAt || Date.now());
-  const ratio = Math.max(0, Math.min(1, elapsed / Math.max(1, totalReadMs)));
+  const wordsRead = Math.max(0, Math.min(totalWords, Math.floor(elapsed / Math.max(1, match.revealSpeedMs || 140))));
   const afterEnd = elapsed >= totalReadMs;
 
+  // NAQT path — the real standard scoring quiz bowl uses.
+  if (fmt.naqt) {
+    if (correct) {
+      const powerIdx = q && Number.isInteger(q.powerWordIndex) ? q.powerWordIndex : null;
+      // +15 only if (a) the question has a power mark recorded and
+      // (b) the buzz landed before the mark.
+      if (powerIdx != null && wordsRead < powerIdx) return fmt.powerPts;
+      return afterEnd ? fmt.afterEndPts : fmt.getPts;
+    }
+    // Wrong: -5 only when the buzz interrupted (came before end-of-read).
+    return afterEnd ? fmt.negAfter : fmt.negDuring;
+  }
+
+  // Legacy paths (IAC variants + JV) keep the time-ratio model.
+  const ratio = Math.max(0, Math.min(1, elapsed / Math.max(1, totalReadMs)));
   if (!correct) {
     if (afterEnd && fmt.negAfter != null) return fmt.negAfter;
     if (fmt.negDuring != null) return fmt.negDuring;
     return fmt.negPts || 0;
   }
-  if (match.scoringFormat === 'standard') return Math.round(10 * (2 - ratio));
   if (Array.isArray(fmt.tiers) && fmt.tiers.length) {
     if (afterEnd && fmt.afterEndPts != null) return fmt.afterEndPts;
     for (const tier of fmt.tiers) if (ratio < tier.upTo) return tier.pts;
@@ -10023,11 +10058,11 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
   res.json({ ok: true });
 
   try {
-    const sys = `You are a quiz bowl question writer. Write pyramidal tossup questions — each starts with obscure clues and progressively gets easier. Output ONLY valid JSON with no markdown, no code fences, no prose before or after.
+    const sys = `You are a quiz bowl question writer. Write pyramidal tossup questions — each starts with obscure clues and progressively gets easier. Include a NAQT-style power mark "(*)" placed roughly 60-70% of the way through each question (after the hard clues but before the "giveaway" clue) — buzzing before the mark earns +15, after earns +10. Output ONLY valid JSON with no markdown, no code fences, no prose before or after.
 
 Exact format:
-{"questions":[{"text":"Full question text here.","answer":"Answer"}]}`;
-    const userMsg = `Generate ${questionCount} pyramidal quiz bowl questions in category "${category}" at ${difficulty} difficulty. Return ONLY the JSON object described — nothing else.`;
+{"questions":[{"text":"Hard clues here, more clues, (*) easier clues here, giveaway clue.","answer":"Answer"}]}`;
+    const userMsg = `Generate ${questionCount} pyramidal quiz bowl questions in category "${category}" at ${difficulty} difficulty. Each MUST contain exactly one (*) power mark. Return ONLY the JSON object described — nothing else.`;
     // Flash is faster + more reliable for raw-JSON tasks; Pro's thinking
     // tokens often consume the budget before emitting output.
     const result = await callGemini(sys, [{ role: 'user', content: userMsg }], GEMINI_FLASH, 8192);
@@ -10041,7 +10076,12 @@ Exact format:
 
     // Double-check the match still exists — someone may have left during gen.
     if (!matches.has(match.code)) return;
-    match.questions = parsed.questions;
+    // Strip power marks into structured powerWordIndex so the scorer can
+    // award +15 vs +10. Questions without (*) score flat +10 / -5 / 0.
+    match.questions = parsed.questions.map(q => {
+      const { text, powerWordIndex } = parseTossupText(q.text || '');
+      return { ...q, text, powerWordIndex };
+    });
     match.currentIdx = 0;
     match.state = 'playing';
     match.questionStartedAt = Date.now();

@@ -10,7 +10,6 @@ import { apiFetch } from '../../api/client';
 import Button from '../shared/Button';
 import LoadingSpinner from '../shared/LoadingSpinner';
 import Modal from '../shared/Modal';
-import MarkdownLineEditor from './MarkdownLineEditor';
 
 // Obsidian-style note map. Each existing note becomes a graph node; the
 // user can drag nodes, link them with edges, add free-form topic nodes,
@@ -1047,18 +1046,14 @@ export default function NoteMap({ onOpenNote, mapId }) {
                     non-notes: shows the rationale and connections list. */}
                 {selectedNode.source === 'note' ? (
                   <div className="flex-1 min-h-0 flex flex-col px-3 pb-3">
-                    <div
-                      className="flex-1 min-h-[120px] w-full bg-white/[0.02] rounded-xl border border-white/[0.05] p-2.5 overflow-y-auto leading-relaxed"
+                    <textarea
+                      value={activeNote?.mainNotes || ''}
+                      onChange={e => handleNoteFieldChange('mainNotes', e.target.value)}
+                      placeholder={noteLoading ? 'Loading…' : 'Start writing… auto-saves as you type.'}
+                      disabled={!activeNote}
                       data-bare
-                    >
-                      <MarkdownLineEditor
-                        value={activeNote?.mainNotes || ''}
-                        onChange={v => handleNoteFieldChange('mainNotes', v)}
-                        placeholder={noteLoading ? 'Loading…' : 'Start writing… **bold**, # headings, - bullets render in place. Click a line to edit it.'}
-                        disabled={!activeNote}
-                        textClassName="text-[12px] text-white/85"
-                      />
-                    </div>
+                      className="flex-1 min-h-[120px] w-full bg-white/[0.02] rounded-xl border border-white/[0.05] p-2.5 text-[12px] text-white/85 placeholder-white/25 resize-none outline-none focus:border-white/[0.12] leading-relaxed"
+                    />
                     {(() => {
                       const neighbors = nodes.filter(n => adjacency.get(selectedNode.id)?.has(n.id));
                       if (neighbors.length === 0) return null;
