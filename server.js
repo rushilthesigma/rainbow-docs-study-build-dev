@@ -349,6 +349,32 @@ function createDefaultData() {
     // Newest-first. Capped at 200 sets server-side.
     quizbowlSets: [],
 
+    // Server-side QB student model — never sent back to the student verbatim,
+    // only used to bias packet recommendations. Updated incrementally on every
+    // saved set (see updateSecretProfile). Backfilled from history on first
+    // migration so existing accounts get value immediately.
+    //   categoryProfile: per-category accuracy + recent trend + buzz pos
+    //   answerProfile:   per-answer-string mastery (was the student right
+    //                    about Krebs Cycle? Congress of Vienna?)
+    //   strengths/weaknesses: top/bottom categories with enough attempts
+    //   struggleTopics: specific answers missed multiple times — these are
+    //                   the high-value drills
+    //   masteryTopics: specific answers got 2+ times in a row — safe to skip
+    //   buzzStyle:      aggressive/cautious/balanced based on avg buzz pos
+    //   updatedAt:      ISO — used to skip rebuild if no new sets
+    secretProfile: {
+      version: 1,
+      updatedAt: null,
+      categoryProfile: {},
+      answerProfile: {},
+      strengths: [],
+      weaknesses: [],
+      struggleTopics: [],
+      masteryTopics: [],
+      buzzStyle: { avgPosition: 0, style: 'unknown', samples: 0 },
+      totals: { sets: 0, questions: 0, correct: 0 },
+    },
+
 
     // ----- Billing / plan state -----
     plan: 'free',                 // 'free' | 'pro'
@@ -443,6 +469,17 @@ function migrateUserData(data) {
   // Make sure exactly one map is flagged as default. If none, mark the first.
   if (!data.noteMaps.some(m => m.isDefault)) {
     data.noteMaps[0].isDefault = true;
+  }
+  // Backfill the QB secret profile from existing history on first migration.
+  // Older accounts have quizbowlSets but no secretProfile — replay the sets
+  // so the recommendation engine has something to work with on day one.
+  if ((!data.secretProfile || !data.secretProfile.updatedAt) && Array.isArray(data.quizbowlSets) && data.quizbowlSets.length) {
+    try {
+      data.secretProfile = rebuildSecretProfileFromHistory(data.quizbowlSets);
+    } catch (e) {
+      // Don't block login on a bad rebuild — just leave the empty default.
+      console.error('secretProfile rebuild failed:', e);
+    }
   }
   return data;
 }
@@ -8698,11 +8735,26 @@ app.get('/api/admin/users/:uid', authMiddleware, adminMiddleware, (req, res) => 
         id: s.id, title: s.title, messageCount: (s.messages || []).length,
         createdAt: s.createdAt, updatedAt: s.updatedAt,
       })),
-      // Standalone Lessons app
+      // Standalone Lessons app — include a summary of the generated
+      // blocks so admins can see WHAT the lesson actually contains, not
+      // just the title. Block bodies are trimmed to keep the payload sane.
       standaloneLessons: (u.data?.lessons || []).map(l => ({
         id: l.id, topic: l.topic, title: l.title, difficulty: l.difficulty,
         isCompleted: !!l.isCompleted, messageCount: (l.chatHistory || []).length,
         createdAt: l.createdAt, lastActiveAt: l.lastActiveAt,
+        blockCount: (l.blocks || []).length,
+        blocks: (l.blocks || []).slice(0, 40).map(b => ({
+          type: b.type || 'text',
+          title: b.title || b.heading || null,
+          preview: typeof b.content === 'string'
+            ? b.content.slice(0, 240)
+            : typeof b.body === 'string'
+              ? b.body.slice(0, 240)
+              : typeof b.text === 'string'
+                ? b.text.slice(0, 240)
+                : null,
+          score: b.score ?? null,
+        })),
       })),
       // Curriculum lesson chats (flattened)
       curriculumChats,
@@ -8740,6 +8792,26 @@ app.get('/api/admin/users/:uid', authMiddleware, adminMiddleware, (req, res) => 
       ),
       // Streaks / daily activity
       studyStreaks: u.data?.studyStreaks || null,
+      // Debate history — multiplayer / tournament matches the user has
+      // finished. Recorded by recordDebateHistoryEntry on match end.
+      // Lives on the user document (u.debateHistory), not under u.data.
+      debateHistory: (u.debateHistory || []).slice(0, 50).map(d => ({
+        code: d.code,
+        topic: d.topic,
+        mode: d.mode,
+        finishedAt: d.finishedAt,
+        mySide: d.mySide,
+        myScore: d.myScore,
+        opponent: d.opponent ? { name: d.opponent.name, side: d.opponent.side } : null,
+        opponentScore: d.opponentScore,
+        result: d.result,
+        verdict: d.verdict ? {
+          winner: d.verdict.winner,
+          summary: typeof d.verdict.summary === 'string' ? d.verdict.summary.slice(0, 400) : null,
+        } : null,
+        turnCount: Array.isArray(d.turns) ? d.turns.length : 0,
+        tournament: d.tournament || null,
+      })),
     }
   });
 });
@@ -8968,6 +9040,203 @@ function computeQBCategoryStats(sets) {
   return out;
 }
 
+// ============================================================
+// SECRET STUDENT PROFILE
+// ============================================================
+// A hidden model of the student kept server-side, updated after every
+// completed set. The student never sees this directly — it just biases
+// the packet recommendations toward their actual weak spots.
+// ============================================================
+
+// Trim a tossup answer down to a stable key. QBReader answers come back
+// with parenthetical pronouns, "or X" alternates, [accept Y] notes, and
+// case variation — we collapse all of that so "(George) Washington" and
+// "washington" map to the same answer-object.
+function normalizeAnswerKey(raw) {
+  if (!raw || typeof raw !== 'string') return '';
+  return raw
+    .toLowerCase()
+    .replace(/\[[^\]]*\]/g, ' ')      // [accept ...] notes
+    .replace(/\([^)]*\)/g, ' ')       // (parenthetical)
+    .replace(/\bor\b.*$/, ' ')        // "X or Y" → keep X only
+    .replace(/<[^>]+>/g, ' ')         // any html tags
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 60);
+}
+
+// Score the student's "buzz style" from average buzz position.
+// Earlier buzzes = more aggressive (and risk-tolerant), later = cautious.
+function classifyBuzzStyle(avgPosition) {
+  if (avgPosition <= 0) return 'unknown';
+  if (avgPosition < 40) return 'aggressive';
+  if (avgPosition < 70) return 'balanced';
+  return 'cautious';
+}
+
+// Roll a single saved set into the student's secret profile. Mutates the
+// profile in place. Safe to call on a fresh empty profile or a populated
+// one — uses incremental averages so we never need to replay history.
+function updateSecretProfile(profile, entry) {
+  if (!profile || !entry || !Array.isArray(entry.perQuestion)) return;
+
+  profile.categoryProfile = profile.categoryProfile || {};
+  profile.answerProfile = profile.answerProfile || {};
+  profile.totals = profile.totals || { sets: 0, questions: 0, correct: 0 };
+  profile.buzzStyle = profile.buzzStyle || { avgPosition: 0, style: 'unknown', samples: 0 };
+
+  profile.totals.sets++;
+
+  const buzzPositions = [];
+
+  for (const q of entry.perQuestion) {
+    const cat = q.category || entry.category || 'Mixed';
+    const correct = !!q.correct;
+
+    profile.totals.questions++;
+    if (correct) profile.totals.correct++;
+
+    // --- Category profile (per-category rolling stats) ---
+    const cp = profile.categoryProfile[cat] || {
+      attempts: 0, correct: 0, accuracy: 0,
+      recent: [],            // rolling window of last 30 booleans
+      recentAccuracy: 0,
+      lastSeenAt: null,
+      buzzPositions: [],     // last 20 buzz positions (0-100)
+      avgBuzzPosition: 0,
+    };
+    cp.attempts++;
+    if (correct) cp.correct++;
+    cp.accuracy = Math.round((cp.correct / cp.attempts) * 100);
+    cp.recent.push(correct);
+    if (cp.recent.length > 30) cp.recent.shift();
+    cp.recentAccuracy = Math.round((cp.recent.filter(Boolean).length / cp.recent.length) * 100);
+    cp.lastSeenAt = entry.finishedAt || new Date().toISOString();
+
+    // Buzz position for this category — only count actual buzzes (>=0).
+    if (typeof q.buzzWord === 'number' && q.buzzWord >= 0 && typeof q.totalWords === 'number' && q.totalWords > 0) {
+      const pos = Math.round((q.buzzWord / q.totalWords) * 100);
+      cp.buzzPositions.push(pos);
+      if (cp.buzzPositions.length > 20) cp.buzzPositions.shift();
+      cp.avgBuzzPosition = Math.round(cp.buzzPositions.reduce((a, b) => a + b, 0) / cp.buzzPositions.length);
+      buzzPositions.push(pos);
+    }
+    profile.categoryProfile[cat] = cp;
+
+    // --- Answer profile (per-answer-object mastery) ---
+    const key = normalizeAnswerKey(q.correctAnswer || q.answer);
+    if (key && key.length >= 3) {
+      const ap = profile.answerProfile[key] || {
+        category: cat, seen: 0, correct: 0, lastSeenAt: null,
+        lastCorrect: null, recent: [],
+      };
+      ap.seen++;
+      if (correct) ap.correct++;
+      ap.lastCorrect = correct;
+      ap.lastSeenAt = entry.finishedAt || new Date().toISOString();
+      ap.recent.push(correct);
+      if (ap.recent.length > 5) ap.recent.shift();
+      profile.answerProfile[key] = ap;
+    }
+  }
+
+  // --- Buzz style rollup ---
+  if (buzzPositions.length) {
+    const oldSamples = profile.buzzStyle.samples;
+    const oldAvg = profile.buzzStyle.avgPosition;
+    const newSamples = oldSamples + buzzPositions.length;
+    const newSum = oldAvg * oldSamples + buzzPositions.reduce((a, b) => a + b, 0);
+    profile.buzzStyle.avgPosition = Math.round(newSum / newSamples);
+    profile.buzzStyle.samples = newSamples;
+    profile.buzzStyle.style = classifyBuzzStyle(profile.buzzStyle.avgPosition);
+  }
+
+  // --- Derived: strengths, weaknesses, struggle/mastery topics ---
+  // Categories with 5+ attempts qualify for strength/weakness ranking.
+  const ranked = Object.entries(profile.categoryProfile)
+    .filter(([, v]) => (v.attempts || 0) >= 5)
+    .map(([cat, v]) => ({ category: cat, accuracy: v.accuracy, recentAccuracy: v.recentAccuracy, attempts: v.attempts }));
+
+  profile.strengths = [...ranked]
+    .filter(r => r.accuracy >= 70)
+    .sort((a, b) => b.accuracy - a.accuracy)
+    .slice(0, 5);
+
+  profile.weaknesses = [...ranked]
+    .filter(r => r.accuracy < 60)
+    .sort((a, b) => a.accuracy - b.accuracy)
+    .slice(0, 5);
+
+  // Struggle: seen 2+ times, missed at least half. These are the
+  // highest-leverage drill targets — the student keeps tripping on them.
+  profile.struggleTopics = Object.entries(profile.answerProfile)
+    .filter(([, v]) => v.seen >= 2 && v.correct / v.seen < 0.5)
+    .sort(([, a], [, b]) => (a.correct / a.seen) - (b.correct / b.seen))
+    .slice(0, 12)
+    .map(([k, v]) => ({ topic: k, category: v.category, seen: v.seen, correct: v.correct }));
+
+  // Mastery: seen 2+ times, got every recent attempt right.
+  profile.masteryTopics = Object.entries(profile.answerProfile)
+    .filter(([, v]) => v.seen >= 2 && v.recent.length >= 2 && v.recent.every(Boolean))
+    .slice(0, 12)
+    .map(([k, v]) => ({ topic: k, category: v.category, seen: v.seen }));
+
+  profile.updatedAt = new Date().toISOString();
+}
+
+// Build a compact text block for Gemini that summarises the student. We
+// keep it under ~30 lines so it fits comfortably in the recommendations
+// prompt without blowing the token budget.
+function buildSecretProfileContext(profile) {
+  if (!profile || !profile.totals?.questions) return null;
+  const lines = [];
+  const totalAcc = profile.totals.questions
+    ? Math.round((profile.totals.correct / profile.totals.questions) * 100) : 0;
+  lines.push(`Overall: ${profile.totals.correct}/${profile.totals.questions} (${totalAcc}%) across ${profile.totals.sets} sets.`);
+
+  if (profile.weaknesses?.length) {
+    lines.push('Weak categories: ' + profile.weaknesses
+      .map(w => `${w.category} ${w.accuracy}% (recent ${w.recentAccuracy}%, n=${w.attempts})`)
+      .join('; '));
+  }
+  if (profile.strengths?.length) {
+    lines.push('Strong categories: ' + profile.strengths
+      .map(s => `${s.category} ${s.accuracy}% (n=${s.attempts})`)
+      .join('; '));
+  }
+  if (profile.struggleTopics?.length) {
+    lines.push('Specific answers the student keeps missing: ' +
+      profile.struggleTopics.slice(0, 8).map(s => `"${s.topic}" (${s.category}, ${s.correct}/${s.seen})`).join(', '));
+  }
+  if (profile.masteryTopics?.length) {
+    lines.push('Already mastered (skip): ' +
+      profile.masteryTopics.slice(0, 8).map(m => `"${m.topic}"`).join(', '));
+  }
+  if (profile.buzzStyle?.style && profile.buzzStyle.style !== 'unknown') {
+    lines.push(`Buzz style: ${profile.buzzStyle.style} (avg ${profile.buzzStyle.avgPosition}% through question, n=${profile.buzzStyle.samples}).`);
+  }
+  return lines.join('\n');
+}
+
+// Rebuild the entire secret profile from a user's saved sets. Used when
+// migrating older accounts that have history but no profile yet.
+function rebuildSecretProfileFromHistory(sets) {
+  const profile = {
+    version: 1, updatedAt: null,
+    categoryProfile: {}, answerProfile: {},
+    strengths: [], weaknesses: [],
+    struggleTopics: [], masteryTopics: [],
+    buzzStyle: { avgPosition: 0, style: 'unknown', samples: 0 },
+    totals: { sets: 0, questions: 0, correct: 0 },
+  };
+  // sets are newest-first in storage; replay oldest-first so "recent"
+  // windows actually reflect recency.
+  const ordered = [...(sets || [])].reverse();
+  for (const s of ordered) updateSecretProfile(profile, s);
+  return profile;
+}
+
 // POST /api/quizbowl/sets — save a completed solo set. Body shape
 // matches the on-disk record above; we backfill `id` + `finishedAt`
 // so the client doesn't have to.
@@ -9017,6 +9286,13 @@ app.post('/api/quizbowl/sets', authMiddleware, (req, res) => {
     const allScores = Object.entries(prof.topicScores);
     prof.strengths = allScores.filter(([, v]) => (v.attempts || 0) >= 3 && v.score >= 75).map(([k]) => k).slice(0, 5);
     prof.weaknesses = allScores.filter(([, v]) => (v.attempts || 0) >= 3 && v.score < 60).map(([k]) => k).slice(0, 5);
+
+    // Update the hidden student model. This is what packet recommendations
+    // actually read — the student never sees it directly.
+    if (!users[email].data.secretProfile) {
+      users[email].data.secretProfile = rebuildSecretProfileFromHistory(users[email].data.quizbowlSets.slice(1));
+    }
+    updateSecretProfile(users[email].data.secretProfile, entry);
 
     saveUsers(users);
     res.json({ ok: true, set: entry });
@@ -9069,18 +9345,27 @@ app.get('/api/quizbowl/recommendations', authMiddleware, async (req, res) => {
     users[email].data = migrateUserData(users[email].data);
     const sets = users[email].data.quizbowlSets || [];
     const cats = computeQBCategoryStats(sets);
+    const secret = users[email].data.secretProfile;
 
     const playedSet = new Set(Object.keys(cats));
     const unplayed = QB_CATEGORIES.filter(c => c !== 'Mixed' && !playedSet.has(c));
     const lastDiff = sets[0]?.difficulty || 'Medium';
 
-    // Build a compact performance summary for Gemini's context.
+    // The secret-profile context is the meat of the prompt — it tells
+    // Gemini exactly what the student is weak at, both at the category
+    // level and at the level of specific answers they keep blanking on.
+    const profileBlock = buildSecretProfileContext(secret);
+
+    // Fallback legacy summary if the profile isn't built yet (e.g. fresh
+    // account or migration not yet run).
     const perfLines = Object.entries(cats)
       .map(([cat, v]) => `${cat}: ${Math.round((v.correct / v.total) * 100)}% (${v.total} questions)`)
       .join(', ');
-    const contextBlock = sets.length
-      ? `Performance: ${perfLines || 'none'}. Unplayed categories: ${unplayed.join(', ') || 'none'}. Last difficulty used: ${lastDiff}.`
-      : 'New student with no history. Suggest beginner-friendly entry points.';
+    const contextBlock = profileBlock
+      ? profileBlock + (unplayed.length ? `\nUnplayed categories: ${unplayed.join(', ')}.` : '') + `\nLast difficulty: ${lastDiff}.`
+      : sets.length
+        ? `Performance: ${perfLines || 'none'}. Unplayed categories: ${unplayed.join(', ') || 'none'}. Last difficulty used: ${lastDiff}.`
+        : 'New student with no history. Suggest beginner-friendly entry points.';
 
     const NICHE_HISTORY_TOPICS = [
       'Congress of Vienna', 'Peloponnesian War', 'Meiji Restoration', 'Haitian Revolution',
@@ -9090,36 +9375,62 @@ app.get('/api/quizbowl/recommendations', authMiddleware, async (req, res) => {
     ];
     const historyTopic = NICHE_HISTORY_TOPICS[Math.floor(Math.random() * NICHE_HISTORY_TOPICS.length)];
 
-    const prompt = `You are a quiz bowl coach. ${contextBlock}
+    // Top weak category, used both for the prompt's "drill weakness" slot
+    // and for the fallback path when Gemini isn't reachable.
+    const weakestCategory = secret?.weaknesses?.[0]?.category
+      || Object.entries(cats)
+        .filter(([, v]) => v.total >= 3)
+        .map(([cat, v]) => ({ cat, acc: v.correct / v.total }))
+        .sort((a, b) => a.acc - b.acc)[0]?.cat
+      || null;
+    const topStruggleTopics = (secret?.struggleTopics || []).slice(0, 5).map(s => s.topic);
 
-Recommend exactly 3 specific niche sub-topics for pyramidal quiz bowl tossup practice. Be concrete and specific — "Krebs Cycle" not "Biology", "Congress of Vienna" not "History", "Waiting for Godot" not "Literature".
+    const prompt = `You are a quiz bowl coach designing a personalised practice set.
 
-IMPORTANT: At least one recommendation MUST be a specific niche History topic (world history, American history, or European history). Good examples: "${historyTopic}", "Reconstruction Era", "Punic Wars". Avoid broad topics like "History" or "World War II" — go deeper.
+STUDENT PROFILE (kept private — do not echo back to the student):
+${contextBlock}
+
+Recommend EXACTLY 3 packets (specific niche sub-topics) for pyramidal tossup practice. Each packet should pull the student toward mastery using what you know about them:
+
+PACKET COMPOSITION (3 packets total):
+1. ONE packet that drills their #1 weakness — ${weakestCategory ? `target "${weakestCategory}"` : 'pick the category with the lowest accuracy'}. If you see specific answer-objects they keep missing (${topStruggleTopics.length ? topStruggleTopics.map(t => `"${t}"`).join(', ') : 'none recorded yet'}), aim the topic NEAR those — same era, same scientific concept, same author's circle. Don't re-ask the exact same answer; orbit it.
+2. ONE packet that reinforces a strength they haven't fully cemented (a category with recent dip vs all-time, or a category they crushed once but haven't revisited). If no strengths yet, pick a niche History topic the student has not seen.
+3. ONE packet that EXPANDS their range — pick a niche topic in an unplayed or thin category to broaden coverage.
+
+RULES:
+- Be specific. "Krebs Cycle" not "Biology". "Congress of Vienna" not "History". "Waiting for Godot" not "Literature".
+- Each topic must anchor 8–10 distinct tossup questions.
+- Skip any answer-object in their "Already mastered" list — they're done with those.
+- Match difficulty to recent performance: if weak category < 50%, drop to Easy; if strong category, push to Hard. Default Medium.
+- At least 1 of the 3 packets must be a History sub-topic (good fallback if you're stuck: "${historyTopic}", "Reconstruction Era", "Punic Wars").
+- "reason" must reference their actual profile — e.g. "you're at 38% in Science and missed 'mitochondria' twice" — not generic encouragement.
 
 Return ONLY valid JSON with no markdown:
-{"recommendations":[{"topic":"Specific Topic Name","category":"Science|History|Literature|Geography|Math|Art|Music|Philosophy|Pop Culture","difficulty":"Easy|Medium|Hard","reason":"One punchy sentence on why to drill this now"}]}
+{"recommendations":[{"topic":"Specific Topic Name","category":"Science|History|Literature|Geography|Math|Art|Music|Philosophy|Pop Culture","difficulty":"Easy|Medium|Hard","reason":"One sentence referencing their profile","targetsWeakness":"category or specific topic this drills, or null","expectedImpact":"high|medium|low"}]}`;
 
-Rules:
-- Each topic must be specific enough to anchor 8–10 tossup questions
-- At least 1 of the 3 must be a niche History sub-topic
-- Prioritise gaps and weak categories; explore unplayed ones too
-- Match difficulty to the student's level (default Medium if no history)
-- Do NOT suggest broad categories as topics`;
-
-    const result = await callGemini(null, [{ role: 'user', content: prompt }], GEMINI_FLASH, 512, { jsonMode: true, temperature: 0.85 });
+    const result = await callGemini(null, [{ role: 'user', content: prompt }], GEMINI_FLASH, 700, { jsonMode: true, temperature: 0.85 });
     if (result.success) {
       let parsed;
       try { parsed = typeof result.text === 'string' ? JSON.parse(result.text) : result.text; } catch {}
       if (parsed?.recommendations?.length) {
-        let recs = parsed.recommendations.slice(0, 3).map(r => ({
-          kind: 'niche',
-          topic: r.topic,
-          category: r.category || 'Mixed',
-          difficulty: r.difficulty || 'Medium',
-          reason: r.reason || '',
-          source: 'ai',
-          customInstructions: `Focus every question specifically on: ${r.topic}`,
-        }));
+        const recs = parsed.recommendations.slice(0, 3).map(r => {
+          // Map Gemini's profile-aware kind: if it explicitly named a weakness,
+          // tag the rec as train-weakness so the UI badge matches.
+          let kind = 'niche';
+          if (r.targetsWeakness && weakestCategory && r.category === weakestCategory) kind = 'train-weakness';
+          else if (r.category && unplayed.includes(r.category)) kind = 'explore';
+          return {
+            kind,
+            topic: r.topic,
+            category: r.category || 'Mixed',
+            difficulty: r.difficulty || 'Medium',
+            reason: r.reason || '',
+            source: 'ai',
+            customInstructions: `Focus every question specifically on: ${r.topic}`,
+            targetsWeakness: r.targetsWeakness || null,
+            expectedImpact: r.expectedImpact || 'medium',
+          };
+        });
         // Guarantee at least one History rec — inject if Gemini missed it.
         const hasHistory = recs.some(r => r.category === 'History');
         if (!hasHistory) {
@@ -9131,33 +9442,58 @@ Rules:
             reason: `Niche history deep-dive — a great QB staple worth mastering.`,
             source: 'ai',
             customInstructions: `Focus every question specifically on: ${historyTopic}`,
+            targetsWeakness: null,
+            expectedImpact: 'medium',
           };
         }
         return res.json({ recommendations: recs });
       }
     }
 
-    // Fallback: static recommendations — always include a niche history set.
+    // Fallback: profile-aware static recommendations (used when Gemini is
+    // unreachable). Pulls directly from the secret profile so it stays
+    // personalised even without the LLM.
     const recs = [];
-    const played = Object.entries(cats)
-      .filter(([, v]) => v.total >= 3)
-      .map(([cat, v]) => ({ cat, acc: v.correct / v.total, total: v.total }))
-      .sort((a, b) => a.acc - b.acc);
-    if (played[0]) {
-      recs.push({ kind: 'train-weakness', category: played[0].cat, difficulty: 'Medium', source: 'qbreader', reason: `Your weakest category — ${Math.round(played[0].acc * 100)}% over ${played[0].total} Q` });
+
+    // Slot 1 — drill weakness. Prefer the secret-profile weakness; fall
+    // back to the legacy stats-only weakness if no profile yet.
+    if (weakestCategory) {
+      const struggle = topStruggleTopics[0];
+      recs.push({
+        kind: 'train-weakness',
+        category: weakestCategory,
+        difficulty: 'Medium',
+        source: 'qbreader',
+        reason: struggle
+          ? `Weakest category — you missed "${struggle}" recently.`
+          : `Weakest category in your profile.`,
+        targetsWeakness: weakestCategory,
+        expectedImpact: 'high',
+      });
     }
-    // Always add a niche history AI set.
+    // Slot 2 — niche history (always present, QB staple).
     recs.push({
       kind: 'niche', topic: historyTopic, category: 'History',
       difficulty: lastDiff || 'Medium', source: 'ai',
       reason: `Niche history set — great for building depth in QB.`,
       customInstructions: `Focus every question specifically on: ${historyTopic}`,
+      targetsWeakness: null,
+      expectedImpact: 'medium',
     });
+    // Slot 3 — explore unplayed or warm up.
     if (unplayed.length) {
       const pick = unplayed.find(c => c !== 'History') || unplayed[0];
-      recs.push({ kind: 'explore', category: pick, difficulty: 'Easy', source: 'qbreader', reason: `New for you — try ${pick}` });
+      recs.push({
+        kind: 'explore', category: pick, difficulty: 'Easy', source: 'qbreader',
+        reason: `New territory for you — try ${pick}.`,
+        targetsWeakness: null, expectedImpact: 'medium',
+      });
     } else {
-      recs.push({ kind: 'mixed', category: 'Mixed', difficulty: lastDiff, source: 'qbreader', reason: sets.length ? `Continue from last (${lastDiff})` : 'Warm-up round' });
+      recs.push({
+        kind: 'mixed', category: 'Mixed', difficulty: lastDiff, source: 'qbreader',
+        reason: sets.length ? `Continue from last (${lastDiff}).` : 'Warm-up round.',
+        targetsWeakness: null, expectedImpact: 'low',
+      });
     }
     res.json({ recommendations: recs.slice(0, 3) });
   } catch (e) {
@@ -9551,32 +9887,46 @@ app.post('/api/quizbowl/match', authMiddleware, (req, res) => {
 // strict 1v1 cap so a full tournament room (8 humans) can play together.
 const QUIZBOWL_MAX_PLAYERS = 8;
 
-// Scoring format rules mirroring the client. powerThreshold is the buzz
-// ratio (elapsed / fully-read time) below which a correct buzz earns
-// powerPts instead of getPts. negPts applies on incorrect buzzes.
-// "standard" preserves the legacy multiplayer behavior: +1 per correct,
-// no neg penalty. The IAC and JV presets apply real tournament rules.
+// Scoring format rules mirroring the client. Two data models coexist:
+//   - Flat: `getPts`/`negPts` (+ optional `powerThreshold`/`powerPts`).
+//   - Tiered: `tiers: [{ upTo, pts }]` (ascending) with optional
+//     `afterEndPts`, `negDuring`, `negAfter` — needed for real IAC
+//     Playoff scoring (6/5/4/3 by buzz position).
+// "standard" uses a continuous curve (computed below). IAC values come
+// from the official IAC Bee Rules PDFs on iacompetitions.com.
 const QUIZBOWL_FORMATS = {
-  standard:     { powerThreshold: null, powerPts: null, getPts: 1,  negPts: 0  },
-  'iac-prelim': { powerThreshold: 0.5,  powerPts: 15,   getPts: 10, negPts: -5 },
-  'iac-playoff':{ powerThreshold: 0.4,  powerPts: 15,   getPts: 10, negPts: -5 },
+  standard:     { powerThreshold: null, powerPts: null, getPts: 10, negPts: -5 },
+  'iac-prelim': { powerThreshold: null, powerPts: null, getPts: 1,  negPts: -1 },
+  'iac-playoff':{
+    tiers: [{ upTo: 0.33, pts: 6 }, { upTo: 0.66, pts: 5 }, { upTo: 1.0, pts: 4 }],
+    afterEndPts: 3, negDuring: -2, negAfter: -1,
+    powerThreshold: 0.33, powerPts: 6, getPts: 4, negPts: -2,
+  },
   jv:           { powerThreshold: null, powerPts: null, getPts: 10, negPts: 0  },
 };
 
 function quizbowlScoreForBuzz(match, { correct }) {
   const fmt = QUIZBOWL_FORMATS[match.scoringFormat] || QUIZBOWL_FORMATS.standard;
-  if (!correct) return fmt.negPts || 0;
-  if (fmt.powerThreshold != null) {
-    const q = match.questions[match.currentIdx];
-    if (q) {
-      const words = (q.text || '').split(/\s+/).filter(Boolean).length || 1;
-      const totalReadMs = words * (match.revealSpeedMs || 140);
-      const elapsed = (match.buzzAt || Date.now()) - (match.questionStartedAt || Date.now());
-      const ratio = Math.max(0, Math.min(1, elapsed / Math.max(1, totalReadMs)));
-      if (ratio < fmt.powerThreshold) return fmt.powerPts;
-    }
+  const q = match.questions ? match.questions[match.currentIdx] : null;
+  const words = q ? ((q.text || '').split(/\s+/).filter(Boolean).length || 1) : 1;
+  const totalReadMs = words * (match.revealSpeedMs || 140);
+  const elapsed = (match.buzzAt || Date.now()) - (match.questionStartedAt || Date.now());
+  const ratio = Math.max(0, Math.min(1, elapsed / Math.max(1, totalReadMs)));
+  const afterEnd = elapsed >= totalReadMs;
+
+  if (!correct) {
+    if (afterEnd && fmt.negAfter != null) return fmt.negAfter;
+    if (fmt.negDuring != null) return fmt.negDuring;
+    return fmt.negPts || 0;
   }
-  return fmt.getPts;
+  if (match.scoringFormat === 'standard') return Math.round(10 * (2 - ratio));
+  if (Array.isArray(fmt.tiers) && fmt.tiers.length) {
+    if (afterEnd && fmt.afterEndPts != null) return fmt.afterEndPts;
+    for (const tier of fmt.tiers) if (ratio < tier.upTo) return tier.pts;
+    return fmt.tiers[fmt.tiers.length - 1].pts;
+  }
+  if (fmt.powerThreshold != null && ratio < fmt.powerThreshold) return fmt.powerPts;
+  return fmt.getPts || 0;
 }
 
 // POST /api/quizbowl/match/:code/join — additional player joins.

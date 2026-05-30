@@ -1137,12 +1137,20 @@ function thinkToSlider(ms) { return Math.round(((ms - THINK_MIN) / (THINK_MAX - 
 // AI LOBBY — compete against AI bots in a lobby of 8 or 1v1
 // ============================================================
 // Scoring formats — mirrors TrialPage / TrialSession definitions. Kept
-// in sync so both AI play entry points feel identical.
+// in sync so both AI play entry points feel identical. Values for IAC
+// Prelim/Playoff are from the official IAC rules PDFs (Bee Preliminary
+// & Playoff Rounds Scoring System) on iacompetitions.com.
 const AI_LOBBY_SCORING_FORMATS = [
-  { id: 'standard',    label: 'Standard',    desc: 'Continuous · earlier = more',  powerThreshold: null, powerPts: null, getPts: 10, negPts: -5, target: null },
-  { id: 'iac-prelim',  label: 'IAC Prelim',  desc: 'Power 15 · Get 10 · Neg −5',   powerThreshold: 0.5,  powerPts: 15,   getPts: 10, negPts: -5, target: 50  },
-  { id: 'iac-playoff', label: 'IAC Playoff', desc: 'Power 15 (early) · −5 neg',    powerThreshold: 0.4,  powerPts: 15,   getPts: 10, negPts: -5, target: 60  },
-  { id: 'jv',          label: 'JV',          desc: 'Get 10 · No power · No neg',   powerThreshold: null, powerPts: null, getPts: 10, negPts: 0,  target: 40  },
+  { id: 'standard',    label: 'Standard',    desc: 'Continuous · earlier = more',
+    powerThreshold: null, powerPts: null, getPts: 10, negPts: -5, target: null },
+  { id: 'iac-prelim',  label: 'IAC Prelim',  desc: '1 pt · race to 8',
+    powerThreshold: null, powerPts: null, getPts: 1, negPts: -1, target: 8 },
+  { id: 'iac-playoff', label: 'IAC Playoff', desc: '6/5/4/3 · −2 / −1 neg',
+    tiers: [{ upTo: 0.33, pts: 6 }, { upTo: 0.66, pts: 5 }, { upTo: 1.0, pts: 4 }],
+    afterEndPts: 3, negDuring: -2, negAfter: -1,
+    powerThreshold: 0.33, powerPts: 6, getPts: 4, negPts: -2, target: 40 },
+  { id: 'jv',          label: 'JV',          desc: 'Get 10 · No power · No neg',
+    powerThreshold: null, powerPts: null, getPts: 10, negPts: 0, target: 40 },
 ];
 
 function AILobbyView({ onExit }) {

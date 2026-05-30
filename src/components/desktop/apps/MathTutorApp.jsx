@@ -272,7 +272,7 @@ export default function MathTutorApp({ seedTopic = null, onBack = null, defaultM
     setView('tutor');
     setMessages([]);
     setError(null);
-    setTimeout(() => doSend({ text: `Teach me about "${topic.trim()}". Give me a real lesson — definition, why it matters, worked examples in KaTeX, then one problem to try on the canvas.`, phase: 'lesson', hidden: true }), 50);
+    setTimeout(() => doSend({ text: `Teach me "${topic.trim()}" — short and tight. One-sentence definition, one worked example in KaTeX, then one problem for the canvas. Nothing else.`, phase: 'lesson', hidden: true }), 50);
   }
 
 

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MessageSquare, ClipboardCheck, BookOpen, Sparkles, X, CheckCircle2, XCircle, ArrowRight } from 'lucide-react';
+import { MessageSquare, ClipboardCheck, BookOpen, Sparkles, X, CheckCircle2, XCircle, ArrowRight, Wand2 } from 'lucide-react';
 import Modal from '../shared/Modal';
 import Button from '../shared/Button';
 import PillGroup from '../shared/PillGroup';
@@ -8,18 +8,27 @@ import LoadingSpinner from '../shared/LoadingSpinner';
 import MathText from '../shared/MathText';
 import { DIFFICULTY_OPTIONS } from '../../utils/constants';
 import { generateAssessment, gradeAssessment } from '../../api/assessments';
+import { updateNote } from '../../api/notes';
+import { apiFetch } from '../../api/client';
 import { useWindowManagerOptional } from '../../context/WindowManagerContext';
 
-// Three actions that "create from a note": a Study session seeded with
+// Actions that "create from a note": a Study session seeded with
 // the note text as a source, a Quiz grounded in the note's content
-// (played inline), and a Curriculum that uses the note as a source.
+// (played inline), a Curriculum that uses the note as a source, and an
+// "AI Edit" pass that rewrites/extends the note based on a free-form
+// instruction (e.g. "make it shorter", "add a section on X").
+//
 // Works in both shells — when the WindowManagerContext is present we
 // launch desktop windows with seeded meta; otherwise we navigate via
 // react-router (mobile + classic routes).
-export default function NoteActions({ note }) {
+//
+// `onNoteUpdated(patch)` is fired after a successful AI edit so the
+// parent editor can refresh its local state without a re-fetch.
+export default function NoteActions({ note, onNoteUpdated }) {
   const wm = useWindowManagerOptional();
   const navigate = useNavigate();
   const [quizOpen, setQuizOpen] = useState(false);
+  const [aiEditOpen, setAiEditOpen] = useState(false);
 
   const noteText = buildNoteText(note);
   const hasContent = noteText.length > 20;
@@ -68,6 +77,11 @@ export default function NoteActions({ note }) {
           onClick={launchCurriculum}
           disabled={!hasContent}
         />
+        <ActionButton
+          icon={<Wand2 size={13} />}
+          label="AI Edit"
+          onClick={() => setAiEditOpen(true)}
+        />
         {!hasContent && (
           <span className="text-[11px] text-white/30 ml-1">Write some notes first</span>
         )}
@@ -78,7 +92,118 @@ export default function NoteActions({ note }) {
         noteTitle={title}
         noteText={noteText}
       />
+      <AIEditNoteModal
+        open={aiEditOpen}
+        onClose={() => setAiEditOpen(false)}
+        note={note}
+        noteText={noteText}
+        onApplied={(patch) => onNoteUpdated?.(patch)}
+      />
     </>
+  );
+}
+
+// Free-form AI editor for the current note. The user types an
+// instruction ("tighten this", "add a section on Y", "convert to a
+// table"), and the AI rewrites mainNotes (and the title, if it
+// volunteers a better one) in place. Cornell extras (cues/summary)
+// pass through untouched — those have their own dedicated regenerate
+// buttons.
+function AIEditNoteModal({ open, onClose, note, noteText, onApplied }) {
+  const [instruction, setInstruction] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  function handleClose() {
+    if (busy) return;
+    setError(null);
+    setInstruction('');
+    onClose?.();
+  }
+
+  async function handleSubmit(e) {
+    e?.preventDefault?.();
+    const instr = instruction.trim();
+    if (!instr || busy || !note?.id) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const isCornell = note.type === 'cornell';
+      const system = `You revise an existing study note based on the student's instruction. Output ONLY valid JSON, no markdown fences, no prose. Shape: {"title": "...", "mainNotes": "..."}. Keep the note's overall topic but apply the requested change. Write mainNotes as plain text only — no markdown, no asterisks, no hashes, no bullet dashes. Use line breaks and indentation for structure. The note should remain organized, dense, and useful for studying.`;
+      const userMessage = `INSTRUCTION FROM THE STUDENT:
+${instr}
+
+CURRENT NOTE TITLE:
+${(note.title || 'Untitled').trim()}
+
+CURRENT NOTE BODY:
+"""
+${(noteText || '').slice(0, 8000)}
+"""
+
+Return the revised note as JSON.`;
+
+      const result = await apiFetch('/api/chat', {
+        method: 'POST',
+        body: JSON.stringify({
+          system,
+          messages: [{ role: 'user', content: userMessage }],
+          max_tokens: 4000,
+        }),
+      });
+      const text = result.content?.[0]?.text || '';
+      let parsed = null;
+      try { parsed = JSON.parse(text); } catch {
+        const m = text.match(/\{[\s\S]*\}/);
+        if (m) { try { parsed = JSON.parse(m[0]); } catch {} }
+      }
+      if (!parsed?.mainNotes && !parsed?.title) {
+        throw new Error('AI did not return a usable revision.');
+      }
+      const patch = {};
+      if (typeof parsed.title === 'string' && parsed.title.trim()) patch.title = parsed.title.trim();
+      if (typeof parsed.mainNotes === 'string') patch.mainNotes = parsed.mainNotes;
+      await updateNote(note.id, patch);
+      onApplied?.(patch);
+      // Hint not used here, but keep Cornell intact — server merges by
+      // patch keys, so cues/summary stay untouched.
+      void isCornell;
+      handleClose();
+    } catch (err) {
+      setError(err?.message || 'Failed to revise the note. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={handleClose} title="AI edit this note" size="md">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+        <div className="flex items-start gap-2 rounded-xl border border-blue-400/20 bg-blue-500/[0.06] px-3 py-2 text-[12px] text-blue-100/85 leading-relaxed">
+          <Sparkles size={12} className="text-blue-300 mt-0.5 flex-shrink-0" />
+          <span>Describe how to revise the note. The AI rewrites the body (and title, if it volunteers a better one) in place.</span>
+        </div>
+        <textarea
+          autoFocus
+          value={instruction}
+          onChange={e => setInstruction(e.target.value)}
+          rows={4}
+          placeholder="e.g. Make this more concise. Add a section on edge cases. Convert key facts into a numbered list."
+          className="w-full rounded-xl border border-white/[0.10] bg-white/[0.04] px-3.5 py-2.5 text-[14px] text-white/90 placeholder-white/30 outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20 resize-y leading-relaxed"
+          disabled={busy}
+        />
+        {error && (
+          <p className="text-[12px] text-rose-300/90 bg-rose-500/[0.08] border border-rose-400/[0.20] rounded-lg px-3 py-2">{error}</p>
+        )}
+        <div className="flex gap-2 justify-end">
+          <Button type="button" variant="ghost" size="sm" onClick={handleClose} disabled={busy}>Cancel</Button>
+          <Button type="submit" size="sm" disabled={!instruction.trim()} loading={busy}>
+            {!busy && <Wand2 size={12} />}
+            {busy ? 'Rewriting…' : 'Apply'}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 

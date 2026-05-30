@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Trophy, Lightbulb } from 'lucide-react';
 import StageTracker from './StageTracker';
 import ReadingBlock from './ReadingBlock';
@@ -10,7 +10,6 @@ import ChallengeBlock from './ChallengeBlock';
 import OpenAnswerBlock from './OpenAnswerBlock';
 import ProgressBar from '../shared/ProgressBar';
 import { SkeletonProse } from '../shared/Skeleton';
-import { useWindowManagerOptional } from '../../context/WindowManagerContext';
 import {
   generateLessonBlocks as curriculumGenerateBlocks,
   generateFinalQuiz as curriculumGenerateFinalQuiz,
@@ -49,43 +48,6 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
   const [generating, setGenerating] = useState(false);
   const [err, setErr] = useState('');
 
-  // ── Detect "fullscreen-ish" layout — either the surrounding desktop
-  // window is maximized, the page is in browser fullscreen, or (for
-  // standalone routes where there's no window chrome at all) the
-  // viewport is wide enough that splitting the lesson left/right
-  // actually pays off. The student gets the reading + quiz side by
-  // side instead of one at a time.
-  const wm = useWindowManagerOptional();
-  const rootRef = useRef(null);
-  const [browserFs, setBrowserFs] = useState(false);
-  const [wideViewport, setWideViewport] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1280);
-  useEffect(() => {
-    function onFs() {
-      setBrowserFs(!!(document.fullscreenElement || document.webkitFullscreenElement));
-    }
-    function onResize() {
-      setWideViewport(window.innerWidth >= 1280);
-    }
-    document.addEventListener('fullscreenchange', onFs);
-    document.addEventListener('webkitfullscreenchange', onFs);
-    window.addEventListener('resize', onResize);
-    return () => {
-      document.removeEventListener('fullscreenchange', onFs);
-      document.removeEventListener('webkitfullscreenchange', onFs);
-      window.removeEventListener('resize', onResize);
-    };
-  }, []);
-  const windowMaximized = (() => {
-    if (!wm?.state?.windows) return false;
-    // Find the window that contains us — the lesson view is rendered
-    // inside an app whose window has appId 'curriculum' or 'lessons'.
-    // We don't know our own appId from here, so the simplest robust
-    // proxy is: is there a maximized window currently focused?
-    const wins = Object.values(wm.state.windows);
-    return wins.some(w => w.isMaximized && !w.isMinimized);
-  })();
-  const sideBySide = (windowMaximized || browserFs || (!wm && wideViewport));
-
   useEffect(() => {
     let cancelled = false;
     if (blocks.length >= 7) return;
@@ -107,15 +69,6 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
 
   function advance() {
     setActiveIdx(i => Math.min(blocks.length - 1, i + 1));
-  }
-
-  // Jump straight to the next reading (skipping the paired quiz). Used
-  // by the side-by-side layout when the quiz is submitted — we want
-  // the next reading + next quiz, not just the next quiz.
-  function advanceToNextReading() {
-    const next = blocks.findIndex((b, i) => i > activeIdx && b.type === 'reading');
-    if (next === -1) setActiveIdx(blocks.length - 1);
-    else setActiveIdx(next);
   }
 
   async function handleReadingComplete() {
@@ -160,17 +113,6 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
     return submission;
   }
 
-  // Side-by-side variant: mark the reading complete without advancing
-  // the active index. The paired quiz is already visible on the right.
-  async function handleReadingCompleteInPlace(blockIdx) {
-    const block = blocks[blockIdx];
-    if (!block || block.completedAt) return;
-    try {
-      const res = await api.completeBlock(block.id);
-      setBlocks(prev => prev.map((b, i) => i === blockIdx ? { ...b, completedAt: res.block.completedAt } : b));
-    } catch (e) { setErr(e.message); }
-  }
-
   async function handleQuizSubmit(results, quizBlockIdx = activeIdx) {
     const idx = quizBlockIdx;
     setBlocks(prev => prev.map((b, i) => i === idx
@@ -184,30 +126,7 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
     // more than once just returns the cached block.
     maybeKickFinalQuiz(idx);
 
-    // In side-by-side mode we want to land on the NEXT reading (so the
-    // next pair shows up). Otherwise — single-block mode — fall through
-    // to the original advance() behaviour.
-    if (sideBySide) {
-      advanceToNextReading();
-    } else {
-      advance();
-    }
-  }
-
-  // Resolve which reading + quiz to show in side-by-side mode. The
-  // pair is anchored on the active reading; if the user clicked on a
-  // quiz in the stage tracker, fall back to the reading that precedes
-  // it.
-  function getPair() {
-    let leftIdx = activeIdx;
-    if (blocks[leftIdx]?.type !== 'reading') {
-      // walk back to the preceding reading
-      for (let i = leftIdx - 1; i >= 0; i--) {
-        if (blocks[i]?.type === 'reading') { leftIdx = i; break; }
-      }
-    }
-    const rightIdx = leftIdx + 1; // quiz that pairs with this reading
-    return { leftIdx, rightIdx, left: blocks[leftIdx], right: blocks[rightIdx] };
+    advance();
   }
 
   const active = blocks[activeIdx];
@@ -220,10 +139,14 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
   // Width container: in side-by-side mode we let the lesson breathe to
   // ~7xl so two columns actually fit. The single-block layout keeps
   // its tighter reading-width column.
-  const wrapWidth = sideBySide ? 'max-w-7xl' : 'max-w-3xl';
+  // Reading and quiz are independent sequential blocks — same width
+  // as every other variety block (example, recap, etc.) — so the
+  // student advances through them one at a time, the way they walk
+  // through any other lesson step.
+  const wrapWidth = 'max-w-3xl';
 
   return (
-    <div ref={rootRef} className={`w-full ${wrapWidth} mx-auto px-5 md:px-8 py-7 md:py-9`}>
+    <div className={`w-full ${wrapWidth} mx-auto px-5 md:px-8 py-7 md:py-9`}>
       {/* Back button */}
       <button
         onClick={onBack}
@@ -301,71 +224,6 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
                 <ArrowLeft size={14} /> {backLabel}
               </button>
             </div>
-          ) : sideBySide && (active?.type === 'reading' || active?.type === 'quiz') && blocks[activeIdx + 1]?.type === 'quiz' ? (
-            // ── Side-by-side layout (maximized window / fullscreen) ──
-            // Only used when the active block is part of a reading↔quiz
-            // pair. Standalone block types (example/recap/application/
-            // challenge) fall through to the single-column renderer
-            // below — pairing them with the preceding reading would
-            // show stale content.
-            (() => {
-              const { leftIdx, rightIdx, left, right } = getPair();
-              const hasRight = !!right && right.type === 'quiz';
-              const readingDone = !!left?.completedAt;
-              return (
-                <div className="grid grid-cols-1 xl:grid-cols-[1.05fr_1fr] gap-6 items-start">
-                  {/* Left column — reading */}
-                  <div className="min-w-0">
-                    <div className="mb-3 flex items-center gap-2">
-                      <span className="text-[10px] font-black uppercase tracking-[0.20em] text-blue-300/70">Read</span>
-                      {readingDone && (
-                        <span className="text-[10px] font-bold uppercase tracking-wide text-blue-300/85 bg-blue-500/15 border border-blue-400/25 px-1.5 py-0.5 rounded">Marked complete</span>
-                      )}
-                    </div>
-                    {left ? (
-                      <ReadingBlock
-                        key={`${left.id}-r`}
-                        block={left}
-                        hideContinue={hasRight}
-                        continueLabel={readingDone ? 'Marked complete' : 'Mark as read'}
-                        onComplete={() => handleReadingCompleteInPlace(leftIdx)}
-                      />
-                    ) : null}
-                    {/* In split view the reading's own CTA is hidden when
-                        a quiz is on the right. Surface a small mark-as-read
-                        button beneath the article so the student can still
-                        sign off on the reading without leaving the pair. */}
-                    {left && hasRight && !readingDone && (
-                      <div className="flex justify-end -mt-2">
-                        <button
-                          onClick={() => handleReadingCompleteInPlace(leftIdx)}
-                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[12px] font-semibold text-blue-100 bg-blue-500/[0.10] border border-blue-400/[0.30] hover:bg-blue-500/[0.18] hover:text-white hover:border-blue-400/[0.50] transition-all"
-                        >
-                          Mark as read
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Right column — paired quiz */}
-                  <div className="min-w-0 xl:sticky xl:top-6">
-                    <p className="text-[10px] font-black uppercase tracking-[0.20em] text-blue-300/70 mb-3">Answer</p>
-                    {hasRight ? (
-                      <QuizBlock
-                        key={`${right.id}-q`}
-                        block={right}
-                        onComplete={(results) => handleQuizSubmit(results, rightIdx)}
-                        gradeFn={(blockId, responses) => api.gradeBlock(blockId, responses)}
-                      />
-                    ) : (
-                      <div className="rounded-3xl border border-blue-400/[0.14] bg-blue-500/[0.03] p-8 text-center text-[13px] text-blue-200/55">
-                        No quiz paired with this reading.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })()
           ) : active?.type === 'reading' ? (
             <ReadingBlock key={active.id} block={active} onComplete={handleReadingComplete} />
           ) : active?.type === 'quiz' ? (

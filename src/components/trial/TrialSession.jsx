@@ -74,17 +74,30 @@ function MatchHeader({ userScore, botScore, botName, target = 10 }) {
 
 // ── Scoring ───────────────────────────────────────────────────────────────
 // Default = legacy "Standard" continuous-curve scoring. Custom formats
-// (IAC Prelim, IAC Playoff, JV) come in from TrialPage.
+// (IAC Prelim, IAC Playoff, JV) come in from TrialPage / QuizBowlApp.
+// Tier-aware: if the format defines `tiers: [{ upTo, pts }]`, buzz
+// position picks the matching tier. `ratio >= 1` uses `afterEndPts` /
+// `negAfter` to model the IAC "after question was read" rules.
 const DEFAULT_FORMAT = {
   id: 'standard', label: 'Standard',
   powerThreshold: null, powerPts: null, getPts: 10, negPts: -5, target: null,
 };
 function scoreForBuzz({ correct, ratio, format }) {
   const f = format || DEFAULT_FORMAT;
-  if (!correct) return f.negPts || 0;
+  const afterEnd = ratio >= 1;
+  if (!correct) {
+    if (afterEnd && f.negAfter != null) return f.negAfter;
+    if (f.negDuring != null) return f.negDuring;
+    return f.negPts || 0;
+  }
   if (f.id === 'standard') return Math.round(10 * (2 - ratio));
+  if (Array.isArray(f.tiers) && f.tiers.length) {
+    if (afterEnd && f.afterEndPts != null) return f.afterEndPts;
+    for (const tier of f.tiers) if (ratio < tier.upTo) return tier.pts;
+    return f.tiers[f.tiers.length - 1].pts;
+  }
   if (f.powerThreshold != null && ratio < f.powerThreshold) return f.powerPts;
-  return f.getPts;
+  return f.getPts || 0;
 }
 
 // ── Answer checker ────────────────────────────────────────────────────────
@@ -144,6 +157,15 @@ export default function TrialSession({
   const phaseRef = useRef('reading');
   useEffect(() => { phaseRef.current = phase; }, [phase]);
 
+  // Synchronous buzz claim. Set the moment a player (user or bot) wins
+  // the buzz; any later bot timer that fires for the same question must
+  // bail out instead of awarding itself points. React state updates are
+  // batched/async, so we can't rely on `buzzedBy` here — JS is
+  // single-threaded, so a ref read+write is race-free.
+  // Reset to null on every new question and after a user neg (when the
+  // question reopens for the remaining bots).
+  const claimedRef = useRef(null);
+
   const q          = questions[qIdx];
   const totalQ     = questions.length;
   const revealSpeed= difficulty === 'hard' ? 115 : difficulty === 'easy' ? 210 : 155;
@@ -159,6 +181,7 @@ export default function TrialSession({
     setRevealedCount(0);
     setPhase('reading');
     setBuzzedBy(null);
+    claimedRef.current = null;
     setAnswer('');
     setAnswerResult(null);
     setUserNegged(false);
@@ -199,6 +222,10 @@ export default function TrialSession({
 
       // Stage 1 — mark bot as "thinking" at the buzz point in the question
       const t = setTimeout(() => {
+        // Race guard: if anyone (user or another bot) has already
+        // claimed the buzz on this question, this bot must not score
+        // or even show a thinking indicator.
+        if (claimedRef.current != null) return;
         setBotStates(prev => {
           if (prev[idx]?.buzzedAt != null) return prev;
           const u = [...prev];
@@ -206,15 +233,29 @@ export default function TrialSession({
           return u;
         });
 
-        // Stage 2 — after processing delay, claim buzzedBy + update result atomically
-        //            (both calls are in the same setTimeout callback → React 18 batches
-        //            them into a single render, so the effect always sees correct = set)
+        // Stage 2 — after processing delay, atomically claim the buzz
+        // and award points. claimedRef is a synchronous lock: only the
+        // first stage-2 callback to read it as null wins; concurrent
+        // ones abort. This is what makes "one buzz = one scorer" hold
+        // even when several bots' timers fire in the same tick.
         const tt = setTimeout(() => {
+          if (claimedRef.current != null) {
+            // Someone else already won — clear our thinking flag so the
+            // UI doesn't get stuck showing this bot mid-thought.
+            setBotStates(s => {
+              const u = [...s];
+              u[idx] = { ...u[idx], isThinking: false };
+              return u;
+            });
+            return;
+          }
+          claimedRef.current = bot.id;
+
           const correct = Math.random() < bot.accuracy;
           // Bots use the same scoring format as the player so the
-          // scoreboard stays consistent (e.g., powers worth 15 across
-          // the table). On a wrong bot buzz we award 0 rather than a
-          // neg — bots aren't penalized to keep the game flowing.
+          // scoreboard stays consistent. On a wrong bot buzz we award 0
+          // rather than a neg — bots aren't penalized to keep the game
+          // flowing.
           const pts     = correct ? scoreForBuzz({ correct: true, ratio, format: FORMAT }) : 0;
 
           // Freeze the question reveal the moment a bot locks in a correct answer
@@ -284,6 +325,11 @@ export default function TrialSession({
 
   function handleBuzz() {
     if (phase !== 'reading' || buzzedBy || userNegged) return;
+    // Race-free claim: if a bot's stage 2 already fired in the same
+    // tick, it has set claimedRef and we must yield. Otherwise we win
+    // the buzz and lock the question for ourselves.
+    if (claimedRef.current != null) return;
+    claimedRef.current = 'user';
     clearInterval(revealTimer.current);
     setBuzzRatio(revealedCount / Math.max(1, words.current.length));
     setBuzzedBy('user');
@@ -313,11 +359,14 @@ export default function TrialSession({
     } else {
       setCombo(0);
       setUserScore(p => p + ptsGained);
-      // Neg: question keeps going until a bot answers or it runs out
+      // Neg: question keeps going until a bot answers or it runs out.
+      // Release the claim so bots whose timers haven't fired yet can
+      // still buzz on the open question.
       setUserNegged(true);
       setAnswer('');
       setAnswerResult(null);
       setBuzzedBy(null);
+      claimedRef.current = null;
       setPhase('reading');
       if (revealedCount < words.current.length) startReveal();
       return;

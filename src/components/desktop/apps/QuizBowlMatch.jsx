@@ -7,10 +7,11 @@ import {
 } from '../../../api/quizMatch';
 
 // Scoring formats available for multiplayer matches. Mirrors server defs.
+// IAC values follow the official IAC Bee Rules (prelim & playoff PDFs).
 const QB_SCORING_FORMATS = [
-  { id: 'standard',    label: 'Standard',    desc: 'Continuous · 1 pt/correct curve' },
-  { id: 'iac-prelim',  label: 'IAC Prelim',  desc: '15 power · 10 get · −5 neg' },
-  { id: 'iac-playoff', label: 'IAC Playoff', desc: '15 power (early) · −5 neg' },
+  { id: 'standard',    label: 'Standard',    desc: 'Continuous · earlier = more' },
+  { id: 'iac-prelim',  label: 'IAC Prelim',  desc: '1 pt · race to 8' },
+  { id: 'iac-playoff', label: 'IAC Playoff', desc: '6/5/4/3 · −2 / −1 neg' },
   { id: 'jv',          label: 'JV',          desc: '10 get · no power · no neg' },
 ];
 

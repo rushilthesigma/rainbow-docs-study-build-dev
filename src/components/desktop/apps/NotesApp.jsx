@@ -70,7 +70,10 @@ function NoteEditor({ noteId, onBack }) {
       />
 
       <div className="mb-3 flex-shrink-0">
-        <NoteActions note={note} />
+        <NoteActions
+          note={note}
+          onNoteUpdated={(patch) => setNote(prev => prev ? { ...prev, ...patch } : prev)}
+        />
       </div>
 
       {isCornell ? (
@@ -161,6 +164,11 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
   const [selectedLessonIds, setSelectedLessonIds] = useState([]); // [] = whole curriculum
   const [curriculumLoading, setCurriculumLoading] = useState(false);
   const [selectedNoteId, setSelectedNoteId] = useState(initialNoteId);
+  // In-app naming modal — replaces the native browser prompt() that
+  // surfaces the URL banner ("www.rushil12.com says…"). `mode` is
+  // 'create' for new map, 'rename' when editing an existing one.
+  const [nameDialog, setNameDialog] = useState(null);
+  // Shape: { mode: 'create' | 'rename', initial: '', mapId? }
 
   useEffect(() => {
     listNotes().then(d => { setNotes(d.notes || []); setLoading(false); }).catch(() => setLoading(false));
@@ -187,31 +195,42 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
 
   useEffect(() => { reloadMaps(); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function handleCreateMap() {
+  function handleCreateMap() {
     if (creatingMap) return;
-    const name = prompt('Name this map:', 'Untitled Map');
-    if (!name) return;
-    setCreatingMap(true);
-    try {
-      const d = await createNoteMap(name.trim() || 'Untitled Map');
-      if (d?.map?.id) {
-        setSelectedMapId(d.map.id);
-        setView('map');
-      }
-      await reloadMaps();
-    } catch (e) {
-      alert(e?.message || 'Could not create map.');
-    }
-    setCreatingMap(false);
+    setNameDialog({ mode: 'create', initial: 'Untitled Map' });
   }
 
-  async function handleRenameMap(map) {
-    const name = prompt('Rename map:', map.name);
-    if (!name || name === map.name) return;
-    try {
-      await updateNoteMap(map.id, { name: name.trim() });
-      await reloadMaps();
-    } catch (e) { alert(e?.message || 'Rename failed.'); }
+  function handleRenameMap(map) {
+    setNameDialog({ mode: 'rename', initial: map.name, mapId: map.id });
+  }
+
+  // Single submit handler for both create + rename. Keeps the modal
+  // generic — the surrounding state decides what to do with the name.
+  async function handleNameSubmit(name) {
+    const trimmed = (name || '').trim() || 'Untitled Map';
+    const dialog = nameDialog;
+    setNameDialog(null);
+    if (!dialog) return;
+    if (dialog.mode === 'create') {
+      setCreatingMap(true);
+      try {
+        const d = await createNoteMap(trimmed);
+        if (d?.map?.id) {
+          setSelectedMapId(d.map.id);
+          setView('map');
+        }
+        await reloadMaps();
+      } catch (e) {
+        alert(e?.message || 'Could not create map.');
+      }
+      setCreatingMap(false);
+    } else if (dialog.mode === 'rename') {
+      if (trimmed === dialog.initial) return;
+      try {
+        await updateNoteMap(dialog.mapId, { name: trimmed });
+        await reloadMaps();
+      } catch (e) { alert(e?.message || 'Rename failed.'); }
+    }
   }
 
   async function handleDeleteMap(e, map) {
@@ -603,6 +622,14 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
         </div>
       </Modal>
 
+      <NameMapModal
+        open={!!nameDialog}
+        mode={nameDialog?.mode}
+        initial={nameDialog?.initial}
+        onClose={() => setNameDialog(null)}
+        onSubmit={handleNameSubmit}
+      />
+
       <Modal open={showCreate} onClose={() => setShowCreate(false)} title="New note">
         <div className="grid grid-cols-2 gap-3">
           <button onClick={() => handleCreate('regular')} className="flex flex-col items-center gap-2 p-5 rounded-2xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.06] hover:border-white/[0.14] transition-colors text-center backdrop-blur-sm">
@@ -641,5 +668,44 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
         </div>
       )}
     </div>
+  );
+}
+
+// In-app rename / create dialog for note maps. Replaces the native
+// `prompt()` (which shows the URL banner) with our own Modal so the
+// flow feels like part of the app.
+function NameMapModal({ open, mode, initial, onClose, onSubmit }) {
+  const [name, setName] = useState(initial || '');
+  // Reset the local input whenever the dialog opens with a different
+  // seed (e.g. user opens rename after just opening create).
+  useEffect(() => {
+    if (open) setName(initial || '');
+  }, [open, initial]);
+
+  if (!open) return null;
+  const title = mode === 'rename' ? 'Rename map' : 'Name this map';
+  const confirmLabel = mode === 'rename' ? 'Rename' : 'Create';
+  function submit(e) {
+    e?.preventDefault?.();
+    onSubmit(name.trim() || 'Untitled Map');
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title={title} size="sm">
+      <form onSubmit={submit} className="flex flex-col gap-4">
+        <input
+          autoFocus
+          value={name}
+          onChange={e => setName(e.target.value)}
+          onFocus={e => e.currentTarget.select()}
+          placeholder="Untitled Map"
+          className="w-full px-3.5 py-2.5 rounded-xl border border-white/[0.10] bg-white/[0.04] text-[14px] text-white/90 placeholder-white/30 outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20"
+        />
+        <div className="flex gap-2 justify-end">
+          <Button type="button" variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+          <Button type="submit" size="sm">{confirmLabel}</Button>
+        </div>
+      </form>
+    </Modal>
   );
 }

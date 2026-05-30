@@ -6,9 +6,11 @@ import {
   getNoteMap, updateNoteMap, suggestNoteMapNodes,
   createNote, updateNote, getNote,
 } from '../../api/notes';
+import { apiFetch } from '../../api/client';
 import Button from '../shared/Button';
 import LoadingSpinner from '../shared/LoadingSpinner';
 import Modal from '../shared/Modal';
+import MarkdownLineEditor from './MarkdownLineEditor';
 
 // Obsidian-style note map. Each existing note becomes a graph node; the
 // user can drag nodes, link them with edges, add free-form topic nodes,
@@ -117,6 +119,14 @@ export default function NoteMap({ onOpenNote, mapId }) {
   // topic.
   const [focusedNodeId, setFocusedNodeId] = useState(null);
   const [creatingNoteFromId, setCreatingNoteFromId] = useState(null);
+  // AI note-generation modal. Lives next to the "Topic" / "Note" buttons
+  // — student types a topic, AI drafts title + body, we create the note,
+  // drop a node on the canvas, and seed an edge from the focused node
+  // (if any) just like createNewNoteOnMap does.
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiTopic, setAiTopic] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState(null);
   // Inline note editor state — loaded when the selected node is a real
   // note. Lets the user write into the note without leaving the map.
   const [activeNote, setActiveNote] = useState(null);
@@ -500,6 +510,68 @@ export default function NoteMap({ onOpenNote, mapId }) {
     setCreatingNoteFromId(null);
   }
 
+  // Ask the AI to draft a note for a given topic, then drop it on the
+  // map (same anchor logic as createNewNoteOnMap — if the user has
+  // drilled in, the new node is wired up to the focused one).
+  async function generateNoteWithAI() {
+    const topic = aiTopic.trim();
+    if (!topic || aiBusy) return;
+    setAiBusy(true);
+    setAiError(null);
+    try {
+      const system = `You are a study-note generator. Output ONLY valid JSON, no markdown fences, no prose. Shape: {"title": "...", "mainNotes": "..."}. Write mainNotes as plain text only — no markdown, no asterisks, no hashes, no bullet dashes. Use line breaks and indentation for structure. The note should be organized, dense, and useful for studying — not a paragraph of fluff.`;
+      const result = await apiFetch('/api/chat', {
+        method: 'POST',
+        body: JSON.stringify({
+          system,
+          messages: [{ role: 'user', content: `Create a regular study note.\n\nTopic: ${topic}` }],
+          max_tokens: 3000,
+        }),
+      });
+      const text = result.content?.[0]?.text || '';
+      let parsed = null;
+      try { parsed = JSON.parse(text); } catch {
+        const m = text.match(/\{[\s\S]*\}/);
+        if (m) { try { parsed = JSON.parse(m[0]); } catch {} }
+      }
+      if (!parsed?.title) throw new Error('AI did not return a usable note.');
+
+      const created = await createNote(parsed.title, 'regular');
+      const newNote = created.note;
+      if (parsed.mainNotes) {
+        try { await updateNote(newNote.id, { mainNotes: parsed.mainNotes }); } catch {}
+      }
+
+      const anchor = focusedNode || null;
+      const baseX = anchor ? anchor.x : 0;
+      const baseY = anchor ? anchor.y : 0;
+      const node = {
+        id: `note_${newNote.id}`,
+        noteId: newNote.id,
+        label: newNote.title,
+        source: 'note',
+        color: randPaletteColor(),
+        x: baseX + (Math.random() - 0.5) * 140,
+        y: baseY + (Math.random() - 0.5) * 140,
+      };
+      setNodes(prev => [...prev, node]);
+      if (anchor) {
+        setEdges(prev => {
+          const k = edgeKey(anchor.id, node.id);
+          if (prev.some(e => edgeKey(e.from, e.to) === k)) return prev;
+          return [...prev, { from: anchor.id, to: node.id, label: '' }];
+        });
+      }
+      setSelectedId(node.id);
+      setAiOpen(false);
+      setAiTopic('');
+    } catch (e) {
+      setAiError(e?.message || 'Could not generate a note.');
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
   function acceptSuggestion(sugg) {
     const id = newId();
     // Drop near a connected anchor (or origin) so the new node doesn't
@@ -660,6 +732,9 @@ export default function NoteMap({ onOpenNote, mapId }) {
           <Button size="sm" variant="ghost" onClick={createNewNoteOnMap} disabled={creatingNoteFromId === '__new__'}>
             <StickyNote size={13} /> {creatingNoteFromId === '__new__' ? 'Adding…' : 'Note'}
           </Button>
+          <Button size="sm" variant="ghost" onClick={() => { setAiError(null); setAiOpen(true); }}>
+            <Wand2 size={13} /> AI
+          </Button>
           {!focusedNode && <Button size="sm" variant="ghost" onClick={relaxLayout}><RotateCw size={13} /> Relax</Button>}
         </div>
       </div>
@@ -719,6 +794,43 @@ export default function NoteMap({ onOpenNote, mapId }) {
             </div>
           </div>
         </div>
+      </Modal>
+
+      {/* AI note generator. Topic in, note out — drops on the map and
+          wires to the focused node (if any). */}
+      <Modal
+        open={aiOpen}
+        onClose={() => { if (!aiBusy) { setAiOpen(false); setAiError(null); } }}
+        title="Generate a note with AI"
+        size="sm"
+      >
+        <form
+          onSubmit={(e) => { e.preventDefault(); generateNoteWithAI(); }}
+          className="flex flex-col gap-3"
+        >
+          <div className="flex items-start gap-2 rounded-xl border border-blue-400/20 bg-blue-500/[0.06] px-3 py-2 text-[12px] text-blue-100/85 leading-relaxed">
+            <Sparkles size={12} className="text-blue-300 mt-0.5 flex-shrink-0" />
+            <span>The AI writes a short, organized study note for the topic you type. It drops onto the map and connects to whatever node you're focused on.</span>
+          </div>
+          <input
+            autoFocus
+            value={aiTopic}
+            onChange={e => setAiTopic(e.target.value)}
+            placeholder="e.g. Photosynthesis, Roman Republic, Eigenvectors"
+            className="w-full px-3.5 py-2.5 rounded-xl border border-white/[0.10] bg-white/[0.04] text-[14px] text-white/90 placeholder-white/30 outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20"
+            disabled={aiBusy}
+          />
+          {aiError && (
+            <p className="text-[12px] text-rose-300/90 bg-rose-500/[0.08] border border-rose-400/[0.20] rounded-lg px-3 py-2">{aiError}</p>
+          )}
+          <div className="flex gap-2 justify-end">
+            <Button type="button" variant="ghost" size="sm" onClick={() => { if (!aiBusy) { setAiOpen(false); setAiError(null); } }} disabled={aiBusy}>Cancel</Button>
+            <Button type="submit" size="sm" disabled={!aiTopic.trim()} loading={aiBusy}>
+              {!aiBusy && <Wand2 size={12} />}
+              {aiBusy ? 'Generating…' : 'Generate'}
+            </Button>
+          </div>
+        </form>
       </Modal>
 
       <div className="flex flex-1 min-h-0 gap-3">
@@ -935,14 +1047,18 @@ export default function NoteMap({ onOpenNote, mapId }) {
                     non-notes: shows the rationale and connections list. */}
                 {selectedNode.source === 'note' ? (
                   <div className="flex-1 min-h-0 flex flex-col px-3 pb-3">
-                    <textarea
-                      value={activeNote?.mainNotes || ''}
-                      onChange={e => handleNoteFieldChange('mainNotes', e.target.value)}
-                      placeholder={noteLoading ? 'Loading…' : 'Start writing… auto-saves as you type.'}
-                      disabled={!activeNote}
+                    <div
+                      className="flex-1 min-h-[120px] w-full bg-white/[0.02] rounded-xl border border-white/[0.05] p-2.5 overflow-y-auto leading-relaxed"
                       data-bare
-                      className="flex-1 min-h-[120px] w-full bg-white/[0.02] rounded-xl border border-white/[0.05] p-2.5 text-[12px] text-white/85 placeholder-white/25 resize-none outline-none focus:border-white/[0.12] leading-relaxed"
-                    />
+                    >
+                      <MarkdownLineEditor
+                        value={activeNote?.mainNotes || ''}
+                        onChange={v => handleNoteFieldChange('mainNotes', v)}
+                        placeholder={noteLoading ? 'Loading…' : 'Start writing… **bold**, # headings, - bullets render in place. Click a line to edit it.'}
+                        disabled={!activeNote}
+                        textClassName="text-[12px] text-white/85"
+                      />
+                    </div>
                     {(() => {
                       const neighbors = nodes.filter(n => adjacency.get(selectedNode.id)?.has(n.id));
                       if (neighbors.length === 0) return null;

@@ -50,15 +50,23 @@ const DIFFICULTIES = [
 ];
 
 // ── Scoring formats ──────────────────────────────────────────────────────
-// Each format defines how tossup points are awarded. `powerThreshold` is
-// the buzz ratio (revealed/total) below which a correct buzz scores
-// `powerPts` instead of `getPts`. `negPts` applies on incorrect buzzes.
-// `target` is the points-to-win for 1v1 mode (null = use mode default 10).
+// Tossup point rules per format. Two data models coexist for back-compat:
+//   - Simple flat (`getPts`/`negPts`, optional `powerThreshold`+`powerPts`)
+//   - Tiered (`tiers: [{ upTo, pts }, …]` with optional `afterEndPts`,
+//     `negDuring`, `negAfter`) — required for real IAC Playoff scoring.
+// Values for IAC Prelim/Playoff come from the official IAC rules PDFs
+// (iacompetitions.com). `target` is points-to-win in 1v1 mode.
 const SCORING_FORMATS = [
-  { id: 'standard',    label: 'Standard',    desc: 'Continuous · earlier = more',  powerThreshold: null, powerPts: null, getPts: 10, negPts: -5, target: null },
-  { id: 'iac-prelim',  label: 'IAC Prelim',  desc: 'Power 15 · Get 10 · Neg −5',   powerThreshold: 0.5,  powerPts: 15,   getPts: 10, negPts: -5, target: 50  },
-  { id: 'iac-playoff', label: 'IAC Playoff', desc: 'Power 15 (early) · −5 neg',    powerThreshold: 0.4,  powerPts: 15,   getPts: 10, negPts: -5, target: 60  },
-  { id: 'jv',          label: 'JV',          desc: 'Get 10 · No power · No neg',   powerThreshold: null, powerPts: null, getPts: 10, negPts: 0,  target: 40  },
+  { id: 'standard',    label: 'Standard',    desc: 'Continuous · earlier = more',
+    powerThreshold: null, powerPts: null, getPts: 10, negPts: -5, target: null },
+  { id: 'iac-prelim',  label: 'IAC Prelim',  desc: '1 pt · race to 8',
+    powerThreshold: null, powerPts: null, getPts: 1, negPts: -1, target: 8 },
+  { id: 'iac-playoff', label: 'IAC Playoff', desc: '6/5/4/3 · −2 / −1 neg',
+    tiers: [{ upTo: 0.33, pts: 6 }, { upTo: 0.66, pts: 5 }, { upTo: 1.0, pts: 4 }],
+    afterEndPts: 3, negDuring: -2, negAfter: -1,
+    powerThreshold: 0.33, powerPts: 6, getPts: 4, negPts: -2, target: 40 },
+  { id: 'jv',          label: 'JV',          desc: 'Get 10 · No power · No neg',
+    powerThreshold: null, powerPts: null, getPts: 10, negPts: 0, target: 40 },
 ];
 
 // ── Color maps ────────────────────────────────────────────────────────────

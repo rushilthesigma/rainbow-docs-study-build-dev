@@ -3,6 +3,7 @@ import {
   Shield, ArrowLeft, Ban, Trash2, User, BookOpen, FileText, Target, Layers,
   MessageSquare, Lightbulb, Trophy, CreditCard, Search, Crown, Calendar,
   RefreshCw, ChevronRight, Zap, ClipboardList, BarChart3, X,
+  Swords, Activity, ChevronDown,
 } from 'lucide-react';
 import {
   checkAdmin, listUsers, getUser, toggleBan, deleteUser,
@@ -115,6 +116,8 @@ export default function AdminApp() {
       list = [...list].sort((a, b) => (sumMsgs(b) - sumMsgs(a)));
     } else if (sort === 'created') {
       list = [...list].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    } else if (sort === 'active') {
+      list = [...list].sort((a, b) => activenessScore(b) - activenessScore(a));
     } else {
       list = [...list].sort((a, b) => (b.lastActiveAt || '').localeCompare(a.lastActiveAt || ''));
     }
@@ -182,6 +185,29 @@ export default function AdminApp() {
 }
 
 function sumMsgs(u) { return (u.chatMessages?.study || 0) + (u.chatMessages?.lessons || 0) + (u.chatMessages?.curriculum || 0); }
+
+// Composite "activeness" score for the user list sort. Recency dominates
+// (a user seen today beats a one-shot whale from last month), engagement
+// volume breaks ties. Scale is unitless — only the ordering matters.
+function activenessScore(u) {
+  const HOUR = 3_600_000, DAY = 86_400_000, WEEK = 7 * DAY, MONTH = 30 * DAY;
+  const lastV = u.lastVisitAt ? Date.parse(u.lastVisitAt) || 0 : 0;
+  const lastA = u.lastActiveAt ? Date.parse(u.lastActiveAt) || 0 : 0;
+  const t = Math.max(lastV, lastA);
+  const dt = t ? Date.now() - t : Infinity;
+  let recency;
+  if (dt < HOUR) recency = 5;
+  else if (dt < DAY) recency = 3;
+  else if (dt < WEEK) recency = 2;
+  else if (dt < MONTH) recency = 1;
+  else recency = 0.25;
+  const volume = (u.visitCount || 0)
+    + sumMsgs(u)
+    + (u.studySessionCount || 0) * 3
+    + (u.lessonCount || 0) * 3
+    + (u.curriculaCount || 0) * 5;
+  return recency * (volume + 1);
+}
 
 /* ====================== USER LIST ====================== */
 function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, sort, setSort, includeDemo, setIncludeDemo, onOpen, onRefresh, onAnalytics }) {
@@ -275,7 +301,7 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
           onChange={setPlanFilter}
         />
         <TabChips
-          options={[['recent', 'Recent'], ['messages', 'Most chats'], ['created', 'Newest']]}
+          options={[['active', 'Activeness'], ['recent', 'Recent'], ['messages', 'Most chats'], ['created', 'Newest']]}
           value={sort}
           onChange={setSort}
         />
@@ -293,8 +319,11 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
         )}
         {users.map(u => {
           const t = lastSeen(u);
-          const isActiveNow = t && (now - t) < HOUR;
-          const isActiveToday = t && (now - t) < DAY;
+          // Force boolean — otherwise `t = 0` (no last-seen recorded) cascades
+          // through `t && ...` as the value `0`, which React then renders as
+          // a literal "0" text node under the avatar.
+          const isActiveNow = t > 0 && (now - t) < HOUR;
+          const isActiveToday = t > 0 && (now - t) < DAY;
           return (
             <div
               key={u.id}
@@ -645,6 +674,7 @@ function UserDetail({ user: u, onBack, onBan, onDelete, onGrantPro, onRevokePro,
           ['lessons',    `Lessons (${u.standaloneLessons?.length || 0})`, <Lightbulb size={12} key="l" />],
           ['curriculum', `Curriculum (${u.curriculumChats?.length || 0})`, <BookOpen size={12} key="c" />],
           ['quizzes',    'Quizzes',    <ClipboardList size={12} key="q" />],
+          ['debates',    `Debates (${u.debateHistory?.length || 0})`,    <Swords size={12} key="d" />],
           ['other',      'Other',      <Layers size={12} key="o" />],
           ['billing',    'Billing',    <CreditCard size={12} key="b" />],
         ].map(([k, label, icon]) => (
@@ -665,6 +695,7 @@ function UserDetail({ user: u, onBack, onBan, onDelete, onGrantPro, onRevokePro,
       {tab === 'lessons' && <LessonsTab u={u} onOpen={(lid) => onOpenConv('lesson', { lid })} />}
       {tab === 'curriculum' && <CurriculumTab u={u} onOpen={(cid, lid) => onOpenConv('curriculum', { cid, lid })} />}
       {tab === 'quizzes' && <QuizzesTab u={u} />}
+      {tab === 'debates' && <DebatesTab u={u} />}
       {tab === 'other' && <OtherTab u={u} />}
       {tab === 'billing' && <BillingTab u={u} />}
     </div>
@@ -714,16 +745,117 @@ function StudyTab({ u, onOpen }) {
 
 function LessonsTab({ u, onOpen }) {
   const list = u.standaloneLessons || [];
-  if (!list.length) return <Empty msg="No single-lesson chats" />;
+  if (!list.length) return <Empty msg="No lessons generated" />;
   return (
     <div className="space-y-1.5">
-      {list.map(l => (
-        <Row key={l.id} onClick={() => onOpen(l.id)}
-          icon={<Lightbulb size={14} className="text-white/45" />}
-          title={l.title || l.topic}
-          meta={`${l.difficulty || 'beginner'} · ${l.messageCount || 0} msgs${l.isCompleted ? ' · completed' : ''}${l.lastActiveAt ? ' · ' + new Date(l.lastActiveAt).toLocaleString() : ''}`}
-        />
-      ))}
+      {list.map(l => <LessonRow key={l.id} l={l} onOpenChat={() => onOpen(l.id)} />)}
+    </div>
+  );
+}
+
+// Expandable row — collapsed shows the lesson chrome, expanded reveals
+// the actual blocks the lesson generator produced (titles + previews).
+function LessonRow({ l, onOpenChat }) {
+  const [open, setOpen] = useState(false);
+  const blocks = l.blocks || [];
+  const meta = `${l.difficulty || 'beginner'} · ${l.blockCount ?? blocks.length} blocks · ${l.messageCount || 0} msgs${l.isCompleted ? ' · completed' : ''}${l.lastActiveAt ? ' · ' + new Date(l.lastActiveAt).toLocaleString() : ''}`;
+  return (
+    <div className="rounded-lg bg-white/[0.03] border border-white/[0.07] overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2">
+        <Lightbulb size={14} className="text-white/45 flex-shrink-0" />
+        <button
+          onClick={() => setOpen(o => !o)}
+          className="flex-1 min-w-0 text-left"
+        >
+          <p className="text-sm text-white/85 truncate">{l.title || l.topic || '(untitled)'}</p>
+          <p className="text-[10px] text-white/35 truncate">{meta}</p>
+        </button>
+        <button
+          onClick={onOpenChat}
+          className="text-[10px] uppercase tracking-wider text-white/45 hover:text-white/80 px-2 py-1 rounded border border-white/[0.08] hover:border-white/[0.18] transition-colors flex-shrink-0"
+          title="Open the lesson chat transcript"
+        >
+          Chat
+        </button>
+        <button
+          onClick={() => setOpen(o => !o)}
+          className="flex-shrink-0 text-white/40 hover:text-white/80 transition-colors"
+          title={open ? 'Hide blocks' : 'Show generated blocks'}
+        >
+          <ChevronDown size={14} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+        </button>
+      </div>
+      {open && (
+        <div className="border-t border-white/[0.05] bg-black/20 px-3 py-2 space-y-1.5">
+          {blocks.length === 0 ? (
+            <p className="text-[11px] text-white/30 italic">No generated blocks recorded for this lesson.</p>
+          ) : blocks.map((b, i) => (
+            <div key={i} className="text-[11px] leading-snug">
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-white/[0.06] border border-white/[0.08] text-white/55 font-semibold">{b.type}</span>
+                {b.title && <span className="text-white/80 font-medium truncate">{b.title}</span>}
+                {b.score != null && <ScoreBadge score={b.score} />}
+              </div>
+              {b.preview && (
+                <p className="text-white/45 line-clamp-2 pl-1">{b.preview}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Debates tab — finished multiplayer / tournament matches the user has
+// played, with score, side, opponent, verdict summary.
+function DebatesTab({ u }) {
+  const list = u.debateHistory || [];
+  if (!list.length) return <Empty msg="No debate matches finished yet" />;
+  return (
+    <div className="space-y-1.5">
+      {list.map(d => <DebateRow key={d.code + d.finishedAt} d={d} />)}
+    </div>
+  );
+}
+
+function DebateRow({ d }) {
+  const [open, setOpen] = useState(false);
+  const resultCls = d.result === 'win' ? 'text-emerald-300 bg-emerald-500/15 border-emerald-400/30'
+    : d.result === 'loss' ? 'text-rose-300 bg-rose-500/15 border-rose-400/30'
+    : 'text-white/70 bg-white/[0.06] border-white/[0.12]';
+  const oppName = d.opponent?.name || 'unknown';
+  return (
+    <div className="rounded-lg bg-white/[0.03] border border-white/[0.07] overflow-hidden">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center gap-2 px-3 py-2 text-left">
+        <Swords size={14} className="text-white/45 flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-white/85 truncate">{d.topic || '(no topic)'}</p>
+          <p className="text-[10px] text-white/35 truncate">
+            {d.mode}{d.tournament ? ` · ${d.tournament.name || 'tournament'}` : ''}
+            {' · '}{(d.mySide || '?').toUpperCase()} vs {oppName} ({(d.opponent?.side || '?').toUpperCase()})
+            {' · '}{d.myScore}–{d.opponentScore}
+            {d.finishedAt ? ' · ' + new Date(d.finishedAt).toLocaleString() : ''}
+          </p>
+        </div>
+        <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${resultCls} flex-shrink-0`}>
+          {d.result || '—'}
+        </span>
+        <ChevronDown size={14} className={`text-white/40 transition-transform flex-shrink-0 ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="border-t border-white/[0.05] bg-black/20 px-3 py-2 text-[11px] space-y-1">
+          {d.verdict?.winner && (
+            <p><span className="text-white/45 uppercase tracking-wider text-[9px] font-bold mr-1.5">Verdict</span>
+              <span className="text-white/80">winner: {d.verdict.winner}</span>
+            </p>
+          )}
+          {d.verdict?.summary && (
+            <p className="text-white/55 leading-snug">{d.verdict.summary}</p>
+          )}
+          <p className="text-white/35">{d.turnCount} turns · code {d.code}</p>
+        </div>
+      )}
     </div>
   );
 }
