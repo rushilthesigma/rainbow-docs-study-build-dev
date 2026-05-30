@@ -40,6 +40,16 @@ const GEMINI_FLASH      = 'gemini-3-flash-preview';
 const GEMINI_FLASH_LITE = 'gemini-3-flash-preview';
 const DEFAULT_MODEL = GEMINI_FLASH;
 const FALLBACK_MODEL = GEMINI_FLASH_LITE;
+
+// How many blocks the AI generates per lesson, before the final quiz
+// is appended. Difficulty drives this — beginner is a quick foothold,
+// expert is a deep dive. The final quiz adds one more block on top.
+const LESSON_BLOCK_COUNT = {
+  beginner:     5,
+  intermediate: 7,
+  advanced:    10,
+  expert:      14,
+};
 const resolveModel = (name) => name || DEFAULT_MODEL;
 // Cascade: Pro → Flash → Flash Lite (each fallback step trades quality for
 // availability + cost). Flash Lite has no further fallback.
@@ -2042,15 +2052,22 @@ app.post('/api/curriculum/refine', authMiddleware, async (req, res) => {
     if (!topic || typeof topic !== 'string' || topic.trim().length < 2) {
       return res.status(400).json({ error: 'topic required' });
     }
-    const system = `You output strict JSON. Given a study topic, produce 3-4 short clarifying questions a curriculum designer should ask before building a course. Each question is one plain-English sentence with 3-4 multiple-choice answer options that span the realistic spread (not a fake "all of the above"). Questions should disambiguate scope, prior background, and the student's goal.
+    const system = `You output strict JSON. Given a study topic, produce 4-5 short clarifying questions a curriculum designer should ask before building a course. Mix two question types:
+- "mcq": one plain-English sentence with 3-4 multiple-choice answer options that span the realistic spread (not a fake "all of the above"). Use these for scope, prior background, and depth choices where the realistic answer set is small and known.
+- "open": one plain-English sentence the student answers in their own words. Use these (at least 1, up to 2) for things MCQs can't pin down — the specific goal, prior context, a concrete project or class the course should serve, or anything where the realistic answer space is too wide to enumerate. Include a short \`placeholder\` hint (under 80 chars) showing the kind of answer expected.
+
+Aim for 2-3 mcq questions plus 1-2 open questions. Questions should disambiguate scope, prior background, and the student's goal.
 
 Output schema (no markdown, no prose):
-{ "questions": [ { "id": "kebab-case", "question": "...", "options": ["...", "...", "..."] } ] }`;
+{ "questions": [
+  { "id": "kebab-case", "type": "mcq", "question": "...", "options": ["...", "...", "..."] },
+  { "id": "kebab-case", "type": "open", "question": "...", "placeholder": "e.g. ..." }
+] }`;
     const user = `Topic: "${String(topic).slice(0, 200)}"
 Difficulty hint: ${difficulty || 'unspecified'}
 Audience hint: ${audience || 'unspecified'}
 
-Generate 3-4 clarifying questions.`;
+Generate 4-5 clarifying questions, mixing mcq and open types as described.`;
     const result = await callGemini(system, [{ role: 'user', content: user }], GEMINI_FLASH_LITE, 900, {
       jsonMode: true, disableThinking: true, temperature: 0.4,
     });
@@ -2060,11 +2077,24 @@ Generate 3-4 clarifying questions.`;
     if (!parsed?.questions || !Array.isArray(parsed.questions)) {
       return res.status(500).json({ error: 'Failed to parse refinement questions.' });
     }
-    const questions = parsed.questions.slice(0, 4).map((q, i) => ({
-      id: String(q.id || `q-${i + 1}`),
-      question: String(q.question || '').slice(0, 240),
-      options: Array.isArray(q.options) ? q.options.slice(0, 4).map(o => String(o).slice(0, 120)) : [],
-    })).filter(q => q.question && q.options.length >= 2);
+    const questions = parsed.questions.slice(0, 5).map((q, i) => {
+      const opts = Array.isArray(q.options) ? q.options.slice(0, 4).map(o => String(o).slice(0, 120)) : [];
+      // Default to mcq when options are present, open otherwise — covers
+      // models that forget the `type` field but get the shape right.
+      const declared = String(q.type || '').toLowerCase();
+      const type = declared === 'open' || (declared !== 'mcq' && opts.length < 2) ? 'open' : 'mcq';
+      const base = {
+        id: String(q.id || `q-${i + 1}`),
+        type,
+        question: String(q.question || '').slice(0, 240),
+      };
+      if (type === 'open') {
+        base.placeholder = String(q.placeholder || '').slice(0, 80);
+      } else {
+        base.options = opts;
+      }
+      return base;
+    }).filter(q => q.question && (q.type === 'open' || (q.options && q.options.length >= 2)));
     res.json({ questions });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -3512,23 +3542,72 @@ app.get('/api/curriculum/:id/grade', authMiddleware, (req, res) => {
 
 function stampBlock(lessonId, b, i, opts = {}) {
   const blockId = `${lessonId}-b${i}`;
+  const typeLabel = {
+    reading: 'Reading', quiz: 'Quiz', example: 'Worked Example',
+    recap: 'Recap', application: 'In the Wild', challenge: 'Challenge', open: 'Open Answer',
+  }[b.type] || 'Step';
   const base = {
     id: blockId,
     type: b.type,
-    title: b.title || (b.type === 'quiz' ? `Quiz ${Math.floor(i / 2) + 1}` : `Reading ${Math.floor(i / 2) + 1}`),
+    title: b.title || `${typeLabel} ${i + 1}`,
     completedAt: null,
     ...(opts.srs ? { srs: true } : {}),
     ...(opts.isFinal ? { isFinal: true } : {}),
   };
-  if (b.type === 'reading') return { ...base, content: String(b.content || '') };
-  const questions = (Array.isArray(b.questions) ? b.questions : []).map((q, qi) => ({
-    id: `${blockId}-q${qi}`,
-    prompt: String(q.prompt || ''),
-    choices: Array.isArray(q.choices) ? q.choices.map(String) : [],
-    answer: String(q.answer || ''),
-    explanation: String(q.explanation || ''),
-  }));
-  return { ...base, questions, score: null, responses: null };
+  if (b.type === 'reading' || b.type === 'application') {
+    return { ...base, content: String(b.content || '') };
+  }
+  if (b.type === 'quiz') {
+    const questions = (Array.isArray(b.questions) ? b.questions : []).map((q, qi) => ({
+      id: `${blockId}-q${qi}`,
+      prompt: String(q.prompt || ''),
+      choices: Array.isArray(q.choices) ? q.choices.map(String) : [],
+      answer: String(q.answer || ''),
+      explanation: String(q.explanation || ''),
+    }));
+    return { ...base, questions, score: null, responses: null };
+  }
+  if (b.type === 'example') {
+    return {
+      ...base,
+      problem: String(b.problem || ''),
+      steps: (Array.isArray(b.steps) ? b.steps : []).map(s => ({
+        label: String(s?.label || ''),
+        text: String(s?.text || ''),
+      })),
+      tryThis: String(b.tryThis || ''),
+    };
+  }
+  if (b.type === 'recap') {
+    return {
+      ...base,
+      bullets: (Array.isArray(b.bullets) ? b.bullets : []).map(String),
+    };
+  }
+  if (b.type === 'challenge') {
+    return {
+      ...base,
+      prompt: String(b.prompt || ''),
+      hint: String(b.hint || ''),
+      solution: String(b.solution || ''),
+    };
+  }
+  if (b.type === 'open') {
+    return {
+      ...base,
+      prompt: String(b.prompt || ''),
+      minWords: Math.max(20, Math.min(200, Number(b.minWords) || 50)),
+      rubric: (Array.isArray(b.rubric) ? b.rubric : []).map(r => ({
+        label: String(r?.label || ''),
+        criterion: String(r?.criterion || ''),
+        weight: Math.max(1, Math.min(5, Number(r?.weight) || 1)),
+      })),
+      submission: null,
+      score: null,
+    };
+  }
+  // Unknown type — preserve raw shape so frontend can render best-effort.
+  return { ...base, ...b };
 }
 
 // Returns the missed-question summaries from any quiz blocks already
@@ -3570,51 +3649,76 @@ app.post('/api/curriculum/:id/lesson/:lessonId/blocks/generate', authMiddleware,
       return res.json({ blocks: lesson.blocks });
     }
 
-    const sys = `You generate one complete lesson as 7 blocks: 4 readings interleaved with 3 mid-quizzes. Output ONLY valid JSON — no markdown, no fences, no commentary.`;
+    const difficulty = curriculum.difficulty || 'intermediate';
+    const blockCount = LESSON_BLOCK_COUNT[difficulty] || LESSON_BLOCK_COUNT.intermediate;
+    const middleCount = blockCount - 2;
+    const sys = `You generate one complete lesson as ${blockCount} blocks. You pick the right MIX of block types for the topic — see the schema. Output ONLY valid JSON — no markdown, no fences, no commentary.`;
     const prompt = `Build the lesson "${lesson.title}" from the unit "${unit.title}" of the course "${curriculum.title}".
 ${lesson.description ? `Lesson goal: ${lesson.description}\n` : ''}${curriculum.description ? `Course context: ${curriculum.description}\n` : ''}
-Difficulty: ${curriculum.difficulty || 'intermediate'}.
+Difficulty: ${difficulty}.
 
-EXACTLY 7 blocks in this order:
-  1. reading_1 — Core definition + framing of the topic. The simplest correct mental model.
-  2. quiz_1   — 3 multiple-choice questions on reading 1.
-  3. reading_2 — Mechanics. How it works, with a worked numeric / concrete example.
-  4. quiz_2   — 3 multiple-choice questions on reading 2.
-  5. reading_3 — SPACED-REPETITION review of readings 1 + 2. The student has now seen R1 and R2 — return to the trickiest concepts from BOTH readings, re-frame from a different angle, hit the most common misconceptions head-on, and add ONE bridging idea that ties them together. This is NOT a new sub-concept — it is intentional review designed to make R1 + R2 stick. 350-450 words.
-  6. quiz_3   — 3 multiple-choice questions that mix R1, R2, and R3 (i.e. drag Q1/Q2-style content back in alongside the R3 framing).
-  7. reading_4 — Synthesis + edge cases. Tie the lesson to the surrounding course; surface 1-2 lingering subtleties.
+EXACTLY ${blockCount} blocks total (this length is set by the course difficulty — do not deviate). You decide the type of each MIDDLE block based on what best serves this topic. Pick a varied, motivated mix — not all the same type.
 
-Each reading: 350-500 words of markdown (## sub-heading + body, with **bold**, lists, fenced code where useful, math via $...$ or $$...$$ if it fits).
-Each quiz question: a "prompt" (string), 4 "choices" (strings, no A) B) prefixes — UI adds them), an "answer" (the EXACT text of the correct choice), and an "explanation" (1-2 sentences naming the misconception each wrong option encodes).
-Distractors must be plausible — each wrong option encodes a real misconception.
+FIXED slots:
+  Slot 1:  "reading"  — Core definition + framing of the topic. The simplest correct mental model. 350-500 words of markdown.
+  Slot ${blockCount}: "reading"  — Synthesis + edge cases. Tie the lesson to the surrounding course; surface 1-2 lingering subtleties. 350-500 words.
 
-Return JSON exactly in this shape:
-{
-  "blocks": [
-    {"type":"reading","title":"Reading 1 — <name>","content":"<markdown>"},
-    {"type":"quiz","title":"Quiz 1","questions":[{"prompt":"...","choices":["...","...","...","..."],"answer":"...","explanation":"..."},...3 total...]},
-    ...
-    {"type":"reading","title":"Reading 4 — <name>","content":"<markdown>"}
-  ]
-}`;
+MIDDLE slots (slots 2 through ${blockCount - 1}, ${middleCount} blocks total) — pick from these types:
+  • "reading"     — A second teaching pass (mechanics, examples). 350-500 words of markdown.
+  • "quiz"        — 3 multiple-choice questions on what's been read so far.
+  • "example"     — A WORKED EXAMPLE. One concrete problem the student would actually face, broken into 3-5 numbered solution steps the student can reveal one at a time, then a short "now you try" prompt.
+  • "recap"       — A CONCEPT RECAP. 4-6 tight bullet points summarising what's been covered so far. Used after dense material to reinforce.
+  • "application" — A REAL-WORLD APPLICATION. 200-300 words of markdown showing where this concept shows up — a product, an event, a phenomenon the student has likely encountered.
+  • "challenge"   — A STRETCH PROBLEM. A harder, non-obvious question with a hint and a full solution. Inserts difficulty when the lesson gets too smooth.
+  • "open"        — An OPEN-ANSWER prompt. A short question the student must answer in their own words (40-150 words). MUST include a 2-3 item rubric — each item is { label, criterion (one sentence describing what an A-grade response shows), weight (1-3) }.
+
+RULES for the middle ${middleCount} blocks:
+  • Include AT LEAST 2 "quiz" blocks (the lesson needs graded checkpoints).
+  • Include AT LEAST ${middleCount >= 5 ? 3 : 2} NON-quiz, NON-reading types — mix freely from {example, recap, application, challenge, open}. Variety is the point.
+  • Include AT LEAST 1 "open" block somewhere in the middle so the student has to write, not just click.
+  • A "quiz" or "open" block should follow material it can test — never put a checkpoint before the relevant teaching content.
+  • A "recap" should come AFTER at least one reading or example.
+  • A "challenge" should come AFTER the relevant teaching content.
+  • Sequence the blocks so the lesson flows naturally for a student new to the topic.
+
+SHAPES — each block's fields by type:
+  reading:     {"type":"reading","title":"...","content":"<markdown>"}
+  quiz:        {"type":"quiz","title":"...","questions":[{"prompt":"...","choices":["...","...","...","..."],"answer":"<exact text of correct choice>","explanation":"<1-2 sentences>"}, ...3 total...]}
+  example:     {"type":"example","title":"...","problem":"<markdown problem statement>","steps":[{"label":"Step name","text":"<markdown>"}, ...3-5 total...],"tryThis":"<short prompt for student to try a variant>"}
+  recap:       {"type":"recap","title":"...","bullets":["...","...","...","..."]}
+  application: {"type":"application","title":"...","content":"<200-300 words of markdown>"}
+  challenge:   {"type":"challenge","title":"...","prompt":"<markdown problem>","hint":"<1-2 sentences nudging without solving>","solution":"<markdown explanation>"}
+  open:        {"type":"open","title":"...","prompt":"<markdown question, 1-3 sentences>","minWords":<40-80>,"rubric":[{"label":"...","criterion":"...","weight":<1-3>}, ...2-3 total...]}
+
+Markdown inside content/problem/prompt/solution: ## sub-headings, **bold**, lists, fenced code where useful, math via $...$ or $$...$$ if it fits.
+Distractors in quizzes must be plausible — each wrong option encodes a real misconception named in the explanation.
+
+Return JSON in this shape:
+{ "blocks": [ <block 1>, <block 2>, ... <block ${blockCount}> ] }`;
 
     // Speed: Flash (not Pro) is plenty for structured-JSON lesson generation
     // and runs ~2-3x faster. Reading + quiz quality is identical because
     // the prompt does the heavy lifting. Pro is reserved for free-form
     // tutoring where reasoning depth matters.
-    const result = await callGemini(sys, [{ role: 'user', content: prompt }], GEMINI_FLASH, 8192, { jsonMode: true, temperature: 0.6 });
+    // Bump the token ceiling for longer lessons — expert mode emits
+    // ~14 blocks with a couple readings inside, easily 6k tokens of
+    // markdown alone. Flash's hard cap is 8192; we'll use Pro for the
+    // deepest two tiers where the ceiling matters.
+    const maxTokens = blockCount >= 10 ? 12000 : 8192;
+    const model = blockCount >= 10 ? GEMINI_PRO : GEMINI_FLASH;
+    const result = await callGemini(sys, [{ role: 'user', content: prompt }], model, maxTokens, { jsonMode: true, temperature: 0.6 });
     if (!result.success) return res.status(500).json({ error: result.error || 'Lesson generation failed' });
     const parsed = parseAIJson(result.data.content?.[0]?.text || '');
-    if (!parsed || !Array.isArray(parsed.blocks) || parsed.blocks.length !== 7) {
-      console.error('Block parse failed. Got', parsed?.blocks?.length, 'blocks');
-      return res.status(500).json({ error: 'Lesson did not return 7 blocks. Try again.' });
+    if (!parsed || !Array.isArray(parsed.blocks) || parsed.blocks.length !== blockCount) {
+      console.error('Block parse failed. Got', parsed?.blocks?.length, 'blocks, expected', blockCount);
+      return res.status(500).json({ error: `Lesson did not return ${blockCount} blocks. Try again.` });
     }
 
-    const blocks = parsed.blocks.map((b, i) => {
-      // Block #5 (index 4) is the SRS reading — flag it.
-      const opts = i === 4 ? { srs: true } : {};
-      return stampBlock(lesson.id, b, i, opts);
-    });
+    // No SRS slot anymore — the AI mixes types as it sees fit, so a
+    // hard-coded spaced-repetition reading at index 4 no longer makes
+    // sense. The "recap" type covers reinforcement when the AI decides
+    // that's what the lesson needs.
+    const blocks = parsed.blocks.map((b, i) => stampBlock(lesson.id, b, i));
 
     lesson.blocks = blocks;
     saveUsers(users);
@@ -3639,18 +3743,17 @@ app.post('/api/curriculum/:id/lesson/:lessonId/blocks/final-quiz/generate', auth
     const found = findLessonInCurriculum(curriculum, req.params.lessonId);
     if (!found) return res.status(404).json({ error: 'Lesson not found' });
     const { unit, lesson } = found;
-    if (!Array.isArray(lesson.blocks) || lesson.blocks.length < 7) {
+    if (!Array.isArray(lesson.blocks) || lesson.blocks.length < 3) {
       return res.status(400).json({ error: 'Run blocks/generate first' });
     }
-    if (lesson.blocks.length === 8) {
-      // already generated
-      return res.json({ block: lesson.blocks[7] });
-    }
+    // Idempotent: if the last block is already the final quiz, return it.
+    const last = lesson.blocks[lesson.blocks.length - 1];
+    if (last?.isFinal) return res.json({ block: last });
 
     const missed = collectMissedFromLesson(lesson);
     const missedBlock = missed.length
-      ? `MISSED QUESTIONS FROM Q1-Q3 (use these as the spine of the final quiz — re-test the same concepts from a different angle, do NOT repeat the questions verbatim):\n${missed.map((m, i) => `  ${i + 1}. Prompt: ${m.prompt}\n     Student picked: ${m.userPicked}\n     Correct: ${m.correctAnswer}\n     Why it tripped them: ${m.explanation}`).join('\n')}`
-      : `(The student got every Q1-Q3 question right. Push harder: 5 application / synthesis questions that integrate readings 1-4.)`;
+      ? `MISSED QUESTIONS FROM THE LESSON QUIZZES (use these as the spine of the final quiz — re-test the same concepts from a different angle, do NOT repeat the questions verbatim):\n${missed.map((m, i) => `  ${i + 1}. Prompt: ${m.prompt}\n     Student picked: ${m.userPicked}\n     Correct: ${m.correctAnswer}\n     Why it tripped them: ${m.explanation}`).join('\n')}`
+      : `(The student got every mid-quiz question right. Push harder: 5 application / synthesis questions that integrate the lesson's readings.)`;
 
     const sys = `You write the FINAL QUIZ for a lesson — a 5-question multiple-choice quiz that integrates the whole lesson. Output ONLY valid JSON.`;
     const prompt = `Lesson: "${lesson.title}" (unit: "${unit.title}", course: "${curriculum.title}").
@@ -3676,7 +3779,7 @@ Return JSON exactly:
       return res.status(500).json({ error: 'Final quiz returned no questions. Try again.' });
     }
 
-    const block = stampBlock(lesson.id, { type: 'quiz', title: 'Final Quiz', questions: parsed.questions }, 7, { isFinal: true });
+    const block = stampBlock(lesson.id, { type: 'quiz', title: 'Final Quiz', questions: parsed.questions }, lesson.blocks.length, { isFinal: true });
     lesson.blocks.push(block);
     saveUsers(users);
     res.json({ block });
@@ -3716,6 +3819,97 @@ app.post('/api/curriculum/:id/lesson/:lessonId/blocks/:bid/grade', authMiddlewar
     res.json({ score, results });
   } catch (e) {
     console.error('blocks/grade failed:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Open-answer grader. Same rubric-driven scoring path as assignments,
+// but the submission lives on the block itself so the lesson runner
+// can render the verdict inline. Idempotent: re-submitting overwrites
+// the previous grade.
+app.post('/api/curriculum/:id/lesson/:lessonId/blocks/:bid/grade-open', authMiddleware, async (req, res) => {
+  try {
+    const { text } = req.body || {};
+    if (!text || typeof text !== 'string' || text.trim().length < 20) {
+      return res.status(400).json({ error: 'Submission must be at least 20 characters' });
+    }
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const curriculum = findUserCurriculum(users, email, req.params.id);
+    if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
+    const found = findLessonInCurriculum(curriculum, req.params.lessonId);
+    if (!found) return res.status(404).json({ error: 'Lesson not found' });
+    const block = (found.lesson.blocks || []).find(b => b.id === req.params.bid);
+    if (!block || block.type !== 'open') return res.status(404).json({ error: 'Open-answer block not found' });
+
+    const rubric = Array.isArray(block.rubric) && block.rubric.length
+      ? block.rubric
+      : [{ label: 'Understanding', criterion: 'Demonstrates accurate understanding of the lesson concept.', weight: 1 }];
+
+    const rubricLines = rubric.map((r, i) => `${i + 1}. [weight ${r.weight ?? 1}] ${r.label}: ${r.criterion}`).join('\n');
+    const system = `You are a rigorous but fair teacher grading a short-form open-answer prompt embedded in a lesson. Score each rubric criterion 0–100 based on what the student actually demonstrated. Be specific in feedback — quote the student where useful, point to what's missing, and say what an A-grade response would have added.
+
+Output STRICT JSON only. No markdown fences.`;
+    const userMsg = `LESSON: "${found.lesson.title}" (unit: "${found.unit.title}")
+COURSE: "${curriculum.title}"
+
+PROMPT:
+"""
+${block.prompt || ''}
+"""
+
+RUBRIC (grade each criterion 0-100; weights are relative):
+${rubricLines}
+
+STUDENT SUBMISSION:
+"""
+${String(text).slice(0, 6000)}
+"""
+
+Return JSON:
+{
+  "perRubric": [
+    { "label": "<must match rubric label>", "score": <0-100>, "note": "<1-2 sentence justification, specific to what the student wrote>" }
+  ],
+  "feedback": "<3-5 sentences of overall feedback addressed to the student. Mention 1 strength, 1-2 specific gaps, and one concrete next step.>"
+}`;
+
+    const result = await callGemini(system, [{ role: 'user', content: userMsg }], modelForUser(users[email], email), 1400, {
+      jsonMode: true, temperature: 0.4,
+    });
+    if (!result.success) return res.status(500).json({ error: result.error });
+    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
+    if (!parsed || !Array.isArray(parsed.perRubric)) {
+      return res.status(500).json({ error: 'Failed to grade submission' });
+    }
+
+    let total = 0, weightSum = 0;
+    const perRubric = rubric.map(r => {
+      const w = Number(r.weight) || 1;
+      const match = parsed.perRubric.find(p => String(p.label).toLowerCase() === String(r.label).toLowerCase());
+      const score = match ? Math.max(0, Math.min(100, Number(match.score) || 0)) : 0;
+      total += score * w;
+      weightSum += w;
+      return { label: r.label, score, note: match?.note ? String(match.note).slice(0, 500) : '' };
+    });
+    const finalScore = weightSum > 0 ? Math.round(total / weightSum) : 0;
+
+    block.submission = {
+      text: String(text).slice(0, 6000),
+      submittedAt: new Date().toISOString(),
+      score: finalScore,
+      letter: percentToLetter(finalScore),
+      perRubric,
+      feedback: String(parsed.feedback || '').slice(0, 2000),
+    };
+    block.score = finalScore;
+    block.completedAt = block.submission.submittedAt;
+    saveUsers(users);
+
+    res.json({ submission: block.submission });
+  } catch (e) {
+    console.error('blocks/grade-open failed:', e);
     res.status(500).json({ error: e.message });
   }
 });
@@ -7649,45 +7843,62 @@ app.post('/api/lessons/:id/blocks/generate', authMiddleware, async (req, res) =>
       return res.json({ blocks: lesson.blocks });
     }
 
-    const sys = `You generate one complete lesson as 7 blocks: 4 readings interleaved with 3 mid-quizzes. Output ONLY valid JSON — no markdown, no fences, no commentary.`;
+    const difficulty = lesson.difficulty || 'beginner';
+    const blockCount = LESSON_BLOCK_COUNT[difficulty] || LESSON_BLOCK_COUNT.intermediate;
+    const middleCount = blockCount - 2;
+    const sys = `You generate one complete lesson as ${blockCount} blocks. You pick the right MIX of block types for the topic — see the schema. Output ONLY valid JSON — no markdown, no fences, no commentary.`;
     const prompt = `Build a standalone lesson on "${lesson.topic || lesson.title}".
-Difficulty: ${lesson.difficulty || 'beginner'}.
+Difficulty: ${difficulty}.
 
-EXACTLY 7 blocks in this order:
-  1. reading_1 — Core definition + framing of the topic. The simplest correct mental model.
-  2. quiz_1   — 3 multiple-choice questions on reading 1.
-  3. reading_2 — Mechanics. How it works, with a worked numeric / concrete example.
-  4. quiz_2   — 3 multiple-choice questions on reading 2.
-  5. reading_3 — SPACED-REPETITION review of readings 1 + 2. The student has now seen R1 and R2 — return to the trickiest concepts from BOTH readings, re-frame from a different angle, hit the most common misconceptions head-on, and add ONE bridging idea that ties them together. This is NOT a new sub-concept — it is intentional review designed to make R1 + R2 stick. 350-450 words.
-  6. quiz_3   — 3 multiple-choice questions that mix R1, R2, and R3 (i.e. drag Q1/Q2-style content back in alongside the R3 framing).
-  7. reading_4 — Synthesis + edge cases. Surface 1-2 lingering subtleties.
+EXACTLY ${blockCount} blocks total (this length is set by the difficulty — do not deviate). You decide the type of each MIDDLE block based on what best serves this topic. Pick a varied, motivated mix — not all the same type.
 
-Each reading: 350-500 words of markdown (## sub-heading + body, with **bold**, lists, fenced code where useful, math via $...$ or $$...$$ if it fits).
-Each quiz question: a "prompt" (string), 4 "choices" (strings, no A) B) prefixes — UI adds them), an "answer" (the EXACT text of the correct choice), and an "explanation" (1-2 sentences naming the misconception each wrong option encodes).
-Distractors must be plausible — each wrong option encodes a real misconception.
+FIXED slots:
+  Slot 1:  "reading"  — Core definition + framing of the topic. The simplest correct mental model. 350-500 words of markdown.
+  Slot ${blockCount}: "reading"  — Synthesis + edge cases. Surface 1-2 lingering subtleties. 350-500 words.
 
-Return JSON exactly in this shape:
-{
-  "blocks": [
-    {"type":"reading","title":"Reading 1 — <name>","content":"<markdown>"},
-    {"type":"quiz","title":"Quiz 1","questions":[{"prompt":"...","choices":["...","...","...","..."],"answer":"...","explanation":"..."},...3 total...]},
-    ...
-    {"type":"reading","title":"Reading 4 — <name>","content":"<markdown>"}
-  ]
-}`;
+MIDDLE slots (slots 2 through ${blockCount - 1}, ${middleCount} blocks total) — pick from these types:
+  • "reading"     — A second teaching pass (mechanics, examples). 350-500 words of markdown.
+  • "quiz"        — 3 multiple-choice questions on what's been read so far.
+  • "example"     — A WORKED EXAMPLE. One concrete problem the student would face, broken into 3-5 numbered solution steps the student can reveal one at a time, then a short "now you try" prompt.
+  • "recap"       — A CONCEPT RECAP. 4-6 tight bullet points summarising what's been covered so far.
+  • "application" — A REAL-WORLD APPLICATION. 200-300 words of markdown showing where this concept shows up.
+  • "challenge"   — A STRETCH PROBLEM. A harder, non-obvious question with a hint and a full solution.
+  • "open"        — An OPEN-ANSWER prompt. A short question the student must answer in their own words (40-150 words). MUST include a 2-3 item rubric — each item is { label, criterion (one sentence describing what an A-grade response shows), weight (1-3) }.
 
-    const result = await callGemini(sys, [{ role: 'user', content: prompt }], GEMINI_FLASH, 8192, { jsonMode: true, temperature: 0.6 });
+RULES for the middle ${middleCount} blocks:
+  • Include AT LEAST 2 "quiz" blocks.
+  • Include AT LEAST ${middleCount >= 5 ? 3 : 2} NON-quiz, NON-reading types — mix freely from {example, recap, application, challenge, open}.
+  • Include AT LEAST 1 "open" block so the student has to write, not just click.
+  • A "quiz" or "open" must follow material it can test — never put a checkpoint before the relevant teaching content.
+  • A "recap" comes AFTER at least one reading or example.
+  • Sequence the blocks so the lesson flows naturally for a student new to the topic.
+
+SHAPES — each block's fields by type:
+  reading:     {"type":"reading","title":"...","content":"<markdown>"}
+  quiz:        {"type":"quiz","title":"...","questions":[{"prompt":"...","choices":["...","...","...","..."],"answer":"<exact text of correct choice>","explanation":"<1-2 sentences>"}, ...3 total...]}
+  example:     {"type":"example","title":"...","problem":"<markdown problem statement>","steps":[{"label":"Step name","text":"<markdown>"}, ...3-5 total...],"tryThis":"<short prompt for student to try a variant>"}
+  recap:       {"type":"recap","title":"...","bullets":["...","...","...","..."]}
+  application: {"type":"application","title":"...","content":"<200-300 words of markdown>"}
+  challenge:   {"type":"challenge","title":"...","prompt":"<markdown problem>","hint":"<1-2 sentences nudging without solving>","solution":"<markdown explanation>"}
+  open:        {"type":"open","title":"...","prompt":"<markdown question, 1-3 sentences>","minWords":<40-80>,"rubric":[{"label":"...","criterion":"...","weight":<1-3>}, ...2-3 total...]}
+
+Markdown inside content/problem/prompt/solution: ## sub-headings, **bold**, lists, fenced code where useful, math via $...$ or $$...$$ if it fits.
+Distractors in quizzes must be plausible.
+
+Return JSON in this shape:
+{ "blocks": [ <block 1>, <block 2>, ... <block ${blockCount}> ] }`;
+
+    const maxTokens = blockCount >= 10 ? 12000 : 8192;
+    const model = blockCount >= 10 ? GEMINI_PRO : GEMINI_FLASH;
+    const result = await callGemini(sys, [{ role: 'user', content: prompt }], model, maxTokens, { jsonMode: true, temperature: 0.6 });
     if (!result.success) return res.status(500).json({ error: result.error || 'Lesson generation failed' });
     const parsed = parseAIJson(result.data.content?.[0]?.text || '');
-    if (!parsed || !Array.isArray(parsed.blocks) || parsed.blocks.length !== 7) {
-      console.error('lessons blocks/generate parse failed. Got', parsed?.blocks?.length, 'blocks');
-      return res.status(500).json({ error: 'Lesson did not return 7 blocks. Try again.' });
+    if (!parsed || !Array.isArray(parsed.blocks) || parsed.blocks.length !== blockCount) {
+      console.error('lessons blocks/generate parse failed. Got', parsed?.blocks?.length, 'blocks, expected', blockCount);
+      return res.status(500).json({ error: `Lesson did not return ${blockCount} blocks. Try again.` });
     }
 
-    const blocks = parsed.blocks.map((b, i) => {
-      const opts = i === 4 ? { srs: true } : {};
-      return stampBlock(lesson.id, b, i, opts);
-    });
+    const blocks = parsed.blocks.map((b, i) => stampBlock(lesson.id, b, i));
 
     lesson.blocks = blocks;
     lesson.lastActiveAt = Date.now();
@@ -7707,10 +7918,11 @@ app.post('/api/lessons/:id/blocks/final-quiz/generate', authMiddleware, async (r
     users[email].data = migrateUserData(users[email].data);
     const lesson = findLesson(users[email].data, req.params.id);
     if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
-    if (!Array.isArray(lesson.blocks) || lesson.blocks.length < 7) {
+    if (!Array.isArray(lesson.blocks) || lesson.blocks.length < 3) {
       return res.status(400).json({ error: 'Run blocks/generate first' });
     }
-    if (lesson.blocks.length === 8) return res.json({ block: lesson.blocks[7] });
+    const last = lesson.blocks[lesson.blocks.length - 1];
+    if (last?.isFinal) return res.json({ block: last });
 
     const missed = collectMissedFromLesson(lesson);
     const missedBlock = missed.length
@@ -7740,7 +7952,7 @@ Return JSON exactly:
       return res.status(500).json({ error: 'Final quiz returned no questions. Try again.' });
     }
 
-    const block = stampBlock(lesson.id, { type: 'quiz', title: 'Final Quiz', questions: parsed.questions }, 7, { isFinal: true });
+    const block = stampBlock(lesson.id, { type: 'quiz', title: 'Final Quiz', questions: parsed.questions }, lesson.blocks.length, { isFinal: true });
     lesson.blocks.push(block);
     saveUsers(users);
     res.json({ block });
@@ -7779,6 +7991,85 @@ app.post('/api/lessons/:id/blocks/:bid/grade', authMiddleware, (req, res) => {
     res.json({ score, results });
   } catch (e) {
     console.error('lessons blocks/grade failed:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Standalone-lesson twin of the curriculum open-answer grader.
+app.post('/api/lessons/:id/blocks/:bid/grade-open', authMiddleware, async (req, res) => {
+  try {
+    const { text } = req.body || {};
+    if (!text || typeof text !== 'string' || text.trim().length < 20) {
+      return res.status(400).json({ error: 'Submission must be at least 20 characters' });
+    }
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const lesson = findLesson(users[email].data, req.params.id);
+    if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
+    const block = (lesson.blocks || []).find(b => b.id === req.params.bid);
+    if (!block || block.type !== 'open') return res.status(404).json({ error: 'Open-answer block not found' });
+
+    const rubric = Array.isArray(block.rubric) && block.rubric.length
+      ? block.rubric
+      : [{ label: 'Understanding', criterion: 'Demonstrates accurate understanding of the lesson concept.', weight: 1 }];
+
+    const rubricLines = rubric.map((r, i) => `${i + 1}. [weight ${r.weight ?? 1}] ${r.label}: ${r.criterion}`).join('\n');
+    const system = `You are a rigorous but fair teacher grading a short-form open-answer prompt embedded in a lesson. Score each rubric criterion 0–100 based on what the student actually demonstrated. Be specific in feedback.
+
+Output STRICT JSON only.`;
+    const userMsg = `LESSON: "${lesson.topic || lesson.title}".
+
+PROMPT:
+"""
+${block.prompt || ''}
+"""
+
+RUBRIC (grade each criterion 0-100; weights are relative):
+${rubricLines}
+
+STUDENT SUBMISSION:
+"""
+${String(text).slice(0, 6000)}
+"""
+
+Return JSON: { "perRubric": [{"label":"...","score":<0-100>,"note":"..."}], "feedback": "3-5 sentences" }`;
+
+    const result = await callGemini(system, [{ role: 'user', content: userMsg }], modelForUser(users[email], email), 1400, {
+      jsonMode: true, temperature: 0.4,
+    });
+    if (!result.success) return res.status(500).json({ error: result.error });
+    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
+    if (!parsed || !Array.isArray(parsed.perRubric)) {
+      return res.status(500).json({ error: 'Failed to grade submission' });
+    }
+
+    let total = 0, weightSum = 0;
+    const perRubric = rubric.map(r => {
+      const w = Number(r.weight) || 1;
+      const match = parsed.perRubric.find(p => String(p.label).toLowerCase() === String(r.label).toLowerCase());
+      const score = match ? Math.max(0, Math.min(100, Number(match.score) || 0)) : 0;
+      total += score * w;
+      weightSum += w;
+      return { label: r.label, score, note: match?.note ? String(match.note).slice(0, 500) : '' };
+    });
+    const finalScore = weightSum > 0 ? Math.round(total / weightSum) : 0;
+
+    block.submission = {
+      text: String(text).slice(0, 6000),
+      submittedAt: new Date().toISOString(),
+      score: finalScore,
+      letter: percentToLetter(finalScore),
+      perRubric,
+      feedback: String(parsed.feedback || '').slice(0, 2000),
+    };
+    block.score = finalScore;
+    block.completedAt = block.submission.submittedAt;
+    saveUsers(users);
+    res.json({ submission: block.submission });
+  } catch (e) {
+    console.error('lessons blocks/grade-open failed:', e);
     res.status(500).json({ error: e.message });
   }
 });

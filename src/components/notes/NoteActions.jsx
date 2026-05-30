@@ -217,7 +217,7 @@ function QuizFromNoteModal({ open, onClose, noteTitle, noteText }) {
             </div>
           </div>
           {error && (
-            <div className="text-[12px] text-rose-400 bg-rose-900/20 border border-rose-700/30 rounded-lg px-3 py-2">{error}</div>
+            <div className="text-[12px] text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 dark:text-rose-300 dark:bg-rose-900/20 dark:border-rose-700/30">{error}</div>
           )}
           <Button type="submit" className="w-full">
             <Sparkles size={14} /> Generate Quiz
@@ -233,7 +233,7 @@ function QuizFromNoteModal({ open, onClose, noteTitle, noteText }) {
       <Modal open={open} onClose={handleClose} title="Building your quiz">
         <div className="py-8 text-center">
           <LoadingSpinner size={20} />
-          <p className="text-[12px] text-white/45 mt-3">Reading your note and writing questions…</p>
+          <p className="text-[12px] text-white/65 mt-3">Reading your note and writing questions…</p>
         </div>
       </Modal>
     );
@@ -246,34 +246,40 @@ function QuizFromNoteModal({ open, onClose, noteTitle, noteText }) {
       : pct >= 60 ? 'text-white/80 bg-white/[0.08] ring-white/[0.18]'
       : 'text-rose-400 bg-rose-900/20 ring-rose-700/40';
     return (
-      <Modal open={open} onClose={handleClose} title="Quiz results">
+      <Modal open={open} onClose={handleClose} title="Quiz results" size="lg">
         <div className="text-center mb-5">
           <div className={`inline-flex items-center justify-center w-16 h-16 rounded-full text-[20px] font-bold mb-2 ring-2 ${scoreCls}`}>
             {pct}%
           </div>
-          <p className="text-[13px] text-white/65">{results.score} of {results.total} correct</p>
+          <p className="text-[13px] text-white/70">{results.score} of {results.total} correct</p>
         </div>
-        <div className="flex flex-col gap-2 max-h-[40vh] overflow-y-auto">
-          {(results.details || []).map((d, i) => (
-            <div key={i} className={`rounded-lg p-3 border text-[12px] ${d.correct ? 'bg-emerald-900/10 border-emerald-700/30' : 'bg-rose-900/10 border-rose-700/30'}`}>
-              <div className="flex items-start gap-2">
-                {d.correct
-                  ? <CheckCircle2 size={14} className="text-emerald-400 mt-0.5 flex-shrink-0" />
-                  : <XCircle size={14} className="text-rose-400 mt-0.5 flex-shrink-0" />}
-                <div className="flex-1">
-                  <p className="text-white/85 font-medium">{d.question}</p>
-                  {!d.correct && (
-                    <p className="text-[11px] text-white/45 mt-1">
-                      You: <span className="text-rose-300">{d.answer}</span> · Correct: <span className="text-emerald-300">{d.correctAnswer}</span>
-                    </p>
-                  )}
-                  {d.explanation && <p className="text-[11px] text-white/35 mt-1 italic">{d.explanation}</p>}
+        <div className="relative">
+          <div className="flex flex-col gap-2 max-h-[38vh] overflow-y-auto pr-1 -mr-1 pb-4">
+            {(results.details || []).map((d, i) => (
+              <div key={i} className={`rounded-lg p-3 border text-[12px] ${d.correct ? 'bg-emerald-900/10 border-emerald-700/30' : 'bg-rose-900/10 border-rose-700/30'}`}>
+                <div className="flex items-start gap-2">
+                  {d.correct
+                    ? <CheckCircle2 size={14} className="text-emerald-400 mt-0.5 flex-shrink-0" />
+                    : <XCircle size={14} className="text-rose-400 mt-0.5 flex-shrink-0" />}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white/85 font-medium break-words">{d.question}</p>
+                    {!d.correct && (
+                      <p className="text-[11px] text-white/55 mt-1 break-words">
+                        You: <span className="text-rose-300">{d.answer}</span> · Correct: <span className="text-emerald-300">{d.correctAnswer}</span>
+                      </p>
+                    )}
+                    {d.explanation && <p className="text-[11px] text-white/50 mt-1 italic break-words">{d.explanation}</p>}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-white via-white/85 to-transparent dark:from-[#1a1a26] dark:via-[#1a1a26]/85"
+          />
         </div>
-        <div className="flex gap-2 mt-4">
+        <div className="flex gap-2 mt-4 pt-4 border-t border-gray-200 dark:border-white/[0.08]">
           <Button onClick={reset} className="flex-1">Another Quiz</Button>
           <Button variant="secondary" onClick={handleClose} className="flex-1">Done</Button>
         </div>
@@ -287,14 +293,20 @@ function QuizFromNoteModal({ open, onClose, noteTitle, noteText }) {
     const total = quiz.questions?.length || 0;
     const answered = Object.keys(answers).length;
     return (
-      <Modal open={open} onClose={handleClose} title={quiz.title || `Quiz: ${noteTitle}`}>
-        <div className="flex items-center justify-between mb-4">
-          <p className="text-[12px] text-white/45">{answered}/{total} answered</p>
-          <button onClick={reset} className="text-[11px] text-white/35 hover:text-white/60 inline-flex items-center gap-1">
+      <Modal open={open} onClose={handleClose} title={quiz.title || `Quiz: ${noteTitle}`} size="lg">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-[12px] text-white/65">
+            <span className="text-white/90 font-semibold">{answered}</span>
+            <span className="text-white/45"> / {total} answered</span>
+          </p>
+          <button
+            onClick={reset}
+            className="text-[11px] text-white/50 hover:text-white/85 inline-flex items-center gap-1 px-2 py-1 rounded-md hover:bg-white/[0.06] transition-colors"
+          >
             <X size={12} /> Restart
           </button>
         </div>
-        <div className="flex gap-1.5 mb-4">
+        <div className="flex gap-1.5 mb-5">
           {quiz.questions?.map((_, i) => {
             const qId = quiz.questions[i]?.id || i;
             const isAnswered = answers[qId] !== undefined;
@@ -303,8 +315,9 @@ function QuizFromNoteModal({ open, onClose, noteTitle, noteText }) {
               <button
                 key={i}
                 onClick={() => { setCurrentQ(i); setSelectedAnswer(answers[qId] || null); }}
+                aria-label={`Go to question ${i + 1}`}
                 className={`h-1.5 flex-1 rounded-full transition-colors ${
-                  isCurrent ? 'bg-white/55' : isAnswered ? 'bg-white/30' : 'bg-white/[0.08]'
+                  isCurrent ? 'bg-white/70' : isAnswered ? 'bg-white/40' : 'bg-white/[0.10]'
                 }`}
               />
             );
@@ -312,8 +325,8 @@ function QuizFromNoteModal({ open, onClose, noteTitle, noteText }) {
         </div>
         {q && (
           <div>
-            <p className="text-[11px] text-white/30 mb-2">Question {currentQ + 1} of {total}</p>
-            <MathText as="h3" className="text-[14px] font-semibold text-white/90 mb-4">{q.question}</MathText>
+            <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-white/50 mb-2">Question {currentQ + 1} of {total}</p>
+            <MathText as="h3" className="text-[15px] font-semibold text-white/95 mb-4 leading-snug break-words">{q.question}</MathText>
             <div className="flex flex-col gap-2 mb-4">
               {(q.options || []).map((opt) => {
                 const letter = opt.charAt(0);
@@ -322,23 +335,23 @@ function QuizFromNoteModal({ open, onClose, noteTitle, noteText }) {
                   <button
                     key={opt}
                     onClick={() => selectAnswer(letter)}
-                    className={`w-full text-left px-3 py-2.5 rounded-lg text-[12px] transition-all border ${
+                    className={`w-full text-left px-3 py-2.5 rounded-lg text-[13px] transition-all border flex items-start gap-2.5 ${
                       isSelected
-                        ? 'border-white/[0.24] bg-white/[0.10] text-white/90 font-medium'
-                        : 'border-white/[0.07] bg-white/[0.02] text-white/60 hover:border-white/[0.16] hover:bg-white/[0.06] hover:text-white/80'
+                        ? 'border-white/[0.28] bg-white/[0.10] text-white/95 font-medium'
+                        : 'border-white/[0.08] bg-white/[0.02] text-white/75 hover:border-white/[0.18] hover:bg-white/[0.06] hover:text-white/90'
                     }`}
                   >
-                    <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold mr-2 ${
-                      isSelected ? 'bg-white/[0.90] text-black' : 'bg-white/[0.08] text-white/40'
+                    <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold flex-shrink-0 mt-0.5 ${
+                      isSelected ? 'bg-white/[0.90] text-black' : 'bg-white/[0.10] text-white/55'
                     }`}>
                       {letter}
                     </span>
-                    <MathText>{opt.slice(3)}</MathText>
+                    <MathText className="flex-1 min-w-0 break-words">{opt.slice(3)}</MathText>
                   </button>
                 );
               })}
             </div>
-            <div className="flex items-center justify-between pt-3 border-t border-white/[0.06]">
+            <div className="flex items-center justify-between pt-3 border-t border-white/[0.08]">
               <Button variant="ghost" size="sm" onClick={prevQuestion} disabled={currentQ === 0}>Previous</Button>
               {currentQ < total - 1 ? (
                 <Button variant="ghost" size="sm" onClick={nextQuestion}>Next <ArrowRight size={12} /></Button>

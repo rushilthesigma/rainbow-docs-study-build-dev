@@ -318,10 +318,10 @@ function FeatureTile({ icon: Icon, title, body, tone, className = '', big = fals
 // ===== Section 4: Numbers strip =====
 function NumbersStrip() {
   const STATS = [
-    { n: '8',    label: 'apps in one workspace' },
-    { n: '<5s',  label: 'to draft a full curriculum' },
+    { n: '8',   label: 'apps in one workspace' },
+    { n: '<5s', label: 'to draft a full curriculum' },
     { n: '500+', label: 'tossups in the Quiz Bowl pool' },
-    { n: '1M',   label: 'token context per chat' },
+    { prefix: 'Up to', n: '1M', label: 'context limit', highlight: true },
   ];
   return (
     <section data-section="numbers" className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative">
@@ -338,8 +338,28 @@ function NumbersStrip() {
         </p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {STATS.map((s) => (
-            <div key={s.label} className="rounded-lg p-5 ring-1 ring-white/[0.10] bg-white/[0.05] backdrop-blur-[20px] backdrop-saturate-150 text-center">
-              <div className="text-[34px] sm:text-[40px] font-bold tracking-tight text-white tabular-nums leading-none">
+            <div
+              key={s.label}
+              className={`group rounded-lg p-5 ring-1 bg-white/[0.05] backdrop-blur-[20px] backdrop-saturate-150 text-center transition-all duration-300 hover:-translate-y-0.5 hover:bg-white/[0.07] ${
+                s.highlight
+                  ? 'ring-blue-300/30 hover:ring-blue-300/50 shadow-[0_0_24px_rgba(99,102,241,0.15)]'
+                  : 'ring-white/[0.10] hover:ring-white/[0.18]'
+              }`}
+            >
+              {s.prefix && (
+                <div className="text-[10px] uppercase tracking-[0.2em] text-white/50 mb-1">
+                  {s.prefix}
+                </div>
+              )}
+              <div
+                className={`font-bold tracking-tight tabular-nums leading-none ${
+                  s.prefix ? 'text-[30px] sm:text-[36px]' : 'text-[34px] sm:text-[40px]'
+                } ${
+                  s.highlight
+                    ? 'bg-gradient-to-br from-blue-200 to-indigo-300 bg-clip-text text-transparent'
+                    : 'text-white'
+                }`}
+              >
                 {s.n}
               </div>
               <p className="text-[11px] uppercase tracking-[0.18em] text-white/55 mt-2">{s.label}</p>

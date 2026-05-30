@@ -1,19 +1,38 @@
-import { BookOpen, ListChecks, Check, Repeat, Trophy } from 'lucide-react';
+import { BookOpen, ListChecks, Trophy, Sparkles, Globe, Flame, ClipboardList, PenTool } from 'lucide-react';
+
+// Maps a block's `type` to the label + icon shown in the stage tracker
+// chip. Reading + quiz keep the original wording; the new variety
+// types surface with their own labels so the student knows what's
+// coming.
+const TYPE_LABELS = {
+  reading:     'Reading',
+  quiz:        'Quiz',
+  example:     'Worked Example',
+  recap:       'Recap',
+  application: 'In the Wild',
+  challenge:   'Challenge',
+  open:        'Open Answer',
+};
+const TYPE_ICONS = {
+  reading:     BookOpen,
+  quiz:        ListChecks,
+  example:     Sparkles,
+  recap:       ClipboardList,
+  application: Globe,
+  challenge:   Flame,
+  open:        PenTool,
+};
 
 export default function StageTracker({ blocks = [], activeIdx = 0, onJump }) {
   const total = blocks.length || 8;
   const completed = blocks.filter((b) => b?.completedAt).length;
 
   const active = blocks[activeIdx];
-  const isReading = active?.type === 'reading';
-  const isSrs = !!active?.srs;
   const isFinal = !!active?.isFinal;
-  const stageNum = Math.floor(activeIdx / 2) + 1;
+  const Icon = isFinal ? Trophy : (TYPE_ICONS[active?.type] || BookOpen);
   const stageName = isFinal
     ? 'Final Quiz'
-    : isReading
-      ? `Reading ${stageNum}${isSrs ? ' · SRS' : ''}`
-      : `Quiz ${stageNum}`;
+    : (TYPE_LABELS[active?.type] || 'Step');
 
   return (
     <div className="mb-8">
@@ -22,9 +41,7 @@ export default function StageTracker({ blocks = [], activeIdx = 0, onJump }) {
         {blocks.map((b, i) => {
           const done = !!b.completedAt;
           const isCurrent = i === activeIdx;
-          const title = b.title || (b.type === 'reading'
-            ? `Reading ${Math.floor(i / 2) + 1}`
-            : b.isFinal ? 'Final Quiz' : `Quiz ${Math.floor(i / 2) + 1}`);
+          const title = b.title || (b.isFinal ? 'Final Quiz' : (TYPE_LABELS[b.type] || `Step ${i + 1}`));
           return (
             <button
               key={b.id || i}
@@ -45,24 +62,18 @@ export default function StageTracker({ blocks = [], activeIdx = 0, onJump }) {
       {/* Stage label row */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 min-w-0">
-          {isFinal ? (
-            <Trophy size={12} className="text-blue-300 flex-shrink-0" />
-          ) : isReading ? (
-            isSrs ? <Repeat size={12} className="text-blue-300 flex-shrink-0" /> : <BookOpen size={12} className="text-blue-300 flex-shrink-0" />
-          ) : (
-            <ListChecks size={12} className="text-blue-300 flex-shrink-0" />
-          )}
+          <Icon size={12} className="text-blue-300 flex-shrink-0" />
           <span className="text-[12px] font-semibold text-white/75 flex-shrink-0">{stageName}</span>
           {(() => {
             // Strip the stage-name prefix from the block title if the
-            // server already prepended it (e.g. stage="Reading 1",
+            // server already prepended it (e.g. label="Reading",
             // title="Reading 1 — The Father of Modern Philosophy"
             // collapses to just "The Father of Modern Philosophy").
             const raw = (active?.title || '').trim();
             if (!raw) return null;
             const stripped = raw
               .replace(new RegExp(`^${stageName}\\s*[—\\-:·]\\s*`, 'i'), '')
-              .replace(/^(Reading|Quiz)\s+\d+\s*[—\-:·]\s*/i, '');
+              .replace(/^(Reading|Quiz|Example|Recap|Application|Challenge)\s+\d*\s*[—\-:·]\s*/i, '');
             const display = stripped || raw;
             if (display === stageName) return null;
             return (

@@ -1,106 +1,93 @@
-import { useState, useEffect } from 'react';
-import { ClipboardCheck, Award, AlertCircle, PenTool } from 'lucide-react';
-import { generateAssignment, submitAssignment } from '../../api/curriculum';
+import { useState } from 'react';
+import { ArrowRight, AlertCircle, PenTool, Award } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import LoadingSpinner from '../shared/LoadingSpinner';
 
-// Graded-mode assignment surface for a single lesson. Styled to match
-// the lesson's variety blocks (top hairline, colored chip, 68ch column,
-// rubric chips, inline feedback) so it doesn't feel like a separate
-// surface bolted on above the chat.
+// Open-answer block. The student types a free-form response and the
+// AI grades it inline against a small rubric — no separate Assignment
+// surface. Sits in the lesson flow like any other block.
 //
-// Three states:
-//   1. No assignment yet — auto-generate-on-open spinner.
-//   2. Assignment ready, no submission — prompt + rubric + textarea.
-//   3. Submission graded — score chip + per-rubric breakdown + feedback.
+// Block shape:
+//   { type: 'open', title, prompt, rubric: [{ label, criterion, weight }], minWords? }
 //
-// `onSubmitted(submission, courseGrade)` is fired after grading so the
-// parent page can refresh course-level state without a full reload.
-export default function AssignmentCard({ curriculumId, lessonId, initialAssignment, onSubmitted }) {
-  const [assignment, setAssignment] = useState(initialAssignment || null);
-  const [generating, setGenerating] = useState(false);
-  const [response, setResponse] = useState('');
+// After submission the server stamps `block.submission = { text, score,
+// perRubric, feedback, submittedAt }`. We surface that inline.
+export default function OpenAnswerBlock({ block, onComplete, gradeFn, hideContinue = false, continueLabel = 'Continue' }) {
+  const submission = block.submission;
+  const [text, setText] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState(null);
-
-  // Auto-generate on first open when missing — keeps the flow one-click.
-  useEffect(() => {
-    if (assignment || generating) return;
-    setGenerating(true);
-    generateAssignment(curriculumId, lessonId)
-      .then(d => setAssignment(d.assignment))
-      .catch(e => setError(e.message))
-      .finally(() => setGenerating(false));
-  }, [assignment, generating, curriculumId, lessonId]);
+  const [error, setError] = useState('');
+  const minWords = block.minWords || 40;
+  const rubric = Array.isArray(block.rubric) ? block.rubric : [];
 
   async function handleSubmit() {
-    setError(null);
-    if (response.trim().length < 20) {
-      setError('Write at least a couple sentences before submitting.');
+    setError('');
+    const trimmed = text.trim();
+    const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
+    if (wordCount < minWords) {
+      setError(`Write at least ${minWords} words before submitting.`);
+      return;
+    }
+    if (!gradeFn) {
+      setError('Grading is unavailable for this block.');
       return;
     }
     setSubmitting(true);
     try {
-      const result = await submitAssignment(curriculumId, lessonId, response.trim());
-      setAssignment(prev => prev ? { ...prev, submission: result.submission } : prev);
-      onSubmitted?.(result.submission, result.courseGrade);
-      setResponse('');
-    } catch (e) { setError(e.message); }
+      await gradeFn(block.id, trimmed);
+      setText('');
+    } catch (e) {
+      setError(e?.message || 'Failed to submit. Try again.');
+    }
     setSubmitting(false);
   }
 
-  if (generating && !assignment) {
-    return (
-      <div className="border-t border-sky-300/[0.18] pt-6">
-        <div className="mx-auto max-w-[68ch] flex items-center gap-3">
-          <LoadingSpinner size={16} />
-          <span className="text-[13px] text-white/55">Generating assignment…</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (!assignment) {
-    return (
-      <div className="border-t border-rose-300/[0.18] pt-6">
-        <div className="mx-auto max-w-[68ch] text-[13px] text-white/55">
-          Assignment unavailable. {error && <span className="text-rose-300">{error}</span>}
-        </div>
-      </div>
-    );
-  }
-
-  const submission = assignment.submission;
-  const rubric = Array.isArray(assignment.rubric) ? assignment.rubric : [];
-  const wordCount = response.trim().split(/\s+/).filter(Boolean).length;
+  const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
 
   return (
     <div className="cl-anim-in">
-      <div className="border-t border-sky-300/[0.18] pt-7 lg:pt-9 mb-4">
+      <div className="border-t border-sky-300/[0.18] pt-7 lg:pt-9 mb-6">
         <div className="mx-auto max-w-[68ch]">
-          {/* Type chip + grade chip */}
-          <div className="flex items-center gap-2 mb-3 flex-wrap">
+          {/* Type chip */}
+          <div className="flex items-center gap-2 mb-3">
             <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-sky-200/85 bg-sky-400/[0.10] border border-sky-300/[0.22] rounded-full px-2.5 py-0.5">
-              <ClipboardCheck size={10} strokeWidth={2.4} /> Graded Assignment
+              <PenTool size={10} strokeWidth={2.4} /> Open Answer
             </span>
             {submission && (
               <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide ${gradeStyle(submission.score)}`}>
-                <Award size={10} /> {submission.letter} · {submission.score}/100
+                <Award size={10} /> {submission.letter || letterFor(submission.score)} · {submission.score}/100
               </span>
             )}
           </div>
 
-          {/* Prompt */}
-          <p className="text-[15.5px] text-white/82 leading-[1.75] whitespace-pre-wrap">
-            {assignment.prompt}
-          </p>
+          {block.title && (
+            <h2 className="text-[22px] font-semibold tracking-[-0.01em] text-white mb-5">
+              {block.title}
+            </h2>
+          )}
 
-          {/* Rubric */}
+          {/* Prompt */}
+          <article className="prose prose-invert max-w-none
+            prose-p:text-white/82 prose-p:leading-[1.75] prose-p:text-[15.5px] prose-p:my-4
+            prose-strong:text-white prose-strong:font-semibold
+            prose-code:bg-white/[0.07] prose-code:text-white/85 prose-code:rounded prose-code:px-1.5 prose-code:py-0.5 prose-code:text-[13px] prose-code:before:content-none prose-code:after:content-none
+            prose-li:text-white/82 prose-li:text-[15.5px] prose-li:leading-[1.7]">
+            <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+              {block.prompt || ''}
+            </ReactMarkdown>
+          </article>
+
+          {/* Rubric — what the grader will look for */}
           {rubric.length > 0 && (
             <div className="mt-5 rounded-xl border border-white/[0.07] bg-white/[0.02] px-4 py-3.5">
               <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/45 mb-2">Rubric</p>
               <ul className="space-y-1.5">
                 {rubric.map((r, i) => {
-                  const ps = submission?.perRubric?.find(p => p.label.toLowerCase() === r.label.toLowerCase());
+                  const ps = submission?.perRubric?.find(p => String(p.label).toLowerCase() === String(r.label).toLowerCase());
                   return (
                     <li key={i} className="flex items-start gap-2.5 text-[12.5px]">
                       <span className="grid place-items-center w-4 h-4 mt-[2px] rounded text-[9px] font-bold bg-sky-400/[0.18] text-sky-200/85 tabular-nums flex-shrink-0">
@@ -109,14 +96,11 @@ export default function AssignmentCard({ curriculumId, lessonId, initialAssignme
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
                           <span className="font-semibold text-white/85">{r.label}</span>
-                          <div className="flex items-center gap-1.5 flex-shrink-0">
-                            <span className="text-[10px] text-white/35">weight {r.weight}</span>
-                            {ps && (
-                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold tabular-nums ${gradeStyle(ps.score)}`}>
-                                {ps.score}
-                              </span>
-                            )}
-                          </div>
+                          {ps && (
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold tabular-nums ${gradeStyle(ps.score)}`}>
+                              {ps.score}
+                            </span>
+                          )}
                         </div>
                         <p className="text-white/55 mt-0.5 leading-snug">{r.criterion}</p>
                         {ps?.note && (
@@ -130,7 +114,7 @@ export default function AssignmentCard({ curriculumId, lessonId, initialAssignme
             </div>
           )}
 
-          {/* Feedback (post-submission) */}
+          {/* Submission state — graded */}
           {submission ? (
             <div className="mt-5 rounded-xl border border-emerald-400/[0.22] bg-emerald-500/[0.05] px-4 py-3.5">
               <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-emerald-300/80 mb-1.5">Feedback</p>
@@ -149,14 +133,16 @@ export default function AssignmentCard({ curriculumId, lessonId, initialAssignme
             <div className="mt-6">
               <label className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/45 mb-2 block">Your response</label>
               <textarea
-                value={response}
-                onChange={e => setResponse(e.target.value)}
-                placeholder="Write 150–400 words showing what you learned…"
+                value={text}
+                onChange={e => setText(e.target.value)}
+                placeholder="Write a few thoughtful paragraphs…"
                 rows={8}
                 className="w-full rounded-xl border border-white/[0.09] bg-white/[0.03] px-4 py-3 text-[14px] text-white/90 placeholder-white/30 focus:outline-none focus:border-sky-400/40 focus:ring-2 focus:ring-sky-400/15 resize-y leading-relaxed"
               />
               <div className="flex items-center justify-between mt-2">
-                <span className="text-[11px] text-white/40 tabular-nums">{wordCount} words</span>
+                <span className={`text-[11px] tabular-nums ${wordCount >= minWords ? 'text-emerald-300/70' : 'text-white/35'}`}>
+                  {wordCount} / {minWords} words
+                </span>
                 {error && (
                   <span className="inline-flex items-center gap-1.5 text-[12px] text-rose-300/90">
                     <AlertCircle size={12} /> {error}
@@ -166,7 +152,7 @@ export default function AssignmentCard({ curriculumId, lessonId, initialAssignme
               <div className="flex justify-end mt-4">
                 <button
                   onClick={handleSubmit}
-                  disabled={submitting || wordCount < 20}
+                  disabled={submitting || wordCount < minWords}
                   className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-[13.5px] text-white bg-gradient-to-b from-sky-500 to-sky-600 hover:from-sky-400 hover:to-sky-500 border border-sky-400/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_6px_18px_rgba(14,165,233,0.40)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {submitting ? <LoadingSpinner size={13} /> : <PenTool size={13} strokeWidth={2.4} />}
@@ -177,6 +163,17 @@ export default function AssignmentCard({ curriculumId, lessonId, initialAssignme
           )}
         </div>
       </div>
+
+      {!hideContinue && submission && (
+        <div className="flex justify-end border-t border-white/[0.05] pt-5">
+          <button
+            onClick={onComplete}
+            className="inline-flex items-center gap-2.5 px-6 py-3 rounded-xl font-semibold text-[14px] text-white bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_6px_18px_rgba(59,130,246,0.40)] transition-all"
+          >
+            {continueLabel} <ArrowRight size={15} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -187,4 +184,18 @@ function gradeStyle(score) {
   if (score >= 80) return 'bg-blue-500/[0.18] border border-blue-400/[0.30] text-blue-200';
   if (score >= 70) return 'bg-amber-500/[0.18] border border-amber-400/[0.30] text-amber-200';
   return 'bg-rose-500/[0.18] border border-rose-400/[0.30] text-rose-200';
+}
+
+function letterFor(score) {
+  if (score == null) return '—';
+  if (score >= 93) return 'A';
+  if (score >= 90) return 'A-';
+  if (score >= 87) return 'B+';
+  if (score >= 83) return 'B';
+  if (score >= 80) return 'B-';
+  if (score >= 77) return 'C+';
+  if (score >= 73) return 'C';
+  if (score >= 70) return 'C-';
+  if (score >= 60) return 'D';
+  return 'F';
 }

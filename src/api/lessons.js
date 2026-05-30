@@ -20,6 +20,12 @@ export async function gradeLessonBlock(lessonId, blockId, responses) {
     body: JSON.stringify({ responses }),
   });
 }
+export async function gradeOpenLessonBlock(lessonId, blockId, text) {
+  return apiFetch(`/api/lessons/${lessonId}/blocks/${blockId}/grade-open`, {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  });
+}
 export async function completeLessonBlock(lessonId, blockId) {
   return apiFetch(`/api/lessons/${lessonId}/blocks/${blockId}/complete`, { method: 'POST' });
 }

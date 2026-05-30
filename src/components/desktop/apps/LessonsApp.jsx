@@ -4,7 +4,7 @@ import ProgressBar from '../../shared/ProgressBar';
 import {
   listLessons, createLesson, deleteLesson,
   generateLessonBlocks, generateLessonFinalQuiz,
-  gradeLessonBlock, completeLessonBlock,
+  gradeLessonBlock, gradeOpenLessonBlock, completeLessonBlock,
 } from '../../../api/lessons';
 import { consumePendingLesson } from '../../../utils/pendingLesson';
 import useBrowserBack from '../../../hooks/useBrowserBack';
@@ -101,6 +101,7 @@ export default function LessonsApp() {
       generateBlocks: () => generateLessonBlocks(activeLesson.id),
       generateFinalQuiz: () => generateLessonFinalQuiz(activeLesson.id),
       gradeBlock: (bid, resp) => gradeLessonBlock(activeLesson.id, bid, resp),
+      gradeOpenBlock: (bid, text) => gradeOpenLessonBlock(activeLesson.id, bid, text),
       completeBlock: (bid) => completeLessonBlock(activeLesson.id, bid),
     };
     return (

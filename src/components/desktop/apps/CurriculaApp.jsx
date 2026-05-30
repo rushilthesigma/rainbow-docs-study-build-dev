@@ -213,7 +213,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
       // Fold the Q&A from the refine step into settings so the prompt can
       // anchor the curriculum to the student's actual ask.
       const refinements = refineQuestions
-        .map(q => ({ question: q.question, answer: refineAnswers[q.id] }))
+        .map(q => ({ question: q.question, answer: typeof refineAnswers[q.id] === 'string' ? refineAnswers[q.id].trim() : refineAnswers[q.id] }))
         .filter(r => r.answer);
       const augmented = { ...settings, ...(refinements.length ? { refinements } : {}) };
       const data = await generateCurriculum(augmented, cleanSources);
@@ -611,37 +611,52 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {refineQuestions.map((q, qi) => (
-                    <div key={q.id} className="rounded-xl border border-blue-400/[0.12] bg-blue-500/[0.04] p-3.5">
-                      <p className="text-[13px] text-white/85 mb-2.5 flex items-start gap-2">
-                        <span className="flex-shrink-0 w-5 h-5 rounded-md bg-blue-500/20 border border-blue-400/35 text-[10px] font-bold text-blue-200 grid place-items-center mt-0.5">
-                          {qi + 1}
-                        </span>
-                        <span className="flex-1">{q.question}</span>
-                      </p>
-                      <div className="flex flex-wrap gap-1.5 pl-7">
-                        {q.options.map(opt => {
-                          const active = refineAnswers[q.id] === opt;
-                          return (
-                            <button
-                              key={opt}
-                              onClick={() => setRefineAnswers(p => ({ ...p, [q.id]: opt }))}
-                              className={`px-2.5 py-1 rounded-md text-[11px] border transition-colors ${
-                                active
-                                  ? 'bg-gradient-to-b from-blue-500 to-blue-600 text-white border-blue-400/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_2px_8px_rgba(59,130,246,0.35)]'
-                                  : 'bg-blue-500/[0.04] text-blue-100/65 border-blue-400/[0.16] hover:text-white hover:border-blue-400/[0.40] hover:bg-blue-500/[0.10]'
-                              }`}
-                            >
-                              {opt}
-                            </button>
-                          );
-                        })}
+                  {refineQuestions.map((q, qi) => {
+                    const isOpen = q.type === 'open';
+                    return (
+                      <div key={q.id} className="rounded-xl border border-blue-400/[0.12] bg-blue-500/[0.04] p-3.5">
+                        <p className="text-[13px] text-white/85 mb-2.5 flex items-start gap-2">
+                          <span className="flex-shrink-0 w-5 h-5 rounded-md bg-blue-500/20 border border-blue-400/35 text-[10px] font-bold text-blue-200 grid place-items-center mt-0.5">
+                            {qi + 1}
+                          </span>
+                          <span className="flex-1">{q.question}</span>
+                        </p>
+                        {isOpen ? (
+                          <div className="pl-7">
+                            <textarea
+                              value={refineAnswers[q.id] || ''}
+                              onChange={(e) => setRefineAnswers(p => ({ ...p, [q.id]: e.target.value }))}
+                              placeholder={q.placeholder || 'Type your answer…'}
+                              rows={2}
+                              className="w-full px-2.5 py-1.5 rounded-md bg-blue-500/[0.04] text-[12px] text-white/90 border border-blue-400/[0.16] placeholder:text-blue-200/35 hover:border-blue-400/[0.40] focus:border-blue-400/60 focus:outline-none focus:bg-blue-500/[0.08] resize-none transition-colors"
+                            />
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap gap-1.5 pl-7">
+                            {q.options.map(opt => {
+                              const active = refineAnswers[q.id] === opt;
+                              return (
+                                <button
+                                  key={opt}
+                                  onClick={() => setRefineAnswers(p => ({ ...p, [q.id]: opt }))}
+                                  className={`px-2.5 py-1 rounded-md text-[11px] border transition-colors ${
+                                    active
+                                      ? 'bg-gradient-to-b from-blue-500 to-blue-600 text-white border-blue-400/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_2px_8px_rgba(59,130,246,0.35)]'
+                                      : 'bg-blue-500/[0.04] text-blue-100/65 border-blue-400/[0.16] hover:text-white hover:border-blue-400/[0.40] hover:bg-blue-500/[0.10]'
+                                  }`}
+                                >
+                                  {opt}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   <div className="flex items-center justify-between pt-2">
                     <p className="text-[10px] text-blue-200/45">
-                      {Object.keys(refineAnswers).length}/{refineQuestions.length} answered — unanswered questions are skipped.
+                      {Object.values(refineAnswers).filter(a => a && String(a).trim()).length}/{refineQuestions.length} answered — unanswered questions are skipped.
                     </p>
                     <div className="flex items-center gap-2">
                       <button

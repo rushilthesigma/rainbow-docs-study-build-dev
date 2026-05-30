@@ -3,6 +3,11 @@ import { ArrowLeft, Trophy, Lightbulb } from 'lucide-react';
 import StageTracker from './StageTracker';
 import ReadingBlock from './ReadingBlock';
 import QuizBlock from './QuizBlock';
+import ExampleBlock from './ExampleBlock';
+import RecapBlock from './RecapBlock';
+import ApplicationBlock from './ApplicationBlock';
+import ChallengeBlock from './ChallengeBlock';
+import OpenAnswerBlock from './OpenAnswerBlock';
 import ProgressBar from '../shared/ProgressBar';
 import { SkeletonProse } from '../shared/Skeleton';
 import { useWindowManagerOptional } from '../../context/WindowManagerContext';
@@ -11,6 +16,7 @@ import {
   generateFinalQuiz as curriculumGenerateFinalQuiz,
   completeLessonBlock as curriculumCompleteBlock,
   gradeQuizBlock as curriculumGradeBlock,
+  gradeOpenBlock as curriculumGradeOpenBlock,
 } from '../../api/curriculum';
 
 // Block-based lesson runner. Walks the user through 8 stages:
@@ -28,6 +34,7 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
       generateBlocks: () => curriculumGenerateBlocks(curriculumId, lesson.id),
       generateFinalQuiz: () => curriculumGenerateFinalQuiz(curriculumId, lesson.id),
       gradeBlock: (bid, resp) => curriculumGradeBlock(curriculumId, lesson.id, bid, resp),
+      gradeOpenBlock: (bid, text) => curriculumGradeOpenBlock(curriculumId, lesson.id, bid, text),
       completeBlock: (bid) => curriculumCompleteBlock(curriculumId, lesson.id, bid),
     };
   }, [apiProp, curriculumId, lesson.id]);
@@ -114,12 +121,43 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
   async function handleReadingComplete() {
     const block = blocks[activeIdx];
     if (!block) return;
-    if (block.completedAt) return advance();
+    if (block.completedAt) {
+      maybeKickFinalQuiz(activeIdx);
+      return advance();
+    }
     try {
       const res = await api.completeBlock(block.id);
       setBlocks(prev => prev.map((b, i) => i === activeIdx ? { ...b, completedAt: res.block.completedAt } : b));
+      maybeKickFinalQuiz(activeIdx);
       advance();
     } catch (e) { setErr(e.message); }
+  }
+
+  // The last pre-generated slot is always a synthesis reading; the
+  // final quiz is appended lazily. Kick it off when the student is
+  // within the last two pre-gen blocks so it's loaded by the time
+  // they reach it. Idempotent on the server, so safe to call more
+  // than once.
+  function maybeKickFinalQuiz(idx) {
+    const len = blocks.length;
+    // If the final quiz is already appended, skip.
+    if (len >= 1 && blocks[len - 1]?.isFinal) return;
+    // Need to be in the last 2 pre-gen blocks.
+    if (idx < len - 2) return;
+    api.generateFinalQuiz()
+      .then(({ block: finalBlock }) => {
+        setBlocks(prev => (prev[prev.length - 1]?.isFinal ? prev : [...prev, finalBlock]));
+      })
+      .catch(() => { /* idempotent on retry; ignored */ });
+  }
+
+  // Open-answer grader. Block content updates in place with the
+  // server-returned submission so the inline feedback renders.
+  async function handleOpenSubmit(bid, text) {
+    if (!api.gradeOpenBlock) throw new Error('Open-answer grading not available');
+    const { submission } = await api.gradeOpenBlock(bid, text);
+    setBlocks(prev => prev.map(b => b.id === bid ? { ...b, submission, score: submission.score, completedAt: submission.submittedAt } : b));
+    return submission;
   }
 
   // Side-by-side variant: mark the reading complete without advancing
@@ -141,16 +179,10 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
     ));
     api.completeBlock(blocks[idx].id).catch(() => {});
 
-    // After Q3 (block index 5) of a 7-block lesson, the server needs to
-    // mint the final quiz. Same trigger applies in side-by-side mode.
-    if (idx === 5 && blocks.length === 7) {
-      try {
-        const { block: finalBlock } = await api.generateFinalQuiz();
-        setBlocks(prev => [...prev, finalBlock]);
-      } catch (e) {
-        setErr('Failed to build final quiz: ' + (e.message || ''));
-      }
-    }
+    // Kick the final-quiz generation as soon as the student is deep
+    // enough into the lesson. The endpoint is idempotent — calling it
+    // more than once just returns the cached block.
+    maybeKickFinalQuiz(idx);
 
     // In side-by-side mode we want to land on the NEXT reading (so the
     // next pair shows up). Otherwise — single-block mode — fall through
@@ -269,8 +301,13 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
                 <ArrowLeft size={14} /> {backLabel}
               </button>
             </div>
-          ) : sideBySide ? (
+          ) : sideBySide && (active?.type === 'reading' || active?.type === 'quiz') && blocks[activeIdx + 1]?.type === 'quiz' ? (
             // ── Side-by-side layout (maximized window / fullscreen) ──
+            // Only used when the active block is part of a reading↔quiz
+            // pair. Standalone block types (example/recap/application/
+            // challenge) fall through to the single-column renderer
+            // below — pairing them with the preceding reading would
+            // show stale content.
             (() => {
               const { leftIdx, rightIdx, left, right } = getPair();
               const hasRight = !!right && right.type === 'quiz';
@@ -337,6 +374,21 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
               block={active}
               onComplete={handleQuizSubmit}
               gradeFn={(blockId, responses) => api.gradeBlock(blockId, responses)}
+            />
+          ) : active?.type === 'example' ? (
+            <ExampleBlock key={active.id} block={active} onComplete={handleReadingComplete} />
+          ) : active?.type === 'recap' ? (
+            <RecapBlock key={active.id} block={active} onComplete={handleReadingComplete} />
+          ) : active?.type === 'application' ? (
+            <ApplicationBlock key={active.id} block={active} onComplete={handleReadingComplete} />
+          ) : active?.type === 'challenge' ? (
+            <ChallengeBlock key={active.id} block={active} onComplete={handleReadingComplete} />
+          ) : active?.type === 'open' ? (
+            <OpenAnswerBlock
+              key={active.id}
+              block={active}
+              gradeFn={handleOpenSubmit}
+              onComplete={handleReadingComplete}
             />
           ) : null}
         </>

@@ -118,6 +118,17 @@ export async function gradeQuizBlock(curriculumId, lessonId, blockId, responses)
   });
 }
 
+// Submit an open-answer block's text response for AI rubric grading.
+// Server stamps `block.submission = { text, score, perRubric, feedback,
+// letter, submittedAt }` and returns it back so the client can render
+// inline feedback immediately.
+export async function gradeOpenBlock(curriculumId, lessonId, blockId, text) {
+  return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/blocks/${blockId}/grade-open`, {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  });
+}
+
 export async function completeLessonBlock(curriculumId, lessonId, blockId) {
   return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/blocks/${blockId}/complete`, {
     method: 'POST',
