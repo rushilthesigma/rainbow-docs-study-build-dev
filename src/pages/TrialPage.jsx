@@ -49,6 +49,18 @@ const DIFFICULTIES = [
   { id: 'hard',   label: 'Hard',   desc: 'College / nationals' },
 ];
 
+// ── Scoring formats ──────────────────────────────────────────────────────
+// Each format defines how tossup points are awarded. `powerThreshold` is
+// the buzz ratio (revealed/total) below which a correct buzz scores
+// `powerPts` instead of `getPts`. `negPts` applies on incorrect buzzes.
+// `target` is the points-to-win for 1v1 mode (null = use mode default 10).
+const SCORING_FORMATS = [
+  { id: 'standard',    label: 'Standard',    desc: 'Continuous · earlier = more',  powerThreshold: null, powerPts: null, getPts: 10, negPts: -5, target: null },
+  { id: 'iac-prelim',  label: 'IAC Prelim',  desc: 'Power 15 · Get 10 · Neg −5',   powerThreshold: 0.5,  powerPts: 15,   getPts: 10, negPts: -5, target: 50  },
+  { id: 'iac-playoff', label: 'IAC Playoff', desc: 'Power 15 (early) · −5 neg',    powerThreshold: 0.4,  powerPts: 15,   getPts: 10, negPts: -5, target: 60  },
+  { id: 'jv',          label: 'JV',          desc: 'Get 10 · No power · No neg',   powerThreshold: null, powerPts: null, getPts: 10, negPts: 0,  target: 40  },
+];
+
 // ── Color maps ────────────────────────────────────────────────────────────
 const COLOR_BTN = {
   blue:    'border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/18 hover:border-blue-500/50',
@@ -101,6 +113,7 @@ export default function TrialPage() {
   const [mode,           setMode]          = useState(MODES[0]);
   const [topic,          setTopic]         = useState('World History');
   const [difficulty,     setDifficulty]    = useState('medium');
+  const [scoringFormat,  setScoringFormat] = useState(SCORING_FORMATS[0]);
   const [source,         setSource]        = useState('qbreader'); // default: real QB questions
   const [selectedBot,    setSelectedBot]   = useState(BOT_ROSTER[2]); // Player 4 for 1v1
   const [practiceBotIds, setPracticeBotIds]= useState(['biscuit', 'alex', 'sam']);
@@ -232,6 +245,7 @@ export default function TrialPage() {
           matchMode={matchMode}
           lobbyMode={lobbyMode}
           botNames={botCustomNames}
+          scoringFormat={scoringFormat}
           onComplete={handleSessionComplete}
         />
       </div>
@@ -510,6 +524,29 @@ export default function TrialPage() {
                   <div className="text-xs text-white/35 mt-0.5">{d.desc}</div>
                 </button>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Scoring format ── */}
+        {!hideTopicDiff && (
+          <div>
+            <p className="text-xs text-white/35 uppercase tracking-widest mb-3 font-medium">Scoring Format</p>
+            <div className="grid grid-cols-2 gap-3">
+              {SCORING_FORMATS.map(f => {
+                const sel = scoringFormat.id === f.id;
+                return (
+                  <button key={f.id} onClick={() => setScoringFormat(f)}
+                    className={`rounded-xl border p-3 text-left transition-all focus:outline-none ${
+                      sel
+                        ? 'bg-amber-500/12 border-amber-500/40 ring-1 ring-amber-500/25'
+                        : 'bg-white/[0.02] border-white/[0.06] hover:border-white/[0.13]'
+                    }`}>
+                    <div className={`text-sm font-semibold ${sel ? 'text-amber-200' : 'text-white'}`}>{f.label}</div>
+                    <div className="text-xs text-white/35 mt-0.5">{f.desc}</div>
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}

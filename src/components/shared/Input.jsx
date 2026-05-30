@@ -7,7 +7,7 @@ import { useId } from 'react';
 
 const baseField =
   'w-full px-3 py-2 rounded-xl border bg-white/[0.04] text-white/85 placeholder-white/25 focus:outline-none focus:ring-2 transition-colors text-sm';
-const fieldOk = 'border-white/[0.07] focus:ring-white/20 focus:border-white/[0.14]';
+const fieldOk = 'border-white/[0.08] focus:ring-blue-400/40 focus:border-blue-400/55 focus:bg-blue-500/[0.05]';
 const fieldErr = 'border-rose-400/40 focus:ring-rose-400/40 focus:border-rose-400/60';
 
 export default function Input({ label, error, id, className = '', ...props }) {
@@ -17,7 +17,7 @@ export default function Input({ label, error, id, className = '', ...props }) {
   return (
     <div className="flex flex-col gap-1.5">
       {label && (
-        <label htmlFor={inputId} className="text-sm font-medium text-white/45">
+        <label htmlFor={inputId} className="text-sm font-medium text-blue-200/55">
           {label}
         </label>
       )}
@@ -44,7 +44,7 @@ export function Textarea({ label, error, id, className = '', ...props }) {
   return (
     <div className="flex flex-col gap-1.5">
       {label && (
-        <label htmlFor={inputId} className="text-sm font-medium text-white/45">
+        <label htmlFor={inputId} className="text-sm font-medium text-blue-200/55">
           {label}
         </label>
       )}

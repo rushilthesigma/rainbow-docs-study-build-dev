@@ -589,66 +589,75 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
         <h2 className="text-lg font-bold text-white mb-4">New curriculum</h2>
         {generating && genPhase === 'questions' ? (
           <div className="py-6 px-2 max-w-xl mx-auto w-full">
-            <div className="flex items-center gap-2 mb-1">
-              <Wand2 size={14} className="text-white/65" />
-              <h3 className="text-sm font-semibold text-white">A few quick questions</h3>
-            </div>
-            <p className="text-[12px] text-white/45 mb-4">
-              So the curriculum for <span className="text-white/70">{settings.topic}</span> matches what you actually want — pick the option that fits, or skip the ones you don't have an opinion on.
-            </p>
-            {genError && (
-              <div className="px-3 py-2 mb-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-300">
-                {genError}
+            <div className="rounded-2xl border border-blue-400/[0.20] bg-gradient-to-b from-blue-500/[0.07] to-blue-500/[0.02] backdrop-blur-sm p-5 shadow-[0_0_36px_-10px_rgba(59,130,246,0.30)]">
+              <div className="flex items-center gap-2.5 mb-1">
+                <div className="w-7 h-7 rounded-lg bg-blue-500/20 border border-blue-400/35 grid place-items-center shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]">
+                  <Wand2 size={13} className="text-blue-200" />
+                </div>
+                <h3 className="text-sm font-semibold text-white">A few quick questions</h3>
               </div>
-            )}
-            {refineQuestions.length === 0 ? (
-              <div className="flex items-center gap-2 text-[12px] text-white/55 py-4">
-                <Loader2 size={14} className="animate-spin" />
-                Thinking of good questions to ask…
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {refineQuestions.map(q => (
-                  <div key={q.id}>
-                    <p className="text-[13px] text-white/85 mb-2">{q.question}</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {q.options.map(opt => {
-                        const active = refineAnswers[q.id] === opt;
-                        return (
-                          <button
-                            key={opt}
-                            onClick={() => setRefineAnswers(p => ({ ...p, [q.id]: opt }))}
-                            className={`px-2.5 py-1 rounded-md text-[11px] border transition-colors ${
-                              active
-                                ? 'bg-white/[0.14] text-white border-white/[0.22]'
-                                : 'bg-white/[0.03] text-white/55 border-white/[0.08] hover:text-white/85 hover:border-white/[0.16]'
-                            }`}
-                          >
-                            {opt}
-                          </button>
-                        );
-                      })}
+              <p className="text-[12px] text-blue-100/55 mb-4 pl-9">
+                So the curriculum for <span className="text-blue-100/85 font-medium">{settings.topic}</span> matches what you actually want — pick the option that fits, or skip the ones you don't have an opinion on.
+              </p>
+              {genError && (
+                <div className="px-3 py-2 mb-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-300">
+                  {genError}
+                </div>
+              )}
+              {refineQuestions.length === 0 ? (
+                <div className="flex items-center gap-2 text-[12px] text-blue-200/65 py-4">
+                  <Loader2 size={14} className="animate-spin text-blue-300" />
+                  Thinking of good questions to ask…
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {refineQuestions.map((q, qi) => (
+                    <div key={q.id} className="rounded-xl border border-blue-400/[0.12] bg-blue-500/[0.04] p-3.5">
+                      <p className="text-[13px] text-white/85 mb-2.5 flex items-start gap-2">
+                        <span className="flex-shrink-0 w-5 h-5 rounded-md bg-blue-500/20 border border-blue-400/35 text-[10px] font-bold text-blue-200 grid place-items-center mt-0.5">
+                          {qi + 1}
+                        </span>
+                        <span className="flex-1">{q.question}</span>
+                      </p>
+                      <div className="flex flex-wrap gap-1.5 pl-7">
+                        {q.options.map(opt => {
+                          const active = refineAnswers[q.id] === opt;
+                          return (
+                            <button
+                              key={opt}
+                              onClick={() => setRefineAnswers(p => ({ ...p, [q.id]: opt }))}
+                              className={`px-2.5 py-1 rounded-md text-[11px] border transition-colors ${
+                                active
+                                  ? 'bg-gradient-to-b from-blue-500 to-blue-600 text-white border-blue-400/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_2px_8px_rgba(59,130,246,0.35)]'
+                                  : 'bg-blue-500/[0.04] text-blue-100/65 border-blue-400/[0.16] hover:text-white hover:border-blue-400/[0.40] hover:bg-blue-500/[0.10]'
+                              }`}
+                            >
+                              {opt}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between pt-2">
+                    <p className="text-[10px] text-blue-200/45">
+                      {Object.keys(refineAnswers).length}/{refineQuestions.length} answered — unanswered questions are skipped.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={cancelGenerate}
+                        className="px-3 py-1.5 rounded-lg text-[12px] text-blue-200/55 hover:text-blue-100 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <Button onClick={runBuild}>
+                        <Sparkles size={14} /> Build curriculum
+                      </Button>
                     </div>
                   </div>
-                ))}
-                <div className="flex items-center justify-between pt-2">
-                  <p className="text-[10px] text-white/35">
-                    {Object.keys(refineAnswers).length}/{refineQuestions.length} answered — unanswered questions are skipped.
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={cancelGenerate}
-                      className="px-3 py-1.5 rounded-lg text-[12px] text-white/55 hover:text-white/90 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <Button onClick={runBuild}>
-                      <Sparkles size={14} /> Build curriculum
-                    </Button>
-                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         ) : generating ? (
           <div className="py-10 px-2 max-w-xl mx-auto w-full">

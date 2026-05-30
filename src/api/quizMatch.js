@@ -15,6 +15,7 @@ export const answerMatch = (code, answer) => apiFetch(`/api/quizbowl/match/${cod
   body: JSON.stringify({ answer }),
 });
 export const nextMatchQuestion = (code) => apiFetch(`/api/quizbowl/match/${code}/next`, { method: 'POST' });
+export const endMatch = (code) => apiFetch(`/api/quizbowl/match/${code}/end`, { method: 'POST' });
 export const leaveMatch = (code) => apiFetch(`/api/quizbowl/match/${code}/leave`, { method: 'POST' });
 
 // Solo "Past QB questions" mode — pulls real tossups from QBReader by

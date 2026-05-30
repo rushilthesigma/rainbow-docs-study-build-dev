@@ -1,10 +1,18 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Zap, Users, Copy, Check, X, Trophy, Play, LogOut, ArrowLeft } from 'lucide-react';
+import { Zap, Users, Copy, Check, X, Trophy, Play, LogOut, ArrowLeft, Flag } from 'lucide-react';
 import ProgressBar, { InlineProgress } from '../../shared/ProgressBar';
 import {
   createMatch, joinMatch, startMatch, buzzMatch, answerMatch, nextMatchQuestion,
-  leaveMatch, streamMatch,
+  endMatch, leaveMatch, streamMatch,
 } from '../../../api/quizMatch';
+
+// Scoring formats available for multiplayer matches. Mirrors server defs.
+const QB_SCORING_FORMATS = [
+  { id: 'standard',    label: 'Standard',    desc: 'Continuous · 1 pt/correct curve' },
+  { id: 'iac-prelim',  label: 'IAC Prelim',  desc: '15 power · 10 get · −5 neg' },
+  { id: 'iac-playoff', label: 'IAC Playoff', desc: '15 power (early) · −5 neg' },
+  { id: 'jv',          label: 'JV',          desc: '10 get · no power · no neg' },
+];
 
 function useWordReveal(text, startedAt, speedMs, frozen, frozenAt) {
   const [, setTick] = useState(0);
@@ -59,6 +67,7 @@ export default function QuizBowlMatch({ user, onExit }) {
   const [difficulty, setDifficulty] = useState('Medium');
   const [questionCount, setQuestionCount] = useState(10);
   const [revealSpeedMs, setRevealSpeedMs] = useState(140);
+  const [scoringFormat, setScoringFormat] = useState('standard');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false);
@@ -110,12 +119,16 @@ export default function QuizBowlMatch({ user, onExit }) {
         setView('playing');
       },
       onBuzz: ({ userId, buzzAt }) => setBuzz({ userId, buzzAt }),
-      onWrongAnswer: ({ userId, answer: wrongAns, lockedOut: lock, questionStartedAt: newStart }) => {
+      onWrongAnswer: ({ userId, answer: wrongAns, lockedOut: lock, questionStartedAt: newStart, scores }) => {
         setBuzz(null);
         setAnswer('');
         setLockedOut(lock || []);
         if (newStart && question) setQuestion(q => q ? { ...q, startedAt: newStart } : q);
         setWrongFlash({ userId, answer: wrongAns });
+        // Apply neg points to scoreboard immediately so the negged player
+        // sees their −5 (or whatever the format awards) without waiting
+        // for the next question.
+        if (scores) setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: scores[p.userId] || 0 })) } : prev);
         setTimeout(() => setWrongFlash(null), 1800);
       },
       onAnswerResult: (data) => {
@@ -163,8 +176,13 @@ export default function QuizBowlMatch({ user, onExit }) {
 
   async function handleStart() {
     setError(null);
-    try { await startMatch(code, { category, difficulty, questionCount, revealSpeedMs }); }
+    try { await startMatch(code, { category, difficulty, questionCount, revealSpeedMs, scoringFormat }); }
     catch (e) { setError(e.message); }
+  }
+
+  async function handleEndMatch() {
+    if (!confirm('End the match now? Final scores will be locked in.')) return;
+    try { await endMatch(code); } catch (e) { setError(e.message); }
   }
 
   const handleBuzz = useCallback(async () => {
@@ -256,6 +274,8 @@ export default function QuizBowlMatch({ user, onExit }) {
   if (view === 'lobby') {
     const playerCount = match?.players?.length || 0;
     const waiting = playerCount < 2;
+    const maxPlayers = match?.maxPlayers || 8;
+    const lobbyFull = playerCount >= maxPlayers;
     function copyCode() {
       if (!code) return;
       try { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
@@ -273,11 +293,17 @@ export default function QuizBowlMatch({ user, onExit }) {
             {copied ? <Check size={18} className="text-blue-400" /> : <Copy size={16} className="text-blue-400/70" />}
           </button>
           <p className="text-[11px] text-blue-300/50 text-center mb-5">
-            {waiting ? 'Share with your opponent' : 'Opponent joined'}
+            {waiting
+              ? 'Share with up to ' + (maxPlayers - 1) + ' more players'
+              : lobbyFull
+                ? `Lobby full · ${playerCount}/${maxPlayers}`
+                : `${playerCount}/${maxPlayers} in — share to add more`}
           </p>
 
           <div className="bg-white/[0.07] dark:bg-white/[0.04] border border-blue-500/[0.12] rounded-xl p-3 mb-5">
-            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2">Players</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2">
+              Players <span className="text-blue-300/40">({playerCount}/{maxPlayers})</span>
+            </p>
             <div className="space-y-1.5">
               {(match?.players || []).map(p => (
                 <div key={p.userId} className="flex items-center gap-2">
@@ -292,14 +318,14 @@ export default function QuizBowlMatch({ user, onExit }) {
               {waiting && (
                 <div className="flex items-center gap-2">
                   <div className="w-6 h-6 rounded-full bg-white/10 dark:bg-white/[0.06] flex items-center justify-center text-[10px] font-bold text-gray-400">?</div>
-                  <span className="text-[12px] text-blue-300/50 italic">Waiting…</span>
+                  <span className="text-[12px] text-blue-300/50 italic">Waiting for at least one more…</span>
                   <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
                 </div>
               )}
             </div>
           </div>
 
-          {/* Settings — host only, both players present */}
+          {/* Settings — host only, at least 2 players present */}
           {!waiting && isHost && (
             <>
               <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2">Category</p>
@@ -311,6 +337,20 @@ export default function QuizBowlMatch({ user, onExit }) {
               <div className="mb-3">
                 <MatchSelector value={difficulty} onChange={setDifficulty}
                   options={['Easy','Medium','Hard','Tournament']} grid="grid-cols-4" />
+              </div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2">Scoring Format</p>
+              <div className="mb-3 grid grid-cols-2 gap-1.5">
+                {QB_SCORING_FORMATS.map(f => (
+                  <button key={f.id} onClick={() => setScoringFormat(f.id)}
+                    className={`px-2.5 py-1.5 rounded-md text-left transition-colors border ${
+                      scoringFormat === f.id
+                        ? 'bg-blue-500/20 text-blue-100 border-blue-500/50'
+                        : 'bg-blue-500/[0.06] border-blue-500/20 text-blue-300/75 hover:bg-blue-500/15 hover:text-blue-200'
+                    }`}>
+                    <div className="text-[11px] font-semibold leading-tight">{f.label}</div>
+                    <div className="text-[9px] opacity-70 leading-tight mt-0.5">{f.desc}</div>
+                  </button>
+                ))}
               </div>
               <div className="grid grid-cols-2 gap-2 mb-4">
                 <div className="rounded-xl border border-blue-500/20 bg-blue-500/[0.04] p-3">
@@ -344,7 +384,7 @@ export default function QuizBowlMatch({ user, onExit }) {
               className="w-full py-3 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none flex items-center justify-center gap-2 transition-all"
             >
               <Play size={14} />
-              {waiting ? 'Waiting for opponent…' : 'Start'}
+              {waiting ? 'Waiting for at least one more…' : `Start (${playerCount} players)`}
             </button>
           )}
 
@@ -383,7 +423,7 @@ export default function QuizBowlMatch({ user, onExit }) {
       match={match} question={question} buzz={buzz} answerResult={answerResult}
       answer={answer} setAnswer={setAnswer}
       onBuzz={handleBuzz} onSubmitAnswer={handleSubmitAnswer} onNext={handleNext}
-      onLeave={handleLeave}
+      onLeave={handleLeave} onEndMatch={handleEndMatch}
       iBuzzed={iBuzzed} isHost={isHost} myId={myId}
       lockedOut={lockedOut} wrongFlash={wrongFlash}
       autoAdvanceDeadline={autoAdvanceDeadline}
@@ -435,7 +475,7 @@ export default function QuizBowlMatch({ user, onExit }) {
 }
 
 // ===== PLAYING VIEW =====
-function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, onBuzz, onSubmitAnswer, onNext, onLeave, iBuzzed, isHost, myId, lockedOut = [], wrongFlash, autoAdvanceDeadline, revealSpeedMs }) {
+function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, onBuzz, onSubmitAnswer, onNext, onLeave, onEndMatch, iBuzzed, isHost, myId, lockedOut = [], wrongFlash, autoAdvanceDeadline, revealSpeedMs }) {
   const frozen = !!buzz || !!answerResult;
   const frozenAt = buzz?.buzzAt || answerResult?.buzzAt || null;
   const { revealed, wordIndex, totalWords } = useWordReveal(question?.text || '', question?.startedAt || 0, revealSpeedMs, frozen, frozenAt);
@@ -457,7 +497,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
         <span className="text-[12px] font-semibold text-white/50 tabular-nums">
           Q{(match.currentIdx || 0) + 1}/{match.totalQuestions}
         </span>
-        <div className="flex-1 flex items-center gap-2 justify-center">
+        <div className="flex-1 flex items-center gap-2 justify-center flex-wrap">
           {players.map(p => (
             <div key={p.userId} className={`flex items-center gap-1.5 px-2 py-1 rounded-xl text-[11px] border ${p.userId === myId ? 'bg-white/[0.06] border-white/[0.10] text-white/60' : 'bg-white/[0.03] border-white/[0.05] text-white/35'}`}>
               <span className="font-medium">{p.name}{p.userId === myId ? ' ·' : ''}</span>
@@ -465,6 +505,12 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
             </div>
           ))}
         </div>
+        {isHost && (
+          <button onClick={onEndMatch} title="End match early"
+            className="inline-flex items-center gap-1 text-[10px] font-semibold text-rose-400/70 hover:text-rose-300 px-2 py-1 rounded-md border border-rose-500/20 hover:border-rose-500/40 bg-rose-500/[0.05] transition-colors">
+            <Flag size={10} /> End
+          </button>
+        )}
         <button onClick={onLeave} className="text-white/20 hover:text-rose-400/60 transition-colors"><LogOut size={12} /></button>
       </div>
 

@@ -13,11 +13,12 @@ import GuidedTour from './GuidedTour';
 import ShortcutsHelp from './ShortcutsHelp';
 import DesktopWidgets from './DesktopWidgets';
 
-// Windows 11 is the only desktop shell. macOS / ChromeOS / Linux paths
-// were removed along with the OS-style picker. The HTML root gets a
-// hardcoded `os-windows` class so the Fluent-scoped index.css rules
-// apply uniformly. The component is still named MacOSContent for
-// historical churn-minimization; rename is a separate task.
+// macOS is the only desktop shell. Win11 / ChromeOS / Linux paths were
+// removed along with the OS-style picker. The HTML root gets a
+// hardcoded `os-macos` class — there are no macOS-specific index.css
+// rules at the moment, so `os-macos` is effectively the baseline (no
+// forced font swap, no squared corners, components keep their declared
+// Tailwind radii).
 function MacOSContent() {
   const { state } = useWindowManager();
   const { toggleSnapGrid } = useWidgets();
@@ -60,10 +61,10 @@ function MacOSContent() {
           <AppWindow appId={win.appId} meta={win.meta} />
         </Window>
       ))}
-      {/* Dock stays visible even when a window is maximized — Windows-
-          taskbar behavior. The menu bar still hides on maximize so the
-          window can claim the full top of the screen. */}
-      <Dock onSpotlight={toggleSpotlight} />
+      {/* Both the dock and the menu bar hide when a window is maximized
+          so fullscreened apps get the entire viewport — true edge-to-
+          edge fullscreen, no chrome peeking through at the bottom. */}
+      {!anyMaximized && <Dock onSpotlight={toggleSpotlight} />}
       <ContextMenu onSpotlight={toggleSpotlight} />
       <Spotlight open={spotlightOpen} onClose={() => setSpotlightOpen(false)} />
     </div>
@@ -78,7 +79,8 @@ const PATH_TO_APP = {
   '/settings':    { appId: 'settings',  title: 'Settings' },
   '/study':       { appId: 'study',     title: 'Study Mode' },
   '/notes':       { appId: 'notes',     title: 'Notes' },
-  '/notes/map':   { appId: 'notemap',   title: 'Note Map' },
+  // Map URL also opens the merged Notes app, just on the Maps view.
+  '/notes/map':   { appId: 'notes',     title: 'Notes', meta: { initialView: 'map' } },
 };
 
 function ShellContent() {
@@ -99,20 +101,21 @@ function ShellContent() {
       if (existing.isMinimized) restoreWindow(existing.id);
       else focusWindow(existing.id);
     } else {
-      openApp(match.appId, match.title, true);
+      openApp(match.appId, match.title, match.meta || true);
     }
     // Rewrite the URL without firing another effect cycle.
     navigate('/dashboard', { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
 
-  // Tag <html> with `os-windows` so the Fluent-scoped CSS rules in
-  // index.css kick in. The shell is Win11-only now — no more dynamic
-  // os-style switching, no legacy macOS/ChromeOS/Linux migration.
+  // Tag <html> with `os-macos`. There are no macOS-specific overrides in
+  // index.css right now — the class exists so future per-shell tweaks
+  // have a hook, and so any stale `os-windows` / `os-chromeos` / `os-linux`
+  // class left over from an earlier build gets cleared on mount.
   useEffect(() => {
     const root = document.documentElement;
     Array.from(root.classList).filter(c => c.startsWith('os-')).forEach(c => root.classList.remove(c));
-    root.classList.add('os-windows');
+    root.classList.add('os-macos');
   }, []);
 
   // Global keyboard shortcuts.

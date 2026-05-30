@@ -94,14 +94,14 @@ export default function NewCurriculumPage() {
         Back to Dashboard
       </button>
 
-      <div className="rounded-xl border border-white/[0.07] bg-white/[0.03] backdrop-blur-sm p-6">
+      <div className="rounded-xl border border-blue-400/[0.18] bg-gradient-to-b from-blue-500/[0.06] to-blue-500/[0.02] backdrop-blur-sm p-6 shadow-[0_0_40px_-12px_rgba(59,130,246,0.25)]">
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-lg bg-white/[0.06] border border-white/[0.09] flex items-center justify-center">
-            <Sparkles size={20} className="text-white/40" />
+          <div className="w-10 h-10 rounded-lg bg-blue-500/[0.16] border border-blue-400/[0.30] flex items-center justify-center shadow-[inset_0_1px_0_rgba(255,255,255,0.10),0_4px_16px_rgba(59,130,246,0.30)]">
+            <Sparkles size={20} className="text-blue-300" />
           </div>
           <div>
             <h1 className="text-[20px] font-bold text-white/90">New Curriculum</h1>
-            <p className="text-[13px] text-white/40">AI will generate a structured learning path</p>
+            <p className="text-[13px] text-blue-200/55">AI will generate a structured learning path</p>
           </div>
         </div>
 

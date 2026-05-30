@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { Search, Plus, Clock, Flame, X, Settings2, RotateCcw, Timer, Calendar as CalendarIcon, StickyNote, Quote, Calculator, ListChecks, Sparkles, Grip } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Plus, Clock, Flame, X, Settings2, RotateCcw, Timer, Calendar as CalendarIcon, StickyNote, Quote, Calculator, ListChecks, Sparkles } from 'lucide-react';
 import { useWidgets } from '../../context/WidgetContext';
 import APP_REGISTRY from './appRegistry';
 import { useWindowManager } from '../../context/WindowManagerContext';
@@ -8,34 +8,50 @@ import { checkAdmin } from '../../api/admin';
 import { Z } from '../../styles/tokens';
 
 
-// Windows 11 style taskbar.
+// macOS-style floating dock.
 //
-// Structure (matches the Win11 default layout):
-//   [ flex-1 spacer ] [ Search | pinned apps | sep | tray apps ] [ system tray + clock ]
+//   • Centered glass pill at the bottom, ~8px above the screen edge
+//   • Squircle (rounded-[13px]) app icons with a soft drop-shadow
+//   • Magnification: icons grow as the cursor approaches them, peaking
+//     ~1.45× at center. Mouseleave releases the scale instantly.
+//   • Running indicator: a small white pip (3px) below open apps, with
+//     reserved space so the row doesn't shift when something opens.
+//   • Tooltip with the app label floats above the hovered icon.
 //
-// The left spacer + system-tray-on-the-right combine to keep the pinned
-// icons centered as a group, exactly like Win11. The Search pill opens
-// Spotlight (same launcher gesture as the menu-bar magnifier).
-//
-// The bar itself is a full-width mica strip pinned flush to the bottom
-// edge — no floating pill, no margins. A thin top hairline + soft
-// upward shadow give it physical separation from the wallpaper.
-// Stays visible even when a window is maximized (Win11 taskbar behavior).
+// The search button + clock that the Win11 taskbar carried have moved
+// out — Spotlight has its own keyboard shortcut (⌘K) plus a magnifier
+// in the menu bar, and the clock lives in the menu bar too. The dock
+// only carries Launchpad → pinned apps → Settings → Widgets.
 
-// Icon hit-area sizes by dockSize preference. All three fit inside the
-// 56px taskbar with breathing room for the hover highlight.
-const DOCK_SIZES = { small: 38, medium: 44, large: 50 };
+// Icon base sizes by dockSize preference. Magnification scales these
+// up to MAGNIFY_MAX, so the actual pill height accommodates the peak.
+const DOCK_SIZES = { small: 40, medium: 50, large: 60 };
+const MAGNIFY_RADIUS = 120;
+const MAGNIFY_MAX = 1.45;
 
-function TaskbarIcon({ app, isOpen, isActive, onClick, size, iconStyle }) {
+function DockIcon({ app, mouseX, isOpen, isActive, onClick, size, iconStyle }) {
   const [tooltipVisible, setTooltipVisible] = useState(false);
+  const iconRef = useRef(null);
   const Icon = app.icon;
-  const innerSize = Math.max(20, Math.round(size * 0.62));
-  const iconSize  = Math.max(14, Math.round(innerSize * 0.6));
+
+  // Distance-based scale: peaks at 1× MAGNIFY_MAX when the cursor is at
+  // the icon's center, eases to 1 at MAGNIFY_RADIUS, clamps to 1 beyond.
+  let scale = 1;
+  if (mouseX !== null && iconRef.current) {
+    const r = iconRef.current.getBoundingClientRect();
+    const center = r.left + r.width / 2;
+    const distance = Math.abs(mouseX - center);
+    if (distance < MAGNIFY_RADIUS) {
+      const t = 1 - distance / MAGNIFY_RADIUS;
+      scale = 1 + (MAGNIFY_MAX - 1) * t;
+    }
+  }
+  const iconSize = Math.max(18, Math.round(size * 0.62));
 
   return (
-    <div className="relative">
+    <div className="relative flex flex-col items-center" ref={iconRef}>
       {tooltipVisible && (
-        <div className="absolute -top-9 left-1/2 -translate-x-1/2 px-2 py-1 rounded-sm bg-[#1f1f1f]/95 text-white text-[11px] font-normal whitespace-nowrap pointer-events-none z-10 shadow-[0_4px_12px_rgba(0,0,0,0.4)] border border-white/[0.08]">
+        <div className="absolute -top-9 left-1/2 -translate-x-1/2 px-2.5 py-1 rounded-md bg-[#1f1f1f]/95 text-white text-[11px] font-medium whitespace-nowrap pointer-events-none z-10 shadow-[0_4px_12px_rgba(0,0,0,0.4)] border border-white/[0.08]">
           {app.label}
         </div>
       )}
@@ -44,21 +60,26 @@ function TaskbarIcon({ app, isOpen, isActive, onClick, size, iconStyle }) {
         onMouseEnter={() => setTooltipVisible(true)}
         onMouseLeave={() => setTooltipVisible(false)}
         data-tour={app.id === 'curricula' ? 'curricula-icon' : undefined}
-        className="dock-icon relative flex items-center justify-center rounded-md transition-colors duration-100 ease-out hover:bg-white/[0.09] active:bg-white/[0.05] focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400/50"
-        style={{ width: size, height: size }}
+        className="dock-icon flex items-center justify-center rounded-[13px] shadow-[0_4px_10px_rgba(0,0,0,0.25)] transition-transform duration-100 ease-out focus:outline-none focus-visible:ring-1 focus-visible:ring-white/25"
+        style={{
+          width: size,
+          height: size,
+          transform: `scale(${scale})`,
+          transformOrigin: 'bottom center',
+        }}
       >
         <div
-          className={`flex items-center justify-center rounded-[6px] shadow-md ${
+          className={`w-full h-full rounded-[13px] flex items-center justify-center ${
             iconStyle === 'mono' ? 'bg-[#2a2a2e]' :
             iconStyle === 'glass' ? 'border border-white/20' :
             iconStyle === 'accent' ? '' :
             `bg-gradient-to-br ${app.gradient}`
           }`}
-          style={{
-            width: innerSize, height: innerSize,
-            ...(iconStyle === 'glass'  ? { background: 'rgba(255,255,255,0.08)', backdropFilter: 'blur(20px)' } : {}),
-            ...(iconStyle === 'accent' ? { backgroundColor: `${app.color}22`, border: `1px solid ${app.color}44` } : {}),
-          }}
+          style={
+            iconStyle === 'glass'  ? { background: 'rgba(255,255,255,0.08)', backdropFilter: 'blur(20px)' } :
+            iconStyle === 'accent' ? { backgroundColor: `${app.color}22`, border: `1px solid ${app.color}44` } :
+            undefined
+          }
         >
           <Icon
             size={iconSize}
@@ -66,48 +87,21 @@ function TaskbarIcon({ app, isOpen, isActive, onClick, size, iconStyle }) {
             style={iconStyle === 'accent' ? { color: app.color } : undefined}
           />
         </div>
-        {/* Windows-style open indicator: thin pill bar pinned to the bottom
-            edge. Inactive open app → short white bar. Active app → longer
-            blue accent bar with a faint glow. */}
+      </button>
+      {/* macOS running-app indicator. 3px white pip below the icon, with
+          reserved row height so the layout doesn't shift on open/close.
+          Active app gets a brighter, slightly larger pip. */}
+      <div className="h-1.5 mt-1 flex items-center justify-center">
         {isOpen && (
           <span
-            className={`absolute bottom-[2px] left-1/2 -translate-x-1/2 rounded-full transition-all duration-200 ${
+            className={`rounded-full transition-all ${
               isActive
-                ? 'w-[14px] h-[3px] bg-blue-400 shadow-[0_0_6px_rgba(96,165,250,0.65)]'
-                : 'w-[6px] h-[2px] bg-white/55'
+                ? 'w-[4px] h-[4px] bg-white shadow-[0_0_4px_rgba(255,255,255,0.7)]'
+                : 'w-[3px] h-[3px] bg-white/70'
             }`}
           />
         )}
-      </button>
-    </div>
-  );
-}
-
-// Search button — opens Spotlight. Lives at the head of the taskbar
-// cluster, same place Windows 11 puts its search pill. Slightly wider
-// than a normal icon button because it carries both a magnifying glass
-// and a hint label, mimicking the Win11 search affordance.
-function SearchButton({ size, onClick }) {
-  const [tooltipVisible, setTooltipVisible] = useState(false);
-  const iconPx = Math.max(14, Math.round(size * 0.42));
-  return (
-    <div className="relative">
-      {tooltipVisible && (
-        <div className="absolute -top-9 left-1/2 -translate-x-1/2 px-2 py-1 rounded-sm bg-[#1f1f1f]/95 text-white text-[11px] font-normal whitespace-nowrap pointer-events-none z-10 shadow-[0_4px_12px_rgba(0,0,0,0.4)] border border-white/[0.08]">
-          Search
-        </div>
-      )}
-      <button
-        onClick={onClick}
-        onMouseEnter={() => setTooltipVisible(true)}
-        onMouseLeave={() => setTooltipVisible(false)}
-        className="dock-icon relative flex items-center gap-1.5 px-2.5 rounded-md transition-colors duration-100 ease-out bg-white/[0.04] hover:bg-white/[0.10] active:bg-white/[0.06] border border-white/[0.06] hover:border-white/[0.12] focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400/50 text-white/85"
-        style={{ height: size }}
-        aria-label="Search"
-      >
-        <Search size={iconPx} strokeWidth={2.1} />
-        <span className="text-[11.5px] font-normal hidden sm:inline">Search</span>
-      </button>
+      </div>
     </div>
   );
 }
@@ -663,107 +657,19 @@ Today is ${new Date().toISOString().slice(0, 10)}. Output the JSON now.`,
   );
 }
 
-// Live clock pinned to the bottom-right corner. Time on top, short date
-// underneath — the standard Win11 stack. Updates every 15s, which is
-// plenty for minute precision without firing constantly.
-function SystemTrayClock() {
-  const [now, setNow] = useState(new Date());
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 15000);
-    return () => clearInterval(id);
-  }, []);
-  const time = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  const date = now.toLocaleDateString([], { month: '2-digit', day: '2-digit', year: 'numeric' });
-  return (
-    <button
-      className="flex flex-col items-end leading-[1.05] text-white/85 text-[11.5px] font-normal cursor-default select-none px-2.5 py-1.5 rounded-md hover:bg-white/[0.07] active:bg-white/[0.04] transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400/40"
-      aria-label="Date and time"
-    >
-      <span>{time}</span>
-      <span className="text-[10.5px] text-white/65 mt-[1px]">{date}</span>
-    </button>
-  );
-}
-
-// ── Launchpad panel — slides up from the bottom-left above the dock ─────────
-// Shows every non-admin app in a 3-column icon grid, Windows-style.
-function LaunchpadPanel({ open, onClose, onOpenApp }) {
-  useEffect(() => {
-    if (!open) return;
-    const onKey = e => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
-
-  if (!open) return null;
-
-  const apps = APP_REGISTRY.filter(a => !a.adminOnly);
-
-  return (
-    <div
-      className="fixed inset-0"
-      style={{ zIndex: Z.dock + 5 }}
-      onMouseDown={onClose}
-    >
-      {/* Scrim */}
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-[3px]" />
-
-      {/* Panel */}
-      <div
-        className="absolute bottom-[72px] left-2 w-[296px] rounded-2xl overflow-hidden"
-        style={{
-          background: 'rgba(18,18,26,0.97)',
-          border: '1px solid rgba(255,255,255,0.10)',
-          boxShadow: '0 32px 64px rgba(0,0,0,0.65), 0 0 0 0.5px rgba(255,255,255,0.06)',
-        }}
-        onMouseDown={e => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 pt-4 pb-1">
-          <span className="text-[14px] font-bold text-white/85 tracking-tight">All Apps</span>
-          <button
-            onClick={onClose}
-            className="w-6 h-6 rounded-full flex items-center justify-center text-white/30 hover:text-white/70 hover:bg-white/[0.08] transition-colors"
-          >
-            <X size={13} />
-          </button>
-        </div>
-
-        {/* App grid */}
-        <div className="grid grid-cols-3 gap-px px-3 pb-4 pt-2">
-          {apps.map(app => {
-            const Icon = app.icon;
-            return (
-              <button
-                key={app.id}
-                onClick={() => { onOpenApp(app); onClose(); }}
-                className="flex flex-col items-center gap-2 py-3.5 px-2 rounded-2xl hover:bg-white/[0.08] active:bg-white/[0.05] transition-all group"
-              >
-                <div
-                  className={`w-12 h-12 rounded-2xl flex items-center justify-center bg-gradient-to-br ${app.gradient} shadow-lg group-hover:scale-110 group-active:scale-95 transition-transform`}
-                >
-                  <Icon size={22} className="text-white drop-shadow" />
-                </div>
-                <span className="text-[10px] font-semibold text-white/55 group-hover:text-white/90 transition-colors text-center leading-tight line-clamp-2 w-full px-1">
-                  {app.label}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export default function Dock({ onSpotlight }) {
+export default function Dock(_props) {
   const { state, openApp, restoreWindow, focusWindow } = useWindowManager();
   const { dockSize, iconStyle, theme } = useUIPreference();
   const dark = theme !== 'light';
   const size = DOCK_SIZES[dockSize] || 50;
 
   const [isAdmin, setIsAdmin] = useState(false);
-  const [launchpadOpen, setLaunchpadOpen] = useState(false);
+  // Cursor x-position, tracked while the pointer is inside the dock.
+  // Each DockIcon reads this on every render to compute its scale —
+  // when null (mouse left the dock) every icon snaps back to base size.
+  const [mouseX, setMouseX] = useState(null);
+  const handleMouseMove = useCallback((e) => setMouseX(e.clientX), []);
+  const handleMouseLeave = useCallback(() => setMouseX(null), []);
   useEffect(() => { checkAdmin().then(d => setIsAdmin(d.isAdmin)).catch(() => {}); }, []);
 
   const mainApps = APP_REGISTRY.filter(a => {
@@ -784,73 +690,64 @@ export default function Dock({ onSpotlight }) {
 
   return (
     <>
-      <LaunchpadPanel
-        open={launchpadOpen}
-        onClose={() => setLaunchpadOpen(false)}
-        onOpenApp={handleIconClick}
-      />
+      {/* macOS-style floating dock. Centered glass pill, ~8px above the
+          screen edge. Hugs its content (no flex-1 spacers) so the pill
+          width tracks the icon count. Icons magnify on cursor proximity
+          via mouseX — see DockIcon. The pill height fits the base icon
+          + the indicator row; magnified icons grow upward and out of
+          the pill, the way macOS does it. */}
       <div
         data-dock-theme={dark ? 'dark' : 'light'}
-        className="fixed bottom-0 left-0 right-0 h-14 flex items-center px-2 transition-colors"
+        className="fixed bottom-2 left-1/2 -translate-x-1/2 flex items-end px-3 pt-2 pb-1.5 gap-2 rounded-2xl transition-colors"
         style={{
           zIndex: Z.dock,
-          background: dark ? '#1c1c22' : 'rgba(245,245,247,0.93)',
-          borderTop: dark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(0,0,0,0.10)',
-          boxShadow: dark ? '0 -6px 24px rgba(0,0,0,0.55)' : '0 -4px 16px rgba(0,0,0,0.10)',
-          backdropFilter: dark ? undefined : 'blur(24px) saturate(180%)',
-          WebkitBackdropFilter: dark ? undefined : 'blur(24px) saturate(180%)',
+          background: dark ? 'rgba(28, 28, 34, 0.55)' : 'rgba(245, 245, 247, 0.55)',
+          border: dark ? '1px solid rgba(255,255,255,0.10)' : '1px solid rgba(0,0,0,0.08)',
+          boxShadow: dark
+            ? '0 12px 32px rgba(0,0,0,0.45), 0 0 0 0.5px rgba(255,255,255,0.04) inset'
+            : '0 12px 32px rgba(0,0,0,0.18), 0 0 0 0.5px rgba(255,255,255,0.40) inset',
+          backdropFilter: 'blur(28px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(28px) saturate(180%)',
         }}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
       >
-        {/* ── Left: Launchpad / Start button ── */}
-        <button
-          onClick={() => setLaunchpadOpen(p => !p)}
-          className={`flex items-center justify-center rounded-xl transition-all focus:outline-none flex-shrink-0 ${
-            launchpadOpen
-              ? 'bg-blue-500/20 text-blue-300 shadow-[inset_0_0_0_1px_rgba(96,165,250,0.30)]'
-              : 'text-white/55 hover:bg-white/[0.09] hover:text-white/85'
-          }`}
-          style={{ width: size + 10, height: size + 4 }}
-          aria-label="All apps"
-        >
-          <Grip size={Math.round(size * 0.46)} strokeWidth={2} />
-        </button>
+        {/* ── Pinned apps ── */}
+        {mainApps.map(app => (
+          <DockIcon
+            key={app.id}
+            app={app}
+            mouseX={mouseX}
+            isOpen={openAppIds.has(app.id)}
+            isActive={activeAppId === app.id}
+            onClick={() => handleIconClick(app)}
+            size={size}
+            iconStyle={iconStyle}
+          />
+        ))}
 
-        {/* Spacer — pushes center group to the middle */}
-        <div className="flex-1" />
+        {/* ── Divider before utilities ── */}
+        <div className="w-px bg-white/[0.12] self-center" style={{ height: size * 0.6 }} />
 
-        {/* ── Center: Search + pinned apps + divider + Settings ── */}
-        <div className="flex items-center gap-0.5">
-          <SearchButton size={size} onClick={() => onSpotlight?.()} />
-          <span className="w-1.5" />
-          {mainApps.map(app => (
-            <TaskbarIcon
-              key={app.id}
-              app={app}
-              isOpen={openAppIds.has(app.id)}
-              isActive={activeAppId === app.id}
-              onClick={() => handleIconClick(app)}
-              size={size}
-              iconStyle={iconStyle}
-            />
-          ))}
-          <div className="w-px bg-white/[0.10] mx-1.5 self-center" style={{ height: size * 0.55 }} />
-          {utilApps.map(app => (
-            <TaskbarIcon
-              key={app.id}
-              app={app}
-              isOpen={openAppIds.has(app.id)}
-              isActive={activeAppId === app.id}
-              onClick={() => handleIconClick(app)}
-              size={size}
-              iconStyle={iconStyle}
-            />
-          ))}
-        </div>
+        {/* ── Settings ── */}
+        {utilApps.map(app => (
+          <DockIcon
+            key={app.id}
+            app={app}
+            mouseX={mouseX}
+            isOpen={openAppIds.has(app.id)}
+            isActive={activeAppId === app.id}
+            onClick={() => handleIconClick(app)}
+            size={size}
+            iconStyle={iconStyle}
+          />
+        ))}
 
-        {/* ── Right: system tray + clock ── */}
-        <div className="flex-1 flex justify-end items-center gap-1 pr-1">
+        {/* ── Widgets tray (+) ── */}
+        <div className="w-px bg-white/[0.12] self-center" style={{ height: size * 0.6 }} />
+        <div className="flex flex-col items-center">
           <SystemTrayIcons />
-          <SystemTrayClock />
+          <div className="h-1.5 mt-1" />
         </div>
       </div>
     </>

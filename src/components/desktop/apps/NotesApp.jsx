@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ArrowLeft, FileText, Plus, Trash2, Layout, Sparkles, Wand2, Loader2, BookOpen, Network } from 'lucide-react';
 import { InlineProgress } from '../../shared/ProgressBar';
-import { listNotes, createNote, deleteNote, getNote, updateNote, generateCues, generateSummary } from '../../../api/notes';
+import { listNotes, createNote, deleteNote, getNote, updateNote, generateCues, generateSummary,
+         listNoteMaps, createNoteMap, deleteNoteMap, updateNoteMap } from '../../../api/notes';
 import { apiFetch } from '../../../api/client';
 import { listCurricula, getCurriculum } from '../../../api/curriculum';
 import Button from '../../shared/Button';
@@ -9,7 +10,7 @@ import LoadingSpinner from '../../shared/LoadingSpinner';
 import Modal from '../../shared/Modal';
 import useBrowserBack from '../../../hooks/useBrowserBack';
 import NoteActions from '../../notes/NoteActions';
-import { useWindowManagerOptional } from '../../../context/WindowManagerContext';
+import NoteMap from '../../notes/NoteMap';
 
 function NoteEditor({ noteId, onBack }) {
   const [note, setNote] = useState(null);
@@ -126,14 +127,25 @@ function NoteEditor({ noteId, onBack }) {
   );
 }
 
-export default function NotesApp({ initialNoteId = null } = {}) {
-  // Optional meta prop from the desktop window manager — when the Note Map
-  // opens a note, it spawns the Notes window with this set so we jump
-  // straight into the editor instead of forcing another click.
-  const [view, setView] = useState(initialNoteId ? 'editor' : 'list');
+export default function NotesApp({ initialNoteId = null, initialMapId = null, initialView = null } = {}) {
+  // Optional meta props from the desktop window manager — `initialNoteId`
+  // jumps straight into the editor for that note; `initialMapId` opens
+  // the merged Maps view on that specific map. The legacy Note Map app
+  // entry passes initialView='map' so existing dock icons keep working.
+  const startView = initialNoteId ? 'editor'
+                    : initialMapId ? 'map'
+                    : initialView === 'map' ? 'map'
+                    : 'list';
+  const [view, setView] = useState(startView);
   // Back button returns to the notes list instead of leaving the site.
   useBrowserBack(view !== 'list', () => setView('list'));
   const [notes, setNotes] = useState([]);
+  // Multi-map state. Maps are summaries — each map's nodes+edges are
+  // fetched inside <NoteMap> by id.
+  const [maps, setMaps] = useState([]);
+  const [mapsLoading, setMapsLoading] = useState(true);
+  const [selectedMapId, setSelectedMapId] = useState(initialMapId);
+  const [creatingMap, setCreatingMap] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [showAI, setShowAI] = useState(false);
@@ -149,15 +161,74 @@ export default function NotesApp({ initialNoteId = null } = {}) {
   const [selectedLessonIds, setSelectedLessonIds] = useState([]); // [] = whole curriculum
   const [curriculumLoading, setCurriculumLoading] = useState(false);
   const [selectedNoteId, setSelectedNoteId] = useState(initialNoteId);
-  // Desktop shell-only: lets us spawn / focus the Note Map window from
-  // here. Returns null when this component is rendered outside the
-  // window manager (e.g. mobile shell uses this same component), so the
-  // Map button just won't render in that case.
-  const wm = useWindowManagerOptional();
 
   useEffect(() => {
     listNotes().then(d => { setNotes(d.notes || []); setLoading(false); }).catch(() => setLoading(false));
   }, []);
+
+  // Load map summaries. We refresh after create/delete via reloadMaps().
+  const reloadMaps = useCallback(() => {
+    setMapsLoading(true);
+    return listNoteMaps()
+      .then(d => {
+        const list = d.maps || [];
+        setMaps(list);
+        // If we landed on the map view with no specific map selected
+        // (e.g. user clicked the dock Notes icon then "Map" tab), pick
+        // the default one so the canvas isn't blank.
+        if (!selectedMapId && list.length > 0) {
+          const def = list.find(m => m.isDefault) || list[0];
+          if (def) setSelectedMapId(def.id);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setMapsLoading(false));
+  }, [selectedMapId]);
+
+  useEffect(() => { reloadMaps(); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleCreateMap() {
+    if (creatingMap) return;
+    const name = prompt('Name this map:', 'Untitled Map');
+    if (!name) return;
+    setCreatingMap(true);
+    try {
+      const d = await createNoteMap(name.trim() || 'Untitled Map');
+      if (d?.map?.id) {
+        setSelectedMapId(d.map.id);
+        setView('map');
+      }
+      await reloadMaps();
+    } catch (e) {
+      alert(e?.message || 'Could not create map.');
+    }
+    setCreatingMap(false);
+  }
+
+  async function handleRenameMap(map) {
+    const name = prompt('Rename map:', map.name);
+    if (!name || name === map.name) return;
+    try {
+      await updateNoteMap(map.id, { name: name.trim() });
+      await reloadMaps();
+    } catch (e) { alert(e?.message || 'Rename failed.'); }
+  }
+
+  async function handleDeleteMap(e, map) {
+    e.stopPropagation();
+    if (map.isDefault) { alert("Can't delete the default map."); return; }
+    if (!confirm(`Delete the map "${map.name}"? Nodes and edges will be lost.`)) return;
+    try {
+      await deleteNoteMap(map.id);
+      if (selectedMapId === map.id) setSelectedMapId(null);
+      await reloadMaps();
+    } catch (err) { alert(err?.message || 'Delete failed.'); }
+  }
+
+  function openMap(map) {
+    setSelectedMapId(map.id);
+    setView('map');
+  }
 
   // Load the curriculum list the first time the user opens the AI modal in
   // "curriculum" mode. Cached after that.
@@ -298,6 +369,43 @@ export default function NotesApp({ initialNoteId = null } = {}) {
     return <NoteEditor noteId={selectedNoteId} onBack={() => { setView('list'); listNotes().then(d => setNotes(d.notes || [])).catch(() => {}); }} />;
   }
 
+  if (view === 'map') {
+    const activeMap = maps.find(m => m.id === selectedMapId) || null;
+    return (
+      <div className="flex flex-col flex-1 min-h-0">
+        <div className="flex items-center justify-between mb-3 flex-shrink-0">
+          <button
+            onClick={() => setView('list')}
+            className="flex items-center gap-2 text-sm text-white/35 hover:text-white/60 transition-colors"
+          >
+            <ArrowLeft size={16} /> Notes
+          </button>
+          <div className="flex items-center gap-2 text-xs text-white/40">
+            {activeMap && (
+              <button
+                onClick={() => handleRenameMap(activeMap)}
+                className="hover:text-white/70 underline-offset-4 hover:underline"
+                title="Rename map"
+              >
+                {activeMap.name}
+              </button>
+            )}
+            {activeMap && activeMap.isDefault && (
+              <span className="text-[10px] uppercase tracking-wider text-white/30 border border-white/10 rounded-full px-1.5 py-0.5">Default</span>
+            )}
+          </div>
+        </div>
+        <div className="flex-1 min-h-0">
+          <NoteMap
+            key={selectedMapId || 'default'}
+            mapId={selectedMapId || undefined}
+            onOpenNote={(noteId) => { setSelectedNoteId(noteId); setView('editor'); }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   if (loading) return <div className="flex items-center justify-center h-48"><LoadingSpinner size={24} /></div>;
 
   return (
@@ -305,16 +413,65 @@ export default function NotesApp({ initialNoteId = null } = {}) {
       <div className="flex items-center justify-between mb-5">
         <h2 className="text-lg font-bold text-white/90">Notes</h2>
         <div className="flex items-center gap-2">
-          {wm && (
-            <Button size="sm" variant="secondary" onClick={() => wm.openApp('notemap', 'Note Map', true)}>
-              <Network size={14} /> Map
-            </Button>
-          )}
           <Button size="sm" variant="secondary" onClick={() => setShowAI(true)}>
             <Wand2 size={14} /> AI
           </Button>
           <Button size="sm" onClick={() => setShowCreate(true)}><Plus size={14} /> New</Button>
         </div>
+      </div>
+
+      {/* Maps section — merged from the standalone Note Map app. Each map
+          is its own canvas; clicking opens the merged map view. */}
+      <div className="mb-5">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-[11px] font-semibold text-white/40 uppercase tracking-wider flex items-center gap-1.5">
+            <Network size={12} /> Maps
+          </h3>
+          <Button size="sm" variant="secondary" onClick={handleCreateMap} disabled={creatingMap || maps.length >= 20}>
+            <Plus size={12} /> New map
+          </Button>
+        </div>
+        {mapsLoading && maps.length === 0 ? (
+          <div className="text-[11px] text-white/30 italic px-1">Loading maps…</div>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+            {maps.map(m => (
+              <div
+                key={m.id}
+                onClick={() => openMap(m)}
+                className="group flex items-center gap-2 bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.06] hover:border-white/[0.12] rounded-2xl px-3 py-2.5 cursor-pointer transition-colors"
+              >
+                <span
+                  className="h-7 w-7 rounded-lg flex items-center justify-center shrink-0"
+                  style={{ background: `${m.color}1F`, color: m.color }}
+                >
+                  <Network size={13} />
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[12.5px] font-medium text-white/85 truncate">{m.name}</div>
+                  <div className="text-[10.5px] text-white/40">
+                    {m.nodeCount} node{m.nodeCount === 1 ? '' : 's'}
+                    {m.isDefault ? ' · default' : ''}
+                  </div>
+                </div>
+                {!m.isDefault && (
+                  <button
+                    onClick={(e) => handleDeleteMap(e, m)}
+                    className="opacity-0 group-hover:opacity-100 text-white/20 hover:text-rose-400 transition-opacity"
+                    title="Delete map"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                )}
+              </div>
+            ))}
+            {maps.length === 0 && !mapsLoading && (
+              <div className="col-span-full text-[11px] text-white/30 italic px-1">
+                No maps yet — click <span className="font-semibold text-white/55">New map</span> to start one.
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <Modal open={showAI} onClose={() => { setShowAI(false); setAiError(null); }} title="Generate note with AI">

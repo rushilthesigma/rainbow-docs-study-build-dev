@@ -1,7 +1,6 @@
 import CurriculaApp from './apps/CurriculaApp';
 import LessonsApp from './apps/LessonsApp';
 import NotesApp from './apps/NotesApp';
-import NoteMapApp from './apps/NoteMapApp';
 import AdminApp from './apps/AdminApp';
 import QuizBowlApp from './apps/QuizBowlApp';
 import MathTutorApp from './apps/MathTutorApp';
@@ -23,7 +22,6 @@ const APP_COMPONENTS = {
   lessons: LessonsApp,
   study: StudyPage,
   notes: NotesApp,
-  notemap: NoteMapApp,
   mathtutor: MathTutorApp,
   quizbowl: QuizBowlApp,
   admin: AdminApp,
@@ -33,7 +31,7 @@ const APP_COMPONENTS = {
 };
 
 // Apps that need flex container without scroll (they manage their own scrolling)
-const FLEX_APPS = new Set(['notes', 'notemap', 'study', 'debate', 'mathtutor', 'mobilepreview']);
+const FLEX_APPS = new Set(['notes', 'study', 'debate', 'mathtutor', 'mobilepreview']);
 
 // Full-bleed apps (no padding, no overflow-hidden) — empty now that
 // slides is gone, but kept as a registration point so future apps can

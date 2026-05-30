@@ -27,6 +27,15 @@ export async function googleLogin(credential) {
   return data;
 }
 
+export async function devLogin(name, email) {
+  const data = await apiFetch('/api/auth/dev-login', {
+    method: 'POST',
+    body: JSON.stringify({ name, email }),
+  });
+  if (data.token) setToken(data.token);
+  return data;
+}
+
 export async function getMe() {
   return apiFetch('/api/auth/me');
 }

@@ -72,6 +72,21 @@ function MatchHeader({ userScore, botScore, botName, target = 10 }) {
   );
 }
 
+// ── Scoring ───────────────────────────────────────────────────────────────
+// Default = legacy "Standard" continuous-curve scoring. Custom formats
+// (IAC Prelim, IAC Playoff, JV) come in from TrialPage.
+const DEFAULT_FORMAT = {
+  id: 'standard', label: 'Standard',
+  powerThreshold: null, powerPts: null, getPts: 10, negPts: -5, target: null,
+};
+function scoreForBuzz({ correct, ratio, format }) {
+  const f = format || DEFAULT_FORMAT;
+  if (!correct) return f.negPts || 0;
+  if (f.id === 'standard') return Math.round(10 * (2 - ratio));
+  if (f.powerThreshold != null && ratio < f.powerThreshold) return f.powerPts;
+  return f.getPts;
+}
+
 // ── Answer checker ────────────────────────────────────────────────────────
 function normalize(str) {
   return str.toLowerCase().replace(/^(the|a|an)\s+/i, '').replace(/[^a-z0-9\s]/g, '').trim();
@@ -97,10 +112,11 @@ function checkAnswer(userAns, correctAns) {
 //   onComplete – ({ xp, userScore, sessionResults })
 export default function TrialSession({
   questions, difficulty, bots: botsProp, matchMode = false,
-  lobbyMode = false, botNames, onComplete,
+  lobbyMode = false, botNames, scoringFormat, onComplete,
 }) {
   const ACTIVE_BOTS = botsProp ?? ALL_BOTS.slice(0, 3);
-  const MATCH_TARGET = 10;
+  const FORMAT = scoringFormat || DEFAULT_FORMAT;
+  const MATCH_TARGET = FORMAT.target || 10;
 
   const words           = useRef([]);
   const revealTimer     = useRef(null);
@@ -195,7 +211,11 @@ export default function TrialSession({
         //            them into a single render, so the effect always sees correct = set)
         const tt = setTimeout(() => {
           const correct = Math.random() < bot.accuracy;
-          const pts     = correct ? Math.round(10 * (2 - ratio)) : 0;
+          // Bots use the same scoring format as the player so the
+          // scoreboard stays consistent (e.g., powers worth 15 across
+          // the table). On a wrong bot buzz we award 0 rather than a
+          // neg — bots aren't penalized to keep the game flowing.
+          const pts     = correct ? scoreForBuzz({ correct: true, ratio, format: FORMAT }) : 0;
 
           // Freeze the question reveal the moment a bot locks in a correct answer
           if (correct && revealTimer.current) {
@@ -275,7 +295,7 @@ export default function TrialSession({
     const correct  = checkAnswer(answer, q.answer);
     const quality  = buzzToQuality(correct, buzzRatio);
     const xpGained = correct ? Math.round(10 * (1 + combo * 0.25) * (2 - buzzRatio)) : 0;
-    const ptsGained= correct ? Math.round(10 * (2 - buzzRatio)) : (matchMode ? 0 : -5);
+    const ptsGained= scoreForBuzz({ correct, ratio: buzzRatio, format: FORMAT });
     const newScore = userScore + ptsGained;
 
     setAnswerResult({ correct, xpGained, ptsGained });
@@ -366,7 +386,7 @@ export default function TrialSession({
   const activeBotBuzz       = activeBotBuzzState?.buzzedAt != null
     ? ACTIVE_BOTS.find(b => b.id === buzzedBy) : null;
   const botAnsweredCorrectly= !!(activeBotBuzz && activeBotBuzzState?.correct === true);
-  const sidebarLabel        = matchMode ? '1v1' : lobbyMode ? `Tournament · ${ACTIVE_BOTS.length + 1}P` : 'Lobby';
+  const sidebarLabel        = (matchMode ? '1v1' : lobbyMode ? `Tournament · ${ACTIVE_BOTS.length + 1}P` : 'Lobby') + ` · ${FORMAT.label}`;
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-transparent">
@@ -497,8 +517,12 @@ export default function TrialSession({
                 </p>
                 <p className="text-[11px] text-white/35 mt-1">
                   {answerResult.correct
-                    ? `+${answerResult.xpGained} XP${matchMode ? ` · +${answerResult.ptsGained} pts` : ''}${buzzRatio < 0.5 ? ' · Early buzz!' : ''}`
-                    : 'Incorrect'}
+                    ? `+${answerResult.xpGained} XP · +${answerResult.ptsGained} pts${
+                        FORMAT.powerThreshold != null && buzzRatio < FORMAT.powerThreshold
+                          ? ' · POWER!'
+                          : (FORMAT.id === 'standard' && buzzRatio < 0.5 ? ' · Early buzz!' : '')
+                      }`
+                    : `Incorrect${FORMAT.negPts ? ` · ${FORMAT.negPts} pts` : ''}`}
                 </p>
               </div>
             )}

@@ -1,8 +1,14 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Sparkles, Plus, Trash2, RotateCw, Wand2, Link2, X, FileText, Lightbulb, Check, Pencil, ArrowLeft, Focus, StickyNote, Loader2 } from 'lucide-react';
-import { getNoteGraph, saveNoteGraph, suggestGraphNodes, createNote, updateNote, getNote } from '../../api/notes';
+import {
+  listNotes,
+  getNoteGraph, saveNoteGraph, suggestGraphNodes,
+  getNoteMap, updateNoteMap, suggestNoteMapNodes,
+  createNote, updateNote, getNote,
+} from '../../api/notes';
 import Button from '../shared/Button';
 import LoadingSpinner from '../shared/LoadingSpinner';
+import Modal from '../shared/Modal';
 
 // Obsidian-style note map. Each existing note becomes a graph node; the
 // user can drag nodes, link them with edges, add free-form topic nodes,
@@ -78,7 +84,20 @@ function edgeKey(a, b) {
   return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
 
-export default function NoteMap({ onOpenNote }) {
+export default function NoteMap({ onOpenNote, mapId }) {
+  // When a mapId is supplied, every read/write is scoped to that map.
+  // Without a mapId we fall back to the legacy single-graph endpoints,
+  // which now alias to the default map server-side.
+  const loadGraph = mapId
+    ? () => getNoteMap(mapId).then(d => ({ graph: d.map ? { nodes: d.map.nodes, edges: d.map.edges } : { nodes: [], edges: [] } }))
+    : () => getNoteGraph();
+  const saveGraph = mapId
+    ? (nodes, edges) => updateNoteMap(mapId, { nodes, edges })
+    : (nodes, edges) => saveNoteGraph(nodes, edges);
+  const askSuggest = mapId
+    ? (args) => suggestNoteMapNodes(mapId, args)
+    : (args) => suggestGraphNodes(args);
+
   const [loading, setLoading] = useState(true);
   const [nodes, setNodes] = useState([]);
   const [edges, setEdges] = useState([]);
@@ -103,6 +122,13 @@ export default function NoteMap({ onOpenNote }) {
   const [activeNote, setActiveNote] = useState(null);
   const [noteLoading, setNoteLoading] = useState(false);
   const [noteSaving, setNoteSaving] = useState(false);
+  // "Pull from notes" picker. Maps no longer auto-mirror every note —
+  // the user explicitly picks which notes to add to the current map.
+  const [pullOpen, setPullOpen] = useState(false);
+  const [pullNotes, setPullNotes] = useState([]);
+  const [pullLoading, setPullLoading] = useState(false);
+  const [pullSelected, setPullSelected] = useState(() => new Set());
+  const [pullQuery, setPullQuery] = useState('');
 
   const svgRef = useRef(null);
   const draggingRef = useRef(null);
@@ -124,9 +150,10 @@ export default function NoteMap({ onOpenNote }) {
     return () => ro.disconnect();
   }, []);
 
-  // Load graph on mount.
+  // Load graph on mount (or whenever the bound map changes).
   useEffect(() => {
-    getNoteGraph()
+    setLoading(true);
+    loadGraph()
       .then(d => {
         const g = d.graph || { nodes: [], edges: [] };
         setNodes(g.nodes || []);
@@ -134,7 +161,8 @@ export default function NoteMap({ onOpenNote }) {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapId]);
 
   // Debounced auto-save. Fires 800ms after the last change so dragging
   // doesn't hammer the server.
@@ -143,7 +171,7 @@ export default function NoteMap({ onOpenNote }) {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(async () => {
       setSaving(true);
-      try { await saveNoteGraph(nodes, edges); } catch {}
+      try { await saveGraph(nodes, edges); } catch {}
       setSaving(false);
     }, 800);
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
@@ -314,6 +342,61 @@ export default function NoteMap({ onOpenNote }) {
     setRenaming({ id, value: label });
   }
 
+  // Open the picker. Loads the user's notes and excludes any already on
+  // the current map so the list shows only candidates worth pulling in.
+  async function openPullNotes() {
+    setPullOpen(true);
+    setPullSelected(new Set());
+    setPullQuery('');
+    setPullLoading(true);
+    try {
+      const d = await listNotes();
+      const taken = new Set(nodes.filter(n => n.source === 'note').map(n => n.noteId));
+      const list = (d.notes || []).filter(n => !taken.has(n.id));
+      setPullNotes(list);
+    } catch (e) {
+      setPullNotes([]);
+    }
+    setPullLoading(false);
+  }
+
+  function togglePullNote(id) {
+    setPullSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function confirmPullNotes() {
+    if (pullSelected.size === 0) { setPullOpen(false); return; }
+    const byId = new Map(pullNotes.map(n => [n.id, n]));
+    const startIdx = nodes.length;
+    const newNodes = [];
+    let i = 0;
+    for (const noteId of pullSelected) {
+      const note = byId.get(noteId);
+      if (!note) continue;
+      // Soft spiral around (0,0) so they don't pile up; the auto-relax
+      // pass spreads them further when the canvas first opens.
+      const angle = (startIdx + i) * 0.9;
+      const radius = 90 + (startIdx + i) * 28;
+      newNodes.push({
+        id: newId(),
+        noteId: note.id,
+        label: note.title || 'Untitled Note',
+        source: 'note',
+        color: NODE_PALETTE[(startIdx + i) % NODE_PALETTE.length],
+        x: Math.cos(angle) * radius,
+        y: Math.sin(angle) * radius,
+      });
+      i += 1;
+    }
+    if (newNodes.length) setNodes(prev => [...prev, ...newNodes]);
+    setPullOpen(false);
+    setPullSelected(new Set());
+  }
+
   function deleteNode(id) {
     setNodes(prev => prev.filter(n => n.id !== id));
     setEdges(prev => prev.filter(e => e.from !== id && e.to !== id));
@@ -345,7 +428,7 @@ export default function NoteMap({ onOpenNote }) {
     setSuggestBusy(true);
     setSuggestError(null);
     try {
-      const data = await suggestGraphNodes({
+      const data = await askSuggest({
         focus: focusInput.trim() || undefined,
         focusNodeId: focusedNodeId || selectedId || undefined,
         count: 4,
@@ -570,6 +653,9 @@ export default function NoteMap({ onOpenNote }) {
           </div>
         </div>
         <div className="flex items-center gap-1.5">
+          <Button size="sm" variant="ghost" onClick={openPullNotes}>
+            <FileText size={13} /> Pull from notes
+          </Button>
           <Button size="sm" variant="ghost" onClick={() => addTopicNode()}><Plus size={13} /> Topic</Button>
           <Button size="sm" variant="ghost" onClick={createNewNoteOnMap} disabled={creatingNoteFromId === '__new__'}>
             <StickyNote size={13} /> {creatingNoteFromId === '__new__' ? 'Adding…' : 'Note'}
@@ -577,6 +663,63 @@ export default function NoteMap({ onOpenNote }) {
           {!focusedNode && <Button size="sm" variant="ghost" onClick={relaxLayout}><RotateCw size={13} /> Relax</Button>}
         </div>
       </div>
+
+      <Modal open={pullOpen} onClose={() => setPullOpen(false)} title="Pull notes into this map">
+        <div className="flex flex-col gap-3">
+          <input
+            value={pullQuery}
+            onChange={e => setPullQuery(e.target.value)}
+            placeholder="Search notes…"
+            className="w-full px-3 py-2 rounded-xl border border-white/[0.06] bg-white/[0.04] text-sm text-white/85 placeholder-white/30 outline-none"
+            autoFocus
+          />
+          <div className="max-h-72 overflow-y-auto rounded-xl border border-white/[0.06] bg-white/[0.02] p-1.5">
+            {pullLoading ? (
+              <div className="flex items-center justify-center py-6 text-xs text-white/30">
+                <Loader2 size={14} className="animate-spin mr-2" /> Loading notes…
+              </div>
+            ) : pullNotes.length === 0 ? (
+              <p className="text-[11px] text-white/35 italic p-3 text-center">
+                {nodes.some(n => n.source === 'note')
+                  ? 'All of your notes are already on this map.'
+                  : "You don't have any notes yet."}
+              </p>
+            ) : (
+              pullNotes
+                .filter(n => !pullQuery.trim() || (n.title || '').toLowerCase().includes(pullQuery.trim().toLowerCase()))
+                .map(n => {
+                  const checked = pullSelected.has(n.id);
+                  return (
+                    <label
+                      key={n.id}
+                      className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer transition-colors ${checked ? 'bg-blue-500/10' : 'hover:bg-white/[0.04]'}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => togglePullNote(n.id)}
+                        className="w-3.5 h-3.5 accent-white"
+                      />
+                      <FileText size={13} className="text-white/40 shrink-0" />
+                      <span className="text-[13px] text-white/80 truncate">{n.title || 'Untitled'}</span>
+                    </label>
+                  );
+                })
+            )}
+          </div>
+          <div className="flex items-center justify-between">
+            <div className="text-[11px] text-white/40">
+              {pullSelected.size} selected
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" variant="ghost" onClick={() => setPullOpen(false)}>Cancel</Button>
+              <Button size="sm" onClick={confirmPullNotes} disabled={pullSelected.size === 0}>
+                <Plus size={12} /> Add {pullSelected.size || ''}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Modal>
 
       <div className="flex flex-1 min-h-0 gap-3">
         {/* Canvas */}

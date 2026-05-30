@@ -36,8 +36,13 @@ function GridOverlay() {
   for (const w of widgets) {
     const c0 = Math.round((w.position.x - GRID_OX) / STEP_X);
     const r0 = Math.round((w.position.y - GRID_OY) / STEP_Y);
-    const span = w.cols ?? 1;
-    for (let dc = 0; dc < span; dc++) occupied.add(`${r0},${c0 + dc}`);
+    const cspan = w.cols ?? 1;
+    const rspan = w.rows ?? 1;
+    for (let dc = 0; dc < cspan; dc++) {
+      for (let dr = 0; dr < rspan; dr++) {
+        occupied.add(`${r0 + dr},${c0 + dc}`);
+      }
+    }
   }
 
   return (
@@ -74,13 +79,28 @@ function GridOverlay() {
 
 /* ── grid math ── */
 const CELL_W = 190;
+const CELL_H = 160;
 const CELL_GAP = 10;
-const colsToWidth = (cols) => cols * CELL_W + (cols - 1) * CELL_GAP;
+const colsToWidth  = (cols) => cols * CELL_W + (cols - 1) * CELL_GAP;
+const rowsToHeight = (rows) => rows * CELL_H + (rows - 1) * CELL_GAP;
 
+// Widget width presets — visually mapped 1:1 to a grid column span. The two
+// largest sizes (XL/Huge) are wide enough to host AI custom widgets with extra
+// chart/list content.
 const GRID_SIZES = [
-  { cols: 1, label: 'Small' },
-  { cols: 2, label: 'Medium' },
-  { cols: 3, label: 'Wide' },
+  { cols: 1, label: 'S'    },
+  { cols: 2, label: 'M'    },
+  { cols: 3, label: 'L'    },
+  { cols: 4, label: 'XL'   },
+  { cols: 5, label: 'Huge' },
+];
+
+// Widget height presets — multi-row widgets get extra vertical padding so
+// content with variable density (notes, todos) feels roomy instead of cramped.
+const ROW_SIZES = [
+  { rows: 1, label: '1' },
+  { rows: 2, label: '2' },
+  { rows: 3, label: '3' },
 ];
 
 /* ── accent & opacity palettes ── */
@@ -93,6 +113,11 @@ export const ACCENT_LIST = [
   { key: 'rose',   dot: '#fb7185', border: 'rgba(251,113,133,0.28)', bg: 'rgba(244,63,94,0.10)'   },
   { key: 'cyan',   dot: '#22d3ee', border: 'rgba(34,211,238,0.28)',  bg: 'rgba(6,182,212,0.10)'   },
   { key: 'amber',  dot: '#fbbf24', border: 'rgba(251,191,36,0.28)',  bg: 'rgba(245,158,11,0.10)'  },
+  { key: 'pink',   dot: '#f472b6', border: 'rgba(244,114,182,0.28)', bg: 'rgba(236,72,153,0.10)'  },
+  { key: 'teal',   dot: '#2dd4bf', border: 'rgba(45,212,191,0.28)',  bg: 'rgba(20,184,166,0.10)'  },
+  { key: 'indigo', dot: '#818cf8', border: 'rgba(129,140,248,0.28)', bg: 'rgba(99,102,241,0.10)'  },
+  { key: 'slate',  dot: '#94a3b8', border: 'rgba(148,163,184,0.28)', bg: 'rgba(100,116,139,0.10)' },
+  { key: 'lime',   dot: '#a3e635', border: 'rgba(163,230,53,0.28)',  bg: 'rgba(132,204,22,0.10)'  },
 ];
 
 export const OPACITY_STEPS = [
@@ -102,14 +127,44 @@ export const OPACITY_STEPS = [
   { value: 100, label: 'Full'  },
 ];
 
+// Corner-radius presets. `px` drives the surface borderRadius; the menu uses
+// the same value on the preset button so the chip itself previews the shape.
+export const RADIUS_STEPS = [
+  { value: 'sharp',  label: 'Sharp', px: 6  },
+  { value: 'normal', label: 'Round', px: 16 },
+  { value: 'soft',   label: 'Soft',  px: 26 },
+];
+
 /* ── context-menu ── */
+// Width preview: a row of cols-many bars whose total span is constant so all
+// 5 size chips line up tidily.
 function GridIcon({ cols, active }) {
-  const cellW = cols === 1 ? 22 : cols === 2 ? 14 : 10;
+  const TOTAL = 26;
+  const GAP = 1.5;
+  const cellW = (TOTAL - (cols - 1) * GAP) / cols;
   return (
-    <div style={{ display: 'flex', gap: 2 }}>
+    <div style={{ display: 'flex', gap: GAP }}>
       {Array.from({ length: cols }).map((_, i) => (
         <div key={i} style={{
-          width: cellW, height: 18, borderRadius: 3,
+          width: cellW, height: 14, borderRadius: 2,
+          background: active ? 'rgba(96,165,250,0.65)' : 'rgba(255,255,255,0.16)',
+          transition: 'background 0.15s',
+        }} />
+      ))}
+    </div>
+  );
+}
+
+// Height preview: rows-many stacked bars to mirror the width chip style.
+function RowIcon({ rows, active }) {
+  const TOTAL = 16;
+  const GAP = 1.5;
+  const cellH = (TOTAL - (rows - 1) * GAP) / rows;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: GAP }}>
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} style={{
+          width: 14, height: cellH, borderRadius: 2,
           background: active ? 'rgba(96,165,250,0.65)' : 'rgba(255,255,255,0.16)',
           transition: 'background 0.15s',
         }} />
@@ -132,15 +187,28 @@ function MenuLabel({ children }) {
   );
 }
 
-function WidgetMenu({ x, y, currentCols, currentAccent = 'none', currentOpacity = 100, onResize, onAccentChange, onOpacityChange, onRemove, onClose }) {
+function WidgetMenu({
+  x, y,
+  currentCols, currentRows,
+  currentAccent = 'none', currentOpacity = 100, currentRadius = 'normal',
+  onResize, onAccentChange, onOpacityChange, onRadiusChange,
+  onRemove, onClose,
+}) {
   useEffect(() => {
     const close = () => onClose();
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('click', close);
-    return () => window.removeEventListener('click', close);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('keydown', onKey);
+    };
   }, [onClose]);
 
-  const menuX = Math.min(x, window.innerWidth - 234);
-  const menuY = Math.min(y, window.innerHeight - 370);
+  const MENU_W = 244;
+  const MENU_H_EST = 440;
+  const menuX = Math.min(x, window.innerWidth  - MENU_W - 8);
+  const menuY = Math.min(y, window.innerHeight - MENU_H_EST - 8);
 
   return (
     <div
@@ -148,30 +216,55 @@ function WidgetMenu({ x, y, currentCols, currentAccent = 'none', currentOpacity 
       onClick={e => e.stopPropagation()}
       onMouseDown={e => e.stopPropagation()}
       style={{
-        position: 'fixed', left: menuX, top: menuY, zIndex: 9999, width: 222,
+        position: 'fixed', left: menuX, top: menuY, zIndex: 9999, width: MENU_W,
         background: '#131316', border: '1px solid rgba(255,255,255,0.10)',
         borderRadius: 14, padding: '10px 10px 8px',
         boxShadow: '0 24px 64px rgba(0,0,0,0.7)',
       }}
     >
-      {/* ── Size ── */}
-      <MenuLabel>Widget Size</MenuLabel>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+      {/* ── Width ── */}
+      <MenuLabel>Width</MenuLabel>
+      <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
         {GRID_SIZES.map(({ cols, label }) => {
           const active = cols === currentCols;
           return (
             <button
-              key={cols} onClick={() => onResize(cols)}
+              key={cols} onClick={() => onResize({ cols })}
               style={{
-                flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
-                padding: '8px 4px 7px', borderRadius: 9,
+                flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                padding: '6px 2px 5px', borderRadius: 8,
                 border: `1.5px solid ${active ? 'rgba(96,165,250,0.60)' : 'rgba(255,255,255,0.08)'}`,
                 background: active ? 'rgba(59,130,246,0.14)' : 'rgba(255,255,255,0.03)',
                 cursor: 'pointer', transition: 'border-color 0.15s, background 0.15s',
               }}
             >
               <GridIcon cols={cols} active={active} />
-              <span style={{ fontSize: 9.5, color: active ? 'rgba(147,210,255,0.90)' : 'rgba(255,255,255,0.36)', fontWeight: active ? 600 : 400 }}>
+              <span style={{ fontSize: 8.5, color: active ? 'rgba(147,210,255,0.90)' : 'rgba(255,255,255,0.36)', fontWeight: active ? 600 : 400 }}>
+                {label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ── Height ── */}
+      <MenuLabel>Height</MenuLabel>
+      <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
+        {ROW_SIZES.map(({ rows, label }) => {
+          const active = rows === currentRows;
+          return (
+            <button
+              key={rows} onClick={() => onResize({ rows })}
+              style={{
+                flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                padding: '6px 2px 5px', borderRadius: 8,
+                border: `1.5px solid ${active ? 'rgba(96,165,250,0.60)' : 'rgba(255,255,255,0.08)'}`,
+                background: active ? 'rgba(59,130,246,0.14)' : 'rgba(255,255,255,0.03)',
+                cursor: 'pointer', transition: 'border-color 0.15s, background 0.15s',
+              }}
+            >
+              <RowIcon rows={rows} active={active} />
+              <span style={{ fontSize: 8.5, color: active ? 'rgba(147,210,255,0.90)' : 'rgba(255,255,255,0.36)', fontWeight: active ? 600 : 400 }}>
                 {label}
               </span>
             </button>
@@ -205,21 +298,43 @@ function WidgetMenu({ x, y, currentCols, currentAccent = 'none', currentOpacity 
 
       <Divider />
 
-      {/* ── Opacity ── */}
-      <MenuLabel>Opacity</MenuLabel>
+      {/* ── Opacity (continuous) ── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
+        <MenuLabel>Opacity</MenuLabel>
+        <span style={{ fontSize: 10, color: 'rgba(147,210,255,0.75)', fontWeight: 600, tabularNums: true }}>{currentOpacity}%</span>
+      </div>
+      <input
+        type="range"
+        min={30}
+        max={100}
+        step={1}
+        value={currentOpacity}
+        onChange={e => onOpacityChange(Number(e.target.value))}
+        style={{
+          width: '100%', margin: '2px 0 10px',
+          accentColor: '#60a5fa', cursor: 'pointer',
+        }}
+      />
+
+      <Divider />
+
+      {/* ── Corner radius ── */}
+      <MenuLabel>Corner Radius</MenuLabel>
       <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
-        {OPACITY_STEPS.map(({ value, label }) => {
-          const active = value === currentOpacity;
+        {RADIUS_STEPS.map(({ value, label, px }) => {
+          const active = value === currentRadius;
           return (
             <button
-              key={value} onClick={() => onOpacityChange(value)}
+              key={value} onClick={() => onRadiusChange(value)}
               style={{
-                flex: 1, padding: '5px 2px', borderRadius: 7, fontSize: 9,
+                flex: 1, padding: '6px 2px', fontSize: 9.5,
                 border: `1.5px solid ${active ? 'rgba(96,165,250,0.55)' : 'rgba(255,255,255,0.07)'}`,
                 background: active ? 'rgba(59,130,246,0.12)' : 'rgba(255,255,255,0.02)',
-                color: active ? 'rgba(147,210,255,0.85)' : 'rgba(255,255,255,0.30)',
+                color: active ? 'rgba(147,210,255,0.85)' : 'rgba(255,255,255,0.36)',
                 cursor: 'pointer', fontWeight: active ? 600 : 400,
-                transition: 'border-color 0.12s, background 0.12s',
+                // Chip mirrors the radius it represents, so the choice is previewable.
+                borderRadius: Math.min(px, 14),
+                transition: 'border-color 0.12s, background 0.12s, border-radius 0.12s',
               }}
             >{label}</button>
           );
@@ -302,15 +417,23 @@ function useDrag(id, position) {
 }
 
 /* ── shell ── */
-function Shell({ id, position, label, children, cols = 1, customWidth, accent = 'none', opacity = 100 }) {
+function Shell({
+  id, position, label, children,
+  cols = 1, rows = 1, customWidth, customHeight,
+  accent = 'none', opacity = 100, radius = 'normal',
+}) {
   const { removeWidget, resizeWidget, updateWidget } = useWidgets();
   const { onMouseDown } = useDrag(id, position);
   const { theme } = useUIPreference();
   const dark = theme !== 'light';
   const [menu, setMenu] = useState(null);
-  const width = customWidth ?? colsToWidth(cols);
+  const width  = customWidth  ?? colsToWidth(cols);
+  // Only set minHeight when rows > 1 — single-row widgets stay tight to their
+  // content, matching previous behavior.
+  const minHeight = customHeight ?? (rows > 1 ? rowsToHeight(rows) : undefined);
 
   const accentData = ACCENT_LIST.find(a => a.key === accent) || ACCENT_LIST[0];
+  const radiusData = RADIUS_STEPS.find(r => r.value === radius) || RADIUS_STEPS[1];
 
   // In light mode, widget bodies need a near-white background and a darker
   // border so they read against a light wallpaper. Children still use
@@ -337,16 +460,18 @@ function Shell({ id, position, label, children, cols = 1, customWidth, accent = 
       className="cursor-grab active:cursor-grabbing"
     >
       <div
-        className="rounded-2xl shadow-2xl"
+        className="shadow-2xl"
         style={{
           backgroundColor: surfaceBg,
           backgroundImage: accentData.bg
             ? `linear-gradient(135deg, ${accentData.bg} 0%, transparent 65%)`
             : 'none',
           border: `1px solid ${surfaceBorder}`,
+          borderRadius: radiusData.px,
+          minHeight,
           backdropFilter: opacity < 100 ? 'blur(24px) saturate(160%)' : undefined,
           WebkitBackdropFilter: opacity < 100 ? 'blur(24px) saturate(160%)' : undefined,
-          transition: 'background-color 0.2s, border-color 0.2s, background-image 0.2s',
+          transition: 'background-color 0.2s, border-color 0.2s, background-image 0.2s, border-radius 0.22s, min-height 0.22s cubic-bezier(0.34,1.56,0.64,1)',
           color: dark ? undefined : '#111',
         }}
       >
@@ -365,11 +490,13 @@ function Shell({ id, position, label, children, cols = 1, customWidth, accent = 
       </div>
       {menu && (
         <WidgetMenu
-          x={menu.x} y={menu.y} currentCols={cols}
-          currentAccent={accent} currentOpacity={opacity}
-          onResize={(c) => { resizeWidget(id, c); setMenu(null); }}
-          onAccentChange={(a) => { updateWidget(id, { accent: a }); setMenu(null); }}
-          onOpacityChange={(o) => { updateWidget(id, { opacity: o }); setMenu(null); }}
+          x={menu.x} y={menu.y}
+          currentCols={cols} currentRows={rows}
+          currentAccent={accent} currentOpacity={opacity} currentRadius={radius}
+          onResize={(size) => { resizeWidget(id, size); }}
+          onAccentChange={(a) => { updateWidget(id, { accent: a }); }}
+          onOpacityChange={(o) => { updateWidget(id, { opacity: o }); }}
+          onRadiusChange={(r) => { updateWidget(id, { radius: r }); }}
           onRemove={() => { removeWidget(id); setMenu(null); }}
           onClose={() => setMenu(null)}
         />
@@ -379,36 +506,44 @@ function Shell({ id, position, label, children, cols = 1, customWidth, accent = 
 }
 
 /* ── clock ── */
-function ClockWidget({ id, position, cols, accent, opacity, settings = {} }) {
-  const { format = '12h', showSeconds = true, showDate = true } = settings;
+// The live time display is split into a leaf so the 1Hz tick only re-renders
+// the clock digits — not the surrounding Shell (drag handler, styles, etc.).
+// Re-rendering the whole widget every second caused intermittent paint
+// glitches where the desktop flashed to bare wallpaper for a frame.
+function ClockBody({ format, showSeconds, showDate }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
-
   const timeOpts = { hour: '2-digit', minute: '2-digit', hour12: format === '12h' };
   const time = now.toLocaleTimeString([], timeOpts);
   const secs = now.toLocaleTimeString([], { second: '2-digit' }).slice(-2);
   const date = now.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
-
   return (
-    <Shell id={id} position={position} label="Clock" cols={cols} accent={accent} opacity={opacity}>
-      <div className="px-3.5 pb-3.5">
-        <div className="flex items-end gap-1">
-          <span className="text-[38px] font-black text-white/92 tabular-nums leading-none tracking-tight">{time}</span>
-          {showSeconds && (
-            <span className="text-[18px] font-bold text-white/30 tabular-nums leading-none mb-1">{secs}</span>
-          )}
-        </div>
-        {showDate && <p className="text-[11px] text-white/35 mt-1">{date}</p>}
+    <div className="px-3.5 pb-3.5">
+      <div className="flex items-end gap-1">
+        <span className="text-[38px] font-black text-white/92 tabular-nums leading-none tracking-tight">{time}</span>
+        {showSeconds && (
+          <span className="text-[18px] font-bold text-white/30 tabular-nums leading-none mb-1">{secs}</span>
+        )}
       </div>
+      {showDate && <p className="text-[11px] text-white/35 mt-1">{date}</p>}
+    </div>
+  );
+}
+
+function ClockWidget({ id, position, cols, rows, accent, opacity, radius, settings = {} }) {
+  const { format = '12h', showSeconds = true, showDate = true } = settings;
+  return (
+    <Shell id={id} position={position} label="Clock" cols={cols} rows={rows} accent={accent} opacity={opacity} radius={radius}>
+      <ClockBody format={format} showSeconds={showSeconds} showDate={showDate} />
     </Shell>
   );
 }
 
 /* ── study streak ── */
-function StudyStreakWidget({ id, position, cols, accent, opacity, settings = {} }) {
+function StudyStreakWidget({ id, position, cols, rows, accent, opacity, radius, settings = {} }) {
   const { showBest = true, showStatus = true, showWeekly = false } = settings;
   const { user } = useAuth();
   const streaks = user?.data?.studyStreaks || {};
@@ -430,7 +565,7 @@ function StudyStreakWidget({ id, position, cols, accent, opacity, settings = {} 
   })();
 
   return (
-    <Shell id={id} position={position} label="Study Streak" cols={cols} accent={accent} opacity={opacity}>
+    <Shell id={id} position={position} label="Study Streak" cols={cols} rows={rows} accent={accent} opacity={opacity} radius={radius}>
       <div className="px-3.5 pb-3.5">
         <div className="flex items-end gap-2">
           <Flame size={18} className="text-orange-400/80 mb-1 flex-shrink-0" />
@@ -461,7 +596,7 @@ function StudyStreakWidget({ id, position, cols, accent, opacity, settings = {} 
 }
 
 /* ── AI-generated custom widget ── */
-function CustomWidget({ id, position, cols, config = {}, accent, opacity }) {
+function CustomWidget({ id, position, cols, rows, config = {}, accent, opacity, radius }) {
   const { label = 'Widget', width = 220, blocks = [] } = config;
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -471,7 +606,7 @@ function CustomWidget({ id, position, cols, config = {}, accent, opacity }) {
   }, [blocks]);
 
   return (
-    <Shell id={id} position={position} label={label} cols={cols} customWidth={width} accent={accent} opacity={opacity}>
+    <Shell id={id} position={position} label={label} cols={cols} rows={rows} customWidth={width} accent={accent} opacity={opacity} radius={radius}>
       <div className="px-3.5 pb-3.5 space-y-2">
         {blocks.map((block, i) => {
           if (block.type === 'heading')  return <p key={i} className="text-[15px] font-bold text-white/85 leading-tight">{block.text}</p>;
@@ -526,7 +661,7 @@ function CustomWidget({ id, position, cols, config = {}, accent, opacity }) {
 }
 
 /* ── pomodoro timer ── */
-function PomodoroWidget({ id, position, cols, accent, opacity, settings = {} }) {
+function PomodoroWidget({ id, position, cols, rows, accent, opacity, radius, settings = {} }) {
   const { updateWidget } = useWidgets();
   const focusMin = settings.focusMin ?? 25;
   const breakMin = settings.breakMin ?? 5;
@@ -572,7 +707,7 @@ function PomodoroWidget({ id, position, cols, accent, opacity, settings = {} }) 
   const accentColor = phase === 'focus' ? '#f97316' : '#34d399';
 
   return (
-    <Shell id={id} position={position} label={phase === 'focus' ? 'Focus' : 'Break'} cols={cols} accent={accent} opacity={opacity}>
+    <Shell id={id} position={position} label={phase === 'focus' ? 'Focus' : 'Break'} cols={cols} rows={rows} accent={accent} opacity={opacity} radius={radius}>
       <div className="px-3.5 pb-3.5">
         <div className="flex items-end gap-1.5">
           <span className="text-[34px] font-black text-white/92 tabular-nums leading-none">
@@ -602,7 +737,7 @@ function PomodoroWidget({ id, position, cols, accent, opacity, settings = {} }) 
 }
 
 /* ── calendar (current month, today highlighted) ── */
-function CalendarWidget({ id, position, cols, accent, opacity }) {
+function CalendarWidget({ id, position, cols, rows, accent, opacity, radius }) {
   const today = new Date();
   const year  = today.getFullYear();
   const month = today.getMonth();
@@ -617,7 +752,7 @@ function CalendarWidget({ id, position, cols, accent, opacity }) {
   const dayLetters = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
   return (
-    <Shell id={id} position={position} label="Calendar" cols={cols} accent={accent} opacity={opacity}>
+    <Shell id={id} position={position} label="Calendar" cols={cols} rows={rows} accent={accent} opacity={opacity} radius={radius}>
       <div className="px-3.5 pb-3">
         <p className="text-[11px] font-semibold text-white/80 mb-1.5">{monthName}</p>
         <div className="grid grid-cols-7 gap-y-0.5 text-center">
@@ -649,7 +784,7 @@ function CalendarWidget({ id, position, cols, accent, opacity }) {
 }
 
 /* ── quick note (synced to a real entry in the Notes app) ── */
-function QuickNoteWidget({ id, position, cols, accent, opacity, settings = {} }) {
+function QuickNoteWidget({ id, position, cols, rows, accent, opacity, radius, settings = {} }) {
   const { updateWidget } = useWidgets();
   const text   = settings.text   ?? '';
   const noteId = settings.noteId ?? null;
@@ -687,7 +822,7 @@ function QuickNoteWidget({ id, position, cols, accent, opacity, settings = {} })
   }
 
   return (
-    <Shell id={id} position={position} label="Note" cols={cols} accent={accent} opacity={opacity}>
+    <Shell id={id} position={position} label="Note" cols={cols} rows={rows} accent={accent} opacity={opacity} radius={radius}>
       <div className="px-3.5 pb-3" data-nodrag>
         <textarea
           data-nodrag
@@ -699,7 +834,12 @@ function QuickNoteWidget({ id, position, cols, accent, opacity, settings = {} })
           // before the textarea can take focus.
           onMouseDown={e => e.stopPropagation()}
           className="w-full bg-transparent text-[12px] text-white/80 placeholder-white/25 resize-none outline-none leading-snug"
-          style={{ minHeight: cols >= 2 ? 92 : 76, fontFamily: 'inherit', cursor: 'text', userSelect: 'text' }}
+          // Textarea grows along with the widget's row span so the bigger
+          // canvas is actually usable for longer notes.
+          style={{
+            minHeight: rows >= 3 ? 410 : rows >= 2 ? 240 : (cols >= 2 ? 92 : 76),
+            fontFamily: 'inherit', cursor: 'text', userSelect: 'text',
+          }}
         />
       </div>
     </Shell>
@@ -707,7 +847,7 @@ function QuickNoteWidget({ id, position, cols, accent, opacity, settings = {} })
 }
 
 /* ── calculator (4-function, keyboard friendly) ── */
-function CalculatorWidget({ id, position, cols, accent, opacity }) {
+function CalculatorWidget({ id, position, cols, rows, accent, opacity, radius }) {
   const [display, setDisplay] = useState('0');
   const [prev, setPrev] = useState(null);
   const [op, setOp] = useState(null);
@@ -759,7 +899,7 @@ function CalculatorWidget({ id, position, cols, accent, opacity }) {
   );
 
   return (
-    <Shell id={id} position={position} label="Calculator" cols={cols} accent={accent} opacity={opacity}>
+    <Shell id={id} position={position} label="Calculator" cols={cols} rows={rows} accent={accent} opacity={opacity} radius={radius}>
       <div className="px-3 pb-3" data-nodrag>
         <div className="text-right text-[20px] font-black text-white/90 tabular-nums px-1 py-1 truncate">{display}</div>
         <div className="grid grid-cols-4 gap-1 mt-1">
@@ -786,7 +926,7 @@ function CalculatorWidget({ id, position, cols, accent, opacity }) {
 }
 
 /* ── to-do list (checklist persisted in widget settings) ── */
-function TodoWidget({ id, position, cols, accent, opacity, settings = {} }) {
+function TodoWidget({ id, position, cols, rows, accent, opacity, radius, settings = {} }) {
   const { updateWidget } = useWidgets();
   const items = Array.isArray(settings.items) ? settings.items : [];
   const [draft, setDraft] = useState('');
@@ -795,14 +935,16 @@ function TodoWidget({ id, position, cols, accent, opacity, settings = {} }) {
   function add() {
     const text = draft.trim();
     if (!text) return;
-    commit([...items, { text, done: false, id: Date.now() }].slice(0, 8));
+    // Cap scales with how tall the widget is so taller widgets can list more.
+    const cap = rows >= 3 ? 24 : rows >= 2 ? 16 : 8;
+    commit([...items, { text, done: false, id: Date.now() }].slice(0, cap));
     setDraft('');
   }
   function toggle(i)  { commit(items.map((it, j) => j === i ? { ...it, done: !it.done } : it)); }
   function remove(i)  { commit(items.filter((_, j) => j !== i)); }
 
   return (
-    <Shell id={id} position={position} label="Tasks" cols={cols} accent={accent} opacity={opacity}>
+    <Shell id={id} position={position} label="Tasks" cols={cols} rows={rows} accent={accent} opacity={opacity} radius={radius}>
       <div className="px-3 pb-3" data-nodrag>
         <ul className="space-y-1 mb-1.5">
           {items.length === 0 && <li className="text-[10.5px] text-white/30 italic px-0.5">Nothing yet — add a task.</li>}
@@ -844,12 +986,12 @@ const QUOTES = [
   { text: 'Discipline equals freedom.',                                  by: 'Jocko Willink' },
   { text: 'Slow is smooth, smooth is fast.',                             by: 'Navy SEAL adage' },
 ];
-function QuoteWidget({ id, position, cols, accent, opacity }) {
+function QuoteWidget({ id, position, cols, rows, accent, opacity, radius }) {
   // Stable across the day — index from the day-of-year so it rotates daily.
   const day = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0)) / 86400000);
   const q = QUOTES[day % QUOTES.length];
   return (
-    <Shell id={id} position={position} label="Quote" cols={cols} accent={accent} opacity={opacity}>
+    <Shell id={id} position={position} label="Quote" cols={cols} rows={rows} accent={accent} opacity={opacity} radius={radius}>
       <div className="px-3.5 pb-3.5">
         <p className="text-[13px] text-white/85 leading-snug italic">&ldquo;{q.text}&rdquo;</p>
         <p className="text-[10px] text-white/35 mt-1.5">— {q.by}</p>
@@ -882,8 +1024,10 @@ export default function DesktopWidgets() {
             id={w.id}
             position={w.position}
             cols={w.cols ?? 1}
+            rows={w.rows ?? 1}
             accent={w.accent}
             opacity={w.opacity ?? 100}
+            radius={w.radius ?? 'normal'}
             settings={w.settings || {}}
           />
         );
@@ -893,9 +1037,11 @@ export default function DesktopWidgets() {
             id={w.id}
             position={w.position}
             cols={w.cols ?? 1}
+            rows={w.rows ?? 1}
             config={w.config}
             accent={w.accent}
             opacity={w.opacity ?? 100}
+            radius={w.radius ?? 'normal'}
           />
         );
         return null;

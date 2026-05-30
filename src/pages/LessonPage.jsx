@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, RotateCcw, ChevronLeft, ChevronRight, Trophy } from 'lucide-react';
+import { ArrowLeft, RotateCcw, ChevronLeft, ChevronRight, Trophy, Sparkles } from 'lucide-react';
 import { getCurriculum, getLessonHistory, sendLessonMessage, resetLesson } from '../api/curriculum';
 import ChatContainer from '../components/chat/ChatContainer';
 import { errorChatMessage } from '../utils/aiErrors';
@@ -181,43 +181,71 @@ export default function LessonPage() {
     );
   }
 
-  const phaseHeader = (
-    <div>
-      <div className="px-4 py-3 border-b border-white/[0.07] bg-white/[0.03]">
-        <p className="text-xs font-medium text-white/50">
-          {currentUnit?.title} &middot; Lesson {currentIndex + 1} of {allLessons.length}
-        </p>
-        <h2 className="font-semibold text-white/90 text-sm mt-0.5">{currentLesson.title}</h2>
-      </div>
-      {currentLesson.type === 'lesson' && <PhaseIndicator currentPhase={phase} />}
-    </div>
-  );
+  const prevLesson = currentIndex > 0 ? allLessons[currentIndex - 1] : null;
+  const nextLesson = currentIndex < allLessons.length - 1 ? allLessons[currentIndex + 1] : null;
+  const phaseHeader = currentLesson.type === 'lesson' ? <PhaseIndicator currentPhase={phase} /> : null;
 
   return (
-    <div className="w-full max-w-5xl mx-auto flex flex-col flex-1 min-h-0">
-      {/* Breadcrumb */}
-      <div className="flex items-center justify-between mb-2 flex-shrink-0">
+    <div className="w-full max-w-5xl mx-auto flex flex-col flex-1 min-h-0 px-1">
+      {/* Slim breadcrumb row */}
+      <div className="flex items-center justify-between mb-4 flex-shrink-0">
         <button
           onClick={() => navigate(`/curriculum/${curriculumId}`)}
-          className="flex items-center gap-2 text-sm text-white/45 hover:text-white/80 transition-colors"
+          className="flex items-center gap-1.5 text-[12px] text-white/40 hover:text-white/85 transition-colors group"
         >
-          <ArrowLeft size={16} />
-          {curriculum.title}
+          <ArrowLeft size={13} className="group-hover:-translate-x-0.5 transition-transform" />
+          <span className="truncate max-w-[260px]">{curriculum.title}</span>
         </button>
-        <Button variant="ghost" size="sm" onClick={handleReset}>
-          <RotateCcw size={14} /> Reset
-        </Button>
+        <button
+          onClick={handleReset}
+          className="flex items-center gap-1.5 text-[12px] text-white/35 hover:text-white/75 transition-colors px-2 py-1 rounded-md hover:bg-white/[0.04]"
+        >
+          <RotateCcw size={12} /> Reset
+        </button>
       </div>
 
-      {/* Completion card */}
+      {/* Hero header — unit tag + big lesson title */}
+      <div className="mb-5 flex-shrink-0">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-blue-300/80 bg-blue-500/[0.10] border border-blue-400/[0.20] rounded-full px-2.5 py-0.5">
+            {currentUnit?.title || 'Lesson'}
+          </span>
+          <span className="text-[11px] text-white/35 font-mono tabular-nums">
+            {currentIndex + 1} / {allLessons.length}
+          </span>
+        </div>
+        <h1 className="text-[26px] sm:text-[30px] leading-[1.15] font-semibold tracking-[-0.015em] text-white/95">
+          {currentLesson.title}
+        </h1>
+      </div>
+
+      {/* Completion celebration — gradient card with trophy + XP */}
       {completed && completionData && (
-        <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl p-4 mb-2 flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <Trophy size={18} className="text-emerald-600" />
-            <span className="font-semibold text-emerald-700 dark:text-emerald-400">Lesson Complete!</span>
-            <span className="ml-auto text-sm font-bold text-emerald-600">+{completionData.xpEarned || 25} XP</span>
+        <div
+          className="relative overflow-hidden rounded-2xl p-5 mb-4 flex-shrink-0 border border-emerald-400/25"
+          style={{
+            background:
+              'radial-gradient(at 0% 0%, rgba(16,185,129,0.20) 0%, transparent 55%),' +
+              'radial-gradient(at 100% 100%, rgba(99,102,241,0.18) 0%, transparent 60%),' +
+              'rgba(16, 22, 26, 0.65)',
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 grid place-items-center shadow-[0_8px_20px_rgba(16,185,129,0.40)] flex-shrink-0">
+              <Trophy size={20} className="text-white drop-shadow" strokeWidth={2.2} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-[16px] font-semibold text-white">Lesson complete</h3>
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-emerald-200/90 bg-emerald-500/[0.18] border border-emerald-400/30 rounded-full px-2 py-0.5">
+                  <Sparkles size={10} /> +{completionData.xpEarned || 25} XP
+                </span>
+              </div>
+              {completionData.summary && (
+                <p className="text-[13px] text-white/65 mt-1 leading-snug">{completionData.summary}</p>
+              )}
+            </div>
           </div>
-          {completionData.summary && <p className="text-sm text-emerald-700 dark:text-emerald-300 mt-1">{completionData.summary}</p>}
         </div>
       )}
 
@@ -225,7 +253,7 @@ export default function LessonPage() {
           Sits above the chat so the student sees the assignment + can either
           submit there or use the chat below to work through the content first. */}
       {curriculum.graded && currentLesson.type === 'lesson' && (
-        <div className="mb-3 flex-shrink-0">
+        <div className="mb-4 flex-shrink-0">
           <AssignmentCard
             curriculumId={curriculumId}
             lessonId={lessonId}
@@ -252,15 +280,56 @@ export default function LessonPage() {
         onAiInstruct={handleAiInstruct}
       />
 
-      {/* Navigation */}
-      <div className="flex items-center justify-between mt-2 flex-shrink-0">
-        <Button variant="ghost" size="sm" onClick={() => navigateToLesson(currentIndex - 1)} disabled={currentIndex <= 0}>
-          <ChevronLeft size={16} /> Prev
-        </Button>
-        <Button variant="ghost" size="sm" onClick={() => navigateToLesson(currentIndex + 1)} disabled={currentIndex >= allLessons.length - 1}>
-          Next <ChevronRight size={16} />
-        </Button>
+      {/* Prev / Next nav — proper outlined buttons with lesson previews */}
+      <div className="grid grid-cols-2 gap-3 mt-4 flex-shrink-0">
+        <LessonNavButton
+          dir="prev"
+          lesson={prevLesson}
+          onClick={() => navigateToLesson(currentIndex - 1)}
+        />
+        <LessonNavButton
+          dir="next"
+          lesson={nextLesson}
+          onClick={() => navigateToLesson(currentIndex + 1)}
+        />
       </div>
     </div>
+  );
+}
+
+// Prev/Next pill: arrow + "Previous" / "Next" label, then the
+// adjacent lesson title underneath. Greys out + disables when there's
+// nothing to navigate to. Hovering nudges the arrow in its direction.
+function LessonNavButton({ dir, lesson, onClick }) {
+  const isPrev = dir === 'prev';
+  const disabled = !lesson;
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`group flex items-center gap-3 rounded-xl border px-4 py-3 text-left transition-all ${
+        disabled
+          ? 'border-white/[0.05] bg-white/[0.015] opacity-40 cursor-not-allowed'
+          : 'border-white/[0.08] bg-white/[0.025] hover:bg-white/[0.05] hover:border-white/[0.14] active:scale-[0.99]'
+      } ${isPrev ? '' : 'flex-row-reverse text-right'}`}
+    >
+      <div className={`w-8 h-8 rounded-lg grid place-items-center flex-shrink-0 transition-all ${
+        disabled
+          ? 'bg-white/[0.03] text-white/30'
+          : 'bg-white/[0.06] text-white/65 group-hover:bg-white/[0.12] group-hover:text-white'
+      }`}>
+        {isPrev
+          ? <ChevronLeft size={16} className="group-hover:-translate-x-0.5 transition-transform" strokeWidth={2.2} />
+          : <ChevronRight size={16} className="group-hover:translate-x-0.5 transition-transform" strokeWidth={2.2} />}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-[10.5px] font-bold uppercase tracking-[0.14em] text-white/35">
+          {isPrev ? 'Previous' : 'Next'}
+        </p>
+        <p className={`text-[13px] mt-0.5 truncate ${disabled ? 'text-white/30' : 'text-white/85'}`}>
+          {lesson?.title || '—'}
+        </p>
+      </div>
+    </button>
   );
 }

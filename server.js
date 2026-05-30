@@ -321,11 +321,13 @@ function createDefaultData() {
     goals: [],
     flashcardDecks: [],
     notes: [],
-    // Obsidian-style knowledge graph over the user's notes. Nodes either
-    // mirror an existing note (source='note', noteId set) or are AI/manual
-    // topic placeholders (source='ai' | 'topic'). Edges are undirected and
-    // identified by the unordered pair (a, b). Positions persist so the
-    // canvas comes back exactly how the user left it.
+    // Obsidian-style knowledge graph(s) over the user's notes. Each map
+    // has its own nodes+edges. The first map is the "default" — note
+    // mirroring (auto-add a node for every note) only happens on it.
+    // Other maps are user-curated.
+    noteMaps: [{ id: 'default', name: 'Main Map', color: '#a78bfa', createdAt: 0, isDefault: true, nodes: [], edges: [] }],
+    // Legacy single-graph field — kept null on new accounts. Old accounts
+    // get migrated into noteMaps[] by migrateUserData.
     noteGraph: { nodes: [], edges: [] },
     studySessions: [],
     assessmentHistory: [],
@@ -411,6 +413,26 @@ function migrateUserData(data) {
         if (unit.locked) unit.locked = false;
       }
     }
+  }
+  // ── noteMaps migration ───────────────────────────────────────────────
+  // Old accounts have a single `noteGraph`. New accounts get an array of
+  // `noteMaps`. Convert the legacy field into the first (default) map so
+  // existing graphs survive the upgrade.
+  if (!Array.isArray(data.noteMaps) || data.noteMaps.length === 0) {
+    const legacy = data.noteGraph && typeof data.noteGraph === 'object' ? data.noteGraph : null;
+    data.noteMaps = [{
+      id: 'default',
+      name: 'Main Map',
+      color: '#a78bfa',
+      createdAt: Date.now(),
+      isDefault: true,
+      nodes: Array.isArray(legacy?.nodes) ? legacy.nodes : [],
+      edges: Array.isArray(legacy?.edges) ? legacy.edges : [],
+    }];
+  }
+  // Make sure exactly one map is flagged as default. If none, mark the first.
+  if (!data.noteMaps.some(m => m.isDefault)) {
+    data.noteMaps[0].isDefault = true;
   }
   return data;
 }
@@ -622,6 +644,53 @@ app.post('/api/auth/login', async (req, res) => {
     console.error('Login error:', e);
     res.status(500).json({ error: 'Login failed' });
   }
+});
+
+// Dev login — bypasses OAuth for local testing. Creates / reuses a
+// dev account (default dev@covalent.test), marks it onboarded, and
+// enables parent mode with PIN 1111 so the parent-flow tests work.
+app.post('/api/auth/dev-login', async (req, res) => {
+  const { name, email } = req.body;
+  const devEmail = email || 'dev@covalent.test';
+  const devName = name || 'Dev User';
+
+  const users = loadUsers();
+  if (!users[devEmail]) {
+    const defaultData = createDefaultData();
+    defaultData.preferences.onboarded = true;
+    users[devEmail] = {
+      id: crypto.randomUUID(),
+      email: devEmail,
+      name: devName,
+      password: '$2b$10$HfkHMN4epGa7NjmwAduRwOYtyQ0O8RfjrXCg1brJ5/NVDMy734y9.',
+      verified: true,
+      createdAt: new Date().toISOString(),
+      data: defaultData,
+    };
+  } else if (!users[devEmail].data?.preferences?.onboarded) {
+    users[devEmail].data.preferences.onboarded = true;
+  }
+
+  const devUser = users[devEmail];
+  devUser.data = migrateUserData(devUser.data);
+  if (!devUser.data.parent.enabled) {
+    devUser.data.parent.enabled = true;
+    devUser.data.parent.pinHash = await hashPin('1111');
+    devUser.data.parent.lastParentUnlockAt = new Date().toISOString();
+  } else if (!devUser.data.parent.pinHash) {
+    devUser.data.parent.pinHash = await hashPin('1111');
+  }
+  saveUsers(users);
+
+  const token = generateToken();
+  sessions[token] = { id: devUser.id, email: devEmail };
+  saveSessions();
+
+  res.json({
+    success: true,
+    token,
+    user: { id: devUser.id, email: devEmail, name: devUser.name, data: devUser.data },
+  });
 });
 
 // Google OAuth
@@ -4470,64 +4539,67 @@ app.post('/api/notes/:nid/generate-summary', authMiddleware, async (req, res) =>
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ===== NOTE GRAPH (Obsidian-style knowledge map) =====
+// ===== NOTE MAPS (Obsidian-style knowledge graphs) =====
 //
-// One graph per user, stored on user.data.noteGraph. Every existing note
-// is auto-mirrored as a node on first read so the canvas isn't empty for
-// users who have notes but haven't opened the map. Manual/AI nodes carry
-// source='topic' | 'ai' and don't need a backing note.
+// A user has many `noteMaps`. The first one flagged `isDefault: true` is
+// the auto-sync map — every existing note is mirrored as a node here so
+// the canvas isn't empty for users who have notes but haven't opened the
+// map. Other maps are user-curated.
+//
+// The legacy `noteGraph` field (single graph) is kept in sync with the
+// default map for any older code path that still reads it.
 
 const GRAPH_PALETTE = ['#60a5fa', '#a78bfa', '#34d399', '#fbbf24', '#f472b6', '#22d3ee', '#fb7185', '#c084fc'];
+const MAP_PALETTE = ['#a78bfa', '#60a5fa', '#34d399', '#fbbf24', '#f472b6', '#22d3ee'];
 
-function ensureNoteGraph(userData) {
-  if (!userData.noteGraph || typeof userData.noteGraph !== 'object') {
-    userData.noteGraph = { nodes: [], edges: [] };
+function ensureNoteMaps(userData) {
+  if (!Array.isArray(userData.noteMaps) || userData.noteMaps.length === 0) {
+    userData.noteMaps = [{
+      id: 'default', name: 'Main Map', color: '#a78bfa',
+      createdAt: Date.now(), isDefault: true, nodes: [], edges: [],
+    }];
   }
-  if (!Array.isArray(userData.noteGraph.nodes)) userData.noteGraph.nodes = [];
-  if (!Array.isArray(userData.noteGraph.edges)) userData.noteGraph.edges = [];
-  return userData.noteGraph;
+  if (!userData.noteMaps.some(m => m.isDefault)) {
+    userData.noteMaps[0].isDefault = true;
+  }
+  for (const m of userData.noteMaps) {
+    if (!Array.isArray(m.nodes)) m.nodes = [];
+    if (!Array.isArray(m.edges)) m.edges = [];
+  }
+  return userData.noteMaps;
 }
 
-// Mirror every existing note as a graph node if it isn't there yet.
-// Drops note-backed nodes whose note has been deleted. Mutates the
-// graph in place and returns true when something changed (so callers
-// can decide whether to persist).
-function syncGraphWithNotes(userData) {
-  const graph = ensureNoteGraph(userData);
-  const notes = Array.isArray(userData.notes) ? userData.notes : [];
+function getDefaultMap(userData) {
+  const maps = ensureNoteMaps(userData);
+  return maps.find(m => m.isDefault) || maps[0];
+}
+
+function findMap(userData, mapId) {
+  const maps = ensureNoteMaps(userData);
+  return maps.find(m => m.id === mapId) || null;
+}
+
+// Legacy alias. The single-graph field mirrors the default map so any
+// route still reading `noteGraph` keeps working.
+function ensureNoteGraph(userData) {
+  const def = getDefaultMap(userData);
+  userData.noteGraph = { nodes: def.nodes, edges: def.edges };
+  return def;
+}
+
+// Cleanup pass for a single map: drops note-backed nodes whose note was
+// deleted, refreshes labels when a note title changes, and drops orphan
+// edges. Does NOT auto-add nodes — pulling notes into a map is an
+// explicit user action (client picks them with "Pull from notes").
+function cleanupMap(map, notes) {
   let changed = false;
-
   const liveNoteIds = new Set(notes.map(n => n.id));
-  const beforeLen = graph.nodes.length;
-  graph.nodes = graph.nodes.filter(n => n.source !== 'note' || liveNoteIds.has(n.noteId));
-  if (graph.nodes.length !== beforeLen) changed = true;
+  const beforeLen = map.nodes.length;
+  map.nodes = map.nodes.filter(n => n.source !== 'note' || liveNoteIds.has(n.noteId));
+  if (map.nodes.length !== beforeLen) changed = true;
 
-  const knownNoteIds = new Set(graph.nodes.filter(n => n.source === 'note').map(n => n.noteId));
-
-  // Lay out new note-nodes on a soft spiral around (0,0) so they don't
-  // all stack on one point — the client's force-layout will spread
-  // things out, but a good starting position avoids the initial pile-up.
-  let spiralIdx = graph.nodes.length;
-  for (const note of notes) {
-    if (knownNoteIds.has(note.id)) continue;
-    const angle = spiralIdx * 0.9;
-    const radius = 90 + spiralIdx * 28;
-    graph.nodes.push({
-      id: `note_${note.id}`,
-      noteId: note.id,
-      label: note.title || 'Untitled Note',
-      source: 'note',
-      color: GRAPH_PALETTE[spiralIdx % GRAPH_PALETTE.length],
-      x: Math.cos(angle) * radius,
-      y: Math.sin(angle) * radius,
-    });
-    spiralIdx += 1;
-    changed = true;
-  }
-
-  // Refresh the label on note-backed nodes if the title changed downstream.
   const byNoteId = new Map(notes.map(n => [n.id, n]));
-  for (const node of graph.nodes) {
+  for (const node of map.nodes) {
     if (node.source !== 'note') continue;
     const n = byNoteId.get(node.noteId);
     if (n && n.title && node.label !== n.title) {
@@ -4536,15 +4608,156 @@ function syncGraphWithNotes(userData) {
     }
   }
 
-  // Drop any edge that references a now-missing node.
-  const liveNodeIds = new Set(graph.nodes.map(n => n.id));
-  const beforeEdges = graph.edges.length;
-  graph.edges = graph.edges.filter(e => liveNodeIds.has(e.from) && liveNodeIds.has(e.to));
-  if (graph.edges.length !== beforeEdges) changed = true;
-
+  const liveNodeIds = new Set(map.nodes.map(n => n.id));
+  const beforeEdges = map.edges.length;
+  map.edges = map.edges.filter(e => liveNodeIds.has(e.from) && liveNodeIds.has(e.to));
+  if (map.edges.length !== beforeEdges) changed = true;
   return changed;
 }
 
+// Legacy helper kept so any older callsite still compiles. It now only
+// cleans up — it never auto-adds note nodes.
+function syncGraphWithNotes(userData) {
+  const notes = Array.isArray(userData.notes) ? userData.notes : [];
+  let changed = false;
+  for (const map of ensureNoteMaps(userData)) {
+    if (cleanupMap(map, notes)) changed = true;
+  }
+  return changed;
+}
+
+// Shared sanitize: enforce shape and size limits on a {nodes, edges} pair.
+function sanitizeGraph(nodes, edges) {
+  const safeNodes = (nodes || []).slice(0, 500).map(n => ({
+    id: String(n.id || crypto.randomUUID()).slice(0, 80),
+    noteId: n.noteId ? String(n.noteId).slice(0, 80) : null,
+    label: String(n.label || 'Untitled').slice(0, 120),
+    source: (n.source === 'note' || n.source === 'ai' || n.source === 'topic') ? n.source : 'topic',
+    color: typeof n.color === 'string' ? n.color.slice(0, 24) : GRAPH_PALETTE[0],
+    x: Number.isFinite(n.x) ? Number(n.x) : 0,
+    y: Number.isFinite(n.y) ? Number(n.y) : 0,
+  }));
+  const liveIds = new Set(safeNodes.map(n => n.id));
+  const seenEdgeKey = new Set();
+  const safeEdges = [];
+  for (const e of (edges || []).slice(0, 2000)) {
+    const a = String(e.from || '');
+    const b = String(e.to || '');
+    if (!a || !b || a === b) continue;
+    if (!liveIds.has(a) || !liveIds.has(b)) continue;
+    const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+    if (seenEdgeKey.has(key)) continue;
+    seenEdgeKey.add(key);
+    safeEdges.push({ from: a, to: b, label: e.label ? String(e.label).slice(0, 60) : '' });
+  }
+  return { nodes: safeNodes, edges: safeEdges };
+}
+
+// ── Multi-map endpoints ─────────────────────────────────────────────
+// GET /api/note-maps → list summaries (no node bodies).
+app.get('/api/note-maps', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    syncGraphWithNotes(users[email].data);
+    saveUsers(users);
+    const maps = users[email].data.noteMaps.map(m => ({
+      id: m.id,
+      name: m.name,
+      color: m.color,
+      createdAt: m.createdAt,
+      isDefault: !!m.isDefault,
+      nodeCount: m.nodes.length,
+      edgeCount: m.edges.length,
+    }));
+    res.json({ maps });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/note-maps → create a new (non-default) map.
+app.post('/api/note-maps', authMiddleware, (req, res) => {
+  try {
+    const { name, color } = req.body || {};
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    if (users[email].data.noteMaps.length >= 20) {
+      return res.status(400).json({ error: 'Map limit reached (20).' });
+    }
+    const map = {
+      id: `map_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+      name: String(name || 'New Map').slice(0, 80) || 'New Map',
+      color: typeof color === 'string' ? color.slice(0, 24) : MAP_PALETTE[users[email].data.noteMaps.length % MAP_PALETTE.length],
+      createdAt: Date.now(),
+      isDefault: false,
+      nodes: [], edges: [],
+    };
+    users[email].data.noteMaps.push(map);
+    saveUsers(users);
+    res.json({ map });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/note-maps/:mid → full map body.
+app.get('/api/note-maps/:mid', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const map = findMap(users[email].data, req.params.mid);
+    if (!map) return res.status(404).json({ error: 'Map not found' });
+    // Only the default map auto-syncs notes; others are user-curated.
+    if (map.isDefault) {
+      const changed = syncGraphWithNotes(users[email].data);
+      if (changed) saveUsers(users);
+    }
+    res.json({ map });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/note-maps/:mid → update name / color / nodes / edges.
+app.put('/api/note-maps/:mid', authMiddleware, (req, res) => {
+  try {
+    const { name, color, nodes, edges } = req.body || {};
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const map = findMap(users[email].data, req.params.mid);
+    if (!map) return res.status(404).json({ error: 'Map not found' });
+    if (typeof name === 'string') map.name = name.slice(0, 80) || map.name;
+    if (typeof color === 'string') map.color = color.slice(0, 24);
+    if (Array.isArray(nodes) && Array.isArray(edges)) {
+      const sanitized = sanitizeGraph(nodes, edges);
+      map.nodes = sanitized.nodes;
+      map.edges = sanitized.edges;
+    }
+    saveUsers(users);
+    res.json({ map });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/note-maps/:mid → delete a map. Cannot delete the default.
+app.delete('/api/note-maps/:mid', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const map = findMap(users[email].data, req.params.mid);
+    if (!map) return res.status(404).json({ error: 'Map not found' });
+    if (map.isDefault) return res.status(400).json({ error: 'Cannot delete the default map.' });
+    users[email].data.noteMaps = users[email].data.noteMaps.filter(m => m.id !== map.id);
+    saveUsers(users);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Legacy single-graph endpoints (kept as aliases for the default map)
 app.get('/api/note-graph', authMiddleware, (req, res) => {
   try {
     const users = loadUsers();
@@ -4553,7 +4766,8 @@ app.get('/api/note-graph', authMiddleware, (req, res) => {
     users[email].data = migrateUserData(users[email].data);
     const changed = syncGraphWithNotes(users[email].data);
     if (changed) saveUsers(users);
-    res.json({ graph: users[email].data.noteGraph });
+    const def = getDefaultMap(users[email].data);
+    res.json({ graph: { nodes: def.nodes, edges: def.edges } });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -4567,122 +4781,109 @@ app.put('/api/note-graph', authMiddleware, (req, res) => {
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
     users[email].data = migrateUserData(users[email].data);
-
-    // Sanitize: only keep the fields we own. Drops user-injected keys.
-    const safeNodes = nodes.slice(0, 500).map(n => ({
-      id: String(n.id || crypto.randomUUID()).slice(0, 80),
-      noteId: n.noteId ? String(n.noteId).slice(0, 80) : null,
-      label: String(n.label || 'Untitled').slice(0, 120),
-      source: (n.source === 'note' || n.source === 'ai' || n.source === 'topic') ? n.source : 'topic',
-      color: typeof n.color === 'string' ? n.color.slice(0, 24) : GRAPH_PALETTE[0],
-      x: Number.isFinite(n.x) ? Number(n.x) : 0,
-      y: Number.isFinite(n.y) ? Number(n.y) : 0,
-    }));
-    const liveIds = new Set(safeNodes.map(n => n.id));
-    const seenEdgeKey = new Set();
-    const safeEdges = [];
-    for (const e of edges.slice(0, 2000)) {
-      const a = String(e.from || '');
-      const b = String(e.to || '');
-      if (!a || !b || a === b) continue;
-      if (!liveIds.has(a) || !liveIds.has(b)) continue;
-      const key = a < b ? `${a}|${b}` : `${b}|${a}`;
-      if (seenEdgeKey.has(key)) continue;
-      seenEdgeKey.add(key);
-      safeEdges.push({ from: a, to: b, label: e.label ? String(e.label).slice(0, 60) : '' });
-    }
-
-    users[email].data.noteGraph = { nodes: safeNodes, edges: safeEdges };
+    const def = getDefaultMap(users[email].data);
+    const sanitized = sanitizeGraph(nodes, edges);
+    def.nodes = sanitized.nodes;
+    def.edges = sanitized.edges;
     saveUsers(users);
-    res.json({ graph: users[email].data.noteGraph });
+    res.json({ graph: { nodes: def.nodes, edges: def.edges } });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Ask Gemini for N new related concepts to add to the map. We hand it
-// the existing labels (so it doesn't propose duplicates) and any
-// optional focus text from the user, and expect back a small JSON list
-// of { label, rationale, connectTo[] } where connectTo references
-// existing labels the new node should link to.
+// Shared AI-suggestion helper used by both legacy and per-map suggest
+// routes. Returns { suggestions } or a Response-ready { error }.
+async function buildGraphSuggestions(userData, graph, { focus, focusNodeId, count }) {
+  const n = Math.max(2, Math.min(8, Number(count) || 4));
+  if (graph.nodes.length === 0 && !focus) {
+    return { error: 'Add a note or a focus topic first.', status: 400 };
+  }
+  const notesById = new Map((userData.notes || []).map(nt => [nt.id, nt]));
+  const contextBlobs = [];
+  for (const node of graph.nodes.slice(0, 30)) {
+    if (node.source !== 'note' || !node.noteId) continue;
+    const note = notesById.get(node.noteId);
+    if (!note) continue;
+    const body = String(note.mainNotes || '').slice(0, 400);
+    if (body) contextBlobs.push(`- ${node.label}: ${body.replace(/\s+/g, ' ').trim()}`);
+  }
+  const existingLabels = graph.nodes.map(n => n.label);
+  const focusNode = focusNodeId ? graph.nodes.find(n => n.id === focusNodeId) : null;
+  const system = 'You expand a student\'s study knowledge graph. Output ONLY valid JSON, no markdown, no preamble.';
+  const userPrompt = [
+    `Suggest ${n} NEW concept nodes to add to the graph.`,
+    focusNode ? `Anchor the suggestions around the existing node "${focusNode.label}".` : '',
+    focus && String(focus).trim() ? `Student wants more depth on: ${String(focus).trim()}` : '',
+    existingLabels.length ? `Do NOT propose anything that duplicates an existing label. Existing labels:\n${existingLabels.map(l => `- ${l}`).join('\n')}` : '',
+    contextBlobs.length ? `Excerpts from existing notes (use as context):\n${contextBlobs.join('\n')}` : '',
+    '',
+    'Return this exact JSON shape and nothing else:',
+    '{"suggestions":[{"label":"short concept name (<=40 chars)","rationale":"one short sentence on why it belongs","connectTo":["label of existing node it relates to", "..."]}]}',
+    'Each connectTo entry MUST exactly match an existing label. 1-3 connections per suggestion.',
+  ].filter(Boolean).join('\n\n');
+  const result = await callGemini(
+    system,
+    [{ role: 'user', content: userPrompt }],
+    GEMINI_FLASH_LITE,
+    1024,
+    { jsonMode: true, temperature: 0.7, disableThinking: true },
+  );
+  if (!result.success) return { error: 'AI call failed', status: 500 };
+  const parsed = parseAIJson(result.data.content?.[0]?.text || '');
+  if (!parsed || !Array.isArray(parsed.suggestions)) {
+    return { error: 'AI did not return suggestions', status: 500 };
+  }
+  const existingByLabel = new Map(graph.nodes.map(node => [node.label.toLowerCase(), node]));
+  const suggestions = parsed.suggestions.slice(0, n).map((s, i) => {
+    const rawLabel = String(s?.label || '').trim().slice(0, 60);
+    if (!rawLabel) return null;
+    if (existingByLabel.has(rawLabel.toLowerCase())) return null;
+    const rawConnect = Array.isArray(s?.connectTo) ? s.connectTo : [];
+    const connectIds = [];
+    for (const targetLabel of rawConnect) {
+      const m = existingByLabel.get(String(targetLabel || '').toLowerCase().trim());
+      if (m) connectIds.push(m.id);
+    }
+    if (focusNode && !connectIds.includes(focusNode.id)) connectIds.unshift(focusNode.id);
+    return {
+      tempId: `sugg_${Date.now()}_${i}`,
+      label: rawLabel,
+      rationale: String(s?.rationale || '').slice(0, 200),
+      connectTo: connectIds,
+    };
+  }).filter(Boolean);
+  return { suggestions };
+}
+
+// Per-map suggest: scope AI suggestions to a specific map.
+app.post('/api/note-maps/:mid/suggest', authMiddleware, async (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const map = findMap(users[email].data, req.params.mid);
+    if (!map) return res.status(404).json({ error: 'Map not found' });
+    if (map.isDefault) syncGraphWithNotes(users[email].data);
+    const out = await buildGraphSuggestions(users[email].data, map, req.body || {});
+    if (out.error) return res.status(out.status || 500).json({ error: out.error });
+    res.json(out);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Legacy single-graph suggest — now scoped to the default map.
 app.post('/api/note-graph/suggest', authMiddleware, async (req, res) => {
   try {
     const { focus, focusNodeId, count } = req.body || {};
-    const n = Math.max(2, Math.min(8, Number(count) || 4));
+    void focus; void focusNodeId; void count;  // body passed through below
     const users = loadUsers();
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
     users[email].data = migrateUserData(users[email].data);
     syncGraphWithNotes(users[email].data);
-
-    const graph = users[email].data.noteGraph;
-    if (graph.nodes.length === 0 && !focus) {
-      return res.status(400).json({ error: 'Add a note or a focus topic first.' });
-    }
-
-    // Pull a few sentences of context from any note-backed nodes so the
-    // suggestions are grounded in what the student is actually studying.
-    const notesById = new Map((users[email].data.notes || []).map(nt => [nt.id, nt]));
-    const contextBlobs = [];
-    for (const node of graph.nodes.slice(0, 30)) {
-      if (node.source !== 'note' || !node.noteId) continue;
-      const note = notesById.get(node.noteId);
-      if (!note) continue;
-      const body = String(note.mainNotes || '').slice(0, 400);
-      if (body) contextBlobs.push(`- ${node.label}: ${body.replace(/\s+/g, ' ').trim()}`);
-    }
-
-    const existingLabels = graph.nodes.map(n => n.label);
-    const focusNode = focusNodeId ? graph.nodes.find(n => n.id === focusNodeId) : null;
-
-    const system = 'You expand a student\'s study knowledge graph. Output ONLY valid JSON, no markdown, no preamble.';
-    const userPrompt = [
-      `Suggest ${n} NEW concept nodes to add to the graph.`,
-      focusNode ? `Anchor the suggestions around the existing node "${focusNode.label}".` : '',
-      focus && String(focus).trim() ? `Student wants more depth on: ${String(focus).trim()}` : '',
-      existingLabels.length ? `Do NOT propose anything that duplicates an existing label. Existing labels:\n${existingLabels.map(l => `- ${l}`).join('\n')}` : '',
-      contextBlobs.length ? `Excerpts from existing notes (use as context):\n${contextBlobs.join('\n')}` : '',
-      '',
-      'Return this exact JSON shape and nothing else:',
-      '{"suggestions":[{"label":"short concept name (<=40 chars)","rationale":"one short sentence on why it belongs","connectTo":["label of existing node it relates to", "..."]}]}',
-      'Each connectTo entry MUST exactly match an existing label. 1-3 connections per suggestion.',
-    ].filter(Boolean).join('\n\n');
-
-    const result = await callGemini(
-      system,
-      [{ role: 'user', content: userPrompt }],
-      GEMINI_FLASH_LITE,
-      1024,
-      { jsonMode: true, temperature: 0.7, disableThinking: true },
-    );
-    if (!result.success) return res.status(500).json({ error: 'AI call failed' });
-    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
-    if (!parsed || !Array.isArray(parsed.suggestions)) {
-      return res.status(500).json({ error: 'AI did not return suggestions' });
-    }
-
-    const existingByLabel = new Map(graph.nodes.map(node => [node.label.toLowerCase(), node]));
-    const suggestions = parsed.suggestions.slice(0, n).map((s, i) => {
-      const rawLabel = String(s?.label || '').trim().slice(0, 60);
-      if (!rawLabel) return null;
-      // Skip duplicates the model proposed despite our instructions.
-      if (existingByLabel.has(rawLabel.toLowerCase())) return null;
-      const rawConnect = Array.isArray(s?.connectTo) ? s.connectTo : [];
-      const connectIds = [];
-      for (const targetLabel of rawConnect) {
-        const m = existingByLabel.get(String(targetLabel || '').toLowerCase().trim());
-        if (m) connectIds.push(m.id);
-      }
-      // Always link new suggestions back to the focus node when one is set
-      // and the AI didn't already wire it up.
-      if (focusNode && !connectIds.includes(focusNode.id)) connectIds.unshift(focusNode.id);
-      return {
-        tempId: `sugg_${Date.now()}_${i}`,
-        label: rawLabel,
-        rationale: String(s?.rationale || '').slice(0, 200),
-        connectTo: connectIds,
-      };
-    }).filter(Boolean);
-
-    res.json({ suggestions });
+    const graph = getDefaultMap(users[email].data);
+    const out = await buildGraphSuggestions(users[email].data, graph, req.body || {});
+    if (out.error) return res.status(out.status || 500).json({ error: out.error });
+    res.json(out);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -9053,6 +9254,8 @@ function publicMatchState(match) {
     category: match.category,
     difficulty: match.difficulty,
     revealSpeedMs: match.revealSpeedMs,
+    scoringFormat: match.scoringFormat || 'standard',
+    maxPlayers: QUIZBOWL_MAX_PLAYERS,
   };
 }
 
@@ -9091,6 +9294,7 @@ app.post('/api/quizbowl/match', authMiddleware, (req, res) => {
       hostId: req.userId,
       scores: { [req.userId]: 0 },
       category: 'Mixed', difficulty: 'Medium', revealSpeedMs: 140,
+      scoringFormat: 'standard',
       createdAt: Date.now(),
       lastActivity: Date.now(),
     };
@@ -9099,7 +9303,39 @@ app.post('/api/quizbowl/match', authMiddleware, (req, res) => {
   } catch (e) { console.error('match create failed', e); res.status(500).json({ error: e.message }); }
 });
 
-// POST /api/quizbowl/match/:code/join — second player joins.
+// Max players allowed in a single QB match. Bumped from the original
+// strict 1v1 cap so a full tournament room (8 humans) can play together.
+const QUIZBOWL_MAX_PLAYERS = 8;
+
+// Scoring format rules mirroring the client. powerThreshold is the buzz
+// ratio (elapsed / fully-read time) below which a correct buzz earns
+// powerPts instead of getPts. negPts applies on incorrect buzzes.
+// "standard" preserves the legacy multiplayer behavior: +1 per correct,
+// no neg penalty. The IAC and JV presets apply real tournament rules.
+const QUIZBOWL_FORMATS = {
+  standard:     { powerThreshold: null, powerPts: null, getPts: 1,  negPts: 0  },
+  'iac-prelim': { powerThreshold: 0.5,  powerPts: 15,   getPts: 10, negPts: -5 },
+  'iac-playoff':{ powerThreshold: 0.4,  powerPts: 15,   getPts: 10, negPts: -5 },
+  jv:           { powerThreshold: null, powerPts: null, getPts: 10, negPts: 0  },
+};
+
+function quizbowlScoreForBuzz(match, { correct }) {
+  const fmt = QUIZBOWL_FORMATS[match.scoringFormat] || QUIZBOWL_FORMATS.standard;
+  if (!correct) return fmt.negPts || 0;
+  if (fmt.powerThreshold != null) {
+    const q = match.questions[match.currentIdx];
+    if (q) {
+      const words = (q.text || '').split(/\s+/).filter(Boolean).length || 1;
+      const totalReadMs = words * (match.revealSpeedMs || 140);
+      const elapsed = (match.buzzAt || Date.now()) - (match.questionStartedAt || Date.now());
+      const ratio = Math.max(0, Math.min(1, elapsed / Math.max(1, totalReadMs)));
+      if (ratio < fmt.powerThreshold) return fmt.powerPts;
+    }
+  }
+  return fmt.getPts;
+}
+
+// POST /api/quizbowl/match/:code/join — additional player joins.
 app.post('/api/quizbowl/match/:code/join', authMiddleware, (req, res) => {
   const match = matches.get(req.params.code);
   if (!match) return res.status(404).json({ error: 'Match not found' });
@@ -9107,7 +9343,7 @@ app.post('/api/quizbowl/match/:code/join', authMiddleware, (req, res) => {
     match.lastActivity = Date.now();
     return res.json({ match: publicMatchState(match) });
   }
-  if (match.players.length >= 2) return res.status(409).json({ error: 'Match is full' });
+  if (match.players.length >= QUIZBOWL_MAX_PLAYERS) return res.status(409).json({ error: 'Match is full' });
   if (match.state !== 'waiting') return res.status(409).json({ error: 'Match already started' });
 
   const users = loadUsers();
@@ -9167,7 +9403,7 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
   const match = matches.get(req.params.code);
   if (!match) return res.status(404).json({ error: 'Match not found' });
   if (match.hostId !== req.userId) return res.status(403).json({ error: 'Only the host can start' });
-  if (match.players.length < 2) return res.status(409).json({ error: 'Waiting for second player' });
+  if (match.players.length < 2) return res.status(409).json({ error: 'Waiting for more players' });
   if (match.state === 'generating' || match.state === 'playing') {
     return res.status(409).json({ error: 'Match already starting' });
   }
@@ -9177,12 +9413,14 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
     difficulty = match.difficulty || 'Medium',
     questionCount = 10,
     revealSpeedMs = match.revealSpeedMs || 140,
+    scoringFormat = match.scoringFormat || 'standard',
   } = req.body || {};
 
   // Persist settings + flip to "generating" so the opponent sees a spinner.
   match.category = category;
   match.difficulty = difficulty;
   match.revealSpeedMs = revealSpeedMs;
+  match.scoringFormat = QUIZBOWL_FORMATS[scoringFormat] ? scoringFormat : 'standard';
   match.state = 'generating';
   match.lastActivity = Date.now();
   pushMatchEvent(match, 'generating', { match: publicMatchState(match) });
@@ -9330,17 +9568,20 @@ app.post('/api/quizbowl/match/:code/answer', authMiddleware, (req, res) => {
   );
 
   if (correct) {
-    // Correct: question ends. Score awarded. Auto-advance in 5s.
-    match.scores[req.userId] = (match.scores[req.userId] || 0) + 1;
+    // Correct: question ends. Score awarded per scoringFormat. Auto-advance in 5s.
+    const pts = quizbowlScoreForBuzz(match, { correct: true });
+    match.scores[req.userId] = (match.scores[req.userId] || 0) + pts;
     match.state = 'reveal';
     match.lastActivity = Date.now();
     pushMatchEvent(match, 'answer_result', {
       userId: req.userId, correct: true, answer, correctAnswer,
-      scores: match.scores, autoAdvanceInMs: 5000,
+      scores: match.scores, autoAdvanceInMs: 5000, ptsGained: pts,
     });
     scheduleAutoAdvance(match, 5000);
   } else {
-    // Wrong: lock out this player, give the other a second chance.
+    // Wrong: apply neg, lock out this player, give the others a chance.
+    const negPts = quizbowlScoreForBuzz(match, { correct: false });
+    if (negPts) match.scores[req.userId] = (match.scores[req.userId] || 0) + negPts;
     if (!match.lockedOutForQ) match.lockedOutForQ = {};
     match.lockedOutForQ[req.userId] = true;
     const pausedMs = Date.now() - (match.buzzAt || Date.now());
@@ -9352,7 +9593,7 @@ app.post('/api/quizbowl/match/:code/answer', authMiddleware, (req, res) => {
       match.lastActivity = Date.now();
       pushMatchEvent(match, 'answer_result', {
         userId: req.userId, correct: false, answer, correctAnswer,
-        scores: match.scores, finalMiss: true, autoAdvanceInMs: 5000,
+        scores: match.scores, finalMiss: true, autoAdvanceInMs: 5000, ptsGained: negPts,
       });
       scheduleAutoAdvance(match, 5000);
     } else {
@@ -9364,6 +9605,7 @@ app.post('/api/quizbowl/match/:code/answer', authMiddleware, (req, res) => {
         userId: req.userId, answer, correctAnswer,
         lockedOut: Object.keys(match.lockedOutForQ),
         questionStartedAt: match.questionStartedAt,
+        scores: match.scores, ptsGained: negPts,
       });
       // Resume the end-of-question timeout for the remaining player(s).
       scheduleQuestionTimeout(match);
@@ -9379,6 +9621,29 @@ app.post('/api/quizbowl/match/:code/next', authMiddleware, (req, res) => {
   if (match.hostId !== req.userId) return res.status(403).json({ error: 'Only the host can advance' });
   advanceMatchToNextQuestion(match);
   res.json({ ok: true, finished: match.state === 'finished' });
+});
+
+// POST /api/quizbowl/match/:code/end — host ends the match immediately.
+// Stops all pending timers, snapshots current scores, and pushes match_end.
+// Lets the host call the game early without burning through the rest of
+// the question bank — useful when running a custom-length packet or when
+// time's just up.
+app.post('/api/quizbowl/match/:code/end', authMiddleware, (req, res) => {
+  const match = matches.get(req.params.code);
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+  if (match.hostId !== req.userId) return res.status(403).json({ error: 'Only the host can end the match' });
+  if (match.state === 'finished') return res.json({ ok: true, alreadyFinished: true });
+  if (match.questionTimeoutId) { clearTimeout(match.questionTimeoutId); match.questionTimeoutId = null; }
+  if (match.revealTimeoutId)   { clearTimeout(match.revealTimeoutId);   match.revealTimeoutId = null; }
+  match.state = 'finished';
+  match.buzzWinner = null;
+  match.buzzAt = null;
+  match.lastActivity = Date.now();
+  pushMatchEvent(match, 'match_end', {
+    scores: match.scores,
+    endedByHost: true,
+  });
+  res.json({ ok: true });
 });
 
 // POST /api/quizbowl/match/:code/leave — graceful exit.

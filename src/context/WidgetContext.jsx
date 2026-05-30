@@ -13,10 +13,10 @@ function snapPos(x, y) {
   };
 }
 
-function cellKey(p, cols = 1) {
+function cellKey(p, cols = 1, rows = 1) {
   const c = Math.round((p.x - G_OX) / G_STEP_X);
   const r = Math.round((p.y - G_OY) / G_STEP_Y);
-  return { c, r, span: cols };
+  return { c, r, cspan: cols, rspan: rows };
 }
 
 // Pick the first grid cell not occupied by an existing widget. Scans left→right,
@@ -24,8 +24,12 @@ function cellKey(p, cols = 1) {
 function firstFreeCell(existing) {
   const occupied = new Set();
   for (const w of existing) {
-    const { c, r, span } = cellKey(w.position, w.cols ?? 1);
-    for (let dc = 0; dc < span; dc++) occupied.add(`${r},${c + dc}`);
+    const { c, r, cspan, rspan } = cellKey(w.position, w.cols ?? 1, w.rows ?? 1);
+    for (let dc = 0; dc < cspan; dc++) {
+      for (let dr = 0; dr < rspan; dr++) {
+        occupied.add(`${r + dr},${c + dc}`);
+      }
+    }
   }
   for (let r = 0; r < 32; r++) {
     for (let c = 0; c < 32; c++) {
@@ -47,7 +51,7 @@ function load() {
   try {
     const stored = localStorage.getItem(KEY);
     const parsed = stored ? JSON.parse(stored) : DEFAULTS;
-    return parsed.map(w => ({ cols: 1, ...w }));
+    return parsed.map(w => ({ cols: 1, rows: 1, radius: 'normal', ...w }));
   }
   catch { return DEFAULTS; }
 }
@@ -92,8 +96,11 @@ export function WidgetProvider({ children }) {
     setWidgets(prev => { const next = prev.map(w => w.id === id ? { ...w, position } : w); save(next); return next; });
   }, []);
 
-  const resizeWidget = useCallback((id, cols) => {
-    setWidgets(prev => { const next = prev.map(w => w.id === id ? { ...w, cols } : w); save(next); return next; });
+  // Accepts either a number (legacy: cols only) or an object like
+  // { cols?, rows? } so callers can resize on either axis independently.
+  const resizeWidget = useCallback((id, sizeOrCols) => {
+    const patch = typeof sizeOrCols === 'number' ? { cols: sizeOrCols } : sizeOrCols;
+    setWidgets(prev => { const next = prev.map(w => w.id === id ? { ...w, ...patch } : w); save(next); return next; });
   }, []);
 
   const updateWidget = useCallback((id, patch) => {

@@ -116,15 +116,15 @@ export default function CurriculumAssessmentPage() {
   if (generating) {
     return (
       <div className="flex flex-col items-center justify-center py-32">
-        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/30 mb-6">
+        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-blue-300/70 mb-6">
           {currentUnit?.title || 'Assessment'}
         </p>
         <div className="w-64 mb-3">
-          <div className="h-0.5 w-full bg-white/[0.07] rounded-full overflow-hidden">
-            <div className="h-full bg-white/40 rounded-full transition-all duration-300 ease-out" style={{ width: `${genPct}%` }} />
+          <div className="h-0.5 w-full bg-blue-400/[0.12] rounded-full overflow-hidden">
+            <div className="h-full bg-gradient-to-r from-blue-400 to-blue-500 rounded-full transition-all duration-300 ease-out shadow-[0_0_8px_rgba(96,165,250,0.5)]" style={{ width: `${genPct}%` }} />
           </div>
         </div>
-        <p className="text-[12px] text-white/30">{Math.round(genPct)}%</p>
+        <p className="text-[12px] text-blue-200/55">{Math.round(genPct)}%</p>
       </div>
     );
   }
@@ -286,15 +286,15 @@ export default function CurriculumAssessmentPage() {
         <div className="flex-1 min-w-0">
           <div className="mb-5">
             <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[12px] text-white/35">Question {currentQ + 1} of {questions.length}</span>
-              <span className="text-[12px] text-white/35">{answeredCount} answered</span>
+              <span className="text-[12px] text-blue-200/55">Question {currentQ + 1} of {questions.length}</span>
+              <span className="text-[12px] text-blue-200/55">{answeredCount} answered</span>
             </div>
-            <div className="h-0.5 w-full bg-white/[0.07] rounded-full overflow-hidden">
-              <div className="h-full bg-white/40 rounded-full transition-all duration-300" style={{ width: `${progressPct}%` }} />
+            <div className="h-0.5 w-full bg-blue-400/[0.12] rounded-full overflow-hidden">
+              <div className="h-full bg-gradient-to-r from-blue-400 to-blue-500 rounded-full transition-all duration-300 shadow-[0_0_6px_rgba(96,165,250,0.4)]" style={{ width: `${progressPct}%` }} />
             </div>
           </div>
 
-          <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] backdrop-blur-sm p-6 mb-4">
+          <div className="rounded-2xl border border-blue-400/[0.18] bg-gradient-to-b from-blue-500/[0.06] to-blue-500/[0.02] backdrop-blur-sm p-6 mb-4 shadow-[0_0_36px_-14px_rgba(59,130,246,0.30)]">
             <MathText as="p" className="text-[15px] leading-relaxed font-medium text-white/90 mb-6">
               {q.question}
             </MathText>
@@ -310,12 +310,14 @@ export default function CurriculumAssessmentPage() {
                     onClick={() => setAnswers(prev => ({ ...prev, [q.id]: letter }))}
                     className={`w-full text-left flex items-start gap-3 px-4 py-3.5 rounded-xl border text-[13px] transition-all ${
                       selected
-                        ? 'border-white/[0.24] bg-white/[0.10] text-white/90'
-                        : 'border-white/[0.07] bg-white/[0.02] text-white/60 hover:border-white/[0.16] hover:bg-white/[0.06] hover:text-white/80'
+                        ? 'border-blue-400/55 bg-blue-500/[0.14] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_4px_18px_rgba(59,130,246,0.25)]'
+                        : 'border-blue-400/[0.10] bg-blue-500/[0.03] text-white/65 hover:border-blue-400/[0.30] hover:bg-blue-500/[0.08] hover:text-white'
                     }`}
                   >
                     <span className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold mt-0.5 ${
-                      selected ? 'bg-white/[0.90] text-black' : 'bg-white/[0.08] text-white/40'
+                      selected
+                        ? 'bg-gradient-to-b from-blue-400 to-blue-500 text-white border border-blue-300/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.20)]'
+                        : 'bg-blue-500/[0.08] text-blue-200/55 border border-blue-400/[0.18]'
                     }`}>
                       {letter}
                     </span>
@@ -330,7 +332,7 @@ export default function CurriculumAssessmentPage() {
             <button
               onClick={() => setCurrentQ(i => Math.max(0, i - 1))}
               disabled={currentQ === 0}
-              className="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-[13px] text-white/35 hover:text-white/65 hover:bg-white/[0.05] disabled:opacity-30 disabled:pointer-events-none transition-colors"
+              className="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-[13px] text-blue-200/55 hover:text-blue-100 hover:bg-blue-500/[0.08] disabled:opacity-30 disabled:pointer-events-none transition-colors"
             >
               <ChevronLeft size={15} /> Previous
             </button>
@@ -338,7 +340,7 @@ export default function CurriculumAssessmentPage() {
             {currentQ < questions.length - 1 ? (
               <button
                 onClick={() => setCurrentQ(i => i + 1)}
-                className="inline-flex items-center gap-1 px-4 py-2 rounded-lg text-[13px] font-semibold text-white/65 hover:text-white/85 hover:bg-white/[0.06] transition-colors"
+                className="inline-flex items-center gap-1 px-4 py-2 rounded-lg text-[13px] font-semibold text-blue-100 hover:text-white hover:bg-blue-500/[0.10] transition-colors"
               >
                 Next <ChevronRight size={15} />
               </button>
@@ -346,7 +348,7 @@ export default function CurriculumAssessmentPage() {
               <button
                 onClick={handleSubmit}
                 disabled={!allAnswered || grading}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-[13px] font-bold text-white/85 bg-white/[0.10] border border-white/[0.18] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] hover:bg-white/[0.16] disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-[13px] font-bold text-white bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_16px_rgba(59,130,246,0.40)] disabled:opacity-40 disabled:pointer-events-none transition-all"
               >
                 {grading ? <><LoadingSpinner size={13} /> Grading</> : <><Check size={13} /> Submit</>}
               </button>
@@ -363,10 +365,10 @@ export default function CurriculumAssessmentPage() {
                 onClick={() => setCurrentQ(i)}
                 className={`w-9 h-9 rounded-lg text-[11px] font-semibold transition-colors ${
                   i === currentQ
-                    ? 'bg-white/[0.20] text-white/90 border border-white/[0.25]'
+                    ? 'bg-gradient-to-b from-blue-500 to-blue-600 text-white border border-blue-400/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_2px_10px_rgba(59,130,246,0.35)]'
                     : answers[qu.id]
-                      ? 'bg-emerald-900/30 text-emerald-400 border border-emerald-700/30'
-                      : 'bg-white/[0.05] text-white/35 hover:bg-white/[0.09] hover:text-white/60'
+                      ? 'bg-blue-500/[0.14] text-blue-200 border border-blue-400/30'
+                      : 'bg-blue-500/[0.04] text-blue-200/45 border border-blue-400/[0.10] hover:bg-blue-500/[0.10] hover:text-blue-100 hover:border-blue-400/[0.25]'
                 }`}
               >
                 {i + 1}
@@ -378,7 +380,7 @@ export default function CurriculumAssessmentPage() {
             <button
               onClick={handleSubmit}
               disabled={grading}
-              className="w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-[13px] font-bold text-white/85 bg-white/[0.10] border border-white/[0.18] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] hover:bg-white/[0.16] disabled:opacity-40 transition-colors"
+              className="w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-[13px] font-bold text-white bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_16px_rgba(59,130,246,0.40)] disabled:opacity-40 transition-all"
             >
               {grading ? <LoadingSpinner size={13} /> : <Check size={13} />}
               Submit

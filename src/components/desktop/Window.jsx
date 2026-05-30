@@ -1,24 +1,31 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { X, Minus, Square } from 'lucide-react';
+import { X, Minus, Maximize2 } from 'lucide-react';
 import { useWindowManager } from '../../context/WindowManagerContext';
 import { useUIPreference } from '../../context/UIPreferenceContext';
 
-// Windows 11 is the only window style. macOS traffic-light + ChromeOS /
-// Linux title bars were removed along with the osStyle preference.
-//
-// (Slides used to hide its maximize button — that app was retired so
-// every window now shows the standard min/max/close triad.)
-function WindowsTitleBar({ windowId, isActive, title, onDragStart, onDoubleClick }) {
+// macOS traffic lights. Green button = in-app "zoom" (full window inside
+// the macOS shell — covers the dock area but stays inside the browser
+// window). For TRUE OS-level fullscreen (taking over the whole monitor),
+// use ⌘⇧P — that calls the browser Fullscreen API.
+function MacTitleBar({ windowId, isActive, title, onDragStart, onDoubleClick, titlebarOpacity = 80 }) {
   const { closeWindow, minimizeWindow, maximizeWindow } = useWindowManager();
-  const dark = document.documentElement.classList.contains('dark');
+  const [hovered, setHovered] = useState(false);
+  const isDark = document.documentElement.classList.contains('dark');
+  const a = titlebarOpacity / 100;
+  const barStyle = isDark
+    ? {
+        background: isActive ? `rgba(36, 36, 40, ${a})` : `rgba(30, 30, 34, ${a})`,
+        borderBottom: '1px solid rgba(255,255,255,0.06)',
+      }
+    : { background: isActive ? `rgba(232,232,234,${a})` : `rgba(240,240,240,${a})` };
   return (
-    <div className={`h-8 flex items-center flex-shrink-0 ${isActive ? (dark ? 'bg-[#1f1f1f]' : 'bg-white') : (dark ? 'bg-[#2d2d2d]' : 'bg-[#f0f0f0]')}`} onPointerDown={onDragStart} onDoubleClick={onDoubleClick} data-titlebar={windowId} style={{ borderBottom: dark ? '1px solid #3a3a3a' : '1px solid #e0e0e0' }}>
-      <div className={`pl-3 text-xs font-normal truncate flex-1 ${isActive ? (dark ? 'text-white' : 'text-gray-900') : (dark ? 'text-gray-500' : 'text-gray-400')}`}>{title}</div>
-      <div className="flex items-center h-full">
-        <button onClick={e => { e.stopPropagation(); minimizeWindow(windowId); }} className={`h-full px-3 flex items-center justify-center ${dark ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-gray-200 text-gray-600'}`}><Minus size={12} /></button>
-        <button onClick={e => { e.stopPropagation(); maximizeWindow(windowId); }} className={`h-full px-3 flex items-center justify-center ${dark ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-gray-200 text-gray-600'}`}><Square size={10} /></button>
-        <button onClick={e => { e.stopPropagation(); closeWindow(windowId); }} className="h-full px-3 flex items-center justify-center hover:bg-red-500 hover:text-white text-gray-400"><X size={14} /></button>
+    <div className="h-8 flex items-center flex-shrink-0 select-none backdrop-blur-md" style={barStyle} onPointerDown={onDragStart} onDoubleClick={onDoubleClick} data-titlebar={windowId}>
+      <div className="flex items-center gap-[7px] px-3" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+        <button onClick={e => { e.stopPropagation(); closeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FF5F57] hover:brightness-90 flex items-center justify-center" title="Close"><X size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#4a0002]" /></button>
+        <button onClick={e => { e.stopPropagation(); minimizeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FEBC2E] hover:brightness-90 flex items-center justify-center" title="Minimize"><Minus size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#5a3e00]" /></button>
+        <button onClick={e => { e.stopPropagation(); maximizeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#28C840] hover:brightness-90 flex items-center justify-center" title="Zoom — fills the desktop. ⌘⇧P for true fullscreen."><Maximize2 size={hovered ? 7 : 0} strokeWidth={2.5} className="text-[#005200]" /></button>
       </div>
+      <div className="flex-1 text-center text-xs font-medium text-gray-600 dark:text-white/65 truncate pr-12 pointer-events-none">{title}</div>
     </div>
   );
 }
@@ -44,12 +51,13 @@ export default function Window({ win, isActive, children }) {
     const prevTransition = el ? el.style.transition : '';
     if (el) el.style.transition = 'none';
     function onMove(ev) {
-      // RushilAI menu bar is always 28px at the top (regardless of
-      // osStyle — it renders for every shell). Win11 taskbar is always
-      // 48px at the bottom. Both constraints apply unconditionally so a
-      // dragged window can never slip behind the chrome.
+      // RushilAI menu bar is always 28px at the top. The floating
+      // macOS dock sits at the bottom with ~84px of footprint
+      // (icon + indicator row + padding + bottom offset). Both
+      // constraints apply unconditionally so a dragged window can
+      // never slip behind the chrome.
       const topBar = 28;
-      const bottomBar = 48;
+      const bottomBar = 84;
       const maxX = window.innerWidth - win.size.w;
       const maxY = window.innerHeight - win.size.h - bottomBar;
       posRef.x = Math.max(0, Math.min(maxX, ev.clientX - startX));
@@ -78,9 +86,9 @@ export default function Window({ win, isActive, children }) {
       const dx = ev.clientX - startX; const dy = ev.clientY - startY;
       const vw = window.innerWidth; const vh = window.innerHeight;
       // Same fixed top/bottom reserves as the drag handler — menu bar
-      // 28px, Win11 taskbar 48px, both always present.
+      // 28px, floating macOS dock 84px, both always present.
       const topBar = 28;
-      const bottomBar = 48;
+      const bottomBar = 84;
       let x = startPos.x, y = startPos.y, w = startSize.w, h = startSize.h;
       if (dir.includes('e')) w = Math.min(vw - x, Math.max(400, startSize.w + dx));
       if (dir.includes('w')) { w = Math.max(400, startSize.w - dx); x = startPos.x + (startSize.w - w); if (x < 0) { w += x; x = 0; } }
@@ -138,11 +146,11 @@ export default function Window({ win, isActive, children }) {
     }
   }, [focusWindow, win.id]);
 
-  // Maximize dimensions: full viewport width, leaves 48px at the bottom
-  // for the Win11 taskbar (which stays visible during maximize) and
-  // claims the full top edge — the in-app menu bar hides on maximize.
-  const DOCK_RESERVE = 48;
-  const maxStyle = { left: 0, top: 0, width: '100vw', height: `calc(100vh - ${DOCK_RESERVE}px)` };
+  // Maximize = TRUE fullscreen. Window covers the entire viewport,
+  // edge-to-edge. The menu bar and dock both hide for maximized
+  // windows (see DesktopShell's `anyMaximized` gate) so nothing
+  // obstructs the app.
+  const maxStyle = { left: 0, top: 0, width: '100vw', height: '100vh' };
 
   const style = maxed
     ? { ...maxStyle, zIndex: win.zIndex }
@@ -155,12 +163,12 @@ export default function Window({ win, isActive, children }) {
     animState === 'closing' ? 'window-closing' :
     '';
 
-  // Win11 is the only chrome — square-ish corners (`rounded-sm`).
-  // Snapped to `rounded-none` whenever the window is taking the full
-  // screen (zoom OR browser fullscreen) so corners don't leave dark
-  // gaps against the desktop / OS chrome.
-  const TitleBar = WindowsTitleBar;
-  const radius = (maxed || isFullscreen) ? 'rounded-none' : 'rounded-sm';
+  // macOS chrome — soft rounded corners on a floating window. Snapped
+  // to `rounded-none` whenever the window is taking the full screen
+  // (zoom OR browser fullscreen) so corners don't leave dark gaps
+  // against the desktop / OS chrome.
+  const TitleBar = MacTitleBar;
+  const radius = (maxed || isFullscreen) ? 'rounded-none' : 'rounded-xl';
 
   const fullBleed = maxed || isFullscreen;
 

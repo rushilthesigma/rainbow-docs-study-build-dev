@@ -105,7 +105,7 @@ export default function QuizBlock({ curriculumId, lessonId, block, onComplete, g
         <div className="flex justify-end">
           <button
             onClick={() => onComplete?.(results)}
-            className="inline-flex items-center gap-2.5 px-6 py-3 rounded-2xl font-bold text-[14px] text-white/85 bg-white/[0.10] border border-white/[0.16] shadow-[inset_0_1px_0_rgba(255,255,255,0.10)] hover:bg-white/[0.15] hover:text-white transition-colors backdrop-blur-sm"
+            className="inline-flex items-center gap-2.5 px-6 py-3 rounded-2xl font-bold text-[14px] text-white bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_16px_rgba(59,130,246,0.40)] transition-all backdrop-blur-sm"
           >
             Continue <ArrowRight size={15} />
           </button>
@@ -116,7 +116,7 @@ export default function QuizBlock({ curriculumId, lessonId, block, onComplete, g
 
   // ===== ACTIVE QUESTION =====
   if (!q) return (
-    <div className="rounded-3xl border border-white/[0.06] bg-white/[0.02] p-6 text-[13px] text-white/35">
+    <div className="rounded-3xl border border-white/[0.06] bg-white/[0.02] p-6 text-[13px] text-white/55">
       No questions in this block.
     </div>
   );
@@ -124,14 +124,12 @@ export default function QuizBlock({ curriculumId, lessonId, block, onComplete, g
 
   return (
     <div className="cl-anim-in">
-      <div className="rounded-3xl border border-white/[0.08] bg-white/[0.03] backdrop-blur-sm p-7 lg:p-10">
-        {/* Quiz header */}
-        <div className="flex items-center justify-between mb-7">
-          <span className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.22em] px-2.5 py-1 rounded-lg bg-white/[0.06] text-white/50 border border-white/[0.08]">
-            {block.title || 'Check'}
-          </span>
-          <span className="text-[12px] font-mono text-white/30 tabular-nums">
-            {idx + 1} <span className="text-white/15">/</span> {total}
+      <div className="rounded-3xl border border-white/[0.06] bg-white/[0.02] p-7 lg:p-10">
+        {/* Quiz header — title shown in StageTracker above, so only the
+            question counter lives here. */}
+        <div className="flex items-center justify-end mb-7">
+          <span className="text-[12px] font-mono text-white/45 tabular-nums">
+            {idx + 1} <span className="text-white/20">/</span> {total}
           </span>
         </div>
 
@@ -150,12 +148,14 @@ export default function QuizBlock({ curriculumId, lessonId, block, onComplete, g
                 disabled={submitting}
                 className={`text-left flex items-start gap-3.5 px-5 py-4 rounded-2xl border transition-all ${
                   isPicked
-                    ? 'border-white/[0.26] bg-white/[0.13] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]'
-                    : 'border-white/[0.07] bg-white/[0.02] text-white/80 hover:border-white/[0.16] hover:bg-white/[0.06] hover:text-white/95'
+                    ? 'border-blue-400/55 bg-blue-500/[0.14] text-white'
+                    : 'border-white/[0.08] bg-white/[0.02] text-white/80 hover:border-white/[0.18] hover:bg-white/[0.04] hover:text-white'
                 }`}
               >
                 <span className={`w-6 h-6 rounded-lg grid place-items-center font-mono text-[11px] font-bold shrink-0 mt-0.5 transition-colors ${
-                  isPicked ? 'bg-white/[0.30] text-white' : 'bg-white/[0.05] text-white/45 border border-white/[0.10]'
+                  isPicked
+                    ? 'bg-blue-500 text-white border border-blue-300/50'
+                    : 'bg-white/[0.04] text-white/55 border border-white/[0.10]'
                 }`}>{letter}</span>
                 <MathText className="text-[14px] leading-relaxed flex-1">{c}</MathText>
               </button>
@@ -168,7 +168,7 @@ export default function QuizBlock({ curriculumId, lessonId, block, onComplete, g
           <div className="flex gap-1.5">
             {block.questions.map((_, i) => (
               <span key={i} className={`w-1.5 h-1.5 rounded-full transition-colors ${
-                i === idx ? 'bg-white/80' : (i < idx || picks[block.questions[i].id]) ? 'bg-white/35' : 'bg-white/[0.10]'
+                i === idx ? 'bg-blue-400' : (i < idx || picks[block.questions[i].id]) ? 'bg-blue-500/55' : 'bg-white/[0.12]'
               }`} />
             ))}
           </div>
@@ -176,7 +176,7 @@ export default function QuizBlock({ curriculumId, lessonId, block, onComplete, g
             <button
               onClick={submit}
               disabled={!allAnswered || submitting}
-              className="inline-flex items-center gap-2.5 px-6 py-3 rounded-2xl font-bold text-[14px] text-white/85 bg-white/[0.10] border border-white/[0.16] shadow-[inset_0_1px_0_rgba(255,255,255,0.10)] disabled:opacity-35 disabled:cursor-not-allowed hover:bg-white/[0.15] hover:text-white transition-colors backdrop-blur-sm"
+              className="inline-flex items-center gap-2.5 px-6 py-3 rounded-2xl font-bold text-[14px] text-white bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_16px_rgba(59,130,246,0.40)] disabled:opacity-35 disabled:cursor-not-allowed transition-all backdrop-blur-sm"
             >
               {submitting ? <><InlineProgress active /> Grading…</> : 'Submit answers'}
             </button>
@@ -184,7 +184,7 @@ export default function QuizBlock({ curriculumId, lessonId, block, onComplete, g
             <button
               onClick={() => setIdx(i => Math.min(total - 1, i + 1))}
               disabled={!selected}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl font-semibold text-[13px] text-white/70 bg-white/[0.07] border border-white/[0.12] hover:bg-white/[0.12] hover:text-white/90 disabled:opacity-35 transition-colors"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl font-semibold text-[13px] text-blue-100 bg-blue-500/[0.10] border border-blue-400/[0.30] hover:bg-blue-500/[0.18] hover:text-white hover:border-blue-400/[0.45] disabled:opacity-35 transition-all"
             >
               Next <ArrowRight size={14} />
             </button>
