@@ -167,7 +167,7 @@ export default function AssignmentCard({ curriculumId, lessonId, initialAssignme
                 <button
                   onClick={handleSubmit}
                   disabled={submitting || wordCount < 20}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-[13.5px] text-white bg-gradient-to-b from-sky-500 to-sky-600 hover:from-sky-400 hover:to-sky-500 border border-sky-400/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_6px_18px_rgba(14,165,233,0.40)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-[13.5px] text-white bg-sky-500 hover:bg-sky-400 border border-sky-400/45 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {submitting ? <LoadingSpinner size={13} /> : <PenTool size={13} strokeWidth={2.4} />}
                   {submitting ? 'Grading…' : 'Submit for grading'}

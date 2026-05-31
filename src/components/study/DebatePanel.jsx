@@ -291,7 +291,7 @@ function ModeMenu({ onSelect, onRejoinTournament }) {
           className="w-full mb-5 flex items-center gap-3 p-3.5 rounded-xl border border-blue-400/45 bg-gradient-to-b from-blue-500/[0.18] to-blue-600/[0.10] hover:from-blue-500/[0.24] hover:to-blue-600/[0.14] hover:border-blue-400/65 transition-colors text-left"
           title="Rejoin your active tournament"
         >
-          <div className="w-10 h-10 rounded-xl bg-blue-500 text-white flex items-center justify-center shadow-[0_4px_12px_rgba(59,130,246,0.35)] flex-shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-blue-500 text-white flex items-center justify-center flex-shrink-0">
             <Trophy size={18} />
           </div>
           <div className="flex-1 min-w-0">
@@ -344,7 +344,7 @@ function ModeMenu({ onSelect, onRejoinTournament }) {
           <span className="absolute top-2.5 right-2.5 inline-flex items-center gap-0.5 text-[10px] font-semibold tabular-nums px-1.5 py-0.5 rounded bg-blue-500 text-white border border-blue-400/60">
             <Clock size={9} strokeWidth={3} /> 2:00
           </span>
-          <div className="w-12 h-12 rounded-xl bg-blue-500 text-white flex items-center justify-center shadow-[0_4px_12px_rgba(59,130,246,0.30)]"><Clock size={22} /></div>
+          <div className="w-12 h-12 rounded-xl bg-blue-500 text-white flex items-center justify-center"><Clock size={22} /></div>
           <p className="text-sm font-semibold text-gray-900 dark:text-white">Timed 1v1</p>
           <p className="text-[11px] text-blue-100/75">2 min per turn</p>
         </button>
@@ -354,7 +354,7 @@ function ModeMenu({ onSelect, onRejoinTournament }) {
         onClick={() => onSelect('tour-menu')}
         className="w-full flex items-center gap-4 p-5 rounded-xl border border-blue-400/40 bg-gradient-to-b from-blue-500/[0.12] to-blue-600/[0.08] hover:from-blue-500/[0.18] hover:to-blue-600/[0.12] hover:border-blue-400/60 transition-colors text-left"
       >
-        <div className="w-12 h-12 rounded-xl bg-blue-500 text-white flex items-center justify-center shadow-[0_4px_12px_rgba(59,130,246,0.30)] flex-shrink-0"><Trophy size={22} /></div>
+        <div className="w-12 h-12 rounded-xl bg-blue-500 text-white flex items-center justify-center flex-shrink-0"><Trophy size={22} /></div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-gray-900 dark:text-white">Tournament</p>
           <p className="text-[11px] text-blue-100/75 mt-0.5">Single-elimination bracket · 4, 8, or 16 players</p>
@@ -893,7 +893,7 @@ function Tournament({ mode, setMode, onExit, rejoinTournament = null }) {
         <button
           onClick={handleCreate}
           disabled={busy || !topicInput.trim()}
-          className="w-full py-3 mb-5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none flex items-center justify-center gap-2 transition-all"
+          className="w-full py-3 mb-5 rounded-xl bg-blue-500 text-white text-sm font-semibold border border-blue-400/40 hover:bg-blue-400 disabled:opacity-40 flex items-center justify-center gap-2 transition-all"
         >
           {busy ? <InlineProgress active /> : <Trophy size={14} />}
           Create tournament
@@ -916,7 +916,7 @@ function Tournament({ mode, setMode, onExit, rejoinTournament = null }) {
           <button
             onClick={handleJoin}
             disabled={busy || joinInput.trim().length < 4}
-            className="px-5 py-2.5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 transition-all"
+            className="px-5 py-2.5 rounded-xl bg-blue-500 text-white text-sm font-semibold border border-blue-400/40 hover:bg-blue-400 disabled:opacity-40 transition-all"
           >
             Join
           </button>
@@ -999,7 +999,7 @@ function Tournament({ mode, setMode, onExit, rejoinTournament = null }) {
           <button
             onClick={handleStart}
             disabled={busy || !isFull}
-            className="w-full py-3 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none flex items-center justify-center gap-2 transition-all"
+            className="w-full py-3 rounded-xl bg-blue-500 text-white text-sm font-semibold border border-blue-400/40 hover:bg-blue-400 disabled:opacity-40 flex items-center justify-center gap-2 transition-all"
           >
             {busy ? <InlineProgress active /> : <Swords size={14} />}
             {isFull ? 'Start tournament' : `Waiting for ${tournament.size - filled} more…`}
@@ -1100,7 +1100,7 @@ function Tournament({ mode, setMode, onExit, rejoinTournament = null }) {
             onClick={() => setActiveMatchCode(myLiveMatch.code)}
             className="w-full mb-4 rounded-xl p-3.5 bg-gradient-to-b from-blue-500/25 to-blue-600/15 border border-blue-400/45 hover:from-blue-500/30 hover:to-blue-600/20 hover:border-blue-400/65 transition-colors text-left inline-flex items-center gap-3"
           >
-            <div className="w-9 h-9 rounded-xl bg-blue-500 text-white flex items-center justify-center shadow-[0_4px_12px_rgba(59,130,246,0.35)] flex-shrink-0">
+            <div className="w-9 h-9 rounded-xl bg-blue-500 text-white flex items-center justify-center flex-shrink-0">
               <Swords size={16} />
             </div>
             <div className="flex-1 min-w-0">
@@ -1150,7 +1150,7 @@ function Tournament({ mode, setMode, onExit, rejoinTournament = null }) {
                   const canSpectate = !isMyMatch && b.state === 'playing' && (iAmEliminated || iAmOrganizer);
                   const cellClasses = `rounded-lg border p-2 ${
                     isMyMatch && b.state === 'playing'
-                      ? 'border-blue-400/55 bg-blue-500/[0.12] shadow-[0_0_0_2px_rgba(96,165,250,0.18)]'
+                      ? 'border-blue-400/55 bg-blue-500/[0.12]'
                       : b.state === 'finished'
                         ? 'border-blue-500/20 bg-blue-500/[0.04]'
                         : 'border-blue-500/[0.18] bg-blue-500/[0.03]'
@@ -1345,7 +1345,7 @@ function TournamentSnapshotModal({ tournament, roundsMap, roundNumbers, roundLab
               onClick={handleDownload}
               disabled={downloadingPng}
               title="Download bracket as PNG"
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold text-white bg-gradient-to-b from-blue-500 to-blue-600 border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-50 transition-all"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold text-white bg-blue-500 border border-blue-400/40 hover:bg-blue-400 disabled:opacity-50 transition-all"
             >
               {downloadingPng ? <InlineProgress active /> : <Download size={11} />}
               PNG
@@ -1558,7 +1558,7 @@ function Singleplayer({ mode, setMode, onExit }) {
           <>
             <p className="text-[11px] font-semibold text-blue-400/70 uppercase tracking-wider mb-2">Your side</p>
             <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => startDebate(topic.trim(), 'for')} className="px-4 py-3 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 transition-all">
+              <button onClick={() => startDebate(topic.trim(), 'for')} className="px-4 py-3 rounded-xl bg-blue-500 text-white text-sm font-semibold border border-blue-400/40 hover:bg-blue-400 transition-all">
                 FOR
               </button>
               <button onClick={() => startDebate(topic.trim(), 'against')} className="px-4 py-3 rounded-xl bg-blue-500/10 border border-blue-500/40 text-blue-200 text-sm font-semibold hover:bg-blue-500/20 hover:border-blue-500/60 hover:text-blue-100 transition-colors">
@@ -1609,7 +1609,7 @@ function Singleplayer({ mode, setMode, onExit }) {
             <p className="text-xs text-gray-800 dark:text-gray-100 leading-relaxed">{verdict.improve}</p>
           </div>
         )}
-        <button onClick={onExit} className="w-full py-2.5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 transition-all inline-flex items-center justify-center gap-2">
+        <button onClick={onExit} className="w-full py-2.5 rounded-xl bg-blue-500 text-white text-sm font-semibold border border-blue-400/40 hover:bg-blue-400 transition-all inline-flex items-center justify-center gap-2">
           <ArrowLeft size={14} /> Back to menu
         </button>
       </div>
@@ -1989,7 +1989,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
         <button
           onClick={handleCreate}
           disabled={busy}
-          className="w-full py-3 mb-4 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none flex items-center justify-center gap-2 transition-all"
+          className="w-full py-3 mb-4 rounded-xl bg-blue-500 text-white text-sm font-semibold border border-blue-400/40 hover:bg-blue-400 disabled:opacity-40 flex items-center justify-center gap-2 transition-all"
         >
           {busy ? <InlineProgress active /> : <Zap size={14} />}
           Create new
@@ -2012,7 +2012,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
           <button
             onClick={handleJoin}
             disabled={busy || joinInput.trim().length < 4}
-            className="px-5 py-2.5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none transition-all"
+            className="px-5 py-2.5 rounded-xl bg-blue-500 text-white text-sm font-semibold border border-blue-400/40 hover:bg-blue-400 disabled:opacity-40 transition-all"
           >
             Join
           </button>
@@ -2165,7 +2165,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
             <button
               onClick={handleStart}
               disabled={busy || !topicInput.trim() || !opponentJoined || !allReady}
-              className="w-full py-3 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none flex items-center justify-center gap-2 transition-all"
+              className="w-full py-3 rounded-xl bg-blue-500 text-white text-sm font-semibold border border-blue-400/40 hover:bg-blue-400 disabled:opacity-40 flex items-center justify-center gap-2 transition-all"
             >
               {busy ? <InlineProgress active /> : <Swords size={14} />}
               {!opponentJoined ? 'Waiting for opponent…' : !allReady ? 'Waiting for ready up…' : 'Start'}
@@ -2286,7 +2286,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
                     iVoted
                       ? 'bg-blue-500/15 border border-blue-500/30 text-blue-300/80'
                       : oppVoted
-                        ? 'bg-gradient-to-b from-blue-500 to-blue-600 text-white border border-blue-400/40 animate-pulse'
+                        ? 'bg-blue-500 text-white border border-blue-400/40 animate-pulse'
                         : 'bg-blue-500/20 border border-blue-400/40 text-blue-200 hover:bg-blue-500/30 hover:text-blue-100'
                   }`}
                 >
@@ -2305,7 +2305,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
               <span
                 className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg font-mono text-base font-bold tabular-nums border-2 shadow-[0_2px_14px_rgba(0,0,0,0.25)] transition-colors ${
                   remainingMs <= 15000
-                    ? 'bg-rose-500/25 border-rose-500/70 text-rose-100 animate-pulse shadow-rose-500/30'
+                    ? 'bg-rose-500/25 border-rose-500/70 text-rose-100 animate-pulse'
                     : remainingMs <= 45000
                       ? 'bg-amber-500/20 border-amber-500/60 text-amber-100'
                       : 'bg-blue-500/20 border-blue-500/55 text-blue-100'
@@ -2337,7 +2337,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
             const isMine = t.userId === myId;
             return (
               <div key={i} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] rounded-2xl p-3.5 shadow-sm ${isMine ? 'bg-gradient-to-b from-blue-500 to-blue-600 text-white border border-blue-400/40 shadow-[0_4px_18px_rgba(59,130,246,0.25)] rounded-tr-md' : 'bg-white/[0.12] dark:bg-white/[0.07] border border-blue-500/20 text-gray-900 dark:text-gray-100 rounded-tl-md'}`}>
+                <div className={`max-w-[85%] rounded-2xl p-3.5 shadow-sm ${isMine ? 'bg-blue-500 text-white border border-blue-400/40 rounded-tr-md' : 'bg-white/[0.12] dark:bg-white/[0.07] border border-blue-500/20 text-gray-900 dark:text-gray-100 rounded-tl-md'}`}>
                   <div className="flex items-center gap-2 mb-1.5">
                     <span className={`text-[9px] font-bold uppercase tracking-wider ${isMine ? 'text-blue-100/80' : 'text-blue-400/80'}`}>
                       {t.side === 'for' ? 'FOR' : 'AGAINST'} · {isMine ? 'you' : opp?.name}
@@ -2534,7 +2534,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
                 <button
                   onClick={handleSubmitMove}
                   disabled={submittingMove || (argument.trim().length < 20 && argImages.length === 0)}
-                  className="px-4 py-1.5 rounded-md bg-gradient-to-b from-blue-500 to-blue-600 text-white text-xs font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_12px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none inline-flex items-center gap-1 transition-all"
+                  className="px-4 py-1.5 rounded-md bg-blue-500 text-white text-xs font-semibold border border-blue-400/40 hover:bg-blue-400 disabled:opacity-40 inline-flex items-center gap-1 transition-all"
                 >
                   {submittingMove ? <><InlineProgress active /> Grading…</> : <><Zap size={12} /> Send</>}
                 </button>
@@ -2564,7 +2564,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
                 <button
                   onClick={handleLeave}
                   disabled={leaving}
-                  className="flex-1 py-2 rounded-lg text-[12px] font-semibold text-white bg-gradient-to-b from-rose-500 to-rose-600 border border-rose-400/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_12px_rgba(244,63,94,0.30)] hover:from-rose-400 hover:to-rose-500 disabled:opacity-50 transition-all inline-flex items-center justify-center gap-1.5"
+                  className="flex-1 py-2 rounded-lg text-[12px] font-semibold text-white bg-rose-500 border border-rose-400/50 hover:bg-rose-400 disabled:opacity-50 transition-all inline-flex items-center justify-center gap-1.5"
                 >
                   {leaving ? <InlineProgress active /> : <X size={12} />}
                   Leave
@@ -2584,7 +2584,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
               <p className="text-[11.5px] text-white/55 mb-4">The match has ended.</p>
               <button
                 onClick={() => { setOpponentLeft(null); onExit(); }}
-                className="w-full py-2 rounded-lg text-[12px] font-semibold text-white bg-gradient-to-b from-blue-500 to-blue-600 border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_12px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 transition-all inline-flex items-center justify-center gap-1.5"
+                className="w-full py-2 rounded-lg text-[12px] font-semibold text-white bg-blue-500 border border-blue-400/40 hover:bg-blue-400 transition-all inline-flex items-center justify-center gap-1.5"
               >
                 <ArrowLeft size={13} /> Back to menu
               </button>
@@ -2628,7 +2628,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
             <p className="text-xs text-gray-800 dark:text-gray-100 leading-relaxed">{v.againstStrongest}</p>
           </div>
         )}
-        <button onClick={onExit} className="w-full py-2.5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 transition-all inline-flex items-center justify-center gap-2">
+        <button onClick={onExit} className="w-full py-2.5 rounded-xl bg-blue-500 text-white text-sm font-semibold border border-blue-400/40 hover:bg-blue-400 transition-all inline-flex items-center justify-center gap-2">
           <ArrowLeft size={14} /> {tournamentCode ? 'Back to bracket' : 'Back to menu'}
         </button>
       </div>

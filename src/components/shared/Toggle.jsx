@@ -12,7 +12,7 @@ export default function Toggle({ label, description, checked, onChange }) {
         onClick={() => onChange(!checked)}
         className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors flex-shrink-0 ${
           checked
-            ? 'bg-gradient-to-r from-blue-500 to-blue-600 border border-blue-400/55 shadow-[0_0_12px_rgba(59,130,246,0.35)]'
+            ? 'bg-gradient-to-r from-blue-500 to-blue-600 border border-blue-400/55'
             : 'bg-blue-500/[0.06] border border-blue-400/[0.14]'
         }`}
       >

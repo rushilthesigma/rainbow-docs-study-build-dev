@@ -15,7 +15,7 @@ export default function MobileHeader({ title, onBack, rightSlot }) {
         </button>
       ) : (
         <div className="flex items-center gap-2 pl-1">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 grid place-items-center">
+          <div className="w-7 h-7 rounded-lg bg-blue-500 grid place-items-center">
             <BookOpen size={14} className="text-white" strokeWidth={2.4} />
           </div>
         </div>

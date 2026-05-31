@@ -14,11 +14,15 @@ import Input from '../../shared/Input';
 import PillGroup from '../../shared/PillGroup';
 import LoadingSpinner from '../../shared/LoadingSpinner';
 import BlockLessonView from '../../lesson/BlockLessonView';
+import { peek, fetchOnce, bust } from '../../../api/cache';
+import ViewFade from '../../shared/ViewFade';
 
 export default function LessonsApp() {
   const [view, setView] = useState('list'); // list | new | lesson
-  const [lessons, setLessons] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // Seed from cache so re-opening the app skips the skeleton flash.
+  const cachedLessons = peek('lessons:list');
+  const [lessons, setLessons] = useState(() => cachedLessons?.lessons || []);
+  const [loading, setLoading] = useState(!cachedLessons);
 
   useBrowserBack(view !== 'list', () => setView('list'));
 
@@ -31,7 +35,7 @@ export default function LessonsApp() {
   const [resetKey, setResetKey] = useState(0);
 
   useEffect(() => {
-    listLessons()
+    fetchOnce('lessons:list', listLessons)
       .then(d => { setLessons(d.lessons || []); })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -44,6 +48,7 @@ export default function LessonsApp() {
     try {
       const { lesson } = await createLesson(req.topic, diff);
       setLessons(prev => [lesson, ...prev.filter(l => l.id !== lesson.id)]);
+      bust('lessons:list');
       await openLesson(lesson);
     } catch (err) {
       setView('new');
@@ -66,6 +71,7 @@ export default function LessonsApp() {
     try {
       const { lesson } = await createLesson(topic.trim(), difficulty);
       setLessons(prev => [lesson, ...prev.filter(l => l.id !== lesson.id)]);
+      bust('lessons:list');
       setTopic('');
       await openLesson(lesson);
     } catch (err) {
@@ -87,6 +93,7 @@ export default function LessonsApp() {
     try {
       await deleteLesson(id);
       setLessons(prev => prev.filter(l => l.id !== id));
+      bust('lessons:list');
       if (activeLesson?.id === id) { setActiveLesson(null); setView('list'); }
     } catch (err) { console.error(err); }
   }
@@ -105,7 +112,7 @@ export default function LessonsApp() {
       completeBlock: (bid) => completeLessonBlock(activeLesson.id, bid),
     };
     return (
-      <div className="h-full overflow-y-auto">
+      <ViewFade viewKey="lesson" className="h-full overflow-y-auto">
         <BlockLessonView
           key={`${activeLesson.id}-${resetKey}`}
           lesson={lessonForView}
@@ -113,14 +120,14 @@ export default function LessonsApp() {
           backLabel="Back to lessons"
           onBack={() => setView('list')}
         />
-      </div>
+      </ViewFade>
     );
   }
 
   // ===== NEW LESSON VIEW =====
   if (view === 'new') {
     return (
-      <div>
+      <ViewFade viewKey="new">
         <button onClick={() => setView('list')} className="flex items-center gap-2 text-sm text-white/35 hover:text-white/65 transition-colors mb-4">
           <ArrowLeft size={16} /> Back
         </button>
@@ -151,7 +158,7 @@ export default function LessonsApp() {
             </Button>
           </div>
         )}
-      </div>
+      </ViewFade>
     );
   }
 
@@ -159,7 +166,7 @@ export default function LessonsApp() {
   if (loading) return <div className="flex items-center justify-center h-48"><LoadingSpinner size={24} /></div>;
 
   return (
-    <div>
+    <ViewFade viewKey="list">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-bold text-white/85">Lessons</h2>
         <Button size="sm" onClick={() => { setTopic(''); setCreateError(null); setView('new'); }}>
@@ -207,6 +214,6 @@ export default function LessonsApp() {
           ))}
         </div>
       )}
-    </div>
+    </ViewFade>
   );
 }

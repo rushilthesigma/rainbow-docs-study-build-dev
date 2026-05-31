@@ -2,13 +2,16 @@ import { useState, useEffect, useCallback } from 'react';
 import { ArrowLeft, Layers, Plus, RotateCcw, Check, X, Trash2, ArrowRight, Loader2, Sparkles, Edit3 } from 'lucide-react';
 import { listDecks, createDeck, getDeck, deleteDeck, submitReview, addCards } from '../../../api/flashcards';
 import LoadingSpinner from '../../shared/LoadingSpinner';
+import { peek, fetchOnce, bust } from '../../../api/cache';
+import ViewFade from '../../shared/ViewFade';
 
 const inputCls = 'w-full rounded-xl border border-white/[0.08] bg-white/[0.04] px-3.5 py-2.5 text-[13px] text-white/85 placeholder:text-white/25 focus:outline-none focus:border-white/[0.20] focus:bg-white/[0.07] transition-colors';
 
 export default function FlashcardsApp() {
   const [view, setView] = useState('list');
-  const [decks, setDecks] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cachedDecks = peek('flashcards:list');
+  const [decks, setDecks] = useState(() => cachedDecks?.decks || []);
+  const [loading, setLoading] = useState(!cachedDecks);
   const [showForm, setShowForm] = useState(false);
   const [creating, setCreating] = useState(false);
   const [topic, setTopic] = useState('');
@@ -26,7 +29,9 @@ export default function FlashcardsApp() {
   const [manualBack, setManualBack] = useState('');
 
   useEffect(() => {
-    listDecks().then(d => { setDecks(d.decks || []); setLoading(false); }).catch(() => setLoading(false));
+    fetchOnce('flashcards:list', listDecks)
+      .then(d => { setDecks(d.decks || []); setLoading(false); })
+      .catch(() => setLoading(false));
   }, []);
 
   async function handleCreate(e) {
@@ -36,6 +41,7 @@ export default function FlashcardsApp() {
     try {
       const data = await createDeck(deckTitle.trim() || topic.trim(), topic.trim() || null, 10, 'beginner');
       setDecks(prev => [{ ...data.deck, cardCount: data.deck.cards?.length || 0, dueCount: data.deck.cards?.length || 0 }, ...prev]);
+      bust('flashcards:list');
       setTopic(''); setDeckTitle(''); setShowForm(false);
     } catch {}
     setCreating(false);
@@ -56,6 +62,7 @@ export default function FlashcardsApp() {
     if (!deck || !confirm('Delete this deck?')) return;
     await deleteDeck(deck.id);
     setDecks(prev => prev.filter(d => d.id !== deck.id));
+    bust('flashcards:list');
     setView('list');
     setDeck(null);
   }
@@ -96,7 +103,7 @@ export default function FlashcardsApp() {
     const progress = reviewCards.length > 0 ? ((reviewIndex) / reviewCards.length) * 100 : 0;
 
     return (
-      <div className="flex flex-col h-full min-h-0">
+      <ViewFade viewKey="deck" className="flex flex-col h-full min-h-0">
         {/* Header */}
         <div className="flex items-center justify-between mb-4 shrink-0">
           <button
@@ -182,7 +189,7 @@ export default function FlashcardsApp() {
               <button
                 disabled={dueCards.length === 0}
                 onClick={() => { setMode('review'); setReviewIndex(0); setFlipped(false); }}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-[12px] font-bold text-white/85 bg-white/[0.10] border border-white/[0.18] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] hover:bg-white/[0.16] disabled:opacity-35 transition-colors"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-[12px] font-bold text-white/85 bg-white/[0.10] border border-white/[0.18] hover:bg-white/[0.16] disabled:opacity-35 transition-colors"
               >
                 <RotateCcw size={12} /> Review ({dueCards.length})
               </button>
@@ -278,7 +285,7 @@ export default function FlashcardsApp() {
             </button>
           </div>
         )}
-      </div>
+      </ViewFade>
     );
   }
 
@@ -286,13 +293,13 @@ export default function FlashcardsApp() {
   if (loading) return <div className="flex items-center justify-center h-48"><LoadingSpinner size={24} /></div>;
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <ViewFade viewKey="list" className="flex flex-col h-full min-h-0">
       {/* Header */}
       <div className="flex items-center justify-between mb-6 shrink-0">
         <h1 className="text-[22px] font-black text-white/90 leading-tight">Flashcards</h1>
         <button
           onClick={() => setShowForm(!showForm)}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl font-bold text-[13px] text-white/85 bg-white/[0.10] border border-white/[0.18] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] hover:bg-white/[0.16] hover:text-white transition-colors"
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl font-bold text-[13px] text-white/85 bg-white/[0.10] border border-white/[0.18] hover:bg-white/[0.16] hover:text-white transition-colors"
         >
           <Plus size={14} /> New deck
         </button>
@@ -307,7 +314,7 @@ export default function FlashcardsApp() {
             <button
               type="submit"
               disabled={creating || (!topic.trim() && !deckTitle.trim())}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-[12px] font-bold text-white/85 bg-white/[0.10] border border-white/[0.18] shadow-[inset_0_1px_0_rgba(255,255,255,0.10)] hover:bg-white/[0.16] disabled:opacity-40 transition-colors"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-[12px] font-bold text-white/85 bg-white/[0.10] border border-white/[0.18] hover:bg-white/[0.16] disabled:opacity-40 transition-colors"
             >
               {creating ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
               {topic.trim() ? 'Generate' : 'Create'}
@@ -351,6 +358,6 @@ export default function FlashcardsApp() {
           ))}
         </div>
       )}
-    </div>
+    </ViewFade>
   );
 }

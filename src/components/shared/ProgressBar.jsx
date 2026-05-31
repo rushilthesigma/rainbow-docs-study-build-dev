@@ -42,7 +42,7 @@ export default function ProgressBar({
       )}
       <div className={`w-full ${heightCls} rounded-full overflow-hidden bg-white/[0.08]`}>
         <div
-          className="h-full bg-gradient-to-r from-blue-500 to-blue-400 transition-all duration-200 ease-out rounded-full shadow-[0_0_8px_rgba(59,130,246,0.55)]"
+          className="h-full bg-gradient-to-r from-blue-500 to-blue-400 transition-all duration-200 ease-out rounded-full"
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -51,38 +51,22 @@ export default function ProgressBar({
   );
 }
 
-export function InlineProgress({ value, active = true, target = 92, duration = 2500, label }) {
-  const [simulated, setSimulated] = useState(0);
-  const startedAt = useRef(null);
-  const wasActive = useRef(false);
-  useEffect(() => {
-    if (value !== undefined) return;
-    if (!active) {
-      if (wasActive.current) {
-        setSimulated(100);
-        const t = setTimeout(() => { setSimulated(0); startedAt.current = null; }, 250);
-        wasActive.current = false;
-        return () => clearTimeout(t);
-      }
-      setSimulated(0); startedAt.current = null;
-      return;
-    }
-    wasActive.current = true;
-    if (startedAt.current === null) startedAt.current = Date.now();
-    const id = setInterval(() => {
-      const elapsed = Date.now() - startedAt.current;
-      const ratio = 1 - Math.exp(-(elapsed / duration) * 3);
-      setSimulated(Math.min(target, Math.round(ratio * target)));
-    }, 80);
-    return () => clearInterval(id);
-  }, [active, value, target, duration]);
-  const pct = value !== undefined ? Math.max(0, Math.min(100, value)) : simulated;
+// Compact "something is happening" indicator. Originally rendered a
+// fake-percentage progress pill (simulated easing toward 92%), but the
+// imaginary percentage was misleading and visually noisy — every loading
+// button looked like a real progress tracker even when the underlying
+// task was a single LLM call. Now it's three staggered bouncing dots in
+// the current text color, which read as activity without lying about
+// completion. The legacy `value` / `target` / `duration` props are
+// accepted but ignored to keep call sites compiling.
+export function InlineProgress({ label }) {
   return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className="relative w-12 h-1 rounded-full bg-blue-500/20 overflow-hidden">
-        <span className="absolute inset-y-0 left-0 bg-gradient-to-r from-blue-500 to-blue-400 transition-all duration-200" style={{ width: `${pct}%` }} />
+    <span className="inline-flex items-center gap-1.5" aria-busy="true">
+      <span className="inline-flex items-center gap-0.5" aria-hidden="true">
+        <span className="w-1 h-1 rounded-full bg-current opacity-60 animate-typing-bounce" />
+        <span className="w-1 h-1 rounded-full bg-current opacity-60 animate-typing-bounce" style={{ animationDelay: '0.15s' }} />
+        <span className="w-1 h-1 rounded-full bg-current opacity-60 animate-typing-bounce" style={{ animationDelay: '0.3s' }} />
       </span>
-      <span className="text-[10px] font-mono tabular-nums text-blue-300">{pct}%</span>
       {label && <span className="text-[11px]">{label}</span>}
     </span>
   );

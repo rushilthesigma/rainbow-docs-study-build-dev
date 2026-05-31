@@ -147,7 +147,7 @@ function ExamCard({ kind, title, subtitle, unlocked, progressFraction, unlockAt,
   return (
     <div className="rounded-2xl border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622] p-5">
       <div className="flex items-start gap-3 mb-3">
-        <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white shadow ${unlocked ? 'bg-gradient-to-br from-blue-500 to-indigo-600' : 'bg-gray-300 dark:bg-[#2A2A40]'}`}>
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white shadow ${unlocked ? 'bg-blue-500' : 'bg-gray-300 dark:bg-[#2A2A40]'}`}>
           {kind === 'final' ? <Trophy size={18} /> : <GraduationCap size={18} />}
         </div>
         <div className="flex-1 min-w-0">

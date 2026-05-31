@@ -22,7 +22,7 @@ export default function MobileLanding({ onSignIn }) {
       {/* Top bar */}
       <header className="relative z-10 flex items-center justify-between px-5 pt-10 pb-2">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 grid place-items-center">
+          <div className="w-8 h-8 rounded-xl bg-blue-500 grid place-items-center">
             <BookOpen size={15} className="text-white" strokeWidth={2.4} />
           </div>
           <span className="font-bold text-[15px] tracking-tight text-gray-900 dark:text-white">RushilAI</span>

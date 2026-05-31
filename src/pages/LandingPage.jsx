@@ -157,7 +157,7 @@ function HeroSection({ onNext }) {
 
         <button
           onClick={onNext}
-          className="mt-10 inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-xl bg-gradient-to-b from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 active:scale-[0.98] text-white text-[14.5px] font-semibold tracking-[-0.005em] transition-all shadow-[inset_0_1px_0_rgba(255,255,255,0.22),inset_0_-1px_0_rgba(0,0,0,0.20),0_8px_24px_rgba(99,102,241,0.45)] border border-blue-400/55"
+          className="mt-10 inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-xl bg-gradient-to-b from-blue-500 to-indigo-600 hover:bg-blue-400 active:scale-[0.98] text-white text-[14.5px] font-semibold tracking-[-0.005em] transition-all border border-blue-400/55"
         >
           Get started <ChevronDown size={15} />
         </button>
@@ -342,7 +342,7 @@ function NumbersStrip() {
               key={s.label}
               className={`group rounded-lg p-5 ring-1 bg-white/[0.05] backdrop-blur-[20px] backdrop-saturate-150 text-center transition-all duration-300 hover:-translate-y-0.5 hover:bg-white/[0.07] ${
                 s.highlight
-                  ? 'ring-blue-300/30 hover:ring-blue-300/50 shadow-[0_0_24px_rgba(99,102,241,0.15)]'
+                  ? 'ring-blue-300/30 hover:ring-blue-300/50'
                   : 'ring-white/[0.10] hover:ring-white/[0.18]'
               }`}
             >
@@ -486,7 +486,7 @@ function SignInSection({ loading, onSignIn, onWhyNotGpt }) {
 
       <div className="relative z-10 flex flex-col items-center w-full max-w-sm animate-fade-up">
         {/* Brand mark */}
-        <div className="relative w-16 h-16 rounded-xl bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 grid place-items-center shadow-[0_10px_30px_rgba(99,102,241,0.45),inset_0_1px_0_rgba(255,255,255,0.25)] ring-1 ring-blue-400/40">
+        <div className="relative w-16 h-16 rounded-xl bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 grid place-items-center ring-1 ring-blue-400/40">
           <Sparkles size={30} className="text-white drop-shadow-lg" strokeWidth={2.2} />
         </div>
 
@@ -603,7 +603,7 @@ function WhyNotGptModal({ onClose }) {
         {/* Header */}
         <div className="relative px-7 pt-7 pb-5 border-b border-white/[0.07]">
           <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 grid place-items-center shadow-[0_6px_18px_rgba(99,102,241,0.45),inset_0_1px_0_rgba(255,255,255,0.25)] ring-1 ring-blue-300/30">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 grid place-items-center ring-1 ring-blue-300/30">
               <Sparkles size={18} className="text-white drop-shadow" />
             </div>
             <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-blue-300">RushilAI vs ChatGPT</span>
@@ -633,7 +633,7 @@ function WhyNotGptModal({ onClose }) {
           <span className="text-[11.5px] text-white/40">Press <kbd className="px-1.5 py-0.5 rounded bg-white/[0.06] border border-white/[0.10] text-white/70 font-mono text-[10.5px]">Esc</kbd> to close</span>
           <button
             onClick={onClose}
-            className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-b from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 active:scale-[0.98] text-white text-[13px] font-semibold tracking-[-0.005em] transition-all border border-blue-400/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.22),inset_0_-1px_0_rgba(0,0,0,0.18),0_6px_18px_rgba(99,102,241,0.30)]"
+            className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-b from-blue-500 to-indigo-600 hover:bg-blue-400 active:scale-[0.98] text-white text-[13px] font-semibold tracking-[-0.005em] transition-all border border-blue-400/55"
           >
             Got it <ArrowRight size={13} />
           </button>
@@ -694,7 +694,7 @@ function MenuBar() {
       }}
     >
       <div className="flex items-center gap-1.5">
-        <div className="w-4 h-4 rounded-[5px] bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 grid place-items-center shadow-[0_2px_5px_rgba(99,102,241,0.45)] ring-1 ring-blue-300/30">
+        <div className="w-4 h-4 rounded-[5px] bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 grid place-items-center ring-1 ring-blue-300/30">
           <Sparkles size={9} className="text-white" strokeWidth={2.6} />
         </div>
         <span className="text-[12.5px] font-semibold tracking-[-0.005em] text-white/95">RushilAI</span>

@@ -9,7 +9,7 @@ import StreakWidget from '../components/study/StreakWidget';
 import LoadingSpinner from '../components/shared/LoadingSpinner';
 import { useAuth } from '../context/AuthContext';
 
-const card = 'rounded-xl border border-white/[0.06] bg-[#1c1c1c]/70 backdrop-blur-sm shadow-[0_1px_0_rgba(255,255,255,0.04)_inset,0_8px_24px_-8px_rgba(0,0,0,0.45)]';
+const card = 'rounded-xl border border-white/[0.06] bg-[#1c1c1c]/70 backdrop-blur-sm';
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -77,7 +77,7 @@ export default function DashboardPage() {
           />
           <button
             type="submit"
-            className="p-2.5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/40 text-white shadow-[0_4px_16px_rgba(59,130,246,0.35)] transition-all"
+            className="p-2.5 rounded-xl bg-blue-500 hover:bg-blue-400 border border-blue-400/40 text-white transition-all"
           >
             <Send size={14} />
           </button>
@@ -96,7 +96,7 @@ export default function DashboardPage() {
           <button
             key={item.to}
             onClick={() => navigate(item.to)}
-            className={`${card} p-4 text-left hover:border-blue-400/[0.30] hover:shadow-[0_0_0_1px_rgba(96,165,250,0.20),0_8px_24px_-8px_rgba(37,99,235,0.30)] transition-all group`}
+            className={`${card} p-4 text-left hover:border-blue-400/[0.30] transition-all group`}
           >
             <item.icon size={17} className="text-blue-300/70 mb-2.5 group-hover:text-blue-200 transition-colors" />
             <p className="text-[13px] font-semibold text-white">{item.label}</p>

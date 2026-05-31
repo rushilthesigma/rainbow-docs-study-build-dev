@@ -61,7 +61,7 @@ export default function MobileSettings() {
             {activeChild.avatar || activeChild.name[0]?.toUpperCase()}
           </div>
         ) : (
-          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 grid place-items-center text-white text-[16px] font-bold">
+          <div className="w-12 h-12 rounded-full bg-blue-500 grid place-items-center text-white text-[16px] font-bold">
             {(user?.name || user?.email || '?')[0]?.toUpperCase()}
           </div>
         )}

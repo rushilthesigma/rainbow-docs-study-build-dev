@@ -94,9 +94,9 @@ export default function NewCurriculumPage() {
         Back to Dashboard
       </button>
 
-      <div className="rounded-xl border border-blue-400/[0.18] bg-gradient-to-b from-blue-500/[0.06] to-blue-500/[0.02] backdrop-blur-sm p-6 shadow-[0_0_40px_-12px_rgba(59,130,246,0.25)]">
+      <div className="rounded-xl border border-blue-400/[0.18] bg-gradient-to-b from-blue-500/[0.06] to-blue-500/[0.02] backdrop-blur-sm p-6">
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-lg bg-blue-500/[0.16] border border-blue-400/[0.30] flex items-center justify-center shadow-[inset_0_1px_0_rgba(255,255,255,0.10),0_4px_16px_rgba(59,130,246,0.30)]">
+          <div className="w-10 h-10 rounded-lg bg-blue-500/[0.16] border border-blue-400/[0.30] flex items-center justify-center">
             <Sparkles size={20} className="text-blue-300" />
           </div>
           <div>

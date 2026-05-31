@@ -3,6 +3,8 @@ import { Zap, Play, Check, X, Loader2, Lightbulb, Users, BookOpen, Sparkles, Set
 import TrialSession from '../../trial/TrialSession';
 import { apiFetch } from '../../../api/client';
 import { fetchQBReaderTossups, saveQuizBowlSet, fetchQuizBowlHistory, fetchQuizBowlRecommendations, fetchQuizBowlPatterns } from '../../../api/quizMatch';
+import { peek, fetchOnce, bustPrefix } from '../../../api/cache';
+import ViewFade from '../../shared/ViewFade';
 import { useWindowManager } from '../../../context/WindowManagerContext';
 import { setPendingLesson } from '../../../utils/pendingLesson';
 import useBrowserBack from '../../../hooks/useBrowserBack';
@@ -138,27 +140,40 @@ export default function QuizBowlApp() {
 
   // Hub: history + recommendations from the server. Loaded on first
   // mount and refreshed whenever the user returns to the hub from a
-  // completed set so the new entry shows up immediately.
-  const [history, setHistory] = useState(null); // { sets, stats } | null
-  const [recs, setRecs] = useState([]);
-  const [patterns, setPatterns] = useState(null);
-  const [hubLoading, setHubLoading] = useState(true);
+  // completed set so the new entry shows up immediately. Cached across
+  // app re-opens so the hub paints instantly with the last data.
+  const cachedHist = peek('qb:history');
+  const cachedRecs = peek('qb:recs');
+  const cachedPats = peek('qb:patterns');
+  const [history, setHistory] = useState(cachedHist || null);
+  const [recs, setRecs] = useState(cachedRecs?.recommendations || []);
+  const [patterns, setPatterns] = useState(cachedPats?.patterns || null);
+  const [hubLoading, setHubLoading] = useState(!(cachedHist && cachedRecs && cachedPats));
   const setStartedAtRef = useRef(null);     // ms timestamp when current set began
   const savedSetIdRef = useRef(null);       // guard so we save each set exactly once
 
   async function loadHub() {
-    setHubLoading(true);
+    // Only show the skeleton if we have NOTHING to render — otherwise
+    // refresh in the background and keep the stale data on screen.
+    if (!peek('qb:history')) setHubLoading(true);
     try {
       const [h, r, p] = await Promise.all([
-        fetchQuizBowlHistory().catch(() => ({ sets: [], stats: { sets: 0, accuracy: 0, studyMs: 0, categoryStats: {} } })),
-        fetchQuizBowlRecommendations().catch(() => ({ recommendations: [] })),
-        fetchQuizBowlPatterns().catch(() => ({ patterns: null })),
+        fetchOnce('qb:history', fetchQuizBowlHistory)
+          .catch(() => ({ sets: [], stats: { sets: 0, accuracy: 0, studyMs: 0, categoryStats: {} } })),
+        fetchOnce('qb:recs', fetchQuizBowlRecommendations)
+          .catch(() => ({ recommendations: [] })),
+        fetchOnce('qb:patterns', fetchQuizBowlPatterns)
+          .catch(() => ({ patterns: null })),
       ]);
       setHistory(h);
       setRecs(r.recommendations || []);
       setPatterns(p.patterns || null);
     } finally { setHubLoading(false); }
   }
+
+  // After a completed set, bust the hub caches so loadHub() re-fetches
+  // (instead of returning the stale "before this set" data).
+  function bustHubCache() { bustPrefix('qb:'); }
   useEffect(() => { loadHub(); }, []);
 
   const [buzzed, setBuzzed] = useState(false);
@@ -389,6 +404,7 @@ export default function QuizBowlApp() {
       savedSetIdRef.current = r?.set?.id || 'saved';
       // Quietly refresh the hub data so the next time the user returns
       // there, the new set + updated weakness data shows up.
+      bustHubCache();
       loadHub();
     }).catch(err => {
       console.warn('Failed to save QB set:', err);
@@ -535,7 +551,7 @@ export default function QuizBowlApp() {
             </>
           )}
           {isInfinite && settingsOpen && (
-            <div className="absolute right-2 top-full mt-1 w-72 z-20 rounded-2xl border border-white/15 bg-gradient-to-b from-white/[0.10] to-white/[0.03] backdrop-blur-2xl backdrop-saturate-150 shadow-[inset_0_1px_0_rgba(255,255,255,0.22),inset_0_-1px_0_rgba(255,255,255,0.04),0_12px_40px_rgba(0,0,0,0.5)] p-3.5 space-y-3">
+            <div className="absolute right-2 top-full mt-1 w-72 z-20 rounded-2xl border border-white/15 bg-gradient-to-b from-white/[0.10] to-white/[0.03] backdrop-blur-2xl backdrop-saturate-150 p-3.5 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-white/55">Settings</span>
                 <button onClick={() => setSettingsOpen(false)} className="text-white/45 hover:text-white/75"><X size={12} /></button>
@@ -544,7 +560,7 @@ export default function QuizBowlApp() {
                 <div className="grid grid-cols-3 gap-1">
                   {CATEGORIES.map(c => (
                     <button key={c} onClick={() => setCategory(c)}
-                      className={`px-2 py-1 rounded-xl text-[10px] font-semibold transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400/60 ${category === c ? 'bg-blue-500/20 text-white border border-blue-400/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_0_10px_rgba(59,130,246,0.25)]' : 'bg-white/[0.04] text-white/55 border border-transparent hover:bg-white/[0.08] hover:text-white/75'}`}>
+                      className={`px-2 py-1 rounded-xl text-[10px] font-semibold transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400/60 ${category === c ? 'bg-blue-500/20 text-white border border-blue-400/50' : 'bg-white/[0.04] text-white/55 border border-transparent hover:bg-white/[0.08] hover:text-white/75'}`}>
                       {c}
                     </button>
                   ))}
@@ -553,7 +569,7 @@ export default function QuizBowlApp() {
               <div className="grid grid-cols-2 gap-1">
                 {DIFFICULTIES.map(d => (
                   <button key={d} onClick={() => setDifficulty(d)}
-                    className={`px-2 py-1.5 rounded-xl text-[11px] font-semibold transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400/60 ${difficulty === d ? 'bg-blue-500/20 text-white border border-blue-400/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_0_10px_rgba(59,130,246,0.25)]' : 'bg-white/[0.04] text-white/55 border border-transparent hover:bg-white/[0.08] hover:text-white/75'}`}>
+                    className={`px-2 py-1.5 rounded-xl text-[11px] font-semibold transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400/60 ${difficulty === d ? 'bg-blue-500/20 text-white border border-blue-400/50' : 'bg-white/[0.04] text-white/55 border border-transparent hover:bg-white/[0.08] hover:text-white/75'}`}>
                     {d}
                   </button>
                 ))}
@@ -583,7 +599,7 @@ export default function QuizBowlApp() {
           {!buzzed && (
             <>
               <button onClick={handleBuzz}
-                className="w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white text-[15px] font-bold uppercase tracking-[0.15em] active:scale-[0.98] transition-all shadow-[0_0_24px_rgba(59,130,246,0.25)]">
+                className="w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white text-[15px] font-bold uppercase tracking-[0.15em] active:scale-[0.98] transition-all">
                 BUZZ
               </button>
               <p className="text-[10px] text-white/35 text-center">Space to buzz</p>
@@ -632,12 +648,20 @@ export default function QuizBowlApp() {
 
   // ===== AI LOBBY =====
   if (view === 'ai-lobby') {
-    return <AILobbyView onExit={() => { setView('hub'); loadHub(); }} />;
+    return (
+      <ViewFade viewKey="ai-lobby" className="h-full flex flex-col">
+        <AILobbyView onExit={() => { setView('hub'); bustHubCache(); loadHub(); }} />
+      </ViewFade>
+    );
   }
 
   // ===== MULTIPLAYER =====
   if (view === 'multiplayer') {
-    return <QuizBowlMatch user={user} onExit={() => setView('hub')} />;
+    return (
+      <ViewFade viewKey="multiplayer" className="h-full flex flex-col">
+        <QuizBowlMatch user={user} onExit={() => setView('hub')} />
+      </ViewFade>
+    );
   }
 
   // ===== CUSTOM SETUP (legacy form — opened from hub) =====
@@ -698,7 +722,7 @@ export default function QuizBowlApp() {
 
           {/* Start */}
           <button onClick={handleGenerate} disabled={generating}
-            className="w-full py-3.5 rounded-2xl bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 backdrop-blur-sm disabled:opacity-40 text-white text-[14px] font-bold inline-flex items-center justify-center gap-2 transition-all border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_18px_rgba(59,130,246,0.40)]">
+            className="w-full py-3.5 rounded-2xl bg-blue-500 hover:bg-blue-400 backdrop-blur-sm disabled:opacity-40 text-white text-[14px] font-bold inline-flex items-center justify-center gap-2 transition-all border border-blue-400/40">
             {generating
               ? <><InlineProgress active /> {questionSource === 'qbreader' ? 'Loading…' : 'Generating…'}</>
               : <><Play size={15} /> Start</>}
@@ -733,6 +757,7 @@ export default function QuizBowlApp() {
 
   // ===== HUB (default) — stats, recommendations, history =====
   return (
+    <ViewFade viewKey="hub" className="h-full flex flex-col">
     <QuizBowlHub
       hubLoading={hubLoading}
       history={history}
@@ -745,6 +770,7 @@ export default function QuizBowlApp() {
       onCustom={() => setView('custom')}
       onAILobby={() => setView('ai-lobby')}
     />
+    </ViewFade>
   );
 }
 
@@ -1144,7 +1170,7 @@ function GlassTile({ active, icon, label, sub, onClick }) {
     <button onClick={onClick}
       className={`text-left rounded-2xl border p-3 transition-all backdrop-blur-sm ${
         active
-          ? 'border-blue-400/45 bg-blue-500/15 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_14px_rgba(59,130,246,0.25)]'
+          ? 'border-blue-400/45 bg-blue-500/15 text-white'
           : 'border-white/[0.08] bg-white/[0.03] text-white/60 hover:bg-white/[0.07] hover:text-white/80'
       }`}>
       <div className="flex items-center gap-1.5 mb-0.5">
@@ -1161,7 +1187,7 @@ function GlassPill({ active, onClick, children }) {
     <button onClick={onClick}
       className={`px-3 py-1.5 rounded-xl text-[11px] font-semibold transition-all whitespace-nowrap backdrop-blur-sm ${
         active
-          ? 'bg-blue-500/20 text-white border border-blue-400/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_12px_rgba(59,130,246,0.28)]'
+          ? 'bg-blue-500/20 text-white border border-blue-400/50'
           : 'bg-white/[0.05] border border-white/[0.08] text-white/55 hover:bg-white/[0.09] hover:text-white/80'
       }`}>
       {children}
@@ -1398,7 +1424,7 @@ function AILobbyView({ onExit }) {
                 <button key={l.id} onClick={() => setRoomLevel(l.id)}
                   className={`py-1.5 rounded-xl text-[11px] font-semibold transition-all border ${
                     roomLevel === l.id
-                      ? 'bg-blue-500/20 text-blue-200 border-blue-400/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]'
+                      ? 'bg-blue-500/20 text-blue-200 border-blue-400/50'
                       : 'bg-white/[0.04] text-white/50 border-transparent hover:bg-white/[0.08] hover:text-white/70'
                   }`}>
                   {l.label}
@@ -1620,8 +1646,8 @@ function AILobbyView({ onExit }) {
         <button onClick={startSession}
           className={`w-full py-3.5 rounded-2xl text-white text-[14px] font-bold inline-flex items-center justify-center gap-2 transition-all border ${
             lobbyType === 'lobby'
-              ? 'bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_18px_rgba(59,130,246,0.40)]'
-              : 'bg-gradient-to-b from-rose-500 to-rose-600 hover:from-rose-400 hover:to-rose-500 border-rose-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_18px_rgba(239,68,68,0.40)]'
+              ? 'bg-blue-500 hover:bg-blue-400 border-blue-400/40'
+              : 'bg-gradient-to-b from-rose-500 to-rose-600 hover:from-rose-400 hover:to-rose-500 border-rose-400/40'
           }`}>
           {lobbyType === 'lobby' ? <><Users size={15} /> Enter Lobby</> : <><Swords size={15} /> Start Match</>}
         </button>

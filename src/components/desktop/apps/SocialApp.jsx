@@ -36,7 +36,7 @@ function ProfileSetup({ onDone }) {
 
   return (
     <div className="flex flex-col items-center justify-center h-full p-6 gap-4">
-      <div className="w-14 h-14 rounded-2xl bg-gradient-to-b from-blue-500/25 to-blue-600/15 border border-blue-400/35 flex items-center justify-center shadow-[0_4px_18px_rgba(59,130,246,0.20)]">
+      <div className="w-14 h-14 rounded-2xl bg-gradient-to-b from-blue-500/25 to-blue-600/15 border border-blue-400/35 flex items-center justify-center">
         <Users size={22} className="text-blue-200" />
       </div>
       <h2 className="text-[15px] font-bold text-white/90">Your profile</h2>
@@ -61,7 +61,7 @@ function ProfileSetup({ onDone }) {
         <button
           type="submit"
           disabled={saving || !handle.trim() || !displayName.trim()}
-          className="w-full py-2.5 rounded-2xl font-bold text-[13px] text-white bg-gradient-to-b from-blue-500 to-blue-600 border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none transition-all flex items-center justify-center gap-1.5"
+          className="w-full py-2.5 rounded-2xl font-bold text-[13px] text-white bg-blue-500 hover:bg-blue-400 disabled:opacity-40 transition-colors flex items-center justify-center gap-1.5"
         >
           {saving ? <Loader2 size={13} className="animate-spin" /> : <Check size={14} />}
           Save
@@ -104,7 +104,7 @@ function ChatView({ messages, profiles, myId, onSend, title, onBack }) {
           const sender = profiles?.[msg.from];
           return (
             <div key={msg.id} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[75%] px-3.5 py-2 rounded-2xl text-[13px] ${isMine ? 'bg-gradient-to-b from-blue-500 to-blue-600 text-white border border-blue-400/40 shadow-[0_4px_14px_rgba(59,130,246,0.25)] rounded-br-md' : 'bg-blue-500/[0.08] text-white/80 border border-blue-500/15 rounded-bl-md'}`}>
+              <div className={`max-w-[75%] px-3.5 py-2 rounded-2xl text-[13px] ${isMine ? 'bg-blue-500 text-white border border-blue-400/40 rounded-br-md' : 'bg-blue-500/[0.08] text-white/80 border border-blue-500/15 rounded-bl-md'}`}>
                 {!isMine && sender && <p className="text-[10px] font-semibold text-blue-300/80 mb-0.5">{sender.displayName}</p>}
                 <p className="break-words">{msg.content}</p>
                 <p className={`text-[9px] mt-0.5 ${isMine ? 'text-white/60' : 'text-blue-300/45'}`}>{new Date(msg.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</p>
@@ -115,7 +115,7 @@ function ChatView({ messages, profiles, myId, onSend, title, onBack }) {
       </div>
       <form onSubmit={handleSend} className="flex items-center gap-2 px-3 py-2.5 border-t border-blue-500/[0.12] flex-shrink-0">
         <input value={text} onChange={e => setText(e.target.value)} placeholder="Message…" className={inputCls} />
-        <button type="submit" disabled={!text.trim()} className="p-2.5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_12px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-30 disabled:shadow-none transition-all">
+        <button type="submit" disabled={!text.trim()} className="p-2.5 rounded-xl bg-blue-500 text-white border border-blue-400/40 hover:bg-blue-400 disabled:opacity-30 disabled:shadow-none transition-all">
           <Send size={13} />
         </button>
       </form>
@@ -297,7 +297,7 @@ export default function SocialApp() {
         </div>
         <div className="px-3 py-2.5 flex gap-2">
           <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSearch()} placeholder="@handle or name" className={inputCls} />
-          <button onClick={handleSearch} disabled={searching} className="p-2.5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_12px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none transition-all">
+          <button onClick={handleSearch} disabled={searching} className="p-2.5 rounded-xl bg-blue-500 text-white border border-blue-400/40 hover:bg-blue-400 disabled:opacity-40 disabled:shadow-none transition-all">
             {searching ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
           </button>
         </div>
@@ -380,7 +380,7 @@ export default function SocialApp() {
           <button
             onClick={handleCreateGroup}
             disabled={!newGroupName.trim()}
-            className="py-2.5 rounded-2xl font-bold text-[13px] text-white bg-gradient-to-b from-blue-500 to-blue-600 border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none transition-all inline-flex items-center justify-center gap-1.5"
+            className="py-2.5 rounded-2xl font-bold text-[13px] text-white bg-blue-500 border border-blue-400/40 hover:bg-blue-400 disabled:opacity-40 disabled:shadow-none transition-all inline-flex items-center justify-center gap-1.5"
           >
             <Plus size={14} /> Create
           </button>

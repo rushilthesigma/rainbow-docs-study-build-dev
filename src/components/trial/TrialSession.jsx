@@ -517,7 +517,7 @@ export default function TrialSession({
             {phase === 'reading' && !botAnsweredCorrectly && (
               <>
                 <button onClick={handleBuzz}
-                  className="w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white text-[15px] font-bold uppercase tracking-[0.15em] active:scale-[0.98] transition-all shadow-[0_0_24px_rgba(59,130,246,0.25)]">
+                  className="w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white text-[15px] font-bold uppercase tracking-[0.15em] active:scale-[0.98] transition-all">
                   BUZZ
                 </button>
                 <p className="text-[10px] text-white/35 text-center">Space to buzz</p>

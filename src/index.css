@@ -292,6 +292,25 @@ body {
 }
 .animate-fade-up { animation: fade-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards; opacity: 0; }
 
+/* View-switch fade — applied via the <ViewFade> wrapper whenever an
+   app changes which sub-view it renders. The wrapper's `key` prop is
+   bound to the view id so React remounts the subtree, which retriggers
+   this animation on every change. Soft + brief so it feels like a
+   transition, not an interstitial. */
+@keyframes view-fade-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-view-fade { animation: view-fade-in 0.18s ease-out forwards; }
+
+/* Modal pop — slightly more pronounced than view-fade so the dialog
+   reads as a discrete surface coming forward. */
+@keyframes modal-in {
+  from { opacity: 0; transform: scale(0.97) translateY(4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+.animate-modal-in { animation: modal-in 0.16s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+
 /* Slow "scroll for more" arrow bounce on the landing-page hero. */
 @keyframes bounce-slow {
   0%, 100% { transform: translateY(0);   opacity: 0.65; }

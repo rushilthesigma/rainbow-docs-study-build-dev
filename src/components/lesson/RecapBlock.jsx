@@ -44,7 +44,7 @@ export default function RecapBlock({ block, onComplete, hideContinue = false, co
         <div className="flex justify-end border-t border-white/[0.05] pt-5">
           <button
             onClick={onComplete}
-            className="inline-flex items-center gap-2.5 px-6 py-3 rounded-xl font-semibold text-[14px] text-white bg-gradient-to-b from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 border border-emerald-400/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_6px_18px_rgba(16,185,129,0.40)] transition-all"
+            className="inline-flex items-center gap-2.5 px-6 py-3 rounded-xl font-semibold text-[14px] text-white bg-gradient-to-b from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 border border-emerald-400/45 transition-all"
           >
             {continueLabel} <ArrowRight size={15} />
           </button>

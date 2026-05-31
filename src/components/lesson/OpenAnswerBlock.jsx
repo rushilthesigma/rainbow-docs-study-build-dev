@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import LoadingSpinner from '../shared/LoadingSpinner';
+import { InlineProgress } from '../shared/ProgressBar';
 
 // Open-answer block. The student types a free-form response and the
 // AI grades it inline against a small rubric — no separate Assignment
@@ -153,9 +153,9 @@ export default function OpenAnswerBlock({ block, onComplete, gradeFn, hideContin
                 <button
                   onClick={handleSubmit}
                   disabled={submitting || wordCount < minWords}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-[13.5px] text-white bg-gradient-to-b from-sky-500 to-sky-600 hover:from-sky-400 hover:to-sky-500 border border-sky-400/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_6px_18px_rgba(14,165,233,0.40)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-[13.5px] text-white bg-sky-500 hover:bg-sky-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {submitting ? <LoadingSpinner size={13} /> : <PenTool size={13} strokeWidth={2.4} />}
+                  {submitting ? <InlineProgress active /> : <PenTool size={13} strokeWidth={2.4} />}
                   {submitting ? 'Grading…' : 'Submit for grading'}
                 </button>
               </div>
@@ -168,7 +168,7 @@ export default function OpenAnswerBlock({ block, onComplete, gradeFn, hideContin
         <div className="flex justify-end border-t border-white/[0.05] pt-5">
           <button
             onClick={onComplete}
-            className="inline-flex items-center gap-2.5 px-6 py-3 rounded-xl font-semibold text-[14px] text-white bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_6px_18px_rgba(59,130,246,0.40)] transition-all"
+            className="inline-flex items-center gap-2.5 px-6 py-3 rounded-xl font-semibold text-[14px] text-white bg-blue-500 hover:bg-blue-400 transition-colors"
           >
             {continueLabel} <ArrowRight size={15} />
           </button>

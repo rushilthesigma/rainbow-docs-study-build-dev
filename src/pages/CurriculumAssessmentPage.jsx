@@ -121,7 +121,7 @@ export default function CurriculumAssessmentPage() {
         </p>
         <div className="w-64 mb-3">
           <div className="h-0.5 w-full bg-blue-400/[0.12] rounded-full overflow-hidden">
-            <div className="h-full bg-gradient-to-r from-blue-400 to-blue-500 rounded-full transition-all duration-300 ease-out shadow-[0_0_8px_rgba(96,165,250,0.5)]" style={{ width: `${genPct}%` }} />
+            <div className="h-full bg-gradient-to-r from-blue-400 to-blue-500 rounded-full transition-all duration-300 ease-out" style={{ width: `${genPct}%` }} />
           </div>
         </div>
         <p className="text-[12px] text-blue-200/55">{Math.round(genPct)}%</p>
@@ -290,11 +290,11 @@ export default function CurriculumAssessmentPage() {
               <span className="text-[12px] text-blue-200/55">{answeredCount} answered</span>
             </div>
             <div className="h-0.5 w-full bg-blue-400/[0.12] rounded-full overflow-hidden">
-              <div className="h-full bg-gradient-to-r from-blue-400 to-blue-500 rounded-full transition-all duration-300 shadow-[0_0_6px_rgba(96,165,250,0.4)]" style={{ width: `${progressPct}%` }} />
+              <div className="h-full bg-gradient-to-r from-blue-400 to-blue-500 rounded-full transition-all duration-300" style={{ width: `${progressPct}%` }} />
             </div>
           </div>
 
-          <div className="rounded-2xl border border-blue-400/[0.18] bg-gradient-to-b from-blue-500/[0.06] to-blue-500/[0.02] backdrop-blur-sm p-6 mb-4 shadow-[0_0_36px_-14px_rgba(59,130,246,0.30)]">
+          <div className="rounded-2xl border border-blue-400/[0.18] bg-gradient-to-b from-blue-500/[0.06] to-blue-500/[0.02] backdrop-blur-sm p-6 mb-4">
             <MathText as="p" className="text-[15px] leading-relaxed font-medium text-white/90 mb-6">
               {q.question}
             </MathText>
@@ -310,13 +310,13 @@ export default function CurriculumAssessmentPage() {
                     onClick={() => setAnswers(prev => ({ ...prev, [q.id]: letter }))}
                     className={`w-full text-left flex items-start gap-3 px-4 py-3.5 rounded-xl border text-[13px] transition-all ${
                       selected
-                        ? 'border-blue-400/55 bg-blue-500/[0.14] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_4px_18px_rgba(59,130,246,0.25)]'
+                        ? 'border-blue-400/55 bg-blue-500/[0.14] text-white'
                         : 'border-blue-400/[0.10] bg-blue-500/[0.03] text-white/65 hover:border-blue-400/[0.30] hover:bg-blue-500/[0.08] hover:text-white'
                     }`}
                   >
                     <span className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold mt-0.5 ${
                       selected
-                        ? 'bg-gradient-to-b from-blue-400 to-blue-500 text-white border border-blue-300/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.20)]'
+                        ? 'bg-gradient-to-b from-blue-400 to-blue-500 text-white border border-blue-300/55'
                         : 'bg-blue-500/[0.08] text-blue-200/55 border border-blue-400/[0.18]'
                     }`}>
                       {letter}
@@ -348,7 +348,7 @@ export default function CurriculumAssessmentPage() {
               <button
                 onClick={handleSubmit}
                 disabled={!allAnswered || grading}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-[13px] font-bold text-white bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_16px_rgba(59,130,246,0.40)] disabled:opacity-40 disabled:pointer-events-none transition-all"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-[13px] font-bold text-white bg-blue-500 hover:bg-blue-400 border border-blue-400/45 disabled:opacity-40 disabled:pointer-events-none transition-all"
               >
                 {grading ? <><LoadingSpinner size={13} /> Grading</> : <><Check size={13} /> Submit</>}
               </button>
@@ -365,7 +365,7 @@ export default function CurriculumAssessmentPage() {
                 onClick={() => setCurrentQ(i)}
                 className={`w-9 h-9 rounded-lg text-[11px] font-semibold transition-colors ${
                   i === currentQ
-                    ? 'bg-gradient-to-b from-blue-500 to-blue-600 text-white border border-blue-400/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_2px_10px_rgba(59,130,246,0.35)]'
+                    ? 'bg-blue-500 text-white border border-blue-400/55'
                     : answers[qu.id]
                       ? 'bg-blue-500/[0.14] text-blue-200 border border-blue-400/30'
                       : 'bg-blue-500/[0.04] text-blue-200/45 border border-blue-400/[0.10] hover:bg-blue-500/[0.10] hover:text-blue-100 hover:border-blue-400/[0.25]'
@@ -380,7 +380,7 @@ export default function CurriculumAssessmentPage() {
             <button
               onClick={handleSubmit}
               disabled={grading}
-              className="w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-[13px] font-bold text-white bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_16px_rgba(59,130,246,0.40)] disabled:opacity-40 transition-all"
+              className="w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-[13px] font-bold text-white bg-blue-500 hover:bg-blue-400 border border-blue-400/45 disabled:opacity-40 transition-all"
             >
               {grading ? <LoadingSpinner size={13} /> : <Check size={13} />}
               Submit

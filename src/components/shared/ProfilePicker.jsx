@@ -223,7 +223,7 @@ export default function ProfilePicker({
               disabled={stage === 'submitting' || pin.length < 4}
               className={`mt-4 w-full px-4 py-2.5 rounded-xl font-semibold text-[14px] transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                 dark
-                  ? 'bg-blue-500 hover:bg-blue-400 text-white shadow-[0_4px_16px_rgba(59,130,246,0.35)]'
+                  ? 'bg-blue-500 hover:bg-blue-400 text-white'
                   : 'bg-blue-600 hover:bg-blue-700 text-white'
               }`}
             >

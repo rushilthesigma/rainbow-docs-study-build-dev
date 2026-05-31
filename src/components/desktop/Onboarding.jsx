@@ -93,7 +93,7 @@ export default function Onboarding({ onComplete }) {
         {STEPS[step] !== 'tour' && (
           <button
             onClick={next}
-            className="inline-flex items-center gap-2 px-6 py-2.5 rounded-md bg-gradient-to-br from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 active:scale-[0.98] text-white text-[13.5px] font-semibold transition-all border border-blue-400/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),inset_0_-1px_0_rgba(0,0,0,0.18),0_4px_14px_rgba(99,102,241,0.40)]"
+            className="inline-flex items-center gap-2 px-6 py-2.5 rounded-md bg-blue-500 hover:bg-blue-400 active:scale-[0.98] text-white text-[13.5px] font-semibold transition-colors"
           >
             Continue <ChevronRight size={14} />
           </button>
@@ -133,7 +133,7 @@ function Welcome({ name, dark }) {
   return (
     <div className="text-center select-none">
       <div className="mb-6 flex justify-center">
-        <div className="relative w-20 h-20 rounded-xl bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 grid place-items-center shadow-[0_12px_32px_rgba(99,102,241,0.45),inset_0_1px_0_rgba(255,255,255,0.25),inset_0_-1px_0_rgba(0,0,0,0.18)] ring-1 ring-blue-400/40 animate-fade-up">
+        <div className="relative w-20 h-20 rounded-xl bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 grid place-items-center ring-1 ring-blue-400/40 animate-fade-up">
           <Sparkles size={38} className="text-white drop-shadow-lg" strokeWidth={2.2} />
         </div>
       </div>
@@ -180,7 +180,7 @@ function WallpaperPick({ wallpaper, setWallpaper, picks, dark }) {
               key={id}
               onClick={() => setWallpaper(id)}
               className={`group relative aspect-[4/3] rounded-lg overflow-hidden border-2 transition-all ${
-                isActive ? 'border-blue-500 ring-2 ring-blue-500/25 scale-[1.02] shadow-[0_4px_14px_rgba(99,102,241,0.40)]' : 'border-white/15 dark:border-white/15 hover:border-white/40'
+                isActive ? 'border-blue-500 ring-2 ring-blue-500/25 scale-[1.02]' : 'border-white/15 dark:border-white/15 hover:border-white/40'
               }`}
               title={wp.label}
             >
@@ -190,7 +190,7 @@ function WallpaperPick({ wallpaper, setWallpaper, picks, dark }) {
               />
               <div className="absolute inset-0 bg-black/10 group-hover:bg-black/0 transition-colors" />
               {isActive && (
-                <span className="absolute top-1.5 right-1.5 w-6 h-6 rounded-sm bg-gradient-to-br from-blue-500 to-indigo-600 grid place-items-center text-white shadow-[0_2px_8px_rgba(99,102,241,0.55),inset_0_1px_0_rgba(255,255,255,0.25)]">
+                <span className="absolute top-1.5 right-1.5 w-6 h-6 rounded-sm bg-blue-500 grid place-items-center text-white">
                   <Check size={12} strokeWidth={3} />
                 </span>
               )}
@@ -230,7 +230,7 @@ function Tour({ onSkip, onTour, dark }) {
         </button>
         <button
           onClick={onTour}
-          className="inline-flex items-center gap-2 px-6 py-2.5 rounded-md bg-gradient-to-br from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 active:scale-[0.98] text-white text-[13.5px] font-semibold transition-all border border-blue-400/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),inset_0_-1px_0_rgba(0,0,0,0.18),0_4px_14px_rgba(99,102,241,0.40)]"
+          className="inline-flex items-center gap-2 px-6 py-2.5 rounded-md bg-blue-500 hover:bg-blue-400 active:scale-[0.98] text-white text-[13.5px] font-semibold transition-all border border-blue-400/50"
         >
           Show me around <ArrowRight size={14} />
         </button>

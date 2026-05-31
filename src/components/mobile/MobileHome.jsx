@@ -48,7 +48,7 @@ export default function MobileHome({ onNavigate }) {
       {continueCard && !loading && (
         <button
           onClick={() => onNavigate(continueCard.kind === 'curriculum' ? 'curricula' : 'lessons')}
-          className="w-full rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white p-4 mb-5 active:scale-[0.99] transition-transform text-left"
+          className="w-full rounded-2xl bg-blue-500 text-white p-4 mb-5 active:scale-[0.99] transition-transform text-left"
         >
           <div className="flex items-center gap-2 mb-2">
             <span className="text-[10px] uppercase tracking-[0.18em] font-bold opacity-90">Continue</span>

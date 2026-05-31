@@ -231,7 +231,7 @@ export default function LessonPage() {
           }}
         >
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 grid place-items-center shadow-[0_8px_20px_rgba(16,185,129,0.40)] flex-shrink-0">
+            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 grid place-items-center flex-shrink-0">
               <Trophy size={20} className="text-white drop-shadow" strokeWidth={2.2} />
             </div>
             <div className="flex-1 min-w-0">

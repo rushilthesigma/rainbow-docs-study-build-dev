@@ -3708,14 +3708,20 @@ MIDDLE slots (slots 2 through ${blockCount - 1}, ${middleCount} blocks total) �
   • "application" — A REAL-WORLD APPLICATION. 200-300 words of markdown showing where this concept shows up — a product, an event, a phenomenon the student has likely encountered.
   • "challenge"   — A STRETCH PROBLEM. A harder, non-obvious question with a hint and a full solution. Inserts difficulty when the lesson gets too smooth.
   • "open"        — An OPEN-ANSWER prompt. A short question the student must answer in their own words (40-150 words). MUST include a 2-3 item rubric — each item is { label, criterion (one sentence describing what an A-grade response shows), weight (1-3) }.
+  • "discussion"  — AN AI DISCUSSION. The student chats back-and-forth with an AI tutor about what they just learned. Give a thoughtful opening question + 3-5 specific talking points the AI should hit across the conversation.
+  • "matching"    — A MATCHING MINIGAME. 5-7 pairs of terms and their definitions/examples the student matches by clicking. Great for vocabulary, formula↔meaning, or cause↔effect drills.
+  • "fill-blank"  — A FILL-IN-THE-BLANK exercise. 4-6 sentences with one key word/phrase omitted. The student types the missing piece. Good for keyword recall after a reading.
 
 RULES for the middle ${middleCount} blocks:
   • Include AT LEAST 2 "quiz" blocks (the lesson needs graded checkpoints).
-  • Include AT LEAST ${middleCount >= 5 ? 3 : 2} NON-quiz, NON-reading types — mix freely from {example, recap, application, challenge, open}. Variety is the point.
-  • Include AT LEAST 1 "open" block somewhere in the middle so the student has to write, not just click.
+  • Include AT LEAST ${middleCount >= 5 ? 3 : 2} NON-quiz, NON-reading types — mix freely from {example, recap, application, challenge, open, discussion, matching, fill-blank}. Variety is the point.
+  • Include AT LEAST 1 "open" OR "discussion" block somewhere in the middle so the student has to express their understanding in their own words.
+  • For lessons of ${middleCount >= 4 ? '4+' : 'any'} middle blocks, include AT LEAST 1 INTERACTIVE type — pick from {matching, fill-blank, discussion} — so the lesson isn't just read-and-quiz.
   • A "quiz" or "open" block should follow material it can test — never put a checkpoint before the relevant teaching content.
   • A "recap" should come AFTER at least one reading or example.
   • A "challenge" should come AFTER the relevant teaching content.
+  • A "discussion" should usually be near the end — it's most useful when the student has something to discuss.
+  • "matching" and "fill-blank" work best right after the reading that introduces the terms they test.
   • Sequence the blocks so the lesson flows naturally for a student new to the topic.
 
 SHAPES — each block's fields by type:
@@ -3726,6 +3732,9 @@ SHAPES — each block's fields by type:
   application: {"type":"application","title":"...","content":"<200-300 words of markdown>"}
   challenge:   {"type":"challenge","title":"...","prompt":"<markdown problem>","hint":"<1-2 sentences nudging without solving>","solution":"<markdown explanation>"}
   open:        {"type":"open","title":"...","prompt":"<markdown question, 1-3 sentences>","minWords":<40-80>,"rubric":[{"label":"...","criterion":"...","weight":<1-3>}, ...2-3 total...]}
+  discussion:  {"type":"discussion","title":"...","prompt":"<the AI's opening question to the student, 1-2 sentences>","talkingPoints":["<concept the AI should make sure gets discussed>", ...3-5 total...]}
+  matching:    {"type":"matching","title":"...","instructions":"<one-line how-to>","pairs":[{"term":"<short term>","definition":"<definition or example, 1 sentence>"}, ...5-7 pairs...]}
+  fill-blank:  {"type":"fill-blank","title":"...","instructions":"<one-line how-to>","sentences":[{"before":"<text before the blank>","answer":"<single word or short phrase>","after":"<text after the blank>","hint":"<optional short hint>"}, ...4-6 sentences...]}
 
 Markdown inside content/problem/prompt/solution: ## sub-headings, **bold**, lists, fenced code where useful, math via $...$ or $$...$$ if it fits.
 Distractors in quizzes must be plausible — each wrong option encodes a real misconception named in the explanation.
@@ -7901,13 +7910,19 @@ MIDDLE slots (slots 2 through ${blockCount - 1}, ${middleCount} blocks total) �
   • "application" — A REAL-WORLD APPLICATION. 200-300 words of markdown showing where this concept shows up.
   • "challenge"   — A STRETCH PROBLEM. A harder, non-obvious question with a hint and a full solution.
   • "open"        — An OPEN-ANSWER prompt. A short question the student must answer in their own words (40-150 words). MUST include a 2-3 item rubric — each item is { label, criterion (one sentence describing what an A-grade response shows), weight (1-3) }.
+  • "discussion"  — AN AI DISCUSSION. The student chats back-and-forth with an AI tutor about what they just learned. Give a thoughtful opening question + 3-5 specific talking points the AI should hit across the conversation.
+  • "matching"    — A MATCHING MINIGAME. 5-7 pairs of terms and their definitions/examples the student matches by clicking. Great for vocabulary, formula↔meaning, or cause↔effect drills.
+  • "fill-blank"  — A FILL-IN-THE-BLANK exercise. 4-6 sentences with one key word/phrase omitted. The student types the missing piece. Good for keyword recall after a reading.
 
 RULES for the middle ${middleCount} blocks:
   • Include AT LEAST 2 "quiz" blocks.
-  • Include AT LEAST ${middleCount >= 5 ? 3 : 2} NON-quiz, NON-reading types — mix freely from {example, recap, application, challenge, open}.
-  • Include AT LEAST 1 "open" block so the student has to write, not just click.
+  • Include AT LEAST ${middleCount >= 5 ? 3 : 2} NON-quiz, NON-reading types — mix freely from {example, recap, application, challenge, open, discussion, matching, fill-blank}.
+  • Include AT LEAST 1 "open" OR "discussion" block so the student has to express their understanding in their own words.
+  • For lessons of ${middleCount >= 4 ? '4+' : 'any'} middle blocks, include AT LEAST 1 INTERACTIVE type — pick from {matching, fill-blank, discussion} — so the lesson isn't just read-and-quiz.
   • A "quiz" or "open" must follow material it can test — never put a checkpoint before the relevant teaching content.
   • A "recap" comes AFTER at least one reading or example.
+  • A "discussion" should usually be near the end — it's most useful when the student has something to discuss.
+  • "matching" and "fill-blank" work best right after the reading that introduces the terms they test.
   • Sequence the blocks so the lesson flows naturally for a student new to the topic.
 
 SHAPES — each block's fields by type:
@@ -7918,6 +7933,9 @@ SHAPES — each block's fields by type:
   application: {"type":"application","title":"...","content":"<200-300 words of markdown>"}
   challenge:   {"type":"challenge","title":"...","prompt":"<markdown problem>","hint":"<1-2 sentences nudging without solving>","solution":"<markdown explanation>"}
   open:        {"type":"open","title":"...","prompt":"<markdown question, 1-3 sentences>","minWords":<40-80>,"rubric":[{"label":"...","criterion":"...","weight":<1-3>}, ...2-3 total...]}
+  discussion:  {"type":"discussion","title":"...","prompt":"<the AI's opening question to the student, 1-2 sentences>","talkingPoints":["<concept the AI should make sure gets discussed>", ...3-5 total...]}
+  matching:    {"type":"matching","title":"...","instructions":"<one-line how-to>","pairs":[{"term":"<short term>","definition":"<definition or example, 1 sentence>"}, ...5-7 pairs...]}
+  fill-blank:  {"type":"fill-blank","title":"...","instructions":"<one-line how-to>","sentences":[{"before":"<text before the blank>","answer":"<single word or short phrase>","after":"<text after the blank>","hint":"<optional short hint>"}, ...4-6 sentences...]}
 
 Markdown inside content/problem/prompt/solution: ## sub-headings, **bold**, lists, fenced code where useful, math via $...$ or $$...$$ if it fits.
 Distractors in quizzes must be plausible.

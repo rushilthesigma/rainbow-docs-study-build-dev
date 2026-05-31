@@ -5,6 +5,8 @@ import { listNotes, createNote, deleteNote, getNote, updateNote, generateCues, g
          listNoteMaps, createNoteMap, deleteNoteMap, updateNoteMap } from '../../../api/notes';
 import { apiFetch } from '../../../api/client';
 import { listCurricula, getCurriculum } from '../../../api/curriculum';
+import { peek, fetchOnce, bust } from '../../../api/cache';
+import ViewFade from '../../shared/ViewFade';
 import Button from '../../shared/Button';
 import LoadingSpinner from '../../shared/LoadingSpinner';
 import Modal from '../../shared/Modal';
@@ -142,14 +144,19 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
   const [view, setView] = useState(startView);
   // Back button returns to the notes list instead of leaving the site.
   useBrowserBack(view !== 'list', () => setView('list'));
-  const [notes, setNotes] = useState([]);
+  // Seed from the in-memory cache so re-opening the app feels instant —
+  // the most-recent list paints on first render and we kick a background
+  // refresh below.
+  const cachedNotes = peek('notes:list');
+  const cachedMaps = peek('notes:maps');
+  const [notes, setNotes] = useState(() => cachedNotes?.notes || []);
   // Multi-map state. Maps are summaries — each map's nodes+edges are
   // fetched inside <NoteMap> by id.
-  const [maps, setMaps] = useState([]);
-  const [mapsLoading, setMapsLoading] = useState(true);
+  const [maps, setMaps] = useState(() => cachedMaps?.maps || []);
+  const [mapsLoading, setMapsLoading] = useState(!cachedMaps);
   const [selectedMapId, setSelectedMapId] = useState(initialMapId);
   const [creatingMap, setCreatingMap] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cachedNotes);
   const [showCreate, setShowCreate] = useState(false);
   const [showAI, setShowAI] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
@@ -171,13 +178,16 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
   // Shape: { mode: 'create' | 'rename', initial: '', mapId? }
 
   useEffect(() => {
-    listNotes().then(d => { setNotes(d.notes || []); setLoading(false); }).catch(() => setLoading(false));
+    fetchOnce('notes:list', listNotes)
+      .then(d => { setNotes(d.notes || []); setLoading(false); })
+      .catch(() => setLoading(false));
   }, []);
 
   // Load map summaries. We refresh after create/delete via reloadMaps().
-  const reloadMaps = useCallback(() => {
-    setMapsLoading(true);
-    return listNoteMaps()
+  const reloadMaps = useCallback((force = false) => {
+    if (force) bust('notes:maps');
+    setMapsLoading(!peek('notes:maps'));
+    return fetchOnce('notes:maps', listNoteMaps)
       .then(d => {
         const list = d.maps || [];
         setMaps(list);
@@ -219,7 +229,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
           setSelectedMapId(d.map.id);
           setView('map');
         }
-        await reloadMaps();
+        await reloadMaps(true);
       } catch (e) {
         alert(e?.message || 'Could not create map.');
       }
@@ -228,7 +238,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
       if (trimmed === dialog.initial) return;
       try {
         await updateNoteMap(dialog.mapId, { name: trimmed });
-        await reloadMaps();
+        await reloadMaps(true);
       } catch (e) { alert(e?.message || 'Rename failed.'); }
     }
   }
@@ -240,7 +250,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
     try {
       await deleteNoteMap(map.id);
       if (selectedMapId === map.id) setSelectedMapId(null);
-      await reloadMaps();
+      await reloadMaps(true);
     } catch (err) { alert(err?.message || 'Delete failed.'); }
   }
 
@@ -279,6 +289,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
     try {
       const data = await createNote('Untitled Note', type);
       setNotes(prev => [data.note, ...prev]);
+      bust('notes:list');
       setSelectedNoteId(data.note.id);
       setView('editor');
       setShowCreate(false);
@@ -351,6 +362,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
       }
       await updateNote(noteId, updates);
       setNotes(prev => [{ ...created.note, ...updates }, ...prev]);
+      bust('notes:list');
       setSelectedNoteId(noteId);
       setView('editor');
       setShowAI(false);
@@ -376,6 +388,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
     if (!confirm('Delete this note?')) return;
     await deleteNote(id);
     setNotes(prev => prev.filter(n => n.id !== id));
+    bust('notes:list');
     if (selectedNoteId === id) { setView('list'); setSelectedNoteId(null); }
   }
 
@@ -385,13 +398,22 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
   }
 
   if (view === 'editor' && selectedNoteId) {
-    return <NoteEditor noteId={selectedNoteId} onBack={() => { setView('list'); listNotes().then(d => setNotes(d.notes || [])).catch(() => {}); }} />;
+    return (
+      <ViewFade viewKey="editor" className="h-full flex flex-col">
+        <NoteEditor noteId={selectedNoteId} onBack={() => {
+          setView('list');
+          // Force a refresh in case the body/title changed.
+          bust('notes:list');
+          fetchOnce('notes:list', listNotes).then(d => setNotes(d.notes || [])).catch(() => {});
+        }} />
+      </ViewFade>
+    );
   }
 
   if (view === 'map') {
     const activeMap = maps.find(m => m.id === selectedMapId) || null;
     return (
-      <div className="flex flex-col flex-1 min-h-0">
+      <ViewFade viewKey="map" className="flex flex-col flex-1 min-h-0">
         <div className="flex items-center justify-between mb-3 flex-shrink-0">
           <button
             onClick={() => setView('list')}
@@ -414,21 +436,21 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
             )}
           </div>
         </div>
-        <div className="flex-1 min-h-0">
+        <div className="flex-1 min-h-0 flex flex-col">
           <NoteMap
             key={selectedMapId || 'default'}
             mapId={selectedMapId || undefined}
             onOpenNote={(noteId) => { setSelectedNoteId(noteId); setView('editor'); }}
           />
         </div>
-      </div>
+      </ViewFade>
     );
   }
 
   if (loading) return <div className="flex items-center justify-center h-48"><LoadingSpinner size={24} /></div>;
 
   return (
-    <div>
+    <ViewFade viewKey="list">
       <div className="flex items-center justify-between mb-5">
         <h2 className="text-lg font-bold text-white/90">Notes</h2>
         <div className="flex items-center gap-2">
@@ -501,13 +523,13 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => setAiSource('prompt')}
-                className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs transition-colors backdrop-blur-sm ${aiSource === 'prompt' ? 'border-blue-400/45 bg-blue-500/15 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_14px_rgba(59,130,246,0.25)]' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}
+                className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs transition-colors backdrop-blur-sm ${aiSource === 'prompt' ? 'border-blue-400/45 bg-blue-500/15 text-white' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}
               >
                 <Wand2 size={12} /> From prompt
               </button>
               <button
                 onClick={() => setAiSource('curriculum')}
-                className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs transition-colors backdrop-blur-sm ${aiSource === 'curriculum' ? 'border-blue-400/45 bg-blue-500/15 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_14px_rgba(59,130,246,0.25)]' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}
+                className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs transition-colors backdrop-blur-sm ${aiSource === 'curriculum' ? 'border-blue-400/45 bg-blue-500/15 text-white' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}
               >
                 <BookOpen size={12} /> From curriculum
               </button>
@@ -518,10 +540,10 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
           <div>
             <label className="text-xs font-medium text-white/40 mb-1.5 block">Type</label>
             <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => setAiType('regular')} className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs transition-colors backdrop-blur-sm ${aiType === 'regular' ? 'border-blue-400/45 bg-blue-500/15 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_14px_rgba(59,130,246,0.25)]' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}>
+              <button onClick={() => setAiType('regular')} className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs transition-colors backdrop-blur-sm ${aiType === 'regular' ? 'border-blue-400/45 bg-blue-500/15 text-white' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}>
                 <FileText size={12} /> Regular
               </button>
-              <button onClick={() => setAiType('cornell')} className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs transition-colors backdrop-blur-sm ${aiType === 'cornell' ? 'border-blue-400/45 bg-blue-500/15 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_14px_rgba(59,130,246,0.25)]' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}>
+              <button onClick={() => setAiType('cornell')} className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs transition-colors backdrop-blur-sm ${aiType === 'cornell' ? 'border-blue-400/45 bg-blue-500/15 text-white' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}>
                 <Layout size={12} /> Cornell
               </button>
             </div>
@@ -667,7 +689,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
           ))}
         </div>
       )}
-    </div>
+    </ViewFade>
   );
 }
 

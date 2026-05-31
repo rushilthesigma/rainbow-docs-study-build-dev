@@ -23,7 +23,7 @@ export default function Sidebar({ hidden, onNavigate }) {
   return (
     <aside className={`fixed left-0 top-0 h-screen w-60 bg-white dark:bg-[#1a1a1a] border-r border-gray-200 dark:border-white/[0.06] flex flex-col transition-transform z-30 ${hidden ? '-translate-x-full' : 'translate-x-0'}`}>
       <div className="flex items-center gap-3 px-4 h-16 border-b border-gray-200 dark:border-white/[0.06]">
-        <div className="w-8 h-8 rounded-lg bg-gray-900 dark:bg-gradient-to-br dark:from-blue-500 dark:to-indigo-600 flex items-center justify-center flex-shrink-0 dark:shadow-[0_0_18px_rgba(59,130,246,0.45)]">
+        <div className="w-8 h-8 rounded-lg bg-gray-900 dark:bg-gradient-to-br dark:from-blue-500 dark:to-indigo-600 flex items-center justify-center flex-shrink-0">
           <BookOpen size={18} className="text-white" />
         </div>
         <span className="font-bold text-lg text-gray-900 dark:text-white tracking-tight">RushilAI</span>
@@ -38,7 +38,7 @@ export default function Sidebar({ hidden, onNavigate }) {
             className={({ isActive }) =>
               `relative flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
                 isActive
-                  ? 'bg-blue-50 dark:bg-blue-500/[0.14] text-blue-700 dark:text-blue-200 font-semibold dark:shadow-[inset_0_0_0_1px_rgba(59,130,246,0.25)] before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-r-full before:bg-blue-600 dark:before:bg-blue-400 before:shadow-[0_0_8px_rgba(59,130,246,0.65)]'
+                  ? 'bg-blue-50 dark:bg-blue-500/[0.14] text-blue-700 dark:text-blue-200 font-semibold before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-r-full before:bg-blue-600 dark:before:bg-blue-400'
                   : 'text-gray-600 dark:text-slate-400 hover:bg-gray-50 dark:hover:bg-blue-500/[0.06] hover:text-gray-900 dark:hover:text-blue-100'
               }`
             }

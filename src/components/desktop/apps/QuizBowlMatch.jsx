@@ -236,7 +236,7 @@ export default function QuizBowlMatch({ user, onExit }) {
           <button
             onClick={handleCreate}
             disabled={busy}
-            className="w-full py-3 mb-4 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none flex items-center justify-center gap-2 transition-all"
+            className="w-full py-3 mb-4 rounded-xl bg-blue-500 text-white text-sm font-semibold border border-blue-400/40 hover:bg-blue-400 disabled:opacity-40 disabled:shadow-none flex items-center justify-center gap-2 transition-all"
           >
             {busy ? <InlineProgress active /> : <Zap size={14} />}
             Create new
@@ -259,7 +259,7 @@ export default function QuizBowlMatch({ user, onExit }) {
             <button
               onClick={handleJoin}
               disabled={busy || joinCodeInput.trim().length < 4}
-              className="px-5 py-2.5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none transition-all"
+              className="px-5 py-2.5 rounded-xl bg-blue-500 text-white text-sm font-semibold border border-blue-400/40 hover:bg-blue-400 disabled:opacity-40 disabled:shadow-none transition-all"
             >
               Join
             </button>
@@ -382,7 +382,7 @@ export default function QuizBowlMatch({ user, onExit }) {
             <button
               onClick={handleStart}
               disabled={waiting}
-              className="w-full py-3 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 text-white text-sm font-semibold border border-blue-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_18px_rgba(59,130,246,0.30)] hover:from-blue-400 hover:to-blue-500 disabled:opacity-40 disabled:shadow-none flex items-center justify-center gap-2 transition-all"
+              className="w-full py-3 rounded-xl bg-blue-500 text-white text-sm font-semibold border border-blue-400/40 hover:bg-blue-400 disabled:opacity-40 disabled:shadow-none flex items-center justify-center gap-2 transition-all"
             >
               <Play size={14} />
               {waiting ? 'Waiting for at least one more…' : `Start (${playerCount} players)`}
@@ -542,7 +542,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
         {!buzz && !answerResult && !iAmLocked && (
           <>
             <button onClick={onBuzz}
-              className="w-full py-4 rounded-2xl bg-red-600/80 hover:bg-red-500/80 backdrop-blur-sm text-white text-[15px] font-bold uppercase tracking-[0.15em] active:scale-[0.98] transition-all shadow-[0_0_24px_rgba(239,68,68,0.2)]">
+              className="w-full py-4 rounded-2xl bg-red-600/80 hover:bg-red-500/80 backdrop-blur-sm text-white text-[15px] font-bold uppercase tracking-[0.15em] active:scale-[0.98] transition-all">
               BUZZ
             </button>
             <p className="text-[10px] text-white/20 text-center">Space to buzz</p>

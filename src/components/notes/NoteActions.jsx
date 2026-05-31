@@ -314,13 +314,13 @@ function QuizFromNoteModal({ open, onClose, noteTitle, noteText }) {
     return (
       <Modal open={open} onClose={handleClose} title={`Quiz on "${noteTitle}"`}>
         <form onSubmit={handleGenerate} className="flex flex-col gap-4">
-          <div className="rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-500/20 dark:bg-emerald-500/[0.06] dark:text-emerald-200/90 px-3 py-2 text-[12px] leading-relaxed flex items-start gap-2">
-            <Sparkles size={12} className="text-emerald-600 dark:text-emerald-400 mt-0.5 flex-shrink-0" />
+          <div className="rounded-lg border border-blue-300 bg-blue-50 text-blue-900 dark:border-blue-400/25 dark:bg-blue-500/[0.08] dark:text-blue-100/90 px-3 py-2 text-[12px] leading-relaxed flex items-start gap-2">
+            <Sparkles size={12} className="text-blue-600 dark:text-blue-300 mt-0.5 flex-shrink-0" />
             <span>The AI will write questions <span className="font-semibold">grounded in your note</span> — not generic ones about the topic.</span>
           </div>
           <PillGroup label="Difficulty" options={DIFFICULTY_OPTIONS} value={difficulty} onChange={setDifficulty} />
           <div>
-            <label className="block text-[10px] font-black uppercase tracking-[0.18em] text-gray-500 dark:text-white/35 mb-2">Questions</label>
+            <label className="block text-[10px] font-black uppercase tracking-[0.18em] text-blue-700/80 dark:text-blue-200/55 mb-2">Questions</label>
             <div className="flex gap-2">
               {[3, 5, 10, 15].map(n => {
                 const active = questionCount === n;
@@ -331,8 +331,8 @@ function QuizFromNoteModal({ open, onClose, noteTitle, noteText }) {
                     onClick={() => setQuestionCount(n)}
                     className={`px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-colors border ${
                       active
-                        ? 'bg-gray-900 text-white border-gray-900 dark:bg-white/15 dark:text-white/90 dark:border-white/20'
-                        : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200 hover:text-gray-700 dark:bg-white/[0.04] dark:text-white/40 dark:border-white/[0.08] dark:hover:bg-white/[0.08] dark:hover:text-white/65'
+                        ? 'bg-blue-600 text-white border-blue-500 dark:bg-blue-500 dark:border-blue-400'
+                        : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:border-blue-300 dark:bg-blue-500/[0.06] dark:text-blue-200/65 dark:border-blue-400/15 dark:hover:bg-blue-500/[0.12] dark:hover:text-blue-100'
                     }`}
                   >
                     {n}
@@ -358,7 +358,7 @@ function QuizFromNoteModal({ open, onClose, noteTitle, noteText }) {
       <Modal open={open} onClose={handleClose} title="Building your quiz">
         <div className="py-8 text-center">
           <LoadingSpinner size={20} />
-          <p className="text-[12px] text-white/65 mt-3">Reading your note and writing questions…</p>
+          <p className="text-[12px] text-blue-200/75 mt-3">Reading your note and writing questions…</p>
         </div>
       </Modal>
     );
@@ -367,45 +367,77 @@ function QuizFromNoteModal({ open, onClose, noteTitle, noteText }) {
   // Results phase
   if (open && results) {
     const pct = results.percentage ?? 0;
-    const scoreCls = pct >= 80 ? 'text-emerald-400 bg-emerald-900/20 ring-emerald-700/40'
-      : pct >= 60 ? 'text-white/80 bg-white/[0.08] ring-white/[0.18]'
-      : 'text-rose-400 bg-rose-900/20 ring-rose-700/40';
+    const wrong = (results.total ?? 0) - (results.score ?? 0);
+    const tier = pct >= 80 ? 'good' : pct >= 60 ? 'ok' : 'bad';
+    const heroCls = tier === 'good'
+      ? 'text-emerald-600 bg-emerald-50 ring-emerald-200 dark:text-emerald-300 dark:bg-emerald-500/[0.12] dark:ring-emerald-400/30'
+      : tier === 'ok'
+        ? 'text-blue-600 bg-blue-50 ring-blue-200 dark:text-blue-200 dark:bg-blue-500/[0.14] dark:ring-blue-400/30'
+        : 'text-rose-600 bg-rose-50 ring-rose-200 dark:text-rose-300 dark:bg-rose-500/[0.12] dark:ring-rose-400/30';
+    const heroLabel = tier === 'good' ? 'Nice work.' : tier === 'ok' ? 'Solid pass.' : 'Worth another pass.';
     return (
       <Modal open={open} onClose={handleClose} title="Quiz results" size="lg">
-        <div className="text-center mb-5">
-          <div className={`inline-flex items-center justify-center w-16 h-16 rounded-full text-[20px] font-bold mb-2 ring-2 ${scoreCls}`}>
+        {/* Hero score */}
+        <div className="flex items-center gap-4 mb-5">
+          <div className={`inline-flex items-center justify-center w-20 h-20 rounded-2xl text-[26px] font-bold tabular-nums ring-1 flex-shrink-0 ${heroCls}`}>
             {pct}%
           </div>
-          <p className="text-[13px] text-white/70">{results.score} of {results.total} correct</p>
+          <div className="min-w-0">
+            <p className="text-[15px] font-semibold text-gray-900 dark:text-white/95">{heroLabel}</p>
+            <p className="text-[12px] text-gray-500 dark:text-blue-200/65 mt-0.5">
+              <span className="text-emerald-600 dark:text-emerald-300 font-semibold">{results.score ?? 0}</span> correct
+              <span className="mx-1.5 text-gray-300 dark:text-blue-300/30">·</span>
+              <span className="text-rose-600 dark:text-rose-300 font-semibold">{wrong}</span> wrong
+              <span className="mx-1.5 text-gray-300 dark:text-blue-300/30">·</span>
+              <span className="text-gray-600 dark:text-blue-100/75">{results.total ?? 0} total</span>
+            </p>
+          </div>
         </div>
-        <div className="relative">
-          <div className="flex flex-col gap-2 max-h-[38vh] overflow-y-auto pr-1 -mr-1 pb-4">
-            {(results.details || []).map((d, i) => (
-              <div key={i} className={`rounded-lg p-3 border text-[12px] ${d.correct ? 'bg-emerald-900/10 border-emerald-700/30' : 'bg-rose-900/10 border-rose-700/30'}`}>
-                <div className="flex items-start gap-2">
+
+        {/* Question-by-question breakdown */}
+        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-gray-500 dark:text-blue-200/45 mb-2">Review</p>
+        <div className="flex flex-col gap-2 max-h-[42vh] overflow-y-auto pr-1 -mr-1">
+          {(results.details || []).map((d, i) => (
+            <div
+              key={i}
+              className={`rounded-xl p-3 border text-[12px] transition-colors ${
+                d.correct
+                  ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-500/[0.06] dark:border-emerald-400/20'
+                  : 'bg-rose-50 border-rose-200 dark:bg-rose-500/[0.06] dark:border-rose-400/20'
+              }`}
+            >
+              <div className="flex items-start gap-2.5">
+                <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full flex-shrink-0 mt-0.5 ${
+                  d.correct
+                    ? 'bg-emerald-500/15 dark:bg-emerald-400/20'
+                    : 'bg-rose-500/15 dark:bg-rose-400/20'
+                }`}>
                   {d.correct
-                    ? <CheckCircle2 size={14} className="text-emerald-400 mt-0.5 flex-shrink-0" />
-                    : <XCircle size={14} className="text-rose-400 mt-0.5 flex-shrink-0" />}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-white/85 font-medium break-words">{d.question}</p>
-                    {!d.correct && (
-                      <p className="text-[11px] text-white/55 mt-1 break-words">
-                        You: <span className="text-rose-300">{d.answer}</span> · Correct: <span className="text-emerald-300">{d.correctAnswer}</span>
-                      </p>
-                    )}
-                    {d.explanation && <p className="text-[11px] text-white/50 mt-1 italic break-words">{d.explanation}</p>}
-                  </div>
+                    ? <CheckCircle2 size={12} className="text-emerald-600 dark:text-emerald-300" />
+                    : <XCircle size={12} className="text-rose-600 dark:text-rose-300" />}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-gray-900 dark:text-white/90 font-medium break-words leading-snug">{d.question}</p>
+                  {!d.correct && (
+                    <p className="text-[11px] text-gray-600 dark:text-blue-200/65 mt-1.5 break-words">
+                      <span className="text-gray-500 dark:text-blue-300/55">Your answer:</span>{' '}
+                      <span className="text-rose-600 dark:text-rose-300 font-medium">{d.answer || '—'}</span>
+                      <span className="mx-1.5 text-gray-300 dark:text-blue-300/25">·</span>
+                      <span className="text-gray-500 dark:text-blue-300/55">Correct:</span>{' '}
+                      <span className="text-emerald-600 dark:text-emerald-300 font-medium">{d.correctAnswer}</span>
+                    </p>
+                  )}
+                  {d.explanation && (
+                    <p className="text-[11px] text-gray-600 dark:text-blue-100/55 mt-1.5 italic break-words leading-snug">{d.explanation}</p>
+                  )}
                 </div>
               </div>
-            ))}
-          </div>
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-white via-white/85 to-transparent dark:from-[#1a1a26] dark:via-[#1a1a26]/85"
-          />
+            </div>
+          ))}
         </div>
-        <div className="flex gap-2 mt-4 pt-4 border-t border-gray-200 dark:border-white/[0.08]">
-          <Button onClick={reset} className="flex-1">Another Quiz</Button>
+
+        <div className="flex gap-2 mt-5 pt-4 border-t border-gray-200 dark:border-blue-400/15">
+          <Button onClick={reset} className="flex-1"><Sparkles size={12} /> Another Quiz</Button>
           <Button variant="secondary" onClick={handleClose} className="flex-1">Done</Button>
         </div>
       </Modal>
@@ -420,13 +452,13 @@ function QuizFromNoteModal({ open, onClose, noteTitle, noteText }) {
     return (
       <Modal open={open} onClose={handleClose} title={quiz.title || `Quiz: ${noteTitle}`} size="lg">
         <div className="flex items-center justify-between mb-3">
-          <p className="text-[12px] text-white/65">
-            <span className="text-white/90 font-semibold">{answered}</span>
-            <span className="text-white/45"> / {total} answered</span>
+          <p className="text-[12px] text-blue-200/75">
+            <span className="text-blue-100 font-semibold">{answered}</span>
+            <span className="text-blue-200/55"> / {total} answered</span>
           </p>
           <button
             onClick={reset}
-            className="text-[11px] text-white/50 hover:text-white/85 inline-flex items-center gap-1 px-2 py-1 rounded-md hover:bg-white/[0.06] transition-colors"
+            className="text-[11px] text-blue-200/65 hover:text-blue-100 inline-flex items-center gap-1 px-2 py-1 rounded-md hover:bg-blue-500/[0.12] transition-colors"
           >
             <X size={12} /> Restart
           </button>
@@ -442,7 +474,7 @@ function QuizFromNoteModal({ open, onClose, noteTitle, noteText }) {
                 onClick={() => { setCurrentQ(i); setSelectedAnswer(answers[qId] || null); }}
                 aria-label={`Go to question ${i + 1}`}
                 className={`h-1.5 flex-1 rounded-full transition-colors ${
-                  isCurrent ? 'bg-white/70' : isAnswered ? 'bg-white/40' : 'bg-white/[0.10]'
+                  isCurrent ? 'bg-blue-400' : isAnswered ? 'bg-blue-500/60' : 'bg-blue-500/15'
                 }`}
               />
             );
@@ -450,7 +482,7 @@ function QuizFromNoteModal({ open, onClose, noteTitle, noteText }) {
         </div>
         {q && (
           <div>
-            <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-white/50 mb-2">Question {currentQ + 1} of {total}</p>
+            <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-blue-300/70 mb-2">Question {currentQ + 1} of {total}</p>
             <MathText as="h3" className="text-[15px] font-semibold text-white/95 mb-4 leading-snug break-words">{q.question}</MathText>
             <div className="flex flex-col gap-2 mb-4">
               {(q.options || []).map((opt) => {
@@ -462,12 +494,12 @@ function QuizFromNoteModal({ open, onClose, noteTitle, noteText }) {
                     onClick={() => selectAnswer(letter)}
                     className={`w-full text-left px-3 py-2.5 rounded-lg text-[13px] transition-all border flex items-start gap-2.5 ${
                       isSelected
-                        ? 'border-white/[0.28] bg-white/[0.10] text-white/95 font-medium'
-                        : 'border-white/[0.08] bg-white/[0.02] text-white/75 hover:border-white/[0.18] hover:bg-white/[0.06] hover:text-white/90'
+                        ? 'border-blue-400/55 bg-blue-500/[0.16] text-blue-50 font-medium'
+                        : 'border-blue-400/[0.10] bg-blue-500/[0.03] text-blue-100/80 hover:border-blue-400/30 hover:bg-blue-500/[0.10] hover:text-blue-50'
                     }`}
                   >
                     <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold flex-shrink-0 mt-0.5 ${
-                      isSelected ? 'bg-white/[0.90] text-black' : 'bg-white/[0.10] text-white/55'
+                      isSelected ? 'bg-blue-400 text-blue-950' : 'bg-blue-500/15 text-blue-200/70'
                     }`}>
                       {letter}
                     </span>
@@ -476,7 +508,7 @@ function QuizFromNoteModal({ open, onClose, noteTitle, noteText }) {
                 );
               })}
             </div>
-            <div className="flex items-center justify-between pt-3 border-t border-white/[0.08]">
+            <div className="flex items-center justify-between pt-3 border-t border-blue-400/[0.12]">
               <Button variant="ghost" size="sm" onClick={prevQuestion} disabled={currentQ === 0}>Previous</Button>
               {currentQ < total - 1 ? (
                 <Button variant="ghost" size="sm" onClick={nextQuestion}>Next <ArrowRight size={12} /></Button>

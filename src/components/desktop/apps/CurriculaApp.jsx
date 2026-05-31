@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { ArrowLeft, Plus, Sparkles, Loader2, BookOpen, ChevronDown, ChevronRight, CheckCircle2, Circle, Lock, ClipboardCheck, PenTool, FileText, Check, X, Trophy, Wand2, Paperclip, Upload, Calculator, GraduationCap, Atom, Sigma, Map as MapIcon, List } from 'lucide-react';
 import { listCurricula, generateCurriculum, getCurriculum, sendLessonMessage, getLessonHistory, editCurriculumWithAI, extractSourceUrl, extractFiles, refineCurriculum } from '../../../api/curriculum';
+import { peek, fetchOnce, bust } from '../../../api/cache';
+import ViewFade from '../../shared/ViewFade';
 import { apiFetch } from '../../../api/client';
 import { useWindowManager } from '../../../context/WindowManagerContext';
 import { useDemoMode } from '../../../context/DemoModeContext';
@@ -54,8 +56,10 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
   // note"). Safe to use directly as the initial state now that useBrowserBack
   // below skips 'new'/'pausd' (see comment there).
   const [view, setView] = useState(seedView || 'list');
-  const [curricula, setCurricula] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // Seed from cache so re-entering the app doesn't flash the skeleton.
+  const cachedCurricula = peek('curricula:list');
+  const [curricula, setCurricula] = useState(() => cachedCurricula?.curricula || []);
+  const [loading, setLoading] = useState(!cachedCurricula);
   const [selectedCurriculum, setSelectedCurriculum] = useState(null);
   // WindowManager is optional — the desktop shell provides it, but if this
   // component is ever rendered outside of one (mobile, for instance) we
@@ -135,7 +139,9 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
   const [enrollingSlug, setEnrollingSlug] = useState(null);
 
   useEffect(() => {
-    listCurricula().then(d => { setCurricula(d.curricula || []); setLoading(false); }).catch(() => setLoading(false));
+    fetchOnce('curricula:list', listCurricula)
+      .then(d => { setCurricula(d.curricula || []); setLoading(false); })
+      .catch(() => setLoading(false));
   }, []);
 
   // Lazy-load the PAUSD catalog the first time the user opens that view.
@@ -163,6 +169,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
         setSelectedCurriculum(data.curriculum);
       } else {
         setCurricula(prev => [data.curriculum, ...prev.filter(c => c.id !== data.curriculum.id)]);
+        bust('curricula:list');
         setSelectedCurriculum(data.curriculum);
       }
       setView('detail');
@@ -218,6 +225,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
       const augmented = { ...settings, ...(refinements.length ? { refinements } : {}) };
       const data = await generateCurriculum(augmented, cleanSources);
       setCurricula(prev => [data.curriculum, ...prev]);
+      bust('curricula:list');
       setSelectedCurriculum(data.curriculum);
       setView('detail');
       setSettings(DEFAULT_SETTINGS);
@@ -369,11 +377,13 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
   // ===== Assessment (unit_test / essay) — real quiz, not a chat tutor =====
   if (view === 'assessment' && currentLesson) {
     return (
-      <AssessmentView
-        lesson={currentLesson}
-        curriculum={selectedCurriculum}
-        onBack={() => setView('detail')}
-      />
+      <ViewFade viewKey={`assessment:${currentLesson.id}`} className="h-full flex flex-col">
+        <AssessmentView
+          lesson={currentLesson}
+          curriculum={selectedCurriculum}
+          onBack={() => setView('detail')}
+        />
+      </ViewFade>
     );
   }
 
@@ -386,7 +396,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
     const isPractice = currentLesson.type === 'practice';
     const seed = currentLesson.practiceTopic || currentLesson.title;
     return (
-      <div className="h-full flex flex-col min-h-0">
+      <ViewFade viewKey={`math_tutor:${currentLesson.id}`} className="h-full flex flex-col min-h-0">
         <div className="flex items-center gap-2 mb-3 flex-shrink-0">
           <button onClick={() => setView('detail')} className="flex items-center gap-2 text-sm text-white/40 hover:text-white/90">
             <ArrowLeft size={16} /> Back to curriculum
@@ -402,7 +412,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
             onBack={() => setView('detail')}
           />
         </div>
-      </div>
+      </ViewFade>
     );
   }
 
@@ -412,11 +422,13 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
     // with SRS. Math / essay / unit_test still go through their own flows.
     if (currentLesson.type === 'lesson' || !currentLesson.type) {
       return (
-        <BlockLessonView
-          curriculumId={selectedCurriculum?.id}
-          lesson={currentLesson}
-          onBack={() => setView('detail')}
-        />
+        <ViewFade viewKey={`lesson:${currentLesson.id}`} className="h-full flex flex-col">
+          <BlockLessonView
+            curriculumId={selectedCurriculum?.id}
+            lesson={currentLesson}
+            onBack={() => setView('detail')}
+          />
+        </ViewFade>
       );
     }
     const header = (
@@ -481,21 +493,23 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
       abortRef.current = abort;
     }
     return (
-      <ChatContainer
-        messages={lessonMessages}
-        streamingContent={streamingContent}
-        streamingSources={streamingSources}
-        searchStatus={searchStatus}
-        onSend={handleLessonSend}
-        disabled={streaming}
-        placeholder={streaming ? 'AI is thinking...' : 'Message...'}
-        header={header}
-        className="h-full"
-        sourceMode={sourceMode}
-        onToggleSource={setSourceMode}
-        onUserEditMessage={handleUserEdit}
-        onAiInstruct={handleAiInstruct}
-      />
+      <ViewFade viewKey={`lesson-chat:${currentLesson.id}`} className="h-full flex flex-col">
+        <ChatContainer
+          messages={lessonMessages}
+          streamingContent={streamingContent}
+          streamingSources={streamingSources}
+          searchStatus={searchStatus}
+          onSend={handleLessonSend}
+          disabled={streaming}
+          placeholder={streaming ? 'AI is thinking...' : 'Message...'}
+          header={header}
+          className="h-full"
+          sourceMode={sourceMode}
+          onToggleSource={setSourceMode}
+          onUserEditMessage={handleUserEdit}
+          onAiInstruct={handleAiInstruct}
+        />
+      </ViewFade>
     );
   }
 
@@ -506,7 +520,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
     const completedLessons = (c.units || []).reduce((s, u) => s + (u.lessons || []).filter(l => l.isCompleted).length, 0);
 
     return (
-      <div>
+      <ViewFade viewKey={`detail:${selectedCurriculum.id}`}>
         <div className="flex items-center justify-between mb-4">
           <button onClick={() => { setView('list'); setSelectedCurriculum(null); }} className="flex items-center gap-2 text-sm text-white/50 hover:text-white/90">
             <ArrowLeft size={16} /> All Curricula
@@ -573,25 +587,26 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
               setSelectedCurriculum(updated);
               // Also update list-view cache so the updated title/descr propagate
               setCurricula(prev => prev.map(x => x.id === updated.id ? updated : x));
+              bust('curricula:list');
               setEditOpen(false);
             }}
           />
         )}
-      </div>
+      </ViewFade>
     );
   }
 
   // New curriculum
   if (view === 'new') {
     return (
-      <div>
+      <ViewFade viewKey="new">
         <button onClick={() => setView('list')} className="flex items-center gap-2 text-sm text-white/40 hover:text-white/90 mb-4"><ArrowLeft size={16} /> Back</button>
         <h2 className="text-lg font-bold text-white mb-4">New curriculum</h2>
         {generating && genPhase === 'questions' ? (
           <div className="py-6 px-2 max-w-xl mx-auto w-full">
-            <div className="rounded-2xl border border-blue-400/[0.20] bg-gradient-to-b from-blue-500/[0.07] to-blue-500/[0.02] backdrop-blur-sm p-5 shadow-[0_0_36px_-10px_rgba(59,130,246,0.30)]">
+            <div className="rounded-2xl border border-blue-400/[0.20] bg-gradient-to-b from-blue-500/[0.07] to-blue-500/[0.02] backdrop-blur-sm p-5">
               <div className="flex items-center gap-2.5 mb-1">
-                <div className="w-7 h-7 rounded-lg bg-blue-500/20 border border-blue-400/35 grid place-items-center shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]">
+                <div className="w-7 h-7 rounded-lg bg-blue-500/20 border border-blue-400/35 grid place-items-center">
                   <Wand2 size={13} className="text-blue-200" />
                 </div>
                 <h3 className="text-sm font-semibold text-white">A few quick questions</h3>
@@ -641,7 +656,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
                                   onClick={() => setRefineAnswers(p => ({ ...p, [q.id]: opt }))}
                                   className={`px-2.5 py-1 rounded-md text-[11px] border transition-colors ${
                                     active
-                                      ? 'bg-gradient-to-b from-blue-500 to-blue-600 text-white border-blue-400/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_2px_8px_rgba(59,130,246,0.35)]'
+                                      ? 'bg-blue-500 text-white border-blue-400/55'
                                       : 'bg-blue-500/[0.04] text-blue-100/65 border-blue-400/[0.16] hover:text-white hover:border-blue-400/[0.40] hover:bg-blue-500/[0.10]'
                                   }`}
                                 >
@@ -786,20 +801,22 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
             <Button onClick={handleGenerate} disabled={!settings.topic.trim()} data-tour="curriculum-generate-button"><Sparkles size={16} /> Generate Curriculum</Button>
           </div>
         )}
-      </div>
+      </ViewFade>
     );
   }
 
   // PAUSD catalog view — browse and enroll in pre-built courses
   if (view === 'pausd') {
     return (
-      <PausdCatalogView
-        catalog={pausdCatalog}
-        loading={pausdLoading}
-        enrollingSlug={enrollingSlug}
-        onBack={() => setView('list')}
-        onEnroll={enrollPausd}
-      />
+      <ViewFade viewKey="pausd" className="h-full flex flex-col">
+        <PausdCatalogView
+          catalog={pausdCatalog}
+          loading={pausdLoading}
+          enrollingSlug={enrollingSlug}
+          onBack={() => setView('list')}
+          onEnroll={enrollPausd}
+        />
+      </ViewFade>
     );
   }
 
@@ -807,7 +824,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
   if (loading) return <div className="flex items-center justify-center h-48"><LoadingSpinner size={24} /></div>;
 
   return (
-    <div>
+    <ViewFade viewKey="list">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-bold text-white">Curricula</h2>
         <div className="flex items-center gap-2">
@@ -875,7 +892,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
           })}
         </div>
       )}
-    </div>
+    </ViewFade>
   );
 }
 

@@ -8,8 +8,12 @@ import RecapBlock from './RecapBlock';
 import ApplicationBlock from './ApplicationBlock';
 import ChallengeBlock from './ChallengeBlock';
 import OpenAnswerBlock from './OpenAnswerBlock';
+import DiscussionBlock from './DiscussionBlock';
+import MatchingBlock from './MatchingBlock';
+import FillBlankBlock from './FillBlankBlock';
 import ProgressBar from '../shared/ProgressBar';
 import { SkeletonProse } from '../shared/Skeleton';
+import ViewFade from '../shared/ViewFade';
 import {
   generateLessonBlocks as curriculumGenerateBlocks,
   generateFinalQuiz as curriculumGenerateFinalQuiz,
@@ -196,6 +200,7 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
         <>
           <StageTracker blocks={blocks} activeIdx={activeIdx} onJump={(i) => setActiveIdx(i)} />
 
+          <ViewFade viewKey={allDone ? 'done' : active?.id || `idx:${activeIdx}`}>
           {allDone ? (
             <div
               className="relative overflow-hidden rounded-3xl border border-emerald-400/25 p-10 md:p-12 text-center"
@@ -206,7 +211,7 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
                   'rgba(14, 20, 24, 0.55)',
               }}
             >
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 grid place-items-center mx-auto mb-5 shadow-[0_12px_28px_rgba(16,185,129,0.45)]">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 grid place-items-center mx-auto mb-5">
                 <Trophy size={28} className="text-white drop-shadow" strokeWidth={2.2} />
               </div>
               <h2 className="text-[28px] md:text-[32px] font-semibold tracking-[-0.02em] text-white mb-2">
@@ -219,7 +224,7 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
               </p>
               <button
                 onClick={onBack}
-                className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-semibold text-[14px] text-white bg-gradient-to-b from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 border border-emerald-400/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_8px_22px_rgba(16,185,129,0.40)] transition-all"
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-semibold text-[14px] text-white bg-gradient-to-b from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 border border-emerald-400/45 transition-all"
               >
                 <ArrowLeft size={14} /> {backLabel}
               </button>
@@ -248,7 +253,14 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
               gradeFn={handleOpenSubmit}
               onComplete={handleReadingComplete}
             />
+          ) : active?.type === 'discussion' ? (
+            <DiscussionBlock key={active.id} block={active} onComplete={handleReadingComplete} />
+          ) : active?.type === 'matching' ? (
+            <MatchingBlock key={active.id} block={active} onComplete={handleReadingComplete} />
+          ) : active?.type === 'fill-blank' ? (
+            <FillBlankBlock key={active.id} block={active} onComplete={handleReadingComplete} />
           ) : null}
+          </ViewFade>
         </>
       )}
     </div>

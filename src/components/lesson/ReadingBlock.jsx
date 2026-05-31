@@ -38,7 +38,7 @@ export default function ReadingBlock({ block, onComplete, hideContinue = false, 
         <div className="flex justify-end border-t border-white/[0.05] pt-5">
           <button
             onClick={onComplete}
-            className="inline-flex items-center gap-2.5 px-6 py-3 rounded-xl font-semibold text-[14px] text-white bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_6px_18px_rgba(59,130,246,0.40)] transition-all backdrop-blur-sm"
+            className="inline-flex items-center gap-2.5 px-6 py-3 rounded-xl font-semibold text-[14px] text-white bg-blue-500 hover:bg-blue-400 transition-colors"
           >
             {continueLabel} <ArrowRight size={15} />
           </button>

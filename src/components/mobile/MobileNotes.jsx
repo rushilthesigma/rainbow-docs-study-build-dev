@@ -84,7 +84,7 @@ export default function MobileNotes() {
           <button
             onClick={handleSave}
             disabled={saving}
-            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-white/[0.10] border border-white/[0.14] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] disabled:opacity-50 text-white/70 text-[12px] font-bold"
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-white/[0.10] border border-white/[0.14] disabled:opacity-50 text-white/70 text-[12px] font-bold"
           >
             <Save size={11} /> Save
           </button>
@@ -120,7 +120,7 @@ export default function MobileNotes() {
     >
       <button
         onClick={handleNew}
-        className="w-full rounded-2xl bg-white/[0.13] border border-white/[0.24] shadow-[0_0_28px_rgba(255,255,255,0.07),inset_0_1px_0_rgba(255,255,255,0.22)] p-4 mb-4 active:scale-[0.99] transition-transform text-left backdrop-blur-sm"
+        className="w-full rounded-2xl bg-white/[0.13] border border-white/[0.24] p-4 mb-4 active:scale-[0.99] transition-transform text-left backdrop-blur-sm"
       >
         <div className="flex items-center gap-3">
           <div className="w-11 h-11 rounded-xl bg-white/[0.15] grid place-items-center shrink-0">

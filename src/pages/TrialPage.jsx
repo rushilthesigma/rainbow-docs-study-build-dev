@@ -268,7 +268,7 @@ export default function TrialPage() {
     return (
       <div className="flex-1 overflow-y-auto min-h-0">
         <div className="max-w-md mx-auto flex flex-col items-center text-center space-y-6 py-10 px-4">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center shadow-[0_0_30px_rgba(234,179,8,0.35)]">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center">
             <Trophy size={28} className="text-white" />
           </div>
           <div>
@@ -297,7 +297,7 @@ export default function TrialPage() {
 
         {/* Header */}
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-[0_0_20px_rgba(99,102,241,0.35)]">
+          <div className="w-10 h-10 rounded-xl bg-blue-500 flex items-center justify-center">
             <Trophy size={20} className="text-white" />
           </div>
           <div>

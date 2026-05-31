@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Sparkles, Plus, Trash2, RotateCw, Wand2, Link2, X, FileText, Lightbulb, Check, Pencil, ArrowLeft, Focus, StickyNote, Loader2 } from 'lucide-react';
+import { Sparkles, Plus, Trash2, RotateCw, Wand2, Link2, X, FileText, Lightbulb, Pencil, ArrowLeft, Focus, StickyNote, Loader2 } from 'lucide-react';
 import {
   listNotes,
-  getNoteGraph, saveNoteGraph, suggestGraphNodes,
-  getNoteMap, updateNoteMap, suggestNoteMapNodes,
+  getNoteGraph, saveNoteGraph,
+  getNoteMap, updateNoteMap,
   createNote, updateNote, getNote,
 } from '../../api/notes';
 import { apiFetch } from '../../api/client';
@@ -95,9 +95,6 @@ export default function NoteMap({ onOpenNote, mapId }) {
   const saveGraph = mapId
     ? (nodes, edges) => updateNoteMap(mapId, { nodes, edges })
     : (nodes, edges) => saveNoteGraph(nodes, edges);
-  const askSuggest = mapId
-    ? (args) => suggestNoteMapNodes(mapId, args)
-    : (args) => suggestGraphNodes(args);
 
   const [loading, setLoading] = useState(true);
   const [nodes, setNodes] = useState([]);
@@ -105,17 +102,11 @@ export default function NoteMap({ onOpenNote, mapId }) {
   const [selectedId, setSelectedId] = useState(null);
   const [linkingFrom, setLinkingFrom] = useState(null);
   const [renaming, setRenaming] = useState(null); // { id, value }
-  const [suggestBusy, setSuggestBusy] = useState(false);
-  const [suggestError, setSuggestError] = useState(null);
-  const [suggestions, setSuggestions] = useState([]);
-  const [focusInput, setFocusInput] = useState('');
   const [saving, setSaving] = useState(false);
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
   const [canvasSize, setCanvasSize] = useState({ w: 600, h: 480 });
   // Drill-in mode: when set, hide all unrelated nodes and pin the focused
-  // node in the center with neighbors arranged around it. Auto-fires AI
-  // suggestions so the student immediately sees "what's next" for this
-  // topic.
+  // node in the center with neighbors arranged around it.
   const [focusedNodeId, setFocusedNodeId] = useState(null);
   const [creatingNoteFromId, setCreatingNoteFromId] = useState(null);
   // AI note-generation modal. Lives next to the "Topic" / "Note" buttons
@@ -143,20 +134,42 @@ export default function NoteMap({ onOpenNote, mapId }) {
   const draggingRef = useRef(null);
   const saveTimerRef = useRef(null);
   const panRef = useRef(null);
-  const autoSuggestedFocusRef = useRef(null);
   const noteSaveTimerRef = useRef(null);
 
   // Track the SVG's actual pixel size so we can center the graph in
-  // pixels (SVG transforms don't accept % values on <g>).
+  // pixels (SVG transforms don't accept % values on <g>). Watches the
+  // SVG itself, its parent, AND window resize — needed because the
+  // desktop window-manager swaps fullscreen via CSS, which sometimes
+  // doesn't trip a ResizeObserver on the SVG node before the next
+  // paint. The window-resize listener catches both browser fullscreen
+  // and zoom-to-fill ("maximized") transitions.
   useEffect(() => {
     const el = svgRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(entries => {
-      const cr = entries[0]?.contentRect;
-      if (cr) setCanvasSize({ w: cr.width, h: cr.height });
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
+    if (!el) return;
+    const measure = () => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        setCanvasSize(prev => (prev.w === rect.width && prev.h === rect.height)
+          ? prev
+          : { w: rect.width, h: rect.height });
+      }
+    };
+    measure();
+    let ro = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(measure);
+      ro.observe(el);
+      if (el.parentElement) ro.observe(el.parentElement);
+    }
+    window.addEventListener('resize', measure);
+    document.addEventListener('fullscreenchange', measure);
+    document.addEventListener('webkitfullscreenchange', measure);
+    return () => {
+      if (ro) ro.disconnect();
+      window.removeEventListener('resize', measure);
+      document.removeEventListener('fullscreenchange', measure);
+      document.removeEventListener('webkitfullscreenchange', measure);
+    };
   }, []);
 
   // Load graph on mount (or whenever the bound map changes).
@@ -238,17 +251,6 @@ export default function NoteMap({ onOpenNote, mapId }) {
     if (!visibleIds) return edges;
     return edges.filter(e => visibleIds.has(e.from) && visibleIds.has(e.to));
   }, [edges, visibleIds]);
-
-  // Auto-fire AI suggestions on focus entry — but only once per focus
-  // session so the user can dismiss them without an instant re-trigger.
-  useEffect(() => {
-    if (!focusedNodeId) { autoSuggestedFocusRef.current = null; return; }
-    if (autoSuggestedFocusRef.current === focusedNodeId) return;
-    autoSuggestedFocusRef.current = focusedNodeId;
-    // Defer to next tick so state has settled.
-    setTimeout(() => runSuggest({ silentEmpty: true }), 0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusedNodeId]);
 
   // Convert screen px to graph-space coords using current viewport.
   const screenToGraph = useCallback((screenX, screenY) => {
@@ -428,31 +430,6 @@ export default function NoteMap({ onOpenNote, mapId }) {
     });
   }
 
-  // AI suggestions ---------------------------------------------------------
-
-  // Anchor priority: explicit focus mode > selected node. The focused
-  // sub-view always asks the AI about its centered topic.
-  async function runSuggest({ silentEmpty = false } = {}) {
-    if (suggestBusy) return;
-    setSuggestBusy(true);
-    setSuggestError(null);
-    try {
-      const data = await askSuggest({
-        focus: focusInput.trim() || undefined,
-        focusNodeId: focusedNodeId || selectedId || undefined,
-        count: 4,
-      });
-      setSuggestions(data.suggestions || []);
-      if (!silentEmpty && (!data.suggestions || data.suggestions.length === 0)) {
-        setSuggestError('No new ideas this round — try a more specific focus.');
-      }
-    } catch (e) {
-      setSuggestError(e?.message || 'AI request failed.');
-    }
-    setSuggestBusy(false);
-  }
-  const handleSuggest = () => runSuggest();
-
   // Convert a topic / AI node into a real saved note. The graph node
   // keeps its id and position, but flips source='note' and gets wired
   // to the backing note via noteId. The note body is pre-seeded with
@@ -571,42 +548,6 @@ export default function NoteMap({ onOpenNote, mapId }) {
     }
   }
 
-  function acceptSuggestion(sugg) {
-    const id = newId();
-    // Drop near a connected anchor (or origin) so the new node doesn't
-    // appear off-screen.
-    let anchorX = 0, anchorY = 0;
-    if (sugg.connectTo && sugg.connectTo.length > 0) {
-      const anchor = nodes.find(n => n.id === sugg.connectTo[0]);
-      if (anchor) { anchorX = anchor.x; anchorY = anchor.y; }
-    }
-    const node = {
-      id,
-      noteId: null,
-      label: sugg.label,
-      source: 'ai',
-      color: randPaletteColor(),
-      x: anchorX + (Math.random() - 0.5) * 140,
-      y: anchorY + (Math.random() - 0.5) * 140,
-    };
-    setNodes(prev => [...prev, node]);
-    const newEdges = (sugg.connectTo || []).map(targetId => ({ from: id, to: targetId, label: '' }));
-    setEdges(prev => {
-      const existing = new Set(prev.map(e => edgeKey(e.from, e.to)));
-      const merged = [...prev];
-      for (const ne of newEdges) {
-        const k = edgeKey(ne.from, ne.to);
-        if (!existing.has(k)) { merged.push(ne); existing.add(k); }
-      }
-      return merged;
-    });
-    setSuggestions(prev => prev.filter(s => s.tempId !== sugg.tempId));
-  }
-
-  function rejectSuggestion(sugg) {
-    setSuggestions(prev => prev.filter(s => s.tempId !== sugg.tempId));
-  }
-
   // Inline note editor: when the selected node is a real note, fetch
   // its content and let the user edit title + body right in the side
   // panel. Saves are debounced — same pattern as NoteEditorPage.
@@ -647,51 +588,6 @@ export default function NoteMap({ onOpenNote, mapId }) {
       try { await updateNote(activeNote.id, { [field]: value }); } catch {}
       setNoteSaving(false);
     }, 800);
-  }
-
-  // Same as acceptSuggestion but immediately creates a backing note so
-  // the new node lands as source='note' instead of 'ai'. The note body
-  // is seeded with the AI's rationale so the user has something to
-  // build on rather than a blank page.
-  async function acceptSuggestionAsNote(sugg) {
-    if (creatingNoteFromId === sugg.tempId) return;
-    setCreatingNoteFromId(sugg.tempId);
-    try {
-      const created = await createNote(sugg.label, 'regular');
-      const newNote = created.note;
-      if (sugg.rationale) {
-        try { await updateNote(newNote.id, { mainNotes: sugg.rationale }); } catch {}
-      }
-      let anchorX = 0, anchorY = 0;
-      if (sugg.connectTo && sugg.connectTo.length > 0) {
-        const anchor = nodes.find(n => n.id === sugg.connectTo[0]);
-        if (anchor) { anchorX = anchor.x; anchorY = anchor.y; }
-      }
-      const node = {
-        id: `note_${newNote.id}`,
-        noteId: newNote.id,
-        label: newNote.title,
-        source: 'note',
-        color: randPaletteColor(),
-        x: anchorX + (Math.random() - 0.5) * 140,
-        y: anchorY + (Math.random() - 0.5) * 140,
-      };
-      setNodes(prev => [...prev, node]);
-      const newEdges = (sugg.connectTo || []).map(targetId => ({ from: node.id, to: targetId, label: '' }));
-      setEdges(prev => {
-        const existing = new Set(prev.map(e => edgeKey(e.from, e.to)));
-        const merged = [...prev];
-        for (const ne of newEdges) {
-          const k = edgeKey(ne.from, ne.to);
-          if (!existing.has(k)) { merged.push(ne); existing.add(k); }
-        }
-        return merged;
-      });
-      setSuggestions(prev => prev.filter(s => s.tempId !== sugg.tempId));
-    } catch (e) {
-      console.error('Failed to add suggestion as note', e);
-    }
-    setCreatingNoteFromId(null);
   }
 
   // Render -----------------------------------------------------------------
@@ -968,11 +864,9 @@ export default function NoteMap({ onOpenNote, mapId }) {
           })()}
         </div>
 
-        {/* Side panel — selected-node area is given top billing so the
-            note editor has real working room; AI suggestions live at the
-            bottom and don't claim space they don't need. */}
+        {/* Side panel — selected-node editor takes the full height. */}
         <div className="w-[300px] flex-shrink-0 flex flex-col gap-3">
-          {/* Selected node panel (TOP, grows) */}
+          {/* Selected node panel — fills the column */}
           <div className="bg-white/[0.03] rounded-2xl border border-white/[0.07] flex-1 min-h-[260px] flex flex-col overflow-hidden">
             {selectedNode ? (
               <div className="flex flex-col flex-1 min-h-0">
@@ -1112,69 +1006,6 @@ export default function NoteMap({ onOpenNote, mapId }) {
             )}
           </div>
 
-          {/* AI suggest (BOTTOM, fixed footprint) */}
-          <div className="bg-white/[0.03] rounded-2xl border border-white/[0.07] p-3 flex flex-col flex-shrink-0">
-            <div className="flex items-center gap-1.5 mb-2 flex-shrink-0">
-              <Sparkles size={13} className="text-blue-300" />
-              <span className="text-[11px] font-semibold text-white/75 uppercase tracking-wide">AI suggestions</span>
-            </div>
-            <div className="flex items-center gap-1.5 mb-2 flex-shrink-0">
-              <input
-                value={focusInput}
-                onChange={e => setFocusInput(e.target.value)}
-                placeholder={selectedNode ? `Around "${selectedNode.label}"` : 'Focus topic (optional)'}
-                className="flex-1 min-w-0 px-2.5 py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.07] text-[12px] text-white/80 placeholder-white/25 outline-none"
-              />
-              <Button size="sm" onClick={handleSuggest} disabled={suggestBusy}>
-                {suggestBusy
-                  ? <><Loader2 size={12} className="animate-spin" /></>
-                  : <><Wand2 size={12} /></>}
-              </Button>
-            </div>
-            {suggestError && <p className="text-[11px] text-rose-400 mt-1 flex-shrink-0">{suggestError}</p>}
-            {suggestions.length > 0 && (
-              <div className="space-y-2 max-h-[240px] overflow-y-auto pr-1 -mr-1">
-                {suggestions.map(s => {
-                  const adding = creatingNoteFromId === s.tempId;
-                  return (
-                    <div key={s.tempId} className="rounded-lg border border-purple-400/30 bg-purple-500/[0.08] p-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[12px] font-semibold text-white/90 truncate">{s.label}</p>
-                          {s.rationale && <p className="text-[10px] text-white/55 mt-0.5 leading-snug">{s.rationale}</p>}
-                          {s.connectTo && s.connectTo.length > 0 && (
-                            <p className="text-[10px] text-white/35 mt-1">
-                              ↔ {s.connectTo.map(id => nodes.find(n => n.id === id)?.label).filter(Boolean).join(', ')}
-                            </p>
-                          )}
-                        </div>
-                        <div className="flex flex-col gap-1 flex-shrink-0">
-                          <button
-                            onClick={() => acceptSuggestion(s)}
-                            disabled={adding}
-                            className="p-1 rounded text-emerald-400 hover:bg-emerald-500/15 disabled:opacity-40"
-                            title="Add as topic"
-                          ><Check size={12} /></button>
-                          <button
-                            onClick={() => acceptSuggestionAsNote(s)}
-                            disabled={adding}
-                            className="p-1 rounded text-sky-300 hover:bg-sky-500/15 disabled:opacity-40"
-                            title="Add as note"
-                          >{adding ? <Loader2 size={12} className="animate-spin" /> : <StickyNote size={12} />}</button>
-                          <button
-                            onClick={() => rejectSuggestion(s)}
-                            disabled={adding}
-                            className="p-1 rounded text-white/35 hover:bg-white/10 disabled:opacity-40"
-                            title="Dismiss"
-                          ><X size={12} /></button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
         </div>
       </div>
     </div>

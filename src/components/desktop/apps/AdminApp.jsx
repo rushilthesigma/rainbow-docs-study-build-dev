@@ -12,6 +12,8 @@ import {
 import { ownerGrantPro, ownerRevokePro } from '../../../api/billing';
 import LoadingSpinner from '../../shared/LoadingSpinner';
 import AdvisorBadge from '../../shared/AdvisorBadge';
+import { peek, fetchOnce, bust, bustPrefix } from '../../../api/cache';
+import ViewFade from '../../shared/ViewFade';
 
 const ADVISOR_EMAILS = new Set(['william.qiao.yang@gmail.com']);
 const isAdvisorEmail = (email) => ADVISOR_EMAILS.has((email || '').toLowerCase());
@@ -34,14 +36,24 @@ export default function AdminApp() {
   const [includeDemo, setIncludeDemo] = useState(true);
 
   useEffect(() => {
+    const cacheKey = `admin:users:${includeDemo ? '1' : '0'}`;
+    const cachedUsers = peek(cacheKey);
+    const cachedAdmin = peek('admin:check');
+    // If we have prior caches, paint immediately — refresh runs in parallel below.
+    if (cachedAdmin?.isAdmin !== undefined) setIsAdmin(!!cachedAdmin.isAdmin);
+    if (cachedUsers?.users) setUsers(cachedUsers.users);
+    if (cachedAdmin && cachedUsers) setLoading(false);
+    // Always re-validate. checkAdmin + listUsers are independent — fire in parallel.
     (async () => {
       try {
-        const a = await checkAdmin();
-        setIsAdmin(a.isAdmin);
-        if (a.isAdmin) {
-          const d = await listUsers({ includeDemo });
-          setUsers(d.users || []);
-        }
+        const [a, d] = await Promise.all([
+          fetchOnce('admin:check', checkAdmin),
+          // listUsers depends on admin check passing, but the API rejects
+          // non-admins anyway — racing them is safe and shaves ~150ms.
+          fetchOnce(cacheKey, () => listUsers({ includeDemo })).catch(() => ({ users: [] })),
+        ]);
+        setIsAdmin(!!a.isAdmin);
+        if (a.isAdmin) setUsers(d.users || []);
       } catch {}
       setLoading(false);
     })();
@@ -49,7 +61,9 @@ export default function AdminApp() {
   }, [includeDemo]);
 
   async function refreshList() {
-    const d = await listUsers({ includeDemo });
+    const cacheKey = `admin:users:${includeDemo ? '1' : '0'}`;
+    bust(cacheKey);
+    const d = await fetchOnce(cacheKey, () => listUsers({ includeDemo }));
     setUsers(d.users || []);
   }
 
@@ -70,6 +84,7 @@ export default function AdminApp() {
     if (!confirm('Permanently delete this user and all their data?')) return;
     await deleteUser(uid);
     setUsers(prev => prev.filter(u => u.id !== uid));
+    bustPrefix('admin:users:');
     if (selectedUser?.id === uid) { setView('list'); setSelectedUser(null); }
   }
   async function handleGrantPro(email) {
@@ -137,39 +152,46 @@ export default function AdminApp() {
 
   if (view === 'chat' && conv) {
     return (
-      <ConversationViewer
-        conv={conv}
-        onBack={() => { setConv(null); setView('detail'); }}
-      />
+      <ViewFade viewKey="chat" className="h-full flex flex-col">
+        <ConversationViewer
+          conv={conv}
+          onBack={() => { setConv(null); setView('detail'); }}
+        />
+      </ViewFade>
     );
   }
 
   if (view === 'detail' && selectedUser) {
     return (
-      <UserDetail
-        user={selectedUser}
-        onBack={() => { setView('list'); setSelectedUser(null); }}
-        onBan={() => handleBan(selectedUser.id)}
-        onDelete={() => handleDelete(selectedUser.id)}
-        onGrantPro={() => handleGrantPro(selectedUser.email)}
-        onRevokePro={() => handleRevokePro(selectedUser.email)}
-        onOpenConv={openConv}
-      />
+      <ViewFade viewKey="detail" className="h-full flex flex-col">
+        <UserDetail
+          user={selectedUser}
+          onBack={() => { setView('list'); setSelectedUser(null); }}
+          onBan={() => handleBan(selectedUser.id)}
+          onDelete={() => handleDelete(selectedUser.id)}
+          onGrantPro={() => handleGrantPro(selectedUser.email)}
+          onRevokePro={() => handleRevokePro(selectedUser.email)}
+          onOpenConv={openConv}
+        />
+      </ViewFade>
     );
   }
 
   if (view === 'analytics') {
     return (
-      <AnalyticsPanel
-        users={users}
-        total={users.length}
-        onClose={() => setView('list')}
-        standalone
-      />
+      <ViewFade viewKey="analytics" className="h-full flex flex-col">
+        <AnalyticsPanel
+          users={users}
+          total={users.length}
+          onClose={() => setView('list')}
+          standalone
+        />
+      </ViewFade>
     );
   }
 
   return (
+    <ViewFade viewKey="list" className="h-full flex flex-col">
     <UserList
       users={filtered}
       total={users.length}
@@ -181,6 +203,7 @@ export default function AdminApp() {
       onRefresh={refreshList}
       onAnalytics={() => setView('analytics')}
     />
+    </ViewFade>
   );
 }
 
@@ -242,7 +265,7 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
         <h2 className="text-[15px] font-bold text-white/90">Admin Panel</h2>
         {activeNow > 0 && (
           <span className="inline-flex items-center gap-1.5 ml-1 px-2 py-0.5 rounded-full bg-emerald-500/[0.12] border border-emerald-500/25 text-[10px] font-semibold text-emerald-300">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.7)] animate-pulse" />
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
             {activeNow} active now
           </span>
         )}
@@ -339,7 +362,7 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
                 {(isActiveNow || isActiveToday) && (
                   <span
                     className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-[#161622] ${
-                      isActiveNow ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.7)]' : 'bg-emerald-700'
+                      isActiveNow ? 'bg-emerald-400' : 'bg-emerald-700'
                     }`}
                     title={isActiveNow ? 'Active in the last hour' : 'Active today'}
                   />
@@ -374,9 +397,9 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
 
 // Stat card: dense, glanceable tile with an optional accent dot + sub-line.
 function AdminStatCard({ label, value, sub, dot, icon }) {
-  const dotCls = dot === 'emerald' ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]'
-    : dot === 'amber' ? 'bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.55)]'
-    : dot === 'rose' ? 'bg-rose-400 shadow-[0_0_6px_rgba(251,113,133,0.55)]'
+  const dotCls = dot === 'emerald' ? 'bg-emerald-400'
+    : dot === 'amber' ? 'bg-amber-400'
+    : dot === 'rose' ? 'bg-rose-400'
     : null;
   return (
     <div className="rounded-xl border border-white/[0.07] bg-white/[0.03] px-3 py-2.5">
@@ -690,14 +713,16 @@ function UserDetail({ user: u, onBack, onBan, onDelete, onGrantPro, onRevokePro,
         ))}
       </div>
 
-      {tab === 'overview' && <OverviewTab u={u} />}
-      {tab === 'study' && <StudyTab u={u} onOpen={(sid) => onOpenConv('study', { sid })} />}
-      {tab === 'lessons' && <LessonsTab u={u} onOpen={(lid) => onOpenConv('lesson', { lid })} />}
-      {tab === 'curriculum' && <CurriculumTab u={u} onOpen={(cid, lid) => onOpenConv('curriculum', { cid, lid })} />}
-      {tab === 'quizzes' && <QuizzesTab u={u} />}
-      {tab === 'debates' && <DebatesTab u={u} />}
-      {tab === 'other' && <OtherTab u={u} />}
-      {tab === 'billing' && <BillingTab u={u} />}
+      <ViewFade viewKey={tab}>
+        {tab === 'overview' && <OverviewTab u={u} />}
+        {tab === 'study' && <StudyTab u={u} onOpen={(sid) => onOpenConv('study', { sid })} />}
+        {tab === 'lessons' && <LessonsTab u={u} onOpen={(lid) => onOpenConv('lesson', { lid })} />}
+        {tab === 'curriculum' && <CurriculumTab u={u} onOpen={(cid, lid) => onOpenConv('curriculum', { cid, lid })} />}
+        {tab === 'quizzes' && <QuizzesTab u={u} />}
+        {tab === 'debates' && <DebatesTab u={u} />}
+        {tab === 'other' && <OtherTab u={u} />}
+        {tab === 'billing' && <BillingTab u={u} />}
+      </ViewFade>
     </div>
   );
 }

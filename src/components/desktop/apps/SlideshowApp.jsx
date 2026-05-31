@@ -1172,7 +1172,7 @@ export default function SlideshowApp() {
               <div className="px-6 pb-6">
                 <button
                   onClick={() => setBetaAcknowledged(true)}
-                  className="w-full py-3 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/40 text-white font-semibold text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_16px_rgba(59,130,246,0.35)] transition-all"
+                  className="w-full py-3 rounded-xl bg-blue-500 hover:bg-blue-400 border border-blue-400/40 text-white font-semibold text-[14px] transition-all"
                 >
                   Got it
                 </button>
@@ -2044,7 +2044,7 @@ function KeynoteTopBar(props) {
                   <button
                     onClick={handleAIImageGenerate}
                     disabled={aiImgLoading || !aiImgPrompt.trim()}
-                    className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/40 text-[11px] text-white font-semibold shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_12px_rgba(59,130,246,0.30)] transition-all disabled:opacity-40"
+                    className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-blue-500 hover:bg-blue-400 border border-blue-400/40 text-[11px] text-white font-semibold transition-all disabled:opacity-40"
                   >
                     {aiImgLoading ? <><Loader2 size={11} className="animate-spin" /> Generating…</> : <><Sparkles size={11} /> Generate</>}
                   </button>
@@ -3666,7 +3666,7 @@ function Gallery({ decks, loading, onOpen, onDelete, onNew, onManual }) {
             <LayoutGrid size={11} /> From template
           </button>
           <button onClick={onNew}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/40 text-white text-[11.5px] font-semibold shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_12px_rgba(59,130,246,0.35)] transition-all">
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-blue-500 hover:bg-blue-400 border border-blue-400/40 text-white text-[11.5px] font-semibold transition-all">
             <Sparkles size={11} /> Generate
           </button>
         </div>
@@ -3693,7 +3693,7 @@ function Gallery({ decks, loading, onOpen, onDelete, onNew, onManual }) {
               <LayoutGrid size={13} /> From template
             </button>
             <button onClick={onNew}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/40 text-white text-[12px] font-semibold shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_12px_rgba(59,130,246,0.35)] transition-all">
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-400 border border-blue-400/40 text-white text-[12px] font-semibold transition-all">
               <Sparkles size={13} /> Generate with AI
             </button>
           </div>
@@ -3793,7 +3793,7 @@ function ManualCreateForm({ onBack, onCreate }) {
                 disabled={loading}
                 className={`text-left px-3.5 py-3 rounded-xl border transition-all disabled:opacity-40 ${
                   template === tmpl.id
-                    ? 'bg-blue-500/15 border-blue-400/45 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.15),0_0_14px_rgba(59,130,246,0.22)]'
+                    ? 'bg-blue-500/15 border-blue-400/45 text-white'
                     : 'bg-white/[0.03] border-white/[0.07] text-white/55 hover:bg-white/[0.07] hover:border-white/[0.14]'
                 }`}
               >
@@ -3810,7 +3810,7 @@ function ManualCreateForm({ onBack, onCreate }) {
         <button
           onClick={handleCreate}
           disabled={!title.trim() || loading}
-          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/40 text-white font-semibold text-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_16px_rgba(59,130,246,0.35)] transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-blue-500 hover:bg-blue-400 border border-blue-400/40 text-white font-semibold text-sm transition-all disabled:opacity-30 disabled:cursor-not-allowed"
         >
           {loading ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
           {loading ? 'Creating…' : 'Create Slideshow'}
@@ -4039,7 +4039,7 @@ function GenerateForm({ onBack, onCreate }) {
             <div className="grid grid-cols-2 gap-2">
               {GEN_TEMPLATES.map(t => (
                 <button key={t.id} onClick={() => setTemplate(t.id)} disabled={loading}
-                  className={`text-left px-3.5 py-2.5 rounded-xl border transition-all disabled:opacity-40 ${template === t.id ? 'bg-blue-500/15 border-blue-400/45 text-white shadow-[0_0_12px_rgba(59,130,246,0.20)]' : 'bg-white/[0.03] border-white/[0.07] text-white/50 hover:bg-white/[0.06] hover:border-white/[0.14]'}`}>
+                  className={`text-left px-3.5 py-2.5 rounded-xl border transition-all disabled:opacity-40 ${template === t.id ? 'bg-blue-500/15 border-blue-400/45 text-white' : 'bg-white/[0.03] border-white/[0.07] text-white/50 hover:bg-white/[0.06] hover:border-white/[0.14]'}`}>
                   <p className="text-[12px] font-semibold leading-none mb-1">{t.label}</p>
                   <p className="text-[10px] text-white/32 leading-snug">{t.desc}</p>
                 </button>
@@ -4151,7 +4151,7 @@ function GenerateForm({ onBack, onCreate }) {
       <div className="shrink-0 border-t border-white/[0.07] bg-[#1a1a1a] px-6 py-4">
         {error && <p className="text-xs text-rose-400 mb-3">{error}</p>}
         <button onClick={handleGenerate} disabled={loading || !topic.trim()}
-          className="w-full flex items-center justify-center gap-2.5 py-3.5 rounded-xl font-semibold text-sm transition-all disabled:opacity-35 border bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border-blue-400/40 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]"
+          className="w-full flex items-center justify-center gap-2.5 py-3.5 rounded-xl font-semibold text-sm transition-all disabled:opacity-35 border bg-blue-500 hover:bg-blue-400 border-blue-400/40 text-white"
           style={{ boxShadow: loading || !topic.trim() ? 'none' : '0 4px 18px rgba(59,130,246,0.40), inset 0 1px 0 rgba(255,255,255,0.20)' }}>
           {loading
             ? <><Loader2 size={15} className="animate-spin" /> Generating…</>
@@ -4166,7 +4166,7 @@ function GenerateForm({ onBack, onCreate }) {
         {loading && (
           <div className="mt-3 space-y-1.5">
             <div className="w-full rounded-full h-[3px] bg-white/[0.07] overflow-hidden">
-              <div className="h-full rounded-full transition-all duration-700 ease-out bg-gradient-to-r from-blue-500 to-blue-400 shadow-[0_0_8px_rgba(59,130,246,0.55)]" style={{ width: `${progress}%` }} />
+              <div className="h-full rounded-full transition-all duration-700 ease-out bg-gradient-to-r from-blue-500 to-blue-400" style={{ width: `${progress}%` }} />
             </div>
             <p className="text-center text-[10px] text-white/30">{statusMsg}</p>
           </div>

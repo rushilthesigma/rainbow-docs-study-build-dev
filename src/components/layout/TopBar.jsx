@@ -42,7 +42,7 @@ export default function TopBar({ onToggleSidebar, showHamburger = false }) {
             onClick={() => isActive ? closeSplit() : openSplit('study')}
             className={`p-2 rounded-lg transition-colors ${
               isActive
-                ? 'text-blue-600 dark:text-blue-300 bg-blue-50 dark:bg-blue-500/[0.18] dark:shadow-[0_0_12px_rgba(59,130,246,0.35)]'
+                ? 'text-blue-600 dark:text-blue-300 bg-blue-50 dark:bg-blue-500/[0.18]'
                 : 'text-gray-500 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-blue-500/[0.10] dark:hover:text-blue-200'
             }`}
             title={isActive ? 'Close split view' : 'Open Study Mode in split view'}

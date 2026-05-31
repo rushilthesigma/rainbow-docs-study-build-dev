@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { Z } from '../../styles/tokens';
 
@@ -94,10 +95,15 @@ export default function Modal({
     xl: 'max-w-2xl',
   }[size] || 'max-w-md';
 
-  return (
+  // Portal to document.body so the overlay's `fixed inset-0` truly covers
+  // the viewport. Without this, an ancestor with `transform`, `filter`, or
+  // `backdrop-filter` (e.g. the desktop Window which uses `transform: scale`
+  // for its minimize animation) becomes the containing block and clips the
+  // modal to that ancestor instead of the screen.
+  return createPortal(
     <div
       ref={overlayRef}
-      className="fixed inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in"
       style={{ zIndex: Z.modal }}
       onClick={(e) => {
         if (closeOnOverlay && e.target === overlayRef.current) onClose?.();
@@ -111,7 +117,7 @@ export default function Modal({
         aria-describedby={description ? descId : undefined}
         tabIndex={-1}
         data-modal-surface
-        className={`backdrop-blur-xl rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.4)] w-full ${widthClass} mx-4 p-6 outline-none max-h-[90vh] overflow-y-auto bg-white text-gray-900 border border-gray-200 dark:bg-[#1a1a26] dark:text-white dark:border-white/[0.14]`}
+        className={`backdrop-blur-xl rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.4)] w-full ${widthClass} mx-4 p-6 outline-none max-h-[90vh] overflow-y-auto bg-white text-gray-900 border border-gray-200 dark:bg-[#1a1a26] dark:text-white dark:border-white/[0.14] animate-modal-in`}
       >
         {(title || onClose) && (
           <div className="flex items-center justify-between mb-4">
@@ -139,6 +145,7 @@ export default function Modal({
         )}
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

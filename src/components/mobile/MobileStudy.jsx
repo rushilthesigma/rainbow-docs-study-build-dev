@@ -103,7 +103,7 @@ export default function MobileStudy() {
     <div className="flex-1 min-h-0 flex flex-col bg-[#F4F5F7] dark:bg-[#0a0a14]">
       {/* Slim header */}
       <header className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 dark:border-white/[0.06] flex-shrink-0">
-        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 grid place-items-center">
+        <div className="w-7 h-7 rounded-lg bg-blue-500 grid place-items-center">
           <Sparkles size={14} className="text-white" />
         </div>
         <div className="flex-1 min-w-0">
@@ -181,7 +181,7 @@ export default function MobileStudy() {
 function EmptyState({ onPick }) {
   return (
     <div className="px-4 pt-8 pb-6 flex flex-col items-center text-center">
-      <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 grid place-items-center shadow-lg shadow-blue-500/40 mb-3">
+      <div className="w-12 h-12 rounded-2xl bg-blue-500 grid place-items-center shadow-lg shadow-blue-500/40 mb-3">
         <Sparkles size={22} className="text-white" />
       </div>
       <h2 className="text-[18px] font-bold tracking-[-0.02em] text-gray-900 dark:text-white">What should we study?</h2>

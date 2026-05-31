@@ -21,7 +21,7 @@ export default function PhaseIndicator({ currentPhase }) {
               key={phase.key}
               className={`flex-1 h-1 rounded-full transition-all duration-300 ${
                 isCurrent
-                  ? 'bg-gradient-to-r from-blue-400 to-indigo-500 shadow-[0_0_10px_rgba(96,165,250,0.55)]'
+                  ? 'bg-gradient-to-r from-blue-400 to-indigo-500'
                   : isComplete
                     ? 'bg-blue-500/55'
                     : 'bg-white/[0.07]'

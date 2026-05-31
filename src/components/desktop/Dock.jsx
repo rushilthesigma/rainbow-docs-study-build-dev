@@ -95,7 +95,7 @@ function DockIcon({ app, mouseX, isOpen, isActive, onClick, size, iconStyle }) {
           <span
             className={`rounded-full transition-all ${
               isActive
-                ? 'w-[4px] h-[4px] bg-white shadow-[0_0_4px_rgba(255,255,255,0.7)]'
+                ? 'w-[4px] h-[4px] bg-white'
                 : 'w-[3px] h-[3px] bg-white/70'
             }`}
           />

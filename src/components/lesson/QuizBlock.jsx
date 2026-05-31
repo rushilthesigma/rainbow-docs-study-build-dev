@@ -105,7 +105,7 @@ export default function QuizBlock({ curriculumId, lessonId, block, onComplete, g
         <div className="flex justify-end">
           <button
             onClick={() => onComplete?.(results)}
-            className="inline-flex items-center gap-2.5 px-6 py-3 rounded-2xl font-bold text-[14px] text-white bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_16px_rgba(59,130,246,0.40)] transition-all backdrop-blur-sm"
+            className="inline-flex items-center gap-2.5 px-6 py-3 rounded-2xl font-bold text-[14px] text-white bg-blue-500 hover:bg-blue-400 transition-colors"
           >
             Continue <ArrowRight size={15} />
           </button>
@@ -176,7 +176,7 @@ export default function QuizBlock({ curriculumId, lessonId, block, onComplete, g
             <button
               onClick={submit}
               disabled={!allAnswered || submitting}
-              className="inline-flex items-center gap-2.5 px-6 py-3 rounded-2xl font-bold text-[14px] text-white bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 border border-blue-400/45 shadow-[inset_0_1px_0_rgba(255,255,255,0.20),0_4px_16px_rgba(59,130,246,0.40)] disabled:opacity-35 disabled:cursor-not-allowed transition-all backdrop-blur-sm"
+              className="inline-flex items-center gap-2.5 px-6 py-3 rounded-2xl font-bold text-[14px] text-white bg-blue-500 hover:bg-blue-400 disabled:opacity-35 disabled:cursor-not-allowed transition-colors"
             >
               {submitting ? <><InlineProgress active /> Grading…</> : 'Submit answers'}
             </button>

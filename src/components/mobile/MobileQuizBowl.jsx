@@ -205,7 +205,7 @@ export default function MobileQuizBowl() {
         <div className="px-4 py-3 border-t border-white/[0.06] flex-shrink-0 space-y-2.5">
           {!buzzed && (
             <button onClick={handleBuzz}
-              className="w-full py-4 rounded-2xl bg-red-600 active:bg-red-700 active:scale-[0.98] text-white text-[17px] font-bold uppercase tracking-[0.18em] transition-all shadow-[0_0_28px_rgba(239,68,68,0.2)]">
+              className="w-full py-4 rounded-2xl bg-red-600 active:bg-red-700 active:scale-[0.98] text-white text-[17px] font-bold uppercase tracking-[0.18em] transition-all">
               BUZZ
             </button>
           )}
@@ -301,7 +301,7 @@ function MobileTile({ active, icon, label, sub, onClick }) {
     <button onClick={onClick}
       className={`text-left rounded-2xl border p-3 transition-all backdrop-blur-sm ${
         active
-          ? 'border-white/[0.18] bg-white/[0.07] text-white/75 shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]'
+          ? 'border-white/[0.18] bg-white/[0.07] text-white/75'
           : 'border-white/[0.06] bg-white/[0.02] text-white/40 active:bg-white/[0.05]'
       }`}>
       <div className="flex items-center gap-1.5 mb-0.5">
@@ -318,7 +318,7 @@ function MobilePill({ active, onClick, children }) {
     <button onClick={onClick}
       className={`px-3 py-2 rounded-xl text-[12px] font-semibold tracking-tight whitespace-nowrap transition-colors backdrop-blur-sm ${
         active
-          ? 'bg-white/[0.10] text-white/80 border border-white/[0.18] shadow-[inset_0_1px_0_rgba(255,255,255,0.10)]'
+          ? 'bg-white/[0.10] text-white/80 border border-white/[0.18]'
           : 'bg-white/[0.04] border border-white/[0.05] text-white/35 active:bg-white/[0.08] active:text-white/60'
       }`}>
       {children}

@@ -251,8 +251,8 @@ export default function ChatInput({
         data-tour="chat-input"
         className={`rounded-xl bg-white/75 dark:bg-transparent backdrop-blur-md transition-all overflow-hidden ${
           sourceMode
-            ? 'ring-2 ring-blue-400/70 shadow-[0_0_0_4px_rgba(59,130,246,0.18),0_0_20px_rgba(59,130,246,0.25)] bg-white/[0.06] dark:bg-blue-500/[0.05]'
-            : 'ring-1 ring-white/20 dark:ring-transparent focus-within:ring-2 focus-within:ring-blue-400/80 dark:focus-within:ring-blue-400/85 dark:focus-within:shadow-[0_0_18px_rgba(59,130,246,0.30)]'
+            ? 'ring-2 ring-blue-400/70 bg-white/[0.06] dark:bg-blue-500/[0.05]'
+            : 'ring-1 ring-white/20 dark:ring-transparent focus-within:ring-2 focus-within:ring-blue-400/80 dark:focus-within:ring-blue-400/85'
         }`}
       >
         {/* TOP RAIL — tools + mode toggle + char count */}
@@ -359,17 +359,17 @@ export default function ChatInput({
             style={{ minHeight: '44px', border: 'none', boxShadow: 'none' }}
             onInput={e => { e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 160) + 'px'; }}
           />
-          {/* Square corner-accent send button — NOT a round pill */}
+          {/* Flat, modern send button */}
           <button
             type="submit"
             disabled={!canSend}
             title="Send (Enter)"
-            className={`m-1.5 px-3 h-9 rounded-md inline-flex items-center gap-1 text-[12px] font-semibold transition-all flex-shrink-0 ${
+            className={`m-1.5 px-3.5 h-9 rounded-lg inline-flex items-center gap-1.5 text-[12px] font-semibold transition-colors flex-shrink-0 ${
               canSend
                 ? (sourceMode
-                    ? 'bg-blue-500/30 hover:bg-blue-500/45 text-white backdrop-blur-sm ring-1 ring-blue-400/50'
-                    : 'bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-white shadow-[0_2px_10px_rgba(59,130,246,0.40),inset_0_1px_0_rgba(255,255,255,0.20)] ring-1 ring-blue-400/40')
-                : 'bg-gray-100 dark:bg-blue-500/[0.06] text-gray-400 dark:text-blue-200/30 cursor-not-allowed ring-1 ring-transparent dark:ring-blue-400/[0.10]'
+                    ? 'bg-blue-500/20 hover:bg-blue-500/30 text-blue-50'
+                    : 'bg-blue-500 hover:bg-blue-400 text-white')
+                : 'bg-gray-100 dark:bg-blue-500/[0.08] text-gray-400 dark:text-blue-200/35 cursor-not-allowed'
             }`}
           >
             Send <Send size={11} />

@@ -285,7 +285,7 @@ export default function GuidedTour() {
             <div
               key={i}
               className={`flex-1 h-[3px] rounded-full transition-all ${
-                i < stepIdx ? 'bg-blue-400/55' : i === stepIdx ? 'bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.55)]' : 'bg-white/[0.12]'
+                i < stepIdx ? 'bg-blue-400/55' : i === stepIdx ? 'bg-blue-400' : 'bg-white/[0.12]'
               }`}
             />
           ))}
@@ -315,11 +315,11 @@ export default function GuidedTour() {
               {isWaiting ? 'Waiting…' : 'Click the highlighted item →'}
             </span>
           ) : step.advanceOn === 'finish' ? (
-            <button onClick={advance} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/[0.12] border border-white/[0.18] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] hover:bg-white/[0.18] text-white/90 text-[11px] font-semibold transition-colors">
+            <button onClick={advance} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/[0.12] border border-white/[0.18] hover:bg-white/[0.18] text-white/90 text-[11px] font-semibold transition-colors">
               <GraduationCap size={12} /> Finish
             </button>
           ) : (
-            <button onClick={advance} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/[0.12] border border-white/[0.18] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] hover:bg-white/[0.18] text-white/90 text-[11px] font-semibold transition-colors">
+            <button onClick={advance} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/[0.12] border border-white/[0.18] hover:bg-white/[0.18] text-white/90 text-[11px] font-semibold transition-colors">
               Next <ArrowRight size={11} />
             </button>
           )}

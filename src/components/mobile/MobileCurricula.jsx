@@ -237,7 +237,7 @@ export default function MobileCurricula() {
           surfaced on mobile (catalog browse is a desktop-class flow). */}
       <button
         onClick={() => { setTopic(''); setGenError(null); setView('new'); }}
-        className="w-full rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white p-4 mb-5 active:scale-[0.99] transition-transform text-left"
+        className="w-full rounded-2xl bg-blue-500 text-white p-4 mb-5 active:scale-[0.99] transition-transform text-left"
       >
         <div className="flex items-center gap-3">
           <div className="w-11 h-11 rounded-xl bg-white/20 grid place-items-center shrink-0">
