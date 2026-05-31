@@ -177,10 +177,10 @@ const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 // "Paid" via isPro() = anything above plus-lite (so the referral bonus
 // gates the same way free does - better limits but still rate-capped).
 const LIMITS = {
-  free:        { dailyMessages: 30,       dailyQB: 1,        weeklyCurricula: 1,        weeklyDebates: 1,        noteMaps: 1 },
-  'plus-lite': { dailyMessages: 75,       dailyQB: 3,        weeklyCurricula: 2,        weeklyDebates: 2,        noteMaps: 2 },
-  plus:        { dailyMessages: 150,      dailyQB: 6,        weeklyCurricula: 3,        weeklyDebates: 4,        noteMaps: 6 },
-  lifetime:    { dailyMessages: 350,      dailyQB: 15,       weeklyCurricula: 8,        weeklyDebates: 10,       noteMaps: 15 },
+  free:        { dailyMessages: 45,       dailyQB: 2,        weeklyCurricula: 2,        weeklyDebates: 2,        noteMaps: 2 },
+  'plus-lite': { dailyMessages: 115,      dailyQB: 5,        weeklyCurricula: 3,        weeklyDebates: 3,        noteMaps: 3 },
+  plus:        { dailyMessages: 225,      dailyQB: 9,        weeklyCurricula: 5,        weeklyDebates: 6,        noteMaps: 9 },
+  lifetime:    { dailyMessages: 525,      dailyQB: 23,       weeklyCurricula: 12,       weeklyDebates: 15,       noteMaps: 23 },
   pro:         { dailyMessages: Infinity, dailyQB: Infinity, weeklyCurricula: Infinity, weeklyDebates: Infinity, noteMaps: Infinity },
 };
 const PAID_TIERS = new Set(['plus', 'lifetime', 'pro']);
