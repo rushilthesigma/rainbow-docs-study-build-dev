@@ -183,7 +183,7 @@ export async function getCourseGrade(curriculumId) {
 }
 
 // Generic SSE streaming helper
-function streamSSE(url, body, { onChunk, onDone, onError, onMeta, onSource, onStatus }) {
+function streamSSE(url, body, { onChunk, onDone, onError, onMeta, onSource, onStatus, onArtifact }) {
   const token = getToken();
   const controller = new AbortController();
 
@@ -221,6 +221,7 @@ function streamSSE(url, body, { onChunk, onDone, onError, onMeta, onSource, onSt
               else if (data.content) onChunk?.(data.content);
               else if (data.source) onSource?.(data.source);
               else if (data.status) onStatus?.(data.status);
+              else if (data.artifact) onArtifact?.(data.artifact);
               else if (data.sessionId) onMeta?.(data);
             } catch {}
           }

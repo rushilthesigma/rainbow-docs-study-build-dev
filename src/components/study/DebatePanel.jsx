@@ -172,8 +172,11 @@ function TopicChips({ onPick, max = null, showCategories = false }) {
   );
 }
 
-export default function DebatePanel({ onBack }) {
-  const [mode, setMode] = useState('menu');
+export default function DebatePanel({ onBack, initialTopic = null, initialSide = null }) {
+  // Deep-link from study mode: drop straight into the solo setup screen
+  // with topic + side preselected so the student is one click from the
+  // first turn. side='pro' maps to FOR, 'con' to AGAINST.
+  const [mode, setMode] = useState(initialTopic ? 'single-setup' : 'menu');
   // Forced-timed flag: set when the user picks "Timed multiplayer" from
   // the menu so the lobby opens with the timed-mode toggle pre-checked.
   // Reset when we go back to the menu.
@@ -261,6 +264,8 @@ export default function DebatePanel({ onBack }) {
             mode={mode}
             setMode={selectMode}
             onExit={() => selectMode('menu')}
+            initialTopic={initialTopic}
+            initialSide={initialSide === 'con' ? 'against' : initialSide === 'pro' ? 'for' : null}
           />
         )}
         {(mode === 'mp-menu' || mode === 'mp-lobby' || mode === 'mp-game' || mode === 'mp-verdict') && (
@@ -1486,9 +1491,9 @@ function SnapshotPlayerRow({ player, score, won, matchFinished }) {
   );
 }
 
-function Singleplayer({ mode, setMode, onExit }) {
-  const [topic, setTopic] = useState('');
-  const [side, setSide] = useState(null);
+function Singleplayer({ mode, setMode, onExit, initialTopic = null, initialSide = null }) {
+  const [topic, setTopic] = useState(initialTopic || '');
+  const [side, setSide] = useState(initialSide || null);
   const [messages, setMessages] = useState([]);
   const [streaming, setStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');

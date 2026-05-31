@@ -4,8 +4,9 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import { Check, X, Copy, Pencil, FileText } from 'lucide-react';
+import { Check, X, Copy, Pencil, FileText, ExternalLink, FileText as NoteIcon, Zap, Swords } from 'lucide-react';
 import MathText from '../shared/MathText';
+import { useWindowManager } from '../../context/WindowManagerContext';
 
 // Parse out --- FILE: name --- blocks that were prepended by ChatInput
 // when the user attached a PDF or text file. Returns the extracted
@@ -142,6 +143,7 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
       .replace(/\[LESSON_(?:DONE|COMPLETE)\]/g, '')
       .replace(/\[QUIZ_START\][\s\S]*?\[QUIZ_END\]/g, '')
       .replace(/\[MILESTONE_COMPLETE:[^\]]+\]/g, '')
+      .replace(/\[MAKE_(?:NOTE|QUIZBOWL|DEBATE)\][\s\S]*?\[\/MAKE_(?:NOTE|QUIZBOWL|DEBATE)\]/g, '')
       .replace(/\[STATUS:\s*(advance|stay|next)\s*\]/gi, '')
       .trim();
     try { await navigator.clipboard.writeText(md); setCopied(true); setTimeout(() => setCopied(false), 1500); }
@@ -211,12 +213,19 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
     .replace(/\[PHASE_COMPLETE\]/g, '')
     .replace(/\[QUIZ_START\][\s\S]*?\[QUIZ_END\]/g, '')
     .replace(/\[MILESTONE_COMPLETE:[^\]]+\]/g, '')
+    // [MAKE_*] action tokens (study mode): the server has already parsed
+    // these into real artifacts and we render Open cards below the bubble.
+    // Hide both completed and in-flight (partial) blocks so the raw JSON
+    // never flashes in the user's view.
+    .replace(/\[MAKE_(?:NOTE|QUIZBOWL|DEBATE)\][\s\S]*?\[\/MAKE_(?:NOTE|QUIZBOWL|DEBATE)\]/g, '')
+    .replace(/\[MAKE_(?:NOTE|QUIZBOWL|DEBATE)\][\s\S]*$/g, '')
     .replace(/\[STATUS:\s*(advance|stay|next)\s*\]/gi, '');
   displayContent = stripDoneMarker(displayContent).trim();
 
   displayContent = normalizeMathDelimiters(displayContent);
 
-  if (!displayContent && !quizJson && !isStreaming) return null;
+  const artifacts = Array.isArray(message.artifacts) ? message.artifacts : [];
+  if (!displayContent && !quizJson && !artifacts.length && !isStreaming) return null;
 
   const contentWithCursor = isStreaming ? displayContent + CURSOR : displayContent;
 
@@ -359,6 +368,7 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
           </div>
         )}
         {quizJson && <InlineQuiz quizJson={quizJson} />}
+        {artifacts.length > 0 && <ArtifactCards artifacts={artifacts} />}
         {Array.isArray(message.sources) && message.sources.length > 0 && (
           <Sources sources={message.sources} />
         )}
@@ -410,6 +420,52 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
         )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// Open cards rendered beneath an assistant bubble when the AI emitted a
+// [MAKE_*] action token in study mode. Each card describes the artifact
+// the server just created (a note, a QB practice topic, a debate prompt)
+// and provides one button that deep-links into the right app via the
+// desktop window manager. We deliberately keep these visually distinct
+// from quiz blocks: card-like, soft border, the verb "Open in <App>" so
+// the affordance is obvious without reading.
+function ArtifactCards({ artifacts }) {
+  const wm = (() => { try { return useWindowManager(); } catch { return null; } })();
+  function open(a) {
+    if (!wm || !a?.launch?.appId) return;
+    try { wm.openApp(a.launch.appId, a.launch.label || a.launch.appId, a.launch.meta || {}); } catch {}
+  }
+  const META = {
+    note:     { Icon: NoteIcon, label: 'Note',        appLabel: 'Notes',     tone: 'text-emerald-200', ring: 'border-emerald-400/30 hover:border-emerald-400/55' },
+    quizbowl: { Icon: Zap,      label: 'Quiz Bowl',   appLabel: 'Quiz Bowl', tone: 'text-amber-200',   ring: 'border-amber-400/30 hover:border-amber-400/55' },
+    debate:   { Icon: Swords,   label: 'Debate',      appLabel: 'Debate',    tone: 'text-rose-200',    ring: 'border-rose-400/30 hover:border-rose-400/55' },
+  };
+  return (
+    <div className="mt-3 space-y-2">
+      {artifacts.map((a, i) => {
+        const m = META[a.type] || { Icon: ExternalLink, label: 'Artifact', appLabel: 'App', tone: 'text-white/70', ring: 'border-white/20 hover:border-white/40' };
+        const Icon = m.Icon;
+        return (
+          <button
+            key={i}
+            onClick={() => open(a)}
+            className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border bg-white/[0.04] hover:bg-white/[0.07] transition-colors text-left ${m.ring}`}
+          >
+            <div className={`w-8 h-8 rounded-lg grid place-items-center bg-white/[0.06] ${m.tone} flex-shrink-0`}>
+              <Icon size={15} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/40">{m.label}</p>
+              <p className="text-[12.5px] font-bold text-white truncate">{a.title || a.launch?.meta?.initialTopic || 'Untitled'}</p>
+            </div>
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white/[0.10] group-hover:bg-white/[0.16] text-white/85 text-[11px] font-semibold flex-shrink-0">
+              Open <ExternalLink size={10} />
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }

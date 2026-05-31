@@ -586,13 +586,35 @@ export function buildStudyModePrompt(profile, goals, curricula, prefs, assessmen
   // attached (URL extracts, PDF text) - included verbatim so the model
   // can cite them.
   let integrationCtx = '';
+  let hasLinkedCourse = false;
+  let linkedCourseTitle = '';
   if (context?.curriculumId && Array.isArray(curricula)) {
     const linked = curricula.find((c) => c.id === context.curriculumId);
     if (linked) {
+      hasLinkedCourse = true;
+      linkedCourseTitle = linked.title;
       const outline = (linked.units || [])
-        .map((u, i) => `  ${i + 1}. ${u.title}${(u.lessons || []).length ? '\n' + (u.lessons || []).map((l) => `     - ${l.title}`).join('\n') : ''}`)
+        .map((u, i) => `  Unit ${i + 1}: ${u.title}${(u.lessons || []).length ? '\n' + (u.lessons || []).map((l, li) => `     ${i + 1}.${li + 1} ${l.title}${l.completed ? ' [done]' : ''}`).join('\n') : ''}`)
         .join('\n');
-      integrationCtx += `\n\nLINKED COURSE - the student integrated this study session with their course "${linked.title}". When they ask about it, answer inside the scope of THIS course. Outline:\n${outline || '(no units yet)'}\n`;
+      const nextLesson = (() => {
+        for (const u of (linked.units || [])) {
+          for (const l of (u.lessons || [])) {
+            if (!l.completed) return { unit: u.title, lesson: l.title };
+          }
+        }
+        return null;
+      })();
+      integrationCtx += `\n\nLINKED COURSE: "${linked.title}" - the student is studying this course right now. THIS IS THE PRIMARY CONTEXT FOR EVERY ANSWER.\n\nCOURSE OUTLINE:\n${outline || '(no units yet)'}\n`;
+      if (nextLesson) {
+        integrationCtx += `\nNEXT LESSON TO COMPLETE: "${nextLesson.lesson}" (in unit "${nextLesson.unit}")\n`;
+      }
+      integrationCtx += `\nCURRICULUM INTEGRATION RULES (when a course is linked):
+- TIE every answer back to a specific lesson in the outline above when one applies. Cite it inline: "This connects to Unit ${1}.${2} '<lesson title>'."
+- If the student asks a generic question that matches a lesson in their course, point them to that lesson AND answer.
+- If they ask about something OUTSIDE the course outline, answer normally but flag it: "Heads up - this isn't covered in your '${linked.title}' course, but here's the answer."
+- When suggesting what to do next, prefer the next uncompleted lesson over a generic recommendation.
+- Use the course's vocabulary and depth (don't re-explain something an earlier lesson in the outline already covered).
+`;
     }
   }
   if (Array.isArray(context?.sources) && context.sources.length) {
@@ -639,6 +661,32 @@ WHAT YOU CAN DO:
   [QUIZ_END]
   Output the FULL JSON in one block. Do NOT split it across messages.
 - Answer ANY question on ANY topic - never refuse or redirect.
+
+CREATING REAL ARTIFACTS (notes, QB game, debate):
+When the student asks you to "make notes on X", "give me a quiz bowl game on Y", "let's debate Z", or similar, DO NOT paste content into the chat. Emit one of the action tokens below INSTEAD. The app creates the real artifact in Notes / Quiz Bowl / Debate and shows the student an Open button to jump to it.
+
+Format every action token EXACTLY like this - opening tag, JSON, closing tag, on their own lines, with NO prose inside or around the JSON. Put a ONE-LINE confirmation BEFORE the token ("Made a note on photosynthesis - tap Open below.") and NOTHING after.
+
+  [MAKE_NOTE]
+  {"title":"Photosynthesis basics","content":"# Photosynthesis\\n\\nMarkdown body here. Use headings, bullets, **bold**, and KaTeX ($x^2$) freely."}
+  [/MAKE_NOTE]
+
+  [MAKE_QUIZBOWL]
+  {"topic":"American history - Reconstruction era","difficulty":"middle"}
+  [/MAKE_QUIZBOWL]
+
+  [MAKE_DEBATE]
+  {"topic":"Resolved: social media does more harm than good for teens","side":"pro"}
+  [/MAKE_DEBATE]
+
+Rules for action tokens:
+- ONE token per message. If the student wants two things, ask which first.
+- Notes: write the FULL note body in markdown inside "content" - don't stub it. The student opens this expecting real notes, not a placeholder. Aim for 200-500 words of usable notes.
+- Quiz Bowl: provide a topic + difficulty (elementary / middle / high / college). The student picks scoring format on the QB side.
+- Debate: provide a clear resolution and which side the student argues (pro / con). Topic must be debatable - not "is water wet".
+${hasLinkedCourse ? `- When this course is linked, default the note title / quiz topic / debate resolution to something specific from "${linkedCourseTitle}" if the student is vague ("make me a note" → make it about the next lesson).` : ''}
+
+DO NOT use these tokens when the student is just chatting or asking a question. Only when they explicitly want an artifact created.
 ${TONE_RULES}`;
 }
 

@@ -24,6 +24,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   const [messages, setMessages] = useState([]);
   const [streamingContent, setStreamingContent] = useState('');
   const [streamingSources, setStreamingSources] = useState([]);
+  const [streamingArtifacts, setStreamingArtifacts] = useState([]);
   const [searchStatus, setSearchStatus] = useState(null);
   const [sourceMode, setSourceMode] = useState(false);
   const [streaming, setStreaming] = useState(false);
@@ -40,6 +41,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   const abortRef = useRef(null);
   const streamContentRef = useRef('');
   const streamSourcesRef = useRef([]);
+  const streamArtifactsRef = useRef([]);
   const initialSent = useRef(false);
 
   // History state
@@ -58,9 +60,11 @@ export default function StudyModePanel({ className = '', flush = false, initialM
     setStreaming(true);
     setStreamingContent('');
     setStreamingSources([]);
+    setStreamingArtifacts([]);
     setSearchStatus(wasSourced ? 'searching' : null);
     streamContentRef.current = '';
     streamSourcesRef.current = [];
+    streamArtifactsRef.current = [];
 
     // Build the context payload - only include what the server cares
     // about. `sources` already contains extracted text from /api/files
@@ -86,23 +90,34 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         streamSourcesRef.current = [...streamSourcesRef.current, src];
         setStreamingSources(streamSourcesRef.current);
       },
+      onArtifact: (a) => {
+        // Server-side post-stream parser found a [MAKE_*] block and
+        // already created the artifact. Attach to the in-flight bubble
+        // so the Open card appears the instant we know about it.
+        streamArtifactsRef.current = [...streamArtifactsRef.current, a];
+        setStreamingArtifacts(streamArtifactsRef.current);
+      },
       onStatus: (s) => setSearchStatus(s),
       onDone: () => {
         const fullContent = streamContentRef.current;
         const sources = streamSourcesRef.current;
+        const artifacts = streamArtifactsRef.current;
         if (fullContent) {
           setMessages(m => [...m, {
             role: 'assistant',
             content: fullContent,
             sources: sources.length ? sources : undefined,
+            artifacts: artifacts.length ? artifacts : undefined,
             timestamp: new Date().toISOString(),
           }]);
         }
         setStreamingContent('');
         setStreamingSources([]);
+        setStreamingArtifacts([]);
         setSearchStatus(null);
         streamContentRef.current = '';
         streamSourcesRef.current = [];
+        streamArtifactsRef.current = [];
         setStreaming(false);
       },
       onError: (err) => {
@@ -110,9 +125,11 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         setMessages(m => [...m, errorChatMessage(err)]);
         setStreamingContent('');
         setStreamingSources([]);
+        setStreamingArtifacts([]);
         setSearchStatus(null);
         streamContentRef.current = '';
         streamSourcesRef.current = [];
+        streamArtifactsRef.current = [];
         setStreaming(false);
       },
     }, wasSourced);
@@ -350,6 +367,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         messages={messages}
         streamingContent={streamingContent}
         streamingSources={streamingSources}
+        streamingArtifacts={streamingArtifacts}
         searchStatus={searchStatus}
         onSend={handleSend}
         disabled={streaming}

@@ -746,6 +746,88 @@ function parseAIJson(text) {
   return null;
 }
 
+// Pull JSON out of an [TAG] ... [/TAG] block. Returns the parsed object
+// or null. Tolerates ``` fences inside the block and balances braces
+// in case the model emits prose after the JSON.
+function extractActionJson(fullText, tag) {
+  const open = `[${tag}]`;
+  const close = `[/${tag}]`;
+  const i = fullText.indexOf(open);
+  if (i < 0) return null;
+  const after = fullText.slice(i + open.length);
+  const j = after.indexOf(close);
+  const body = (j >= 0 ? after.slice(0, j) : after).trim();
+  return parseAIJson(body);
+}
+
+// Parse all [MAKE_*] action blocks the AI emitted in this study reply,
+// materialize them into real artifacts (notes + launch payloads for QB
+// and debate), and return a list the caller can stream to the client
+// AND persist on the assistant message. Side-effects: mutates the
+// passed-in user data (adds notes); saveUsers is the caller's job.
+//
+// Each returned artifact looks like:
+//   { type, id?, title, launch: { appId, meta } }
+// where `launch.meta` is what the desktop's openApp() spreads as props
+// onto the destination app.
+async function buildStudyArtifacts(fullText, userData) {
+  const out = [];
+
+  // ── [MAKE_NOTE] - create a real note with the full markdown body ──
+  const noteJson = extractActionJson(fullText, 'MAKE_NOTE');
+  if (noteJson && (noteJson.title || noteJson.content)) {
+    if (!Array.isArray(userData.notes)) userData.notes = [];
+    const note = {
+      id: crypto.randomUUID(),
+      title: String(noteJson.title || 'Untitled note').slice(0, 200),
+      type: 'regular',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      cues: [],
+      mainNotes: String(noteJson.content || ''),
+      summary: '',
+      linkedCurriculumId: null,
+      linkedLessonId: null,
+    };
+    userData.notes.unshift(note);
+    out.push({
+      type: 'note',
+      id: note.id,
+      title: note.title,
+      launch: { appId: 'notes', label: 'Notes', meta: { initialNoteId: note.id, initialView: 'editor' } },
+    });
+  }
+
+  // ── [MAKE_QUIZBOWL] - no game pre-created; we deep-link the QB hub
+  //    pre-filled with topic + difficulty so the student can start. ──
+  const qbJson = extractActionJson(fullText, 'MAKE_QUIZBOWL');
+  if (qbJson && qbJson.topic) {
+    const topic = String(qbJson.topic).slice(0, 200);
+    const difficulty = ['elementary', 'middle', 'high', 'college'].includes(qbJson.difficulty)
+      ? qbJson.difficulty
+      : 'high';
+    out.push({
+      type: 'quizbowl',
+      title: topic,
+      launch: { appId: 'quizbowl', label: 'Quiz Bowl', meta: { initialTopic: topic, initialDifficulty: difficulty } },
+    });
+  }
+
+  // ── [MAKE_DEBATE] - deep-link the debate app pre-configured. ──
+  const debJson = extractActionJson(fullText, 'MAKE_DEBATE');
+  if (debJson && debJson.topic) {
+    const topic = String(debJson.topic).slice(0, 300);
+    const side = ['pro', 'con'].includes(debJson.side) ? debJson.side : 'pro';
+    out.push({
+      type: 'debate',
+      title: topic,
+      launch: { appId: 'debate', label: 'Debate', meta: { initialTopic: topic, initialSide: side } },
+    });
+  }
+
+  return out;
+}
+
 // ===== AUTH ROUTES =====
 
 // Email + password signup - creates a brand-new account.
@@ -4425,6 +4507,23 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
     await streamAIResponse(res, systemPrompt, aiMessages, async (fullContent, sources) => {
       const msg = { role: 'assistant', content: fullContent, timestamp: new Date().toISOString() };
       if (sources && sources.length) msg.sources = sources;
+
+      // [MAKE_*] action tokens: create the real artifact(s), attach them
+      // to the assistant message (so reloads restore the Open cards),
+      // and stream each as a metadata event so the panel can render the
+      // card before the user sees the bubble finish.
+      try {
+        const artifacts = await buildStudyArtifacts(fullContent, users[email].data);
+        if (artifacts.length) {
+          msg.artifacts = artifacts;
+          for (const a of artifacts) {
+            try { res.write(`data: ${JSON.stringify({ artifact: a })}\n\n`); } catch {}
+          }
+        }
+      } catch (e) {
+        console.error('buildStudyArtifacts error:', e);
+      }
+
       session.messages.push(msg);
 
       // Check for milestone completion markers

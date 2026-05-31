@@ -4,7 +4,7 @@ import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 
 export default function ChatContainer({
-  messages, streamingContent, streamingSources, onSend, disabled, placeholder,
+  messages, streamingContent, streamingSources, streamingArtifacts, onSend, disabled, placeholder,
   header, className = '', sourceMode, onToggleSource, searchStatus,
   hideInput = false,
   editableIndices = null,
@@ -43,11 +43,12 @@ export default function ChatContainer({
 
   // Build display messages + streaming message (show live sources while streaming)
   const displayMessages = [...messages];
-  if (streamingContent || (streamingSources && streamingSources.length)) {
+  if (streamingContent || (streamingSources && streamingSources.length) || (streamingArtifacts && streamingArtifacts.length)) {
     displayMessages.push({
       role: 'assistant',
       content: streamingContent || '',
       sources: streamingSources || [],
+      artifacts: streamingArtifacts || [],
       _streaming: true,
     });
   }

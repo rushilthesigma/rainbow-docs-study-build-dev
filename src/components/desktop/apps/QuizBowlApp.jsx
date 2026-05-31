@@ -113,7 +113,7 @@ function useWordReveal(text, speed = 140, active = false) {
   return { revealed, done, wordIndex, totalWords: words.length, stop };
 }
 
-export default function QuizBowlApp() {
+export default function QuizBowlApp({ initialTopic = null, initialDifficulty = null } = {}) {
   const { openApp } = useWindowManager();
   function openLessonFor(topic) {
     if (!topic) return;
@@ -122,7 +122,9 @@ export default function QuizBowlApp() {
   }
   // 'hub' is the new landing screen (stats + recommendations + history).
   // 'custom' is the old setup form, still available for fine control.
-  const [view, setView] = useState('hub');
+  // When deep-linked from study mode with a topic, jump straight to the
+  // custom form so the student can hit Start without hunting.
+  const [view, setView] = useState(initialTopic ? 'custom' : 'hub');
   useBrowserBack(view !== 'hub', () => setView(view === 'custom' ? 'hub' : 'hub'));
   const { user } = useAuth();
   const [questions, setQuestions] = useState([]);
@@ -131,9 +133,14 @@ export default function QuizBowlApp() {
   const [error, setError] = useState(null);
 
   const [category, setCategory] = useState('Mixed');
-  const [difficulty, setDifficulty] = useState('Medium');
+  const [difficulty, setDifficulty] = useState(() => {
+    // Study-mode deep link maps lowercase NAQT levels to the picker labels
+    // this app uses ("Easy" / "Medium" / "Hard"). Default Medium otherwise.
+    const m = { elementary: 'Easy', middle: 'Easy', high: 'Medium', college: 'Hard' };
+    return m[initialDifficulty] || 'Medium';
+  });
   const [questionCount, setQuestionCount] = useState(10);
-  const [customInstructions, setCustomInstructions] = useState('');
+  const [customInstructions, setCustomInstructions] = useState(initialTopic ? `Focus on: ${initialTopic}` : '');
   const [revealSpeedMs, setRevealSpeedMs] = useState(140);
   const [questionSource, setQuestionSource] = useState('qbreader');
   const [playingSource, setPlayingSource] = useState('ai');
