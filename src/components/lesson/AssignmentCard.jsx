@@ -9,9 +9,9 @@ import LoadingSpinner from '../shared/LoadingSpinner';
 // surface bolted on above the chat.
 //
 // Three states:
-//   1. No assignment yet — auto-generate-on-open spinner.
-//   2. Assignment ready, no submission — prompt + rubric + textarea.
-//   3. Submission graded — score chip + per-rubric breakdown + feedback.
+//   1. No assignment yet - auto-generate-on-open spinner.
+//   2. Assignment ready, no submission - prompt + rubric + textarea.
+//   3. Submission graded - score chip + per-rubric breakdown + feedback.
 //
 // `onSubmitted(submission, courseGrade)` is fired after grading so the
 // parent page can refresh course-level state without a full reload.
@@ -22,7 +22,7 @@ export default function AssignmentCard({ curriculumId, lessonId, initialAssignme
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
 
-  // Auto-generate on first open when missing — keeps the flow one-click.
+  // Auto-generate on first open when missing - keeps the flow one-click.
   useEffect(() => {
     if (assignment || generating) return;
     setGenerating(true);
@@ -145,13 +145,13 @@ export default function AssignmentCard({ curriculumId, lessonId, initialAssignme
               </details>
             </div>
           ) : (
-            /* Submission state — input */
+            /* Submission state - input */
             <div className="mt-6">
               <label className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/45 mb-2 block">Your response</label>
               <textarea
                 value={response}
                 onChange={e => setResponse(e.target.value)}
-                placeholder="Write 150–400 words showing what you learned…"
+                placeholder="Write 150-400 words showing what you learned…"
                 rows={8}
                 className="w-full rounded-xl border border-white/[0.09] bg-white/[0.03] px-4 py-3 text-[14px] text-white/90 placeholder-white/30 focus:outline-none focus:border-sky-400/40 focus:ring-2 focus:ring-sky-400/15 resize-y leading-relaxed"
               />

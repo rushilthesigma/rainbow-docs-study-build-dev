@@ -7,7 +7,7 @@ import MathTutorApp from '../components/desktop/apps/MathTutorApp';
 import LoadingSpinner from '../components/shared/LoadingSpinner';
 
 // Practice lessons used to mount a standalone MathCanvas. That component
-// was deleted — the canvas now lives inside MathTutorApp under the
+// was deleted - the canvas now lives inside MathTutorApp under the
 // `defaultMode="canvas"` flag (the user can flip to Both / Tutor from
 // the in-app mode toggle).
 export default function PracticeLessonPage() {
@@ -78,7 +78,7 @@ export default function PracticeLessonPage() {
         </div>
       </div>
 
-      {/* Math Tutor — canvas-first, but the user can flip to Tutor or Both. */}
+      {/* Math Tutor - canvas-first, but the user can flip to Tutor or Both. */}
       <div className="flex-1 min-h-0">
         <MathTutorApp
           seedTopic={seedTopic}

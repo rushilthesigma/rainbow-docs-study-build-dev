@@ -272,7 +272,7 @@ export default function MathTutorApp({ seedTopic = null, onBack = null, defaultM
     setView('tutor');
     setMessages([]);
     setError(null);
-    setTimeout(() => doSend({ text: `Teach me "${topic.trim()}" — short and tight. One-sentence definition, one worked example in KaTeX, then one problem for the canvas. Nothing else.`, phase: 'lesson', hidden: true }), 50);
+    setTimeout(() => doSend({ text: `Teach me "${topic.trim()}" - short and tight. One-sentence definition, one worked example in KaTeX, then one problem for the canvas. Nothing else.`, phase: 'lesson', hidden: true }), 50);
   }
 
 
@@ -280,7 +280,7 @@ export default function MathTutorApp({ seedTopic = null, onBack = null, defaultM
     if (!seedTopic || seedKickedOff.current) return;
     seedKickedOff.current = true;
     setTimeout(() => doSend({
-      text: `Teach me about "${seedTopic}". Give me a real lesson — definition, why it matters, worked examples in KaTeX, then one problem to try on the canvas.`,
+      text: `Teach me about "${seedTopic}". Give me a real lesson - definition, why it matters, worked examples in KaTeX, then one problem to try on the canvas.`,
       phase: 'lesson', hidden: true,
     }), 60);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -294,7 +294,7 @@ export default function MathTutorApp({ seedTopic = null, onBack = null, defaultM
   function handleFeedback() {
     const png = captureRef.current?.capture?.();
     if (!png || captureRef.current.isEmpty()) { setError('Draw something on the canvas first.'); setTimeout(() => setError(null), 2500); return; }
-    doSend({ text: 'Here is my current work. Give me step-by-step feedback — point out the step where I am, whether it\'s correct, and hint at the next step without solving it for me.', phase: 'practice', imageDataUrl: png });
+    doSend({ text: 'Here is my current work. Give me step-by-step feedback - point out the step where I am, whether it\'s correct, and hint at the next step without solving it for me.', phase: 'practice', imageDataUrl: png });
   }
   function handleGrade() {
     const png = captureRef.current?.capture?.();
@@ -334,7 +334,7 @@ export default function MathTutorApp({ seedTopic = null, onBack = null, defaultM
             />
           </div>
 
-          {/* Custom instructions — collapsed by default */}
+          {/* Custom instructions - collapsed by default */}
           <div>
             <button
               onClick={() => setShowSettings(s => !s)}
@@ -391,7 +391,7 @@ export default function MathTutorApp({ seedTopic = null, onBack = null, defaultM
     if (apiHistory.length && apiHistory[apiHistory.length - 1].role === 'user') {
       apiHistory[apiHistory.length - 1] = {
         ...apiHistory[apiHistory.length - 1],
-        content: `${apiHistory[apiHistory.length - 1].content}\n\n[SYSTEM NOTE: Regenerate your previous answer — this time ${instruction.trim()}. Do NOT acknowledge this instruction in your response. Just produce the revised answer directly.]`,
+        content: `${apiHistory[apiHistory.length - 1].content}\n\n[SYSTEM NOTE: Regenerate your previous answer - this time ${instruction.trim()}. Do NOT acknowledge this instruction in your response. Just produce the revised answer directly.]`,
       };
     }
     setStreaming(true); setStreamingContent(''); streamRef.current = '';

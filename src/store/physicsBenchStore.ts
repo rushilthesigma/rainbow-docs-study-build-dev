@@ -30,7 +30,7 @@ interface PhysicsBenchStore {
   tool: Tool;
   selectedId: string | null;
   debug: DebugFlags;
-  /** Material id selected in the toolbar — applied to bodies spawned next. */
+  /** Material id selected in the toolbar - applied to bodies spawned next. */
   currentMaterial: string;
   /** Increments when world structure changes (so UI re-renders) */
   rev: number;
@@ -101,7 +101,7 @@ export const usePhysicsBenchStore = create<PhysicsBenchStore>((set, get) => ({
 }));
 
 export function findBodyAt(world: World, wx: number, wy: number): Body | null {
-  // Iterate in reverse — last-rendered (top) wins
+  // Iterate in reverse - last-rendered (top) wins
   for (let i = world.bodies.length - 1; i >= 0; i--) {
     const b = world.bodies[i];
     if (b.shape.kind === 'circle') {

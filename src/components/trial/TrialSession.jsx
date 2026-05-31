@@ -116,13 +116,13 @@ function checkAnswer(userAns, correctAns) {
 
 // ── Main ──────────────────────────────────────────────────────────────────
 // Props:
-//   questions  – QB question objects
-//   difficulty – 'easy' | 'medium' | 'hard'
-//   bots       – bot objects to use (subset of ALL_BOTS). null = first 3
-//   matchMode  – boolean: 1v1 head-to-head
-//   lobbyMode  – boolean: full 8-player tournament room
-//   botNames   – { [botId]: customName } map for display
-//   onComplete – ({ xp, userScore, sessionResults })
+//   questions  - QB question objects
+//   difficulty - 'easy' | 'medium' | 'hard'
+//   bots       - bot objects to use (subset of ALL_BOTS). null = first 3
+//   matchMode  - boolean: 1v1 head-to-head
+//   lobbyMode  - boolean: full 8-player tournament room
+//   botNames   - { [botId]: customName } map for display
+//   onComplete - ({ xp, userScore, sessionResults })
 export default function TrialSession({
   questions, difficulty, bots: botsProp, matchMode = false,
   lobbyMode = false, botNames, scoringFormat, onComplete,
@@ -160,7 +160,7 @@ export default function TrialSession({
   // Synchronous buzz claim. Set the moment a player (user or bot) wins
   // the buzz; any later bot timer that fires for the same question must
   // bail out instead of awarding itself points. React state updates are
-  // batched/async, so we can't rely on `buzzedBy` here — JS is
+  // batched/async, so we can't rely on `buzzedBy` here - JS is
   // single-threaded, so a ref read+write is race-free.
   // Reset to null on every new question and after a user neg (when the
   // question reopens for the remaining bots).
@@ -220,7 +220,7 @@ export default function TrialSession({
       const jitter = (Math.random() - 0.5) * 0.2;
       const ratio  = Math.max(0.1, Math.min(0.95, bot.buzzAt + jitter));
 
-      // Stage 1 — mark bot as "thinking" at the buzz point in the question
+      // Stage 1 - mark bot as "thinking" at the buzz point in the question
       const t = setTimeout(() => {
         // Race guard: if anyone (user or another bot) has already
         // claimed the buzz on this question, this bot must not score
@@ -233,14 +233,14 @@ export default function TrialSession({
           return u;
         });
 
-        // Stage 2 — after processing delay, atomically claim the buzz
+        // Stage 2 - after processing delay, atomically claim the buzz
         // and award points. claimedRef is a synchronous lock: only the
         // first stage-2 callback to read it as null wins; concurrent
         // ones abort. This is what makes "one buzz = one scorer" hold
         // even when several bots' timers fire in the same tick.
         const tt = setTimeout(() => {
           if (claimedRef.current != null) {
-            // Someone else already won — clear our thinking flag so the
+            // Someone else already won - clear our thinking flag so the
             // UI doesn't get stuck showing this bot mid-thought.
             setBotStates(s => {
               const u = [...s];
@@ -254,7 +254,7 @@ export default function TrialSession({
           const correct = Math.random() < bot.accuracy;
           // Bots use the same scoring format as the player so the
           // scoreboard stays consistent. On a wrong bot buzz we award 0
-          // rather than a neg — bots aren't penalized to keep the game
+          // rather than a neg - bots aren't penalized to keep the game
           // flowing.
           const pts     = correct ? scoreForBuzz({ correct: true, ratio, format: FORMAT }) : 0;
 
@@ -272,7 +272,7 @@ export default function TrialSession({
             return u;
           });
 
-          // Claim buzzedBy in the same batch — effect sees both updates at once
+          // Claim buzzedBy in the same batch - effect sees both updates at once
           setBuzzedBy(prev => prev ?? bot.id);
         }, bot.thinkMs);
 
@@ -408,7 +408,7 @@ export default function TrialSession({
             {won ? 'You Win!' : `${botName} Wins`}
           </h2>
           <p className="text-white/40 text-sm mt-1">
-            Final: You {userScore} — {botName} {botTotal}
+            Final: You {userScore} - {botName} {botTotal}
           </p>
         </div>
         <Button onClick={() => onComplete?.({ xp, userScore, sessionResults })} size="lg" className="w-full max-w-xs">
@@ -489,7 +489,7 @@ export default function TrialSession({
             </div>
           </div>
 
-          {/* Bottom controls — mirrors QuizBowlApp playing view */}
+          {/* Bottom controls - mirrors QuizBowlApp playing view */}
           <div className="px-4 py-3 border-t border-white/[0.04] flex-shrink-0 space-y-2">
 
             {/* Neg feedback banner */}
@@ -524,7 +524,7 @@ export default function TrialSession({
               </>
             )}
 
-            {/* Waiting — bot already got it */}
+            {/* Waiting - bot already got it */}
             {phase === 'reading' && botAnsweredCorrectly && (
               <div className="py-3 rounded-xl bg-white/[0.03] text-center text-[12px] text-white/30 border border-white/[0.05]">
                 Next question loading…
@@ -554,7 +554,7 @@ export default function TrialSession({
               </div>
             )}
 
-            {/* Result — answer revealed here, not in question text */}
+            {/* Result - answer revealed here, not in question text */}
             {phase === 'result' && answerResult && (
               <div className={`p-4 rounded-2xl text-center border-2 ${
                 answerResult.correct
@@ -576,7 +576,7 @@ export default function TrialSession({
               </div>
             )}
 
-            {/* Result — bot got it right */}
+            {/* Result - bot got it right */}
             {phase === 'result' && !answerResult && (
               <div className="p-4 rounded-2xl text-center border-2 bg-white/[0.04] border-white/[0.12]">
                 <p className="text-[15px] font-bold text-white/60">{q.answer}</p>

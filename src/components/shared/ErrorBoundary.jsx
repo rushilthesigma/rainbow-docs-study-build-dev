@@ -16,7 +16,7 @@ export default class ErrorBoundary extends Component {
 
   componentDidCatch(error, info) {
     // Surface to console for dev; in prod this is where a telemetry
-    // hook would go (open question in PRD — left as plain console).
+    // hook would go (open question in PRD - left as plain console).
     console.error('[ErrorBoundary]', error, info?.componentStack);
   }
 

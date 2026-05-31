@@ -97,7 +97,7 @@ export default function MobileStudy() {
   return (
     // `flex-1 min-h-0` (not `h-full`) so this fills the parent flex
     // column deterministically. h-full vs flex-1 matters here because
-    // the parent uses flex-1 itself — `height: 100%` of a flex-grown
+    // the parent uses flex-1 itself - `height: 100%` of a flex-grown
     // parent resolves inconsistently across browsers, while `flex-1`
     // on the child is rock solid.
     <div className="flex-1 min-h-0 flex flex-col bg-[#F4F5F7] dark:bg-[#0a0a14]">
@@ -225,7 +225,7 @@ function Bubble({ role, content }) {
   );
 }
 
-// Pre-streaming "thinking" indicator. Three pulsing dots — feels alive,
+// Pre-streaming "thinking" indicator. Three pulsing dots - feels alive,
 // no literal "..." characters in the content.
 function TypingBubble() {
   return (

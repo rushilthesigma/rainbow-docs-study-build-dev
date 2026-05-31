@@ -222,7 +222,7 @@ function speedColor(t: number, out: { r: number; g: number; b: number }) {
 
 /**
  * Dense traced streamlines + animated glow tracers. Each frame nothing is
- * re-integrated unless the flow params change — the streamlines are static
+ * re-integrated unless the flow params change - the streamlines are static
  * geometry colored by local speed, and a set of glowing tracer points ride
  * along them to convey motion. This reads like Fusion 360's flow viz.
  */

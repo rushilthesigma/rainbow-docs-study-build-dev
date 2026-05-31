@@ -359,7 +359,7 @@ function LibraryPanel() {
     <>
       <div className="flex-1 flex flex-col min-w-0">
         <div className="h-10 px-3 flex items-center border-b border-white/10 chrome text-sm text-white/70">
-          My Library — models you saved from Modeler3D
+          My Library - models you saved from Modeler3D
         </div>
         <div className="flex-1 overflow-y-auto p-3 grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3 content-start">
           {models.length === 0 && (
@@ -507,7 +507,7 @@ function PartCard({
   selected: boolean;
   onClick: () => void;
 }) {
-  // Lightweight silhouette derived from category — no R3F per card.
+  // Lightweight silhouette derived from category - no R3F per card.
   const accent = CATEGORY_COLORS[part.category] ?? '#94a3b8';
   return (
     <button
@@ -539,7 +539,7 @@ function PartCard({
   );
 }
 
-/** Per-category SVG silhouette — bright, lightweight, no GL context needed. */
+/** Per-category SVG silhouette - bright, lightweight, no GL context needed. */
 function PartSilhouette({ categoryId, accent }: { categoryId: string; accent: string }) {
   const stroke = accent;
   switch (categoryId) {
@@ -736,7 +736,7 @@ const module: AppModule = {
   manifest: {
     id: 'partslib',
     name: 'PartsLib',
-    description: 'Procedural mechanical parts library — bolts, gears, bearings, springs',
+    description: 'Procedural mechanical parts library - bolts, gears, bearings, springs',
     icon: PartsIcon,
     defaultSize: { width: 1100, height: 660 },
     accent: 'linear-gradient(135deg, #84cc16 0%, #10b981 100%)',

@@ -204,7 +204,7 @@ export const CIRCUIT_PRESETS: CircuitPreset[] = [
   {
     id: 'wheatstone-bridge',
     name: 'Wheatstone Bridge',
-    description: 'Four-resistor bridge — strain-gauge / sensor front-end. Probe both arms.',
+    description: 'Four-resistor bridge - strain-gauge / sensor front-end. Probe both arms.',
     components: [
       { id: 'v1', type: 'vsource', x: 70, y: 150, value: 5 },
       { id: 'r1', type: 'resistor', x: 200, y: 70, value: 1000 },
@@ -254,7 +254,7 @@ export const CIRCUIT_PRESETS: CircuitPreset[] = [
   {
     id: 'diode-clipper',
     name: 'Diode Clipper',
-    description: 'Series R + shunt diode clamps the waveform — guitar-pedal style.',
+    description: 'Series R + shunt diode clamps the waveform - guitar-pedal style.',
     components: [
       { id: 'ac', type: 'vsource_ac', x: 80, y: 120, value: 5, freq: 1000 },
       { id: 'r1', type: 'resistor', x: 220, y: 90, value: 1000 },

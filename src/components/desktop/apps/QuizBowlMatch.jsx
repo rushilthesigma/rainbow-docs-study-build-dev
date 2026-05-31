@@ -298,7 +298,7 @@ export default function QuizBowlMatch({ user, onExit }) {
               ? 'Share with up to ' + (maxPlayers - 1) + ' more players'
               : lobbyFull
                 ? `Lobby full · ${playerCount}/${maxPlayers}`
-                : `${playerCount}/${maxPlayers} in — share to add more`}
+                : `${playerCount}/${maxPlayers} in - share to add more`}
           </p>
 
           <div className="bg-white/[0.07] dark:bg-white/[0.04] border border-blue-500/[0.12] rounded-xl p-3 mb-5">
@@ -326,7 +326,7 @@ export default function QuizBowlMatch({ user, onExit }) {
             </div>
           </div>
 
-          {/* Settings — host only, at least 2 players present */}
+          {/* Settings - host only, at least 2 players present */}
           {!waiting && isHost && (
             <>
               <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2">Category</p>
@@ -536,7 +536,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
         {wrongFlash && !buzz && !answerResult && (
           <div className="px-3 py-1.5 rounded-2xl bg-rose-500/[0.08] border border-rose-500/15 text-[11px] text-rose-400/70 text-center">
             {wrongFlash.userId === myId ? 'Wrong' : `${wrongName} was wrong`}
-            {wrongFlash.answer ? ` — "${wrongFlash.answer}"` : ''} · continues
+            {wrongFlash.answer ? ` - "${wrongFlash.answer}"` : ''} · continues
           </div>
         )}
         {!buzz && !answerResult && !iAmLocked && (
@@ -550,7 +550,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
         )}
         {!buzz && !answerResult && iAmLocked && (
           <div className="w-full py-3 rounded-2xl border border-white/[0.05] bg-white/[0.02] text-center text-[11px] text-white/25">
-            Locked out — wait for next question
+            Locked out - wait for next question
           </div>
         )}
         {buzz && !answerResult && iBuzzed && (

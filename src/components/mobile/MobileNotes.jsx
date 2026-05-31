@@ -11,7 +11,7 @@ export default function MobileNotes() {
   const [notes, setNotes] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // edit state — server stores the body under `mainNotes` (Cornell-style),
+  // edit state - server stores the body under `mainNotes` (Cornell-style),
   // not `content`. Keep our state name aligned to avoid the same off-by-key
   // bug that caused "make new note doesn't work" the first time.
   const [activeId, setActiveId] = useState(null);

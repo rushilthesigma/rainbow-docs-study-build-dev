@@ -2,15 +2,15 @@ import { useState } from 'react';
 import { Shield, KeyRound, ArrowLeft } from 'lucide-react';
 import { WALLPAPERS } from '../desktop/DesktopBackground';
 
-// Profile-picker screen — shown after login whenever the family has
+// Profile-picker screen - shown after login whenever the family has
 // profiles set up. Family manager (admin) requires PIN; children switch freely.
 //
 // Props:
-//   parentName        – display name of the account owner (family manager)
-//   students          – [{ id, name, color, avatar }] child profiles
-//   parentMode        – { enabled, hasPin } from /api/auth/me
-//   onSelectStudent(sid) – child tile selected
-//   onSelectAdmin(pin)   – family manager tile selected (after PIN if set)
+//   parentName        - display name of the account owner (family manager)
+//   students          - [{ id, name, color, avatar }] child profiles
+//   parentMode        - { enabled, hasPin } from /api/auth/me
+//   onSelectStudent(sid) - child tile selected
+//   onSelectAdmin(pin)   - family manager tile selected (after PIN if set)
 export default function ProfilePicker({
   parentName, students, parentMode, onSelectStudent, onSelectAdmin,
 }) {
@@ -45,7 +45,7 @@ export default function ProfilePicker({
   function pickAdmin() {
     if (selected) return;
     if (!parentMode?.hasPin) {
-      // No PIN set yet — skip straight through
+      // No PIN set yet - skip straight through
       setSelected('admin');
       onSelectAdmin('');
       return;
@@ -58,14 +58,14 @@ export default function ProfilePicker({
   async function submitPin(e) {
     e?.preventDefault?.();
     if (!/^[0-9]{4,6}$/.test(pin)) {
-      setError('PIN must be 4–6 digits.');
+      setError('PIN must be 4-6 digits.');
       return;
     }
     setStage('submitting');
     setError(null);
     try {
       await onSelectAdmin(pin);
-      // Caller handles navigation — picker stays in submitting until unmount
+      // Caller handles navigation - picker stays in submitting until unmount
     } catch (err) {
       setStage('pin');
       setError(err?.message || 'Incorrect PIN.');

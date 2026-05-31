@@ -2,8 +2,8 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Shield, ArrowLeft, Ban, Trash2, User, BookOpen, FileText, Target, Layers,
   MessageSquare, Lightbulb, Trophy, CreditCard, Search, Crown, Calendar,
-  RefreshCw, ChevronRight, Zap, ClipboardList, BarChart3, X,
-  Swords, Activity, ChevronDown,
+  RefreshCw, ChevronRight, Zap, ClipboardList, BarChart3, X, Check,
+  Swords, Activity, ChevronDown, Sparkles,
 } from 'lucide-react';
 import {
   checkAdmin, listUsers, getUser, toggleBan, deleteUser,
@@ -14,6 +14,7 @@ import LoadingSpinner from '../../shared/LoadingSpinner';
 import AdvisorBadge from '../../shared/AdvisorBadge';
 import { peek, fetchOnce, bust, bustPrefix } from '../../../api/cache';
 import ViewFade from '../../shared/ViewFade';
+import { useToast } from '../../shared/Toast';
 
 const ADVISOR_EMAILS = new Set(['william.qiao.yang@gmail.com']);
 const isAdvisorEmail = (email) => ADVISOR_EMAILS.has((email || '').toLowerCase());
@@ -39,17 +40,17 @@ export default function AdminApp() {
     const cacheKey = `admin:users:${includeDemo ? '1' : '0'}`;
     const cachedUsers = peek(cacheKey);
     const cachedAdmin = peek('admin:check');
-    // If we have prior caches, paint immediately — refresh runs in parallel below.
+    // If we have prior caches, paint immediately - refresh runs in parallel below.
     if (cachedAdmin?.isAdmin !== undefined) setIsAdmin(!!cachedAdmin.isAdmin);
     if (cachedUsers?.users) setUsers(cachedUsers.users);
     if (cachedAdmin && cachedUsers) setLoading(false);
-    // Always re-validate. checkAdmin + listUsers are independent — fire in parallel.
+    // Always re-validate. checkAdmin + listUsers are independent - fire in parallel.
     (async () => {
       try {
         const [a, d] = await Promise.all([
           fetchOnce('admin:check', checkAdmin),
           // listUsers depends on admin check passing, but the API rejects
-          // non-admins anyway — racing them is safe and shaves ~150ms.
+          // non-admins anyway - racing them is safe and shaves ~150ms.
           fetchOnce(cacheKey, () => listUsers({ includeDemo })).catch(() => ({ users: [] })),
         ]);
         setIsAdmin(!!a.isAdmin);
@@ -87,8 +88,12 @@ export default function AdminApp() {
     bustPrefix('admin:users:');
     if (selectedUser?.id === uid) { setView('list'); setSelectedUser(null); }
   }
-  async function handleGrantPro(email) {
-    await ownerGrantPro(email);
+  async function handleSetPlan(email, tier) {
+    if (tier === 'free') {
+      await ownerRevokePro(email);
+    } else {
+      await ownerGrantPro(email, tier);
+    }
     await refreshList();
     if (selectedUser?.email === email) {
       const d = await getUser(selectedUser.id, { includeDemo });
@@ -169,8 +174,7 @@ export default function AdminApp() {
           onBack={() => { setView('list'); setSelectedUser(null); }}
           onBan={() => handleBan(selectedUser.id)}
           onDelete={() => handleDelete(selectedUser.id)}
-          onGrantPro={() => handleGrantPro(selectedUser.email)}
-          onRevokePro={() => handleRevokePro(selectedUser.email)}
+          onSetPlan={(tier) => handleSetPlan(selectedUser.email, tier)}
           onOpenConv={openConv}
         />
       </ViewFade>
@@ -211,7 +215,7 @@ function sumMsgs(u) { return (u.chatMessages?.study || 0) + (u.chatMessages?.les
 
 // Composite "activeness" score for the user list sort. Recency dominates
 // (a user seen today beats a one-shot whale from last month), engagement
-// volume breaks ties. Scale is unitless — only the ordering matters.
+// volume breaks ties. Scale is unitless - only the ordering matters.
 function activenessScore(u) {
   const HOUR = 3_600_000, DAY = 86_400_000, WEEK = 7 * DAY, MONTH = 30 * DAY;
   const lastV = u.lastVisitAt ? Date.parse(u.lastVisitAt) || 0 : 0;
@@ -255,7 +259,7 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
 
   return (
     <div>
-      {/* Header strip — keeps the icon + title compact and pushes the
+      {/* Header strip - keeps the icon + title compact and pushes the
           action cluster to the right. Stats live in their own dense card
           row below so the title bar stays scannable. */}
       <div className="flex items-center gap-2 mb-3">
@@ -296,7 +300,7 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
         </div>
       </div>
 
-      {/* Stat card row — six glanceable tiles. The accent dot color
+      {/* Stat card row - six glanceable tiles. The accent dot color
           encodes status: green = activity, amber = paid, rose = blocked. */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-4">
         <AdminStatCard label="Total users" value={total} />
@@ -342,7 +346,7 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
         )}
         {users.map(u => {
           const t = lastSeen(u);
-          // Force boolean — otherwise `t = 0` (no last-seen recorded) cascades
+          // Force boolean - otherwise `t = 0` (no last-seen recorded) cascades
           // through `t && ...` as the value `0`, which React then renders as
           // a literal "0" text node under the avatar.
           const isActiveNow = t > 0 && (now - t) < HOUR;
@@ -357,7 +361,7 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
                 <div className="w-8 h-8 rounded-full bg-white/[0.10] border border-white/[0.15] flex items-center justify-center text-[11px] font-bold text-white/70">
                   {(u.name || u.email || '?')[0]?.toUpperCase()}
                 </div>
-                {/* Presence dot — lit green when seen in the last hour,
+                {/* Presence dot - lit green when seen in the last hour,
                     dim when active today, hidden otherwise. */}
                 {(isActiveNow || isActiveToday) && (
                   <span
@@ -371,7 +375,7 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <p className="text-sm font-medium text-white/90 truncate">{u.name || u.email}</p>
-                  {isAdvisorEmail(u.email) ? <AdvisorBadge /> : (u.plan === 'pro' && <ProPill />)}
+                  {isAdvisorEmail(u.email) ? <AdvisorBadge /> : <PlanPill plan={u.plan} />}
                   {u.banned && <span className="px-1.5 py-0.5 rounded bg-rose-900/30 text-rose-400 text-[10px] font-medium">Banned</span>}
                   {u.isDemo && <span className="px-1.5 py-0.5 rounded bg-amber-900/20 text-amber-400 text-[10px] font-bold uppercase tracking-wider">Demo</span>}
                 </div>
@@ -416,7 +420,7 @@ function AdminStatCard({ label, value, sub, dot, icon }) {
   );
 }
 
-// "5m ago" / "2h" / "3d" / "Jan 12" — kept terse for the user-list density.
+// "5m ago" / "2h" / "3d" / "Jan 12" - kept terse for the user-list density.
 function formatRelativeShort(deltaMs) {
   const m = Math.floor(deltaMs / 60_000);
   if (m < 1) return 'now';
@@ -452,10 +456,99 @@ function ProPill() {
   );
 }
 
+// Owner-only inline plan switcher. Click to expand, pick a tier,
+// server applies it (revoke for free, grant + tier for the rest).
+function PlanPicker({ plan, onSetPlan }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const ref = useRef(null);
+  const toast = useToast();
+  useEffect(() => {
+    if (!open) return;
+    function onClick(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('pointerdown', onClick);
+    return () => document.removeEventListener('pointerdown', onClick);
+  }, [open]);
+  const TIERS = [
+    { id: 'free',      label: 'Free' },
+    { id: 'plus-lite', label: 'Plus-Lite' },
+    { id: 'plus',      label: 'Plus' },
+    { id: 'lifetime',  label: 'Lifetime' },
+    { id: 'pro',       label: 'Pro' },
+  ];
+  async function pick(tier) {
+    if (busy || tier === plan) { setOpen(false); return; }
+    setBusy(true);
+    try { await onSetPlan(tier); } catch (e) { toast.error(e?.message || 'Failed to set plan'); }
+    setBusy(false);
+    setOpen(false);
+  }
+  const currentLabel = TIERS.find(t => t.id === plan)?.label || 'Free';
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        disabled={busy}
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/[0.10] bg-white/[0.04] hover:bg-white/[0.08] text-white/85 text-xs font-medium disabled:opacity-40"
+      >
+        <Crown size={11} className="text-white/55" />
+        Plan: <span className="font-semibold">{currentLabel}</span>
+        <ChevronDown size={11} className="text-white/45" />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-9 w-44 rounded-lg border border-white/[0.10] bg-[#1a1a26]/95 backdrop-blur-xl shadow-xl py-1 z-20">
+          {TIERS.map(t => (
+            <button
+              key={t.id}
+              onClick={() => pick(t.id)}
+              className={`w-full text-left px-3 py-1.5 text-[12px] flex items-center justify-between transition-colors ${
+                t.id === plan
+                  ? 'text-white/95 font-medium bg-white/[0.06]'
+                  : 'text-white/70 hover:bg-white/[0.06] hover:text-white/95'
+              }`}
+            >
+              <span>{t.label}</span>
+              {t.id === plan && <Check size={11} className="text-emerald-300" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Generic plan badge - picks color + label for any tier. Surfaces
+// Plus-Lite / Plus / Lifetime alongside the existing Pro pill.
+function PlanPill({ plan }) {
+  if (plan === 'pro') return <ProPill />;
+  if (plan === 'lifetime') {
+    return (
+      <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500 text-white">
+        <Sparkles size={8} /> LIFETIME
+      </span>
+    );
+  }
+  if (plan === 'plus') {
+    return (
+      <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-violet-500 text-white">
+        <Zap size={8} /> PLUS
+      </span>
+    );
+  }
+  if (plan === 'plus-lite') {
+    return (
+      <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500 text-white">
+        <Zap size={8} /> PLUS-LITE
+      </span>
+    );
+  }
+  return null;
+}
+
 /* =====================================================
  * SECRET ANALYTICS PANEL
  * Hidden behind 5 fast taps on the "Admin Panel" title.
- * Computes real metrics from the loaded user list — MAU/WAU/DAU,
+ * Computes real metrics from the loaded user list - MAU/WAU/DAU,
  * stickiness ratio, churn signal, plan split, signup cohorts,
  * power users, time-on-site proxy (avg visits).
  * =====================================================*/
@@ -488,7 +581,7 @@ function AnalyticsPanel({ users, total, onClose, standalone }) {
     let newToday = 0, new7d = 0, new30d = 0;
     let pro = 0, banned = 0;
     let totalVisits = 0, totalMsgs = 0;
-    // Churn — users active in the prior 30d window but NOT in the
+    // Churn - users active in the prior 30d window but NOT in the
     // current 7d. Rough but useful directional signal.
     let activePrior30 = 0, activeNow7 = 0;
     const usersWithActivity = users.filter(u => lastActiveMs(u) > 0);
@@ -517,7 +610,7 @@ function AnalyticsPanel({ users, total, onClose, standalone }) {
     // is NOT active in the current 7d window? Lower is better.
     const churn = (activePrior30 + activeNow7) ? (activePrior30 / (activePrior30 + activeNow7)) * 100 : 0;
 
-    // Power users — top 5 by total chat messages.
+    // Power users - top 5 by total chat messages.
     const powerUsers = [...users]
       .map(u => ({
         u,
@@ -601,7 +694,7 @@ function AnalyticsPanel({ users, total, onClose, standalone }) {
         </div>
 
         <p className="text-[9.5px] text-white/30 text-center mt-3">
-          Note: time-on-site uses avg-visits as a proxy — session duration isn't tracked yet.
+          Note: time-on-site uses avg-visits as a proxy - session duration isn't tracked yet.
         </p>
       </div>
     </div>
@@ -634,7 +727,7 @@ function StatRow({ label, value }) {
 }
 
 /* ====================== USER DETAIL ====================== */
-function UserDetail({ user: u, onBack, onBan, onDelete, onGrantPro, onRevokePro, onOpenConv }) {
+function UserDetail({ user: u, onBack, onBan, onDelete, onSetPlan, onOpenConv }) {
   const [tab, setTab] = useState('overview');
 
   const totalMsgs =
@@ -656,7 +749,7 @@ function UserDetail({ user: u, onBack, onBan, onDelete, onGrantPro, onRevokePro,
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-lg font-bold text-white/90 truncate">{u.name || 'Unknown'}</h2>
-            {isAdvisorEmail(u.email) ? <AdvisorBadge /> : (u.plan === 'pro' && <ProPill />)}
+            {isAdvisorEmail(u.email) ? <AdvisorBadge /> : <PlanPill plan={u.plan} />}
             {u.banned && <span className="px-2 py-0.5 rounded-full bg-rose-900/30 text-rose-400 text-xs font-medium">Banned</span>}
           </div>
           <p className="text-xs text-white/40 truncate">
@@ -669,18 +762,8 @@ function UserDetail({ user: u, onBack, onBan, onDelete, onGrantPro, onRevokePro,
       </div>
 
       {/* Actions */}
-      <div className="flex flex-wrap gap-2 mb-4">
-        {u.plan !== 'pro' ? (
-          <button onClick={onGrantPro} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-yellow-500 text-white text-xs font-semibold">
-            <Crown size={12} /> Grant Pro
-          </button>
-        ) : (
-          u.proGrantedBy === 'owner' && (
-            <button onClick={onRevokePro} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-amber-700/50 text-amber-400 text-xs font-medium">
-              Revoke Pro
-            </button>
-          )
-        )}
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <PlanPicker plan={u.plan || 'free'} onSetPlan={onSetPlan} />
         <button onClick={onBan} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${u.banned ? 'bg-emerald-700/80 text-white' : 'bg-rose-700/80 text-white'}`}>
           <Ban size={12} className="inline mr-1" /> {u.banned ? 'Unban' : 'Ban'}
         </button>
@@ -733,7 +816,7 @@ function OverviewTab({ u }) {
   return (
     <div className="grid grid-cols-2 gap-2">
       <Stat label="Visits" value={u.visitCount || 0} />
-      <Stat label="Last visit" value={u.lastVisitAt ? new Date(u.lastVisitAt).toLocaleDateString() : '—'} />
+      <Stat label="Last visit" value={u.lastVisitAt ? new Date(u.lastVisitAt).toLocaleDateString() : '-'} />
       <Stat label="Level" value={u.profile?.level || 1} />
       <Stat label="XP" value={u.profile?.xp || 0} />
       <Stat label="Current streak" value={s?.currentStreak || 0} />
@@ -778,7 +861,7 @@ function LessonsTab({ u, onOpen }) {
   );
 }
 
-// Expandable row — collapsed shows the lesson chrome, expanded reveals
+// Expandable row - collapsed shows the lesson chrome, expanded reveals
 // the actual blocks the lesson generator produced (titles + previews).
 function LessonRow({ l, onOpenChat }) {
   const [open, setOpen] = useState(false);
@@ -832,7 +915,7 @@ function LessonRow({ l, onOpenChat }) {
   );
 }
 
-// Debates tab — finished multiplayer / tournament matches the user has
+// Debates tab - finished multiplayer / tournament matches the user has
 // played, with score, side, opponent, verdict summary.
 function DebatesTab({ u }) {
   const list = u.debateHistory || [];
@@ -859,12 +942,12 @@ function DebateRow({ d }) {
           <p className="text-[10px] text-white/35 truncate">
             {d.mode}{d.tournament ? ` · ${d.tournament.name || 'tournament'}` : ''}
             {' · '}{(d.mySide || '?').toUpperCase()} vs {oppName} ({(d.opponent?.side || '?').toUpperCase()})
-            {' · '}{d.myScore}–{d.opponentScore}
+            {' · '}{d.myScore}-{d.opponentScore}
             {d.finishedAt ? ' · ' + new Date(d.finishedAt).toLocaleString() : ''}
           </p>
         </div>
         <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${resultCls} flex-shrink-0`}>
-          {d.result || '—'}
+          {d.result || '-'}
         </span>
         <ChevronDown size={14} className={`text-white/40 transition-transform flex-shrink-0 ${open ? 'rotate-180' : ''}`} />
       </button>
@@ -903,7 +986,7 @@ function CurriculumTab({ u, onOpen }) {
 }
 
 function ScoreBadge({ score }) {
-  if (score == null) return <span className="text-white/25 text-[10px]">—</span>;
+  if (score == null) return <span className="text-white/25 text-[10px]">-</span>;
   const color = score >= 80 ? 'text-emerald-400' : score >= 60 ? 'text-amber-400' : 'text-rose-400';
   return <span className={`font-bold tabular-nums text-xs ${color}`}>{score}%</span>;
 }
@@ -1058,13 +1141,13 @@ function BillingTab({ u }) {
         <div className="flex items-center justify-between">
           <span className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-white/40">Plan</span>
           <div className="flex items-center gap-1.5">
-            {isAdvisorEmail(u.email) ? <AdvisorBadge /> : (u.plan === 'pro' ? <ProPill /> : <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/[0.08] text-white/40">FREE</span>)}
+            {isAdvisorEmail(u.email) ? <AdvisorBadge /> : (u.plan && u.plan !== 'free' ? <PlanPill plan={u.plan} /> : <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/[0.08] text-white/40">FREE</span>)}
           </div>
         </div>
-        <KV label="Granted by" value={u.proGrantedBy || '—'} />
-        <KV label="Pro until" value={u.proUntil ? new Date(u.proUntil).toLocaleString() : '—'} />
-        <KV label="Stripe customer" value={u.stripeCustomerId || '—'} mono />
-        <KV label="Stripe subscription" value={u.stripeSubscriptionId || '—'} mono />
+        <KV label="Granted by" value={u.proGrantedBy || '-'} />
+        <KV label="Pro until" value={u.proUntil ? new Date(u.proUntil).toLocaleString() : '-'} />
+        <KV label="Stripe customer" value={u.stripeCustomerId || '-'} mono />
+        <KV label="Stripe subscription" value={u.stripeSubscriptionId || '-'} mono />
       </div>
       <div className="rounded-2xl border border-white/[0.07] bg-white/[0.03] backdrop-blur-sm p-4 space-y-2">
         <div className="flex items-center gap-1.5 mb-1">

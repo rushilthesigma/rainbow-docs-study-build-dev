@@ -1,12 +1,13 @@
 import { useState } from 'react';
-import { LogOut, ChevronRight, Shield, Sparkles, X, Check, User as UserIcon, PanelBottom, Users } from 'lucide-react';
+import { LogOut, ChevronRight, Shield, Sparkles, X, Check, Lock, User as UserIcon, PanelBottom, Users } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useUIPreference } from '../../context/UIPreferenceContext';
 import { syncData } from '../../api/auth';
+import { planFromUser, canUseModel, requiredPlanFor, resolveModelTier } from '../billing/modelAccess';
 import MobilePage from './MobilePage';
 import { Z } from '../../styles/tokens';
 
-// Mobile-native settings — plan banner removed (it's not actionable
+// Mobile-native settings - plan banner removed (it's not actionable
 // from this screen anyway). Model preference is now a real picker
 // sheet. Theme toggle stays inline.
 // Only Pro has the 1M-token context window; Flash + Flash Lite ship
@@ -30,10 +31,12 @@ export default function MobileSettings() {
     window.location.reload();
   }
   const { bottomBarTransparent, setBottomBarTransparent } = useUIPreference();
+  const plan = planFromUser(user);
   const [modelTier, setModelTier] = useState(() => user?.data?.preferences?.modelTier || 'pro');
   const [pickerOpen, setPickerOpen] = useState(null); // null | 'model'
 
   async function handlePickModel(v) {
+    if (!canUseModel(v, plan)) return; // locked tiers aren't selectable
     setModelTier(v);
     setPickerOpen(null);
     try {
@@ -43,7 +46,9 @@ export default function MobileSettings() {
     } catch (err) { console.error('save modelTier failed:', err); }
   }
 
-  const modelLabel = MODEL_OPTIONS.find((m) => m.value === modelTier)?.label || 'Auto';
+  // Reflect the tier the user will actually be served, not an unusable pick.
+  const effectiveTier = resolveModelTier(modelTier, plan);
+  const modelLabel = MODEL_OPTIONS.find((m) => m.value === effectiveTier)?.label || 'Auto';
 
   return (
     <MobilePage
@@ -123,15 +128,20 @@ export default function MobileSettings() {
       {/* Model preference picker */}
       {pickerOpen === 'model' && (
         <PickerSheet title="Model preference" onClose={() => setPickerOpen(null)}>
-          {MODEL_OPTIONS.map((m) => (
-            <PickerRow
-              key={m.value}
-              active={modelTier === m.value}
-              title={m.label}
-              sub={m.description}
-              onClick={() => handlePickModel(m.value)}
-            />
-          ))}
+          {MODEL_OPTIONS.map((m) => {
+            const locked = !canUseModel(m.value, plan);
+            return (
+              <PickerRow
+                key={m.value}
+                active={!locked && effectiveTier === m.value}
+                title={m.label}
+                sub={m.description}
+                locked={locked}
+                lockLabel={locked ? requiredPlanFor(m.value)?.label : undefined}
+                onClick={() => handlePickModel(m.value)}
+              />
+            );
+          })}
         </PickerSheet>
       )}
     </MobilePage>
@@ -200,16 +210,26 @@ function PickerSheet({ title, onClose, children }) {
   );
 }
 
-function PickerRow({ active, title, sub, onClick }) {
+function PickerRow({ active, title, sub, onClick, locked, lockLabel }) {
   return (
     <button
       onClick={onClick}
+      disabled={locked}
       className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left ${
-        active ? 'bg-blue-500/10 border border-blue-500' : 'bg-gray-50 dark:bg-white/[0.03] border border-transparent'
+        active ? 'bg-blue-500/10 border border-blue-500'
+        : locked ? 'bg-gray-50 dark:bg-white/[0.02] border border-transparent opacity-60 cursor-not-allowed'
+        : 'bg-gray-50 dark:bg-white/[0.03] border border-transparent'
       }`}
     >
       <div className="flex-1 min-w-0">
-        <p className="text-[13.5px] font-bold text-gray-900 dark:text-white">{title}</p>
+        <p className="text-[13.5px] font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
+          {title}
+          {locked && lockLabel && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-300/80">
+              <Lock size={10} /> {lockLabel}
+            </span>
+          )}
+        </p>
         <p className="text-[11.5px] text-gray-500 dark:text-gray-400 mt-0.5">{sub}</p>
       </div>
       {active && <Check size={15} className="text-blue-500 shrink-0" />}

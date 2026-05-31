@@ -8,6 +8,6 @@ export default function RootShell({ classicChildren }) {
     return <DesktopShell />;
   }
 
-  // Classic mode — render the normal routed content
+  // Classic mode - render the normal routed content
   return classicChildren;
 }

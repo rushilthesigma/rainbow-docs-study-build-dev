@@ -149,7 +149,7 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
   }
 
   function saveUserEdit() {
-    // User edits RESTART the conversation from this point — the parent
+    // User edits RESTART the conversation from this point - the parent
     // truncates history and re-sends the edited text to the AI.
     const fn = onUserEdit || onEdit;
     if (typeof fn === 'function') fn(editText);
@@ -166,7 +166,7 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
     setEditing(false);
   }
 
-  // Extract quiz blocks — only render the inline quiz UI when the full block has arrived
+  // Extract quiz blocks - only render the inline quiz UI when the full block has arrived
   const quizMatch = raw.match(/\[QUIZ_START\]\s*([\s\S]*?)\s*\[QUIZ_END\]/);
   const quizJson = quizMatch ? quizMatch[1].trim() : null;
   const quizStreaming = !quizJson && raw.includes('[QUIZ_START]');
@@ -224,12 +224,12 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
 
   const isError = !!message._error;
 
-  // Layout philosophy — NOT ChatGPT.
+  // Layout philosophy - NOT ChatGPT.
   // ChatGPT's pattern is full-width alternating gray/white panels with
   // tiny avatar+name. We deliberately do iMessage-style:
   //
   //   AI on the LEFT in a soft-rounded card with a sharp inner left
-  //   accent stripe — feels like a teacher's note in the margin.
+  //   accent stripe - feels like a teacher's note in the margin.
   //   USER on the RIGHT as a tight blue bubble with a sharp tail
   //   corner pointing at "you" (rounded-tr-sm).
   //
@@ -242,7 +242,7 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
 
     if (editing) {
       return (
-        <div className="flex justify-end mb-3">
+        <div className="flex justify-end mb-3 animate-fade-in">
           <div className="max-w-[78%] w-full sm:w-auto">
             <div className="rounded-2xl rounded-tr-md bg-gray-900 dark:bg-white/[0.12] p-3 shadow-sm">
               <textarea
@@ -263,9 +263,9 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
       );
     }
     return (
-      <div className="group flex justify-end mb-3">
+      <div className="group flex justify-end mb-3 animate-fade-in">
         <div className="max-w-[78%]">
-          {/* User bubble — dark/white neutral, no color */}
+          {/* User bubble - dark/white neutral, no color */}
           <div className="rounded-2xl rounded-tr-md bg-gray-900/70 dark:bg-white/[0.11] px-4 py-2.5 shadow-sm backdrop-blur-sm">
             {Array.isArray(message.images) && message.images.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mb-2">
@@ -320,12 +320,12 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
     );
   }
 
-  // Assistant turn — same bubble SHAPE as the user (rounded-2xl with one
+  // Assistant turn - same bubble SHAPE as the user (rounded-2xl with one
   // sharp tail corner pointing back at the speaker), just a different
   // color. iMessage style: user = blue, AI = gray. Symmetric, no extra
   // chrome (no accent stripes, no header labels).
   return (
-    <div className="flex justify-start mb-3">
+    <div className="flex justify-start mb-3 animate-fade-in">
       <div className={`max-w-[88%] rounded-2xl rounded-tl-md px-4 py-2.5 shadow-sm backdrop-blur-sm ${
         isError
           ? 'bg-rose-100/70 dark:bg-rose-900/30'

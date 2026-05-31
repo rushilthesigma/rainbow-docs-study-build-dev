@@ -8,7 +8,7 @@ import 'katex/dist/katex.min.css';
 
 // Stretch problem. The AI surfaces this when the student is clearly
 // ahead of the curve (acing recent quizzes). Has a hint reveal and a
-// final solution reveal — students who solve it cold get the win;
+// final solution reveal - students who solve it cold get the win;
 // stuck students can peek incrementally.
 //
 // Block shape:

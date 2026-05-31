@@ -79,7 +79,7 @@ export default function QuizBlock({ curriculumId, lessonId, block, onComplete, g
           {block.questions.map((qq, i) => {
             const r = results.results?.find(x => x.qid === qq.id);
             const correct = r?.correct;
-            const given = r?.given || '—';
+            const given = r?.given || '-';
             return (
               <div key={qq.id} className={`rounded-2xl border p-4 ${correct ? 'border-emerald-500/15 bg-emerald-500/5' : 'border-rose-500/15 bg-rose-500/5'}`}>
                 <div className="flex items-start gap-3">
@@ -125,7 +125,7 @@ export default function QuizBlock({ curriculumId, lessonId, block, onComplete, g
   return (
     <div className="cl-anim-in">
       <div className="rounded-3xl border border-white/[0.06] bg-white/[0.02] p-7 lg:p-10">
-        {/* Quiz header — title shown in StageTracker above, so only the
+        {/* Quiz header - title shown in StageTracker above, so only the
             question counter lives here. */}
         <div className="flex items-center justify-end mb-7">
           <span className="text-[12px] font-mono text-white/45 tabular-nums">

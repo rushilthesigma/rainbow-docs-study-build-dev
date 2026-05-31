@@ -46,7 +46,7 @@ export async function suggestGraphNodes({ focus, focusNodeId, count } = {}) {
 }
 
 // ── Multi-map API. Each map has its own nodes/edges. The first map is
-// the "default" — it auto-mirrors every note. Other maps are user-curated.
+// the "default" - it auto-mirrors every note. Other maps are user-curated.
 export async function listNoteMaps() {
   return apiFetch('/api/note-maps');
 }

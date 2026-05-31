@@ -1,6 +1,6 @@
 import { Inbox } from 'lucide-react';
 
-// Shared empty state — drop in wherever a list, deck, or panel has
+// Shared empty state - drop in wherever a list, deck, or panel has
 // no items yet so the screen doesn't render a blank void. Pass an
 // `action` (a Button or link) for a call-to-action.
 export default function EmptyState({

@@ -6,7 +6,7 @@ export async function listLessons() {
 
 // ===== STANDALONE LESSON BLOCKS (Claudius 4R/4Q + final SRS) =====
 // Mirrors the curriculum-side block API but for the standalone Lessons
-// app — no parent curriculum/unit. Server endpoints live on
+// app - no parent curriculum/unit. Server endpoints live on
 // /api/lessons/:id/blocks/*.
 export async function generateLessonBlocks(lessonId) {
   return apiFetch(`/api/lessons/${lessonId}/blocks/generate`, { method: 'POST' });
@@ -53,7 +53,7 @@ export async function resetLesson(id) {
   return apiFetch(`/api/lessons/${id}/reset`, { method: 'POST' });
 }
 
-// SSE chat — same shape as curriculum lesson chat. `sourced=true` → web-search (2x cost).
+// SSE chat - same shape as curriculum lesson chat. `sourced=true` → web-search (2x cost).
 // `images` is an array of { dataUrl, mimeType } forwarded as inline_data to Gemini.
 export function sendLessonMessage(id, message, images, { onChunk, onDone, onError, onSource, onStatus }, sourced = false) {
   const token = getToken();
@@ -96,7 +96,7 @@ export function sendLessonMessage(id, message, images, { onChunk, onDone, onErro
           }
         }
       }
-      // Stream closed without a `done` or `error` event — connection dropped
+      // Stream closed without a `done` or `error` event - connection dropped
       // mid-response (proxy timeout, network blip). Surface as a soft error
       // so the bubble closes instead of spinning forever.
       if (!finished) onError?.('Connection ended unexpectedly. Try sending the message again.');

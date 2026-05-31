@@ -36,7 +36,7 @@ export default function TopBar({ onToggleSidebar, showHamburger = false }) {
       )}
       <div className="flex-1" />
       <div className="flex items-center gap-1">
-        {/* Split view toggle — hidden on math canvas page */}
+        {/* Split view toggle - hidden on math canvas page */}
         {!showHamburger && !isMathPage && (
           <button
             onClick={() => isActive ? closeSplit() : openSplit('study')}

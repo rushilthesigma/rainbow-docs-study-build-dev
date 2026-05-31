@@ -1,5 +1,5 @@
 /**
- * DataViz sample datasets — fully synthetic 3D scalar fields sampled on a
+ * DataViz sample datasets - fully synthetic 3D scalar fields sampled on a
  * structured grid, plus a CSV point-cloud parser. Each point carries a scalar
  * `s` that the visualization colors by.
  */

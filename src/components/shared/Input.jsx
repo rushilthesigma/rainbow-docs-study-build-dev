@@ -1,6 +1,6 @@
 import { useId } from 'react';
 
-// Shared input primitive — links label↔input via htmlFor/id, supports
+// Shared input primitive - links label↔input via htmlFor/id, supports
 // an `error` prop wired through aria-describedby, and forwards every
 // native attribute (`required`, `pattern`, `min`, `max`, `type`, etc.)
 // so callers don't need to drop down to raw <input>.

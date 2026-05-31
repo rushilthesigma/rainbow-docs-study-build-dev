@@ -81,9 +81,9 @@ body {
 /* ── Text remapping (opacity tiers) ──
  * Highest specificity wins, so put strong opacities first.
  * /9, /8  → near-opaque primary text
- * /7–/5   → secondary text
- * /4–/3   → tertiary / muted
- * /2–/1   → ghost / placeholder
+ * /7-/5   → secondary text
+ * /4-/3   → tertiary / muted
+ * /2-/1   → ghost / placeholder
  */
 [data-widget-theme="light"] [class*="text-white/9"],
 [data-widget-theme="light"] [class*="text-white/8"],
@@ -129,8 +129,8 @@ body {
 
 /* ── Background remapping ──
  * Three tiers so hover/active states have visible contrast:
- *   Low   (0.00–0.07)  → very subtle tint  (resting surface)
- *   Mid   (0.08–0.14)  → soft dark tint     (hover)
+ *   Low   (0.00-0.07)  → very subtle tint  (resting surface)
+ *   Mid   (0.08-0.14)  → soft dark tint     (hover)
  *   High  (0.15+)      → clear dark tint    (active / selected)
  */
 [data-widget-theme="light"] [class*="bg-white/"],
@@ -284,7 +284,7 @@ body {
   50%      { opacity: 1;    transform: scale(1.2); }
 }
 
-/* Onboarding "hello" reveal — fade + slide-up. Used on staggered
+/* Onboarding "hello" reveal - fade + slide-up. Used on staggered
    children so the welcome screen unfolds line by line. */
 @keyframes fade-up {
   from { opacity: 0; transform: translateY(12px); }
@@ -292,7 +292,7 @@ body {
 }
 .animate-fade-up { animation: fade-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards; opacity: 0; }
 
-/* View-switch fade — applied via the <ViewFade> wrapper whenever an
+/* View-switch fade - applied via the <ViewFade> wrapper whenever an
    app changes which sub-view it renders. The wrapper's `key` prop is
    bound to the view id so React remounts the subtree, which retriggers
    this animation on every change. Soft + brief so it feels like a
@@ -303,7 +303,7 @@ body {
 }
 .animate-view-fade { animation: view-fade-in 0.18s ease-out forwards; }
 
-/* Modal pop — slightly more pronounced than view-fade so the dialog
+/* Modal pop - slightly more pronounced than view-fade so the dialog
    reads as a discrete surface coming forward. */
 @keyframes modal-in {
   from { opacity: 0; transform: scale(0.97) translateY(4px); }
@@ -324,7 +324,7 @@ body {
    Apps still share one React codebase; these CSS rules nudge
    corner radii, borders, shadows, and button chrome so each
    OS feels closer to its native idiom. macOS is the default
-   (no extra rules) — other shells override selectively.
+   (no extra rules) - other shells override selectively.
    =========================================================== */
 
 /* =========================================================
@@ -334,7 +334,7 @@ body {
    [data-spotlight-input] so per-OS focus halos don't draw a
    bright cylinder around them.
    ========================================================= */
-/* Kill ALL focus chrome for the Spotlight input — no cylinder, no ring,
+/* Kill ALL focus chrome for the Spotlight input - no cylinder, no ring,
    no border color/bg change on focus. Highest specificity + !important
    so every per-OS rule below loses. */
 input[data-spotlight-input],
@@ -362,7 +362,7 @@ input[data-spotlight-input]:hover,
 
 
 /* =========================================================
-   WINDOWS — Fluent / Segoe / squared chrome, underline inputs
+   WINDOWS - Fluent / Segoe / squared chrome, underline inputs
    ========================================================= */
 .os-windows { font-family: 'Segoe UI', 'Noto Sans', system-ui, sans-serif; letter-spacing: 0.005em; }
 .os-windows .rounded-2xl { border-radius: 0.375rem !important; }
@@ -370,7 +370,7 @@ input[data-spotlight-input]:hover,
 .os-windows .rounded-lg  { border-radius: 0.25rem !important; }
 .os-windows .rounded-md  { border-radius: 0.1875rem !important; }
 
-/* Chat bubbles — Teams/Fluent rectangles */
+/* Chat bubbles - Teams/Fluent rectangles */
 .os-windows [class*="rounded-br-md"],
 .os-windows [class*="rounded-bl-md"] { border-radius: 4px !important; }
 
@@ -379,12 +379,12 @@ input[data-spotlight-input]:hover,
 .os-windows input:focus,
 .os-windows textarea:focus { outline: none !important; box-shadow: none !important; }
 
-/* Heavier headings, smaller body — Fluent feels denser */
+/* Heavier headings, smaller body - Fluent feels denser */
 .os-windows h1, .os-windows h2, .os-windows h3 { font-weight: 600 !important; letter-spacing: -0.01em; }
 .os-windows .text-sm { font-size: 0.8125rem !important; }
 .os-windows .text-xs { font-size: 0.6875rem !important; }
 
-/* Fluent shadow — tighter, two-step */
+/* Fluent shadow - tighter, two-step */
 .os-windows .shadow-lg  { box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08) !important; }
 .os-windows .shadow-xl  { box-shadow: 0 2px 6px rgba(0,0,0,0.15), 0 8px 16px rgba(0,0,0,0.12) !important; }
 .os-windows .shadow-2xl { box-shadow: 0 4px 10px rgba(0,0,0,0.18), 0 16px 32px rgba(0,0,0,0.15) !important; }
@@ -396,7 +396,7 @@ input[data-spotlight-input]:hover,
 .os-windows [class*="fixed"][class*="rounded-2xl"] { border-radius: 0 !important; }
 
 /* =========================================================
-   CHROMEOS — Material You / pill everything / airy spacing
+   CHROMEOS - Material You / pill everything / airy spacing
    ========================================================= */
 .os-chromeos { font-family: 'Google Sans', 'Roboto', system-ui, sans-serif; letter-spacing: -0.005em; }
 .os-chromeos .rounded-2xl { border-radius: 1.5rem !important; }
@@ -428,7 +428,7 @@ input[data-spotlight-input]:hover,
 .os-chromeos .py-2 { padding-top: 0.6rem !important; padding-bottom: 0.6rem !important; }
 .os-chromeos .py-3 { padding-top: 0.9rem !important; padding-bottom: 0.9rem !important; }
 
-/* Chat bubbles — Gmail/Material-y asymmetric pills */
+/* Chat bubbles - Gmail/Material-y asymmetric pills */
 .os-chromeos [class*="rounded-br-md"] { border-radius: 20px 20px 4px 20px !important; }
 .os-chromeos [class*="rounded-bl-md"] { border-radius: 20px 20px 20px 4px !important; }
 
@@ -436,7 +436,7 @@ input[data-spotlight-input]:hover,
 .os-chromeos button:active { transform: scale(0.97); transition: transform 0.08s ease-out; }
 
 /* =========================================================
-   LINUX / GNOME — Adwaita flat, tighter rows, thick focus halo
+   LINUX / GNOME - Adwaita flat, tighter rows, thick focus halo
    ========================================================= */
 .os-linux { font-family: 'Ubuntu', 'Cantarell', system-ui, sans-serif; }
 .os-linux .rounded-2xl { border-radius: 0.75rem !important; }
@@ -463,11 +463,11 @@ input[data-spotlight-input]:hover,
 .os-linux .shadow-xl  { box-shadow: 0 2px 8px rgba(0,0,0,0.18) !important; }
 .os-linux .shadow-2xl { box-shadow: 0 4px 12px rgba(0,0,0,0.2) !important; }
 
-/* Chat bubbles — Adwaita rounded rectangles */
+/* Chat bubbles - Adwaita rounded rectangles */
 .os-linux [class*="rounded-br-md"] { border-radius: 12px 12px 4px 12px !important; }
 .os-linux [class*="rounded-bl-md"] { border-radius: 12px 12px 12px 4px !important; }
 
-/* Hard button press — GTK-style */
+/* Hard button press - GTK-style */
 .os-linux button:active { transform: translateY(1px); transition: transform 0.05s ease-out; }
 
 /* ===== LIQUID GLASS ===== */
@@ -506,7 +506,7 @@ input[data-spotlight-input]:hover,
   backdrop-filter: blur(20px) saturate(1.6);
   -webkit-backdrop-filter: blur(20px) saturate(1.6);
 }
-/* Dark header/footer strip — neutral */
+/* Dark header/footer strip - neutral */
 .dark .glass-header {
   background: rgba(20, 20, 20, 0.55) !important;
   backdrop-filter: blur(20px) saturate(1.2) !important;
@@ -552,7 +552,7 @@ input[data-spotlight-input]:hover,
   box-shadow: inset 0 1px 3px rgba(0,0,0,0.06) !important;
   color: #111827 !important;
 }
-/* Dark input — neutral well, blue accent only on focus */
+/* Dark input - neutral well, blue accent only on focus */
 .dark .glass-input {
   background: rgba(255, 255, 255, 0.05) !important;
   border-color: rgba(255, 255, 255, 0.10) !important;

@@ -4,7 +4,7 @@ import { ArrowRight, Check, RotateCcw } from 'lucide-react';
 // Matching game block. Block shape:
 //   { type: 'matching', title, instructions, pairs: [{ term, definition }] }
 //
-// Two-column layout. Click a term, then click a definition — if they
+// Two-column layout. Click a term, then click a definition - if they
 // match, both cards lock in. Mismatches flash and clear. Block completes
 // when every pair is correctly matched.
 export default function MatchingBlock({ block, onComplete }) {

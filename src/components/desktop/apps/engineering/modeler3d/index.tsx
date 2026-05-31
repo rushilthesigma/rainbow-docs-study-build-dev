@@ -1166,7 +1166,7 @@ const PRESET_BUILDS: Record<string, () => THREE.BufferGeometry> = {
     const top = new THREE.BoxGeometry(1.4, 0.06, 0.8);
     return top; // simplified: top only for the default; real ones use boolean ops
   },
-  // The presets below are intentionally simple — single primitive scenes that
+  // The presets below are intentionally simple - single primitive scenes that
   // give the user a one-click starter. They're light on geometry so they load fast.
   vase: () => new THREE.LatheGeometry(
     Array.from({ length: 12 }, (_, i) => new THREE.Vector2(

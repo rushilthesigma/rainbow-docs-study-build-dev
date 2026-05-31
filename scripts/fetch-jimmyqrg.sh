@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # =========================================================
-# fetch-jimmyqrg.sh — populate ./games/ from jimmyqrg's public repos.
+# fetch-jimmyqrg.sh: populate ./games/ from jimmyqrg's public repos.
 #
 # Usage:
-#   ./scripts/fetch-jimmyqrg.sh           # interactive — pick repos
+#   ./scripts/fetch-jimmyqrg.sh           # interactive: pick repos
 #   ./scripts/fetch-jimmyqrg.sh all       # clone every public repo
 #   ./scripts/fetch-jimmyqrg.sh slope crossy-road basket-random ...
 #
@@ -31,7 +31,7 @@ if ! command -v curl >/dev/null; then
   echo "curl is required" >&2; exit 1
 fi
 
-# List of repos to clone — provided on command line, "all", or interactive.
+# List of repos to clone, provided on command line, "all", or interactive.
 list_all_repos() {
   # GitHub paginates at 100. Most of jimmyqrg's profile fits in 2 pages.
   local page=1

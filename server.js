@@ -42,7 +42,7 @@ const DEFAULT_MODEL = GEMINI_FLASH;
 const FALLBACK_MODEL = GEMINI_FLASH_LITE;
 
 // How many blocks the AI generates per lesson, before the final quiz
-// is appended. Difficulty drives this — beginner is a quick foothold,
+// is appended. Difficulty drives this - beginner is a quick foothold,
 // expert is a deep dive. The final quiz adds one more block on top.
 const LESSON_BLOCK_COUNT = {
   beginner:     5,
@@ -59,10 +59,10 @@ const fallbackFor = (name) => {
   return GEMINI_FLASH_LITE;
 };
 const genAI = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
-if (!GEMINI_API_KEY) console.warn('GEMINI_API_KEY is not set — AI calls will fail');
+if (!GEMINI_API_KEY) console.warn('GEMINI_API_KEY is not set - AI calls will fail');
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 
-// Data storage — try multiple locations until one works
+// Data storage - try multiple locations until one works
 const IS_RENDER = !!process.env.RENDER;
 const CANDIDATE_DIRS = [
   process.env.DATA_DIR,
@@ -111,7 +111,7 @@ function generateToken() {
   return crypto.randomBytes(32).toString('hex');
 }
 
-// Session storage — embedded in users.json for single-file persistence
+// Session storage - embedded in users.json for single-file persistence
 // Also kept in memory for fast lookups, synced to disk on every change
 const SESSIONS_FILE = join(DATA_DIR, 'sessions.json');
 function loadSessions() {
@@ -155,13 +155,78 @@ function canSeeBeta(email) {
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
 const STRIPE_PRICE_ID = process.env.STRIPE_PRICE_ID || '';
+// Per-tier prices created on Stripe (set in .env). Each tier maps to a
+// price id + a checkout mode (subscription for recurring, payment for
+// the one-time lifetime purchase). Unset => that tier disabled at checkout.
+const TIER_PRICES = {
+  plus:     { priceId: process.env.STRIPE_PRICE_PLUS_MONTHLY || '', mode: 'subscription', amountUsd: 4,  interval: 'month' },
+  pro:      { priceId: process.env.STRIPE_PRICE_PRO_MONTHLY  || STRIPE_PRICE_ID || '', mode: 'subscription', amountUsd: 10, interval: 'month' },
+  lifetime: { priceId: process.env.STRIPE_PRICE_LIFETIME     || '', mode: 'payment',      amountUsd: 20, interval: null },
+};
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 
 // ===== Plan / limits =====
-const FREE_DAILY_MESSAGE_LIMIT = 20;
-const FREE_DAILY_QUIZBOWL_GAMES = 2;
-const FREE_WEEKLY_CURRICULA = 1;
-const FREE_WEEKLY_DEBATES = 1;
+// Five tiers, ladder Free → Plus-Lite (free, referral unlock) → Plus → Lifetime → Pro:
+//   free       = baseline gating, what un-paid un-referred accounts get
+//   plus-lite  = free, unlocks when the user has referred 2 friends
+//                (≈ $2/month of value - roughly half of Plus)
+//   plus       = $4/mo, 5x the free limits for casual learners
+//   lifetime   = $20 one-time, sits between plus and pro on limits
+//                (permanent access, generous but not unlimited)
+//   pro        = $10/mo, unlimited everything
+// "Paid" via isPro() = anything above plus-lite (so the referral bonus
+// gates the same way free does - better limits but still rate-capped).
+const LIMITS = {
+  free:        { dailyMessages: 50,       dailyQB: 2,        weeklyCurricula: 1,        weeklyDebates: 1,        noteMaps: 1 },
+  'plus-lite': { dailyMessages: 120,      dailyQB: 5,        weeklyCurricula: 2,        weeklyDebates: 2,        noteMaps: 3 },
+  plus:        { dailyMessages: 250,      dailyQB: 10,       weeklyCurricula: 5,        weeklyDebates: 5,        noteMaps: 10 },
+  lifetime:    { dailyMessages: 600,      dailyQB: 25,       weeklyCurricula: 12,       weeklyDebates: 15,       noteMaps: 25 },
+  pro:         { dailyMessages: Infinity, dailyQB: Infinity, weeklyCurricula: Infinity, weeklyDebates: Infinity, noteMaps: Infinity },
+};
+const PAID_TIERS = new Set(['plus', 'lifetime', 'pro']);
+
+// Referrals: each user owns one 8-char alphanumeric code. When two
+// different users redeem the same code, the owner unlocks Plus-Lite.
+// Codes are stamped on user creation + backfilled on migrate.
+const REFERRAL_CODE_LEN = 8;
+const REFERRAL_THRESHOLD = 2;                  // # of redemptions to unlock plus-lite
+const REFERRAL_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';  // no 0/O/1/I/L
+
+function generateReferralCode() {
+  let out = '';
+  for (let i = 0; i < REFERRAL_CODE_LEN; i++) {
+    out += REFERRAL_ALPHABET[Math.floor(Math.random() * REFERRAL_ALPHABET.length)];
+  }
+  return out;
+}
+// Build an in-memory index { CODE -> email } so /redeem doesn't need to
+// scan every user. Recomputed lazily - small enough (1 entry per user)
+// to rebuild on demand.
+function indexReferralCodes(users) {
+  const map = new Map();
+  for (const [email, u] of Object.entries(users)) {
+    if (u?.data?.referralCode) map.set(u.data.referralCode, email);
+  }
+  return map;
+}
+// Allocate a fresh code that doesn't collide with any existing one.
+// 30^8 = ~6.5e11 codes - collisions are vanishingly rare but we still
+// retry up to 8x to be safe.
+function allocateReferralCode(users) {
+  const index = indexReferralCodes(users);
+  for (let i = 0; i < 8; i++) {
+    const code = generateReferralCode();
+    if (!index.has(code)) return code;
+  }
+  // Fall back to a timestamp suffix - guaranteed unique even on collision.
+  return generateReferralCode().slice(0, 4) + Date.now().toString(36).toUpperCase().slice(-4);
+}
+// Legacy aliases - kept so older code that read these constants doesn't
+// break. New code should go through LIMITS[plan] instead.
+const FREE_DAILY_MESSAGE_LIMIT = LIMITS.free.dailyMessages;
+const FREE_DAILY_QUIZBOWL_GAMES = LIMITS.free.dailyQB;
+const FREE_WEEKLY_CURRICULA = LIMITS.free.weeklyCurricula;
+const FREE_WEEKLY_DEBATES = LIMITS.free.weeklyDebates;
 const MODEL_PRO        = GEMINI_FLASH_LITE;
 const MODEL_FREE       = GEMINI_FLASH_LITE;
 const MODEL_FLASH_LITE = GEMINI_FLASH_LITE;
@@ -177,22 +242,48 @@ function weekKey(d = new Date()) {
   return `${date.getUTCFullYear()}-W${String(weekNum).padStart(2, '0')}`;
 }
 
-// Every authenticated user is Pro. The paid-tier gates have been removed
-// from the product — we keep the function so the 100+ call sites that use
-// `getPlan` / `isPro` / `modelForUser` still work without edits, they just
-// always see "pro" now. Owner/advisor email checks live separately (for
-// admin surfaces) and are unaffected.
-function getPlan(/* user, email */) { return 'pro'; }
-function isPro(/* user, email */) { return true; }
+// Resolve the user's effective plan tier. Lifetime trumps everything (it's
+// a permanent grant). Recurring Plus/Pro require a future-dated proUntil
+// (Stripe sets it at the billing-period end). Plus-Lite is a free bonus
+// granted once `referralsUsed >= REFERRAL_THRESHOLD` (currently 2).
+// Owners and advisors always see lifetime so demo accounts can use the
+// product without paying.
+function getPlan(user, email) {
+  const d = user?.data || {};
+  // The stored plan ALWAYS wins. Owners + advisors used to auto-resolve
+  // to lifetime here, but that blocked admin from testing downgrades
+  // on their own account. They can self-grant lifetime from the admin
+  // PlanPicker; otherwise we only fall back to lifetime for owners
+  // when they've never had a plan stamped at all.
+  if (d.plan === 'lifetime' || d.lifetimePurchasedAt) return 'lifetime';
+  const stillActive = !d.proUntil || new Date(d.proUntil) > new Date();
+  if (d.plan === 'pro' && stillActive) return 'pro';
+  if (d.plan === 'plus' && stillActive) return 'plus';
+  if (d.plan === 'plus-lite' && stillActive) return 'plus-lite';
+  if (d.plan === 'free') return 'free';
+  // Untouched (null/undefined): owners + advisors get lifetime as a
+  // convenience, the referral unlock kicks in for everyone else, and
+  // the final fallback is free.
+  if (isOwner(email) || isAdvisor(email)) return 'lifetime';
+  if ((d.referralsUsed || 0) >= REFERRAL_THRESHOLD) return 'plus-lite';
+  return 'free';
+}
+// "Pro" in the legacy sense = any paid tier. New code that needs to
+// distinguish Plus vs Lifetime vs Pro should call getPlan() directly.
+function isPro(user, email) { return PAID_TIERS.has(getPlan(user, email)); }
 // Three tiers selectable via preferences.modelTier:
-//   'pro'        → gemini-3.1-pro-preview          (default — deepest reasoning)
-//   'flash'      → gemini-3.1-flash-preview        (balanced — faster, lower cost)
+//   'pro'        → gemini-3.1-pro-preview          (default - deepest reasoning)
+//   'flash'      → gemini-3.1-flash-preview        (balanced - faster, lower cost)
 //   'flash-lite' → gemini-3.1-flash-lite-preview   (fastest + cheapest)
 // Free users always get FREE (Flash) regardless of preference.
 function modelForUser(user, email) {
   const tier = user?.data?.preferences?.modelTier;
-  if (tier === 'pro')        return GEMINI_PRO;
-  if (tier === 'flash')      return GEMINI_FLASH;
+  const plan = getPlan(user, email);
+  // Gemini Pro: gated to the Pro subscription tier only.
+  if (tier === 'pro' && plan === 'pro') return GEMINI_PRO;
+  // Flash: gated to Plus and above (plus / lifetime / pro).
+  if (tier === 'flash' && ['plus', 'lifetime', 'pro'].includes(plan)) return GEMINI_FLASH;
+  // Everyone else (and any unlock-mismatch) gets Flash Lite.
   return GEMINI_FLASH_LITE;
 }
 
@@ -213,54 +304,62 @@ function ensureUsageBucket(user) {
   }
 }
 
-// Returns { allowed: boolean, remaining: number, limit: number, plan }.
-// Mutates usage on allowed=true (caller must saveUsers).
-// `cost` is how many messages this request counts as (2 for sourced).
+// Returns { allowed, remaining, limit, plan }. Mutates usage on allowed=true.
+// Limits come from the LIMITS table keyed by the user's current tier.
+// Infinity limits short-circuit before touching the usage bucket so Pro
+// users don't accidentally count usage.
 function consumeMessage(users, email, cost = 1) {
   const u = users[email];
   if (!u) return { allowed: false, remaining: 0, limit: 0, plan: 'free' };
   const plan = getPlan(u, email);
-  if (plan === 'pro') return { allowed: true, remaining: Infinity, limit: Infinity, plan };
+  const cap = LIMITS[plan]?.dailyMessages ?? LIMITS.free.dailyMessages;
+  if (cap === Infinity) return { allowed: true, remaining: Infinity, limit: Infinity, plan };
   ensureUsageBucket(u);
-  if (u.data.usage.messages + cost > FREE_DAILY_MESSAGE_LIMIT) {
-    return { allowed: false, remaining: Math.max(0, FREE_DAILY_MESSAGE_LIMIT - u.data.usage.messages), limit: FREE_DAILY_MESSAGE_LIMIT, plan };
+  if (u.data.usage.messages + cost > cap) {
+    return { allowed: false, remaining: Math.max(0, cap - u.data.usage.messages), limit: cap, plan };
   }
   u.data.usage.messages += cost;
-  return { allowed: true, remaining: Math.max(0, FREE_DAILY_MESSAGE_LIMIT - u.data.usage.messages), limit: FREE_DAILY_MESSAGE_LIMIT, plan, cost };
+  return { allowed: true, remaining: Math.max(0, cap - u.data.usage.messages), limit: cap, plan, cost };
 }
 function consumeQuizBowlGame(users, email) {
   const u = users[email];
   if (!u) return { allowed: false };
-  if (getPlan(u, email) === 'pro') return { allowed: true, remaining: Infinity, limit: Infinity };
+  const plan = getPlan(u, email);
+  const cap = LIMITS[plan]?.dailyQB ?? LIMITS.free.dailyQB;
+  if (cap === Infinity) return { allowed: true, remaining: Infinity, limit: Infinity, plan };
   ensureUsageBucket(u);
-  if (u.data.usage.quizBowlGames >= FREE_DAILY_QUIZBOWL_GAMES) {
-    return { allowed: false, remaining: 0, limit: FREE_DAILY_QUIZBOWL_GAMES };
+  if (u.data.usage.quizBowlGames >= cap) {
+    return { allowed: false, remaining: 0, limit: cap, plan };
   }
   u.data.usage.quizBowlGames++;
-  return { allowed: true, remaining: Math.max(0, FREE_DAILY_QUIZBOWL_GAMES - u.data.usage.quizBowlGames), limit: FREE_DAILY_QUIZBOWL_GAMES };
+  return { allowed: true, remaining: Math.max(0, cap - u.data.usage.quizBowlGames), limit: cap, plan };
 }
-// Weekly buckets — curricula / debates
+// Weekly buckets - curricula / debates
 function consumeCurriculumGeneration(users, email) {
   const u = users[email];
   if (!u) return { allowed: false };
-  if (getPlan(u, email) === 'pro') return { allowed: true, remaining: Infinity, limit: Infinity };
+  const plan = getPlan(u, email);
+  const cap = LIMITS[plan]?.weeklyCurricula ?? LIMITS.free.weeklyCurricula;
+  if (cap === Infinity) return { allowed: true, remaining: Infinity, limit: Infinity, plan };
   ensureUsageBucket(u);
-  if ((u.data.usage.curricula || 0) >= FREE_WEEKLY_CURRICULA) {
-    return { allowed: false, remaining: 0, limit: FREE_WEEKLY_CURRICULA };
+  if ((u.data.usage.curricula || 0) >= cap) {
+    return { allowed: false, remaining: 0, limit: cap, plan };
   }
   u.data.usage.curricula = (u.data.usage.curricula || 0) + 1;
-  return { allowed: true, remaining: Math.max(0, FREE_WEEKLY_CURRICULA - u.data.usage.curricula), limit: FREE_WEEKLY_CURRICULA };
+  return { allowed: true, remaining: Math.max(0, cap - u.data.usage.curricula), limit: cap, plan };
 }
 function consumeDebate(users, email) {
   const u = users[email];
   if (!u) return { allowed: false };
-  if (getPlan(u, email) === 'pro') return { allowed: true, remaining: Infinity, limit: Infinity };
+  const plan = getPlan(u, email);
+  const cap = LIMITS[plan]?.weeklyDebates ?? LIMITS.free.weeklyDebates;
+  if (cap === Infinity) return { allowed: true, remaining: Infinity, limit: Infinity, plan };
   ensureUsageBucket(u);
-  if ((u.data.usage.debates || 0) >= FREE_WEEKLY_DEBATES) {
-    return { allowed: false, remaining: 0, limit: FREE_WEEKLY_DEBATES };
+  if ((u.data.usage.debates || 0) >= cap) {
+    return { allowed: false, remaining: 0, limit: cap, plan };
   }
   u.data.usage.debates = (u.data.usage.debates || 0) + 1;
-  return { allowed: true, remaining: Math.max(0, FREE_WEEKLY_DEBATES - u.data.usage.debates), limit: FREE_WEEKLY_DEBATES };
+  return { allowed: true, remaining: Math.max(0, cap - u.data.usage.debates), limit: cap, plan };
 }
 
 // ===== MIDDLEWARE =====
@@ -332,24 +431,24 @@ function createDefaultData() {
     flashcardDecks: [],
     notes: [],
     // Obsidian-style knowledge graph(s) over the user's notes. Each map
-    // has its own nodes+edges. The first map is the "default" — note
+    // has its own nodes+edges. The first map is the "default" - note
     // mirroring (auto-add a node for every note) only happens on it.
     // Other maps are user-curated.
     noteMaps: [{ id: 'default', name: 'Main Map', color: '#a78bfa', createdAt: 0, isDefault: true, nodes: [], edges: [] }],
-    // Legacy single-graph field — kept null on new accounts. Old accounts
+    // Legacy single-graph field - kept null on new accounts. Old accounts
     // get migrated into noteMaps[] by migrateUserData.
     noteGraph: { nodes: [], edges: [] },
     studySessions: [],
     assessmentHistory: [],
     lessons: [],
-    slideshows: [],               // AI-generated slide decks (legacy field — Slides was retired)
+    slideshows: [],               // AI-generated slide decks (legacy field - Slides was retired)
     // Each entry: { id, category, difficulty, source: 'qbreader'|'ai',
     //   score, total, durationMs, finishedAt, categoryStats: { [cat]: {correct, total} },
     //   perQuestion: [{category, correct, buzzWord, totalWords, answer, correctAnswer}] }
     // Newest-first. Capped at 200 sets server-side.
     quizbowlSets: [],
 
-    // Server-side QB student model — never sent back to the student verbatim,
+    // Server-side QB student model - never sent back to the student verbatim,
     // only used to bias packet recommendations. Updated incrementally on every
     // saved set (see updateSecretProfile). Backfilled from history on first
     // migration so existing accounts get value immediately.
@@ -357,11 +456,11 @@ function createDefaultData() {
     //   answerProfile:   per-answer-string mastery (was the student right
     //                    about Krebs Cycle? Congress of Vienna?)
     //   strengths/weaknesses: top/bottom categories with enough attempts
-    //   struggleTopics: specific answers missed multiple times — these are
+    //   struggleTopics: specific answers missed multiple times - these are
     //                   the high-value drills
-    //   masteryTopics: specific answers got 2+ times in a row — safe to skip
+    //   masteryTopics: specific answers got 2+ times in a row - safe to skip
     //   buzzStyle:      aggressive/cautious/balanced based on avg buzz pos
-    //   updatedAt:      ISO — used to skip rebuild if no new sets
+    //   updatedAt:      ISO - used to skip rebuild if no new sets
     secretProfile: {
       version: 1,
       updatedAt: null,
@@ -377,13 +476,26 @@ function createDefaultData() {
 
 
     // ----- Billing / plan state -----
-    plan: 'free',                 // 'free' | 'pro'
-    proUntil: null,               // ISO string or null — when paid sub expires; null = untimed (admin grant / owner)
+    plan: 'free',                 // 'free' | 'plus-lite' | 'plus' | 'pro' | 'lifetime'
+    proUntil: null,               // ISO string or null - when a recurring sub expires; null = untimed
     proGrantedBy: null,           // 'owner' | 'stripe' | null
+    lifetimePurchasedAt: null,    // ISO when the one-time Lifetime charge cleared; sticky forever
     stripeCustomerId: null,
     stripeSubscriptionId: null,
-    // Usage counters — reset by helper when the date / week changes
+    // Usage counters - reset by helper when the date / week changes
     usage: { day: null, messages: 0, quizBowlGames: 0, week: null, curricula: 0, debates: 0 },
+
+    // ----- Referrals -----
+    // referralCode: the user's own shareable code (filled in on signup
+    //               via migrateUserData if missing - never overwritten).
+    // referredBy:   the code the user redeemed at signup (null if none).
+    //               Each user can redeem at most one code, forever.
+    // referralsUsed: how many OTHER users have redeemed THIS user's
+    //                code. When this hits REFERRAL_THRESHOLD (2), the
+    //                user is bumped to plus-lite (unless they're paid).
+    referralCode: null,
+    referredBy: null,
+    referralsUsed: 0,
 
     // ----- Parent mode (parental controls + child profiles) -----
     // When `enabled`, the account owner is treated as a parent. Curricula
@@ -394,10 +506,10 @@ function createDefaultData() {
       enabled: false,
       pinHash: null,            // bcrypt hash of 4-6 digit PIN (null until setup)
       students: [],             // [{ id, name, color, avatar, grade, createdAt, controls }]
-      adults: [],               // [{ id, name, color, avatar, createdAt }] — full-access family members
+      adults: [],               // [{ id, name, color, avatar, createdAt }] - full-access family members
       activeStudentId: null,    // currently-selected child (null = family-manager / adult view)
       activeAdultId: null,      // currently-selected adult member
-      lastParentUnlockAt: null, // ISO — when parent last entered PIN
+      lastParentUnlockAt: null, // ISO - when parent last entered PIN
     },
   };
 }
@@ -416,7 +528,7 @@ function migrateUserData(data) {
       if (data.preferences[key] === undefined) data.preferences[key] = defaults.preferences[key];
     }
   }
-  // Backfill parent block — older accounts predate the parent-mode feature.
+  // Backfill parent block - older accounts predate the parent-mode feature.
   if (!data.parent || typeof data.parent !== 'object') {
     data.parent = defaults.parent;
   } else {
@@ -431,7 +543,7 @@ function migrateUserData(data) {
   if (data.aiPersonality !== undefined && data.preferences.aiPersonality === 'friendly') {
     data.preferences.aiPersonality = data.aiPersonality;
   }
-  // Clean phantom curricula from old RushilAI app — remove any without valid units/lessons structure
+  // Clean phantom curricula from old RushilAI app - remove any without valid units/lessons structure
   if (data.curricula?.length) {
     data.curricula = data.curricula.filter(c => {
       // Must have units array with at least one unit that has lessons
@@ -442,7 +554,7 @@ function migrateUserData(data) {
       const hasValidUnit = c.units.some(u => Array.isArray(u.lessons) && u.lessons.length > 0);
       return hasValidUnit;
     });
-    // Retroactively unlock any previously-locked units — students can jump
+    // Retroactively unlock any previously-locked units - students can jump
     // ahead to any lesson at will now.
     for (const c of data.curricula) {
       for (const unit of (c.units || [])) {
@@ -471,16 +583,25 @@ function migrateUserData(data) {
     data.noteMaps[0].isDefault = true;
   }
   // Backfill the QB secret profile from existing history on first migration.
-  // Older accounts have quizbowlSets but no secretProfile — replay the sets
+  // Older accounts have quizbowlSets but no secretProfile - replay the sets
   // so the recommendation engine has something to work with on day one.
   if ((!data.secretProfile || !data.secretProfile.updatedAt) && Array.isArray(data.quizbowlSets) && data.quizbowlSets.length) {
     try {
       data.secretProfile = rebuildSecretProfileFromHistory(data.quizbowlSets);
     } catch (e) {
-      // Don't block login on a bad rebuild — just leave the empty default.
+      // Don't block login on a bad rebuild - just leave the empty default.
       console.error('secretProfile rebuild failed:', e);
     }
   }
+  // Backfill the user's shareable referral code if they don't have one
+  // yet. We can't check for global collisions from inside this function
+  // (it only sees one user's data), but 30^8 ≈ 6.5e11 codes means a
+  // duplicate is vanishingly unlikely; the redeem endpoint also
+  // re-validates so the worst case is one extra failed redeem attempt.
+  if (!data.referralCode || typeof data.referralCode !== 'string' || data.referralCode.length !== REFERRAL_CODE_LEN) {
+    data.referralCode = generateReferralCode();
+  }
+  if (typeof data.referralsUsed !== 'number') data.referralsUsed = 0;
   return data;
 }
 
@@ -534,7 +655,7 @@ function checkGoalMilestones(data) {
 // Robust JSON parser with multiple fallback strategies.
 //
 // Gemini failure modes this handles:
-//   1. Strict JSON (responseMimeType=application/json) — direct parse.
+//   1. Strict JSON (responseMimeType=application/json) - direct parse.
 //   2. Markdown-fenced JSON: ```json\n{...}\n```
 //   3. Leading `json` label without fences.
 //   4. Prose preamble before the JSON body.
@@ -564,7 +685,7 @@ function parseAIJson(text) {
   // Repair helpers that we can layer onto a candidate.
   function repair(s) {
     return s
-      // Strip line comments outside of strings (rough — relies on being a
+      // Strip line comments outside of strings (rough - relies on being a
       // single statement; sufficient for AI output that doesn't have
       // intentional `//` inside strings).
       .replace(/(^|\s)\/\/[^\n]*/g, '$1')
@@ -613,7 +734,7 @@ function parseAIJson(text) {
 
 // ===== AUTH ROUTES =====
 
-// Email + password signup — creates a brand-new account.
+// Email + password signup - creates a brand-new account.
 app.post('/api/auth/signup', async (req, res) => {
   try {
     const { name, email, password } = req.body;
@@ -791,7 +912,7 @@ app.get('/api/auth/me', authMiddleware, (req, res) => {
     user.data = migrateUserData(user.data);
 
     // Track visits. /api/auth/me is the first call after sign-in and on every
-    // subsequent page load, so we use it as the visit signal — debounced to
+    // subsequent page load, so we use it as the visit signal - debounced to
     // 30 min so a quick refresh doesn't inflate the number.
     const now = Date.now();
     const VISIT_DEBOUNCE_MS = 30 * 60 * 1000;
@@ -811,7 +932,7 @@ app.get('/api/auth/me', authMiddleware, (req, res) => {
       email: user.email || email,
       name: user.name,
       // Surface isDemo so the client can hard-refuse to render the
-      // signed-in dashboard with a demo session — see ProtectedRoute
+      // signed-in dashboard with a demo session - see ProtectedRoute
       // in src/App.jsx, which force-logs-out + redirects.
       isDemo: isDemoOrDevEmail(email),
       data: {
@@ -852,14 +973,14 @@ app.post('/api/auth/sync', authMiddleware, (req, res) => {
 // returns to the unscoped parent view.
 //
 // Endpoints:
-//   POST   /api/parent/setup            — first-time enable: set PIN + initial students
-//   POST   /api/parent/verify-pin       — verify PIN to unlock parent view
-//   GET    /api/parent/status           — current state (enabled, students, activeStudentId)
-//   POST   /api/parent/students         — add a child (requires PIN)
-//   DELETE /api/parent/students/:sid    — remove a child (requires PIN)
-//   POST   /api/parent/students/:sid/switch — switch active child (requires PIN)
-//   POST   /api/parent/exit-child       — leave child view (requires PIN)
-//   GET    /api/parent/dashboard        — parental dashboard rollup
+//   POST   /api/parent/setup            - first-time enable: set PIN + initial students
+//   POST   /api/parent/verify-pin       - verify PIN to unlock parent view
+//   GET    /api/parent/status           - current state (enabled, students, activeStudentId)
+//   POST   /api/parent/students         - add a child (requires PIN)
+//   DELETE /api/parent/students/:sid    - remove a child (requires PIN)
+//   POST   /api/parent/students/:sid/switch - switch active child (requires PIN)
+//   POST   /api/parent/exit-child       - leave child view (requires PIN)
+//   GET    /api/parent/dashboard        - parental dashboard rollup
 // =================================================================
 
 function makeStudentId() { return 'st-' + crypto.randomBytes(6).toString('hex'); }
@@ -882,7 +1003,7 @@ function isValidPin(pin) {
 //                    a new curriculum ('beginner' | 'intermediate' |
 //                    'advanced' | 'expert' | null = no floor).
 //   allowChats:      can the child use the open-ended Study Mode chat?
-//                    Lesson chats stay on regardless — they're the
+//                    Lesson chats stay on regardless - they're the
 //                    teaching surface, not free-form chat.
 function defaultStudentControls() {
   return {
@@ -903,12 +1024,12 @@ function buildChildGuardrails(child) {
   const lines = [];
   if (child.controls.socraticMode) {
     lines.push(
-      '⚠️ PARENTAL GUARDRAIL — SOCRATIC MODE: This is a child account. You MUST teach through guided questions only. Never state the answer to a homework or assignment problem directly. Instead, ask probing questions that help the student discover the answer themselves. If the student asks you to "just tell me the answer", respond with another question that moves them closer without revealing it.',
+      '⚠️ PARENTAL GUARDRAIL - SOCRATIC MODE: This is a child account. You MUST teach through guided questions only. Never state the answer to a homework or assignment problem directly. Instead, ask probing questions that help the student discover the answer themselves. If the student asks you to "just tell me the answer", respond with another question that moves them closer without revealing it.',
     );
   }
   if (child.controls.blockAnswerHints) {
     lines.push(
-      '⚠️ PARENTAL GUARDRAIL — NO ANSWER HINTS: This is a child account. During graded assessments and practice problems you must NOT give hints, partial answers, or reveal the correct answer in any form. If the student asks for a hint on an assessment question, gently decline and encourage them to try their best on their own.',
+      '⚠️ PARENTAL GUARDRAIL - NO ANSWER HINTS: This is a child account. During graded assessments and practice problems you must NOT give hints, partial answers, or reveal the correct answer in any form. If the student asks for a hint on an assessment question, gently decline and encourage them to try their best on their own.',
     );
   }
   return lines.length ? '\n\n' + lines.join('\n\n') : '';
@@ -987,7 +1108,7 @@ function summarizeStudent(user, studentId) {
 
 // Weighted-average grade across all graded assignments in a curriculum.
 // Each assignment is worth `weight` (default 1). Returns percent + letter +
-// counts. Lessons without a graded assignment are skipped — they don't drag
+// counts. Lessons without a graded assignment are skipped - they don't drag
 // the average down until the student submits.
 function computeCourseGrade(curriculum) {
   let total = 0, weightSum = 0, gradedCount = 0;
@@ -1030,7 +1151,7 @@ function percentToLetter(p) {
 app.post('/api/parent/setup', authMiddleware, async (req, res) => {
   try {
     const { pin, students } = req.body || {};
-    if (!isValidPin(pin)) return res.status(400).json({ error: 'PIN must be 4–6 digits' });
+    if (!isValidPin(pin)) return res.status(400).json({ error: 'PIN must be 4-6 digits' });
     const users = loadUsers();
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
@@ -1139,7 +1260,7 @@ app.delete('/api/parent/students/:sid', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Switch into a child profile. Doesn't require PIN — children should be
+// Switch into a child profile. Doesn't require PIN - children should be
 // able to swap between their own profiles freely (think: family iPad).
 // Leaving child mode (back to parent view) DOES require PIN.
 app.post('/api/parent/students/:sid/switch', authMiddleware, (req, res) => {
@@ -1160,7 +1281,7 @@ app.post('/api/parent/students/:sid/switch', authMiddleware, (req, res) => {
 });
 
 // Select the parent admin profile from the ProfilePicker (or any "switch
-// to admin" UI). When parent mode is enabled this REQUIRES the PIN —
+// to admin" UI). When parent mode is enabled this REQUIRES the PIN -
 // otherwise a child could just click "Parent Admin Panel" to escape
 // restrictions. When parent mode is NOT yet set up, no PIN is needed and
 // we send back `requiresSetup` so the client can route to the setup form.
@@ -1247,7 +1368,7 @@ app.delete('/api/parent/adults/:aid', authMiddleware, async (req, res) => {
   } catch (e) { console.error('parent/adults delete:', e); res.status(500).json({ error: e.message }); }
 });
 
-// Switch to an adult profile. No PIN required — adults are trusted.
+// Switch to an adult profile. No PIN required - adults are trusted.
 app.post('/api/parent/adults/:aid/switch', authMiddleware, (req, res) => {
   try {
     const users = loadUsers();
@@ -1284,7 +1405,7 @@ app.post('/api/parent/exit-adult', authMiddleware, (req, res) => {
 app.post('/api/parent/change-pin', authMiddleware, async (req, res) => {
   try {
     const { oldPin, newPin } = req.body || {};
-    if (!isValidPin(newPin)) return res.status(400).json({ error: 'New PIN must be 4–6 digits' });
+    if (!isValidPin(newPin)) return res.status(400).json({ error: 'New PIN must be 4-6 digits' });
     const users = loadUsers();
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
@@ -1301,7 +1422,7 @@ app.post('/api/parent/change-pin', authMiddleware, async (req, res) => {
 });
 
 // Disable parent mode entirely. Wipes PIN + students + activeStudentId.
-// Existing curricula stay where they are — just stop being scoped per
+// Existing curricula stay where they are - just stop being scoped per
 // student. PIN-gated so a child can't disable restrictions themselves.
 app.post('/api/parent/disable', authMiddleware, async (req, res) => {
   try {
@@ -1442,7 +1563,7 @@ app.get('/api/parent/dashboard', authMiddleware, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Update a child's controls. PIN-gated — the child can't lift their own
+// Update a child's controls. PIN-gated - the child can't lift their own
 // restrictions. Accepts a partial controls object; unspecified keys keep
 // their previous value.
 app.put('/api/parent/students/:sid/controls', authMiddleware, async (req, res) => {
@@ -1466,7 +1587,7 @@ app.put('/api/parent/students/:sid/controls', authMiddleware, async (req, res) =
     const def = defaultStudentControls();
     if (Array.isArray(controls.blockedApps)) {
       // Cap + dedupe + only allow known app ids. The list mirrors
-      // appRegistry — we don't import the JS module so we keep a
+      // appRegistry - we don't import the JS module so we keep a
       // server-side allowlist instead.
       const ALLOWED = ['curricula', 'lessons', 'study', 'notes', 'mathtutor', 'debate', 'quizbowl'];
       student.controls.blockedApps = [...new Set(controls.blockedApps.filter(a => ALLOWED.includes(a)))].slice(0, ALLOWED.length);
@@ -1485,7 +1606,7 @@ app.put('/api/parent/students/:sid/controls', authMiddleware, async (req, res) =
 });
 
 // List a child's chats (PIN-gated). Returns lesson chats AND study sessions
-// in a single feed. Each entry is a metadata stub — the full transcript is
+// in a single feed. Each entry is a metadata stub - the full transcript is
 // fetched separately via the next endpoint to keep the list response small.
 app.get('/api/parent/students/:sid/chats', authMiddleware, async (req, res) => {
   try {
@@ -1501,7 +1622,7 @@ app.get('/api/parent/students/:sid/chats', authMiddleware, async (req, res) => {
     if (!student) return res.status(404).json({ error: 'Student not found' });
 
     const chats = [];
-    // Lesson chats — pulled from every lesson in every curriculum owned
+    // Lesson chats - pulled from every lesson in every curriculum owned
     // by this child.
     for (const c of (user.data.curricula || [])) {
       if (c.studentId !== student.id) continue;
@@ -1523,10 +1644,10 @@ app.get('/api/parent/students/:sid/chats', authMiddleware, async (req, res) => {
         }
       }
     }
-    // Study sessions — open-ended chats outside the curriculum.
+    // Study sessions - open-ended chats outside the curriculum.
     for (const sess of (user.data.studySessions || [])) {
       if (sess.studentId && sess.studentId !== student.id) continue;
-      // Legacy sessions without studentId belong to the parent, not a child —
+      // Legacy sessions without studentId belong to the parent, not a child -
       // skip them so a parent's own study chats don't leak into the child's
       // viewer.
       if (!sess.studentId) continue;
@@ -1694,7 +1815,7 @@ async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096,
           // short generative calls (debate topic suggestions, etc).
           // Without this, the model burns the entire token budget on a
           // hidden `thoughtSignature` and the visible JSON gets cut off
-          // mid-sentence — which broke the AI debate-topic chip.
+          // mid-sentence - which broke the AI debate-topic chip.
           ...(opts.disableThinking ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
         },
       });
@@ -1730,7 +1851,7 @@ async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096,
             }
           }
         }
-        // Any URLs without matching supports — still surface them
+        // Any URLs without matching supports - still surface them
         for (const ch of chunksMeta) {
           const url = ch?.web?.uri || ch?.retrievedContext?.uri;
           if (!url || urlToIndex.has(url)) continue;
@@ -1814,7 +1935,7 @@ async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096,
   return { success: false, error: lastError || 'All attempts failed' };
 }
 
-// Back-compat alias — all existing call sites use `callAnthropic`.
+// Back-compat alias - all existing call sites use `callAnthropic`.
 const callAnthropic = callGemini;
 
 // Ensure the fields the completion handler touches exist. Older user records
@@ -1832,7 +1953,7 @@ function ensureLessonCompletionFields(data) {
 
 // Pull the JSON blob that follows a [LESSON_DONE] / [LESSON_COMPLETE] marker.
 // Walks brace depth so nested objects are handled correctly. Tolerates code
-// fences and inline citation markers — caller should pre-sanitize if needed.
+// fences and inline citation markers - caller should pre-sanitize if needed.
 function extractLessonDoneJson(text) {
   const markerIdx = text.search(/\[LESSON_(?:DONE|COMPLETE)\]/);
   if (markerIdx < 0) return null;
@@ -1860,9 +1981,32 @@ function extractLessonDoneJson(text) {
   return null;
 }
 
-app.post('/api/chat', async (req, res) => {
+// Was unauthenticated + ungated for a long time, which meant every
+// /api/chat call bypassed the daily message cap entirely. Now requires
+// auth and consumes from the user's bucket (cost 2 for sourced/web
+// search calls, 1 otherwise). Returns 402 with `message_limit_reached`
+// on overflow so the client can pop the upgrade chip.
+app.post('/api/chat', authMiddleware, async (req, res) => {
   try {
     const { messages, system, model, max_tokens, sourced, jsonMode, disableThinking } = req.body;
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const cost = sourced ? 2 : 1;
+    const quota = consumeMessage(users, email, cost);
+    if (!quota.allowed) {
+      const upgradeKind = quota.plan === 'free' ? 'refer' : 'upgrade';
+      const upgradeHint = upgradeKind === 'refer'
+        ? 'Refer 2 friends to unlock Plus-Lite (free) for higher limits.'
+        : 'Upgrade to the next plan for more daily messages.';
+      return res.status(402).json({
+        error: 'message_limit_reached',
+        message: `You've hit today's message limit (${quota.limit}). ${upgradeHint}`,
+        limit: quota.limit, remaining: quota.remaining, plan: quota.plan, upgradeKind,
+      });
+    }
+    saveUsers(users);
     const systemPrompt = system || 'You are a helpful AI assistant.';
     const result = await callGemini(systemPrompt, messages, model, max_tokens || 4096, {
       enableWebSearch: !!sourced,
@@ -1934,7 +2078,7 @@ app.post('/api/demo/curriculum/generate', async (req, res) => {
       ? req.body.difficulty : 'intermediate';
     if (!topic) return res.status(400).json({ error: 'Topic is required' });
 
-    // Condensed prompt for the demo — force a compact structure so
+    // Condensed prompt for the demo - force a compact structure so
     // generation is under 5s and the preview feels snappy.
     const system = 'You are an expert curriculum designer. Output ONLY valid JSON. No markdown, no code fences, no explanation.';
     const user = `Design a compact learning curriculum for: "${topic}" at the ${difficulty} level.
@@ -1964,7 +2108,7 @@ Return JSON with EXACTLY 2 units. Each unit has 3 lessons. Each lesson has a "ty
     let parsed = parseAIJson(text);
 
     // Retry once with a much stricter prompt if the first pass didn't give
-    // us valid JSON — the Flash model occasionally wraps output in prose.
+    // us valid JSON - the Flash model occasionally wraps output in prose.
     if (!parsed?.units) {
       const retry = await callGemini(
         'Output ONLY a single valid JSON object. No markdown. No code fences. No explanation. Nothing before or after the JSON. Start with { and end with }.',
@@ -2012,7 +2156,7 @@ app.post('/api/demo/flashcards/generate', async (req, res) => {
     const topic = String(req.body?.topic || '').trim().slice(0, 80);
     if (!topic) return res.status(400).json({ error: 'Topic is required' });
 
-    const system = 'You are a flashcard author. Output ONLY valid JSON — no markdown, no fences, no explanation.';
+    const system = 'You are a flashcard author. Output ONLY valid JSON - no markdown, no fences, no explanation.';
     const user = `Generate 8 flashcards on "${topic}". Each card is short (front: question/prompt, back: 1-2 sentence answer). Return JSON:
 { "cards": [ { "front": "...", "back": "..." }, ... 8 total ... ] }`;
     const result = await callGemini(system, [{ role: 'user', content: user }], MODEL_FREE, 1536);
@@ -2051,10 +2195,10 @@ app.post('/api/demo/lesson/stream', async (req, res) => {
         .slice(-20)
         .map(m => ({ role: m.role, content: m.content.slice(0, 6000) }));
       if (!messages.length) return res.status(400).json({ error: 'No messages' });
-      system = 'You are a warm, conversational tutor. Use markdown — headings (##), bold, bulleted lists, numbered steps, and code blocks where useful. Keep replies under 250 words unless the student asks for depth. End with one short check-for-understanding question when it fits.';
+      system = 'You are a warm, conversational tutor. Use markdown - headings (##), bold, bulleted lists, numbered steps, and code blocks where useful. Keep replies under 250 words unless the student asks for depth. End with one short check-for-understanding question when it fits.';
     } else {
       if (!topic) return res.status(400).json({ error: 'Topic or messages required' });
-      system = 'You are a warm, conversational tutor. Use markdown — headings (##), bold, bulleted lists, numbered steps, and code blocks where useful. Keep the opening to 150-220 words.';
+      system = 'You are a warm, conversational tutor. Use markdown - headings (##), bold, bulleted lists, numbered steps, and code blocks where useful. Keep the opening to 150-220 words.';
       messages = [{
         role: 'user',
         content: `Give me an opening lesson on "${topic}"${context ? ` (context: ${context})` : ''}. Start with a 1-sentence hook, then the core idea (## heading), one worked example, and finish with a short check-for-understanding question.`,
@@ -2082,7 +2226,7 @@ app.post('/api/demo/lesson/stream', async (req, res) => {
 // Generate a new curriculum
 // Ask 3-4 clarifying questions about a topic before generation. The
 // student's answers (sent back as `settings.refinements`) anchor the
-// syllabus to what they actually want — scope, prior background, goal.
+// syllabus to what they actually want - scope, prior background, goal.
 app.post('/api/curriculum/refine', authMiddleware, async (req, res) => {
   try {
     const { topic, difficulty, audience } = req.body || {};
@@ -2091,7 +2235,7 @@ app.post('/api/curriculum/refine', authMiddleware, async (req, res) => {
     }
     const system = `You output strict JSON. Given a study topic, produce 4-5 short clarifying questions a curriculum designer should ask before building a course. Mix two question types:
 - "mcq": one plain-English sentence with 3-4 multiple-choice answer options that span the realistic spread (not a fake "all of the above"). Use these for scope, prior background, and depth choices where the realistic answer set is small and known.
-- "open": one plain-English sentence the student answers in their own words. Use these (at least 1, up to 2) for things MCQs can't pin down — the specific goal, prior context, a concrete project or class the course should serve, or anything where the realistic answer space is too wide to enumerate. Include a short \`placeholder\` hint (under 80 chars) showing the kind of answer expected.
+- "open": one plain-English sentence the student answers in their own words. Use these (at least 1, up to 2) for things MCQs can't pin down - the specific goal, prior context, a concrete project or class the course should serve, or anything where the realistic answer space is too wide to enumerate. Include a short \`placeholder\` hint (under 80 chars) showing the kind of answer expected.
 
 Aim for 2-3 mcq questions plus 1-2 open questions. Questions should disambiguate scope, prior background, and the student's goal.
 
@@ -2116,7 +2260,7 @@ Generate 4-5 clarifying questions, mixing mcq and open types as described.`;
     }
     const questions = parsed.questions.slice(0, 5).map((q, i) => {
       const opts = Array.isArray(q.options) ? q.options.slice(0, 4).map(o => String(o).slice(0, 120)) : [];
-      // Default to mcq when options are present, open otherwise — covers
+      // Default to mcq when options are present, open otherwise - covers
       // models that forget the `type` field but get the shape right.
       const declared = String(q.type || '').toLowerCase();
       const type = declared === 'open' || (declared !== 'mcq' && opts.length < 2) ? 'open' : 'mcq';
@@ -2143,7 +2287,7 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
 
     // Parental controls: if the request is on behalf of an active child,
     // apply their controls BEFORE running the AI. This is the server-side
-    // backstop — the client UI also reflects the same rules, but we
+    // backstop - the client UI also reflects the same rules, but we
     // can't trust client-only enforcement.
     {
       const usersCC = loadUsers();
@@ -2166,7 +2310,7 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
     }
 
     // Sources: optional array of { title, kind: 'pdf'|'text'|'url', content, url? }.
-    // Already-extracted text — files come from /api/files/extract and URLs
+    // Already-extracted text - files come from /api/files/extract and URLs
     // from /api/sources/extract-url. We sanitize + cap to stay inside the
     // model's input window.
     const SOURCE_TOTAL_CAP = 60000;
@@ -2215,7 +2359,7 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
     saveUsers(usersC);
 
     const { system, user } = buildCurriculumPrompt(settings, sources);
-    // Flash Lite for curriculum generation — fastest model, structured JSON
+    // Flash Lite for curriculum generation - fastest model, structured JSON
     // output is schema-constrained so quality is the same as heavier models.
     // 4096 tokens is plenty for 5-8 units × 4-7 lessons (title + description).
     const result = await callGemini(system, [{ role: 'user', content: user }], GEMINI_FLASH_LITE, 4096, { jsonMode: true, temperature: 0.7 });
@@ -2266,7 +2410,7 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
           autoAssign: true,
         }
       : null;
-    // Persist the source materials the user attached — minus their full
+    // Persist the source materials the user attached - minus their full
     // content (kept only metadata, since the content is already baked
     // into every generated lesson via the prompt). Frontend uses this
     // to render the "Sources used" badge on the curriculum card.
@@ -2303,7 +2447,7 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
       if (isMathCurriculum && lessons.length >= 2) {
         const mathTutorLesson = {
           id: `${curriculumId}-u${ui}-mathtutor`,
-          title: `${unit.title} — Math Tutor`,
+          title: `${unit.title} - Math Tutor`,
           description: `Walk through worked problems for ${unit.title} with step-by-step feedback on a handwriting canvas.`,
           type: 'math_tutor',
           tool: 'math_tutor',
@@ -2317,7 +2461,7 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
         };
         const practiceLesson = {
           id: `${curriculumId}-u${ui}-practice`,
-          title: `${unit.title} — Practice Problems`,
+          title: `${unit.title} - Practice Problems`,
           description: `Solve practice problems for ${unit.title} using the math canvas.`,
           type: 'practice',
           tool: 'math_canvas',
@@ -2337,7 +2481,7 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
         // the existing assessment/essay flow (prompt + rubric + AI grading).
         const essayLesson = {
           id: `${curriculumId}-u${ui}-essay`,
-          title: `${unit.title} — Graded Essay`,
+          title: `${unit.title} - Graded Essay`,
           description: `Write a graded short essay on ${unit.title}. Feedback is scored against a rubric.`,
           type: 'essay',
           chatHistory: [],
@@ -2354,7 +2498,7 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
       // Add unit test at end (always last).
       lessons.push({
         id: `${curriculumId}-u${ui}-test`,
-        title: `${unit.title} — Assessment`,
+        title: `${unit.title} - Assessment`,
         description: `Test your knowledge of ${unit.title}`,
         type: 'unit_test',
         chatHistory: [],
@@ -2365,7 +2509,7 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
         score: null,
       });
 
-      // All units unlocked — student can jump to any lesson at any time.
+      // All units unlocked - student can jump to any lesson at any time.
       return { ...unit, id: `${curriculumId}-u${ui}`, locked: false, lessons };
     });
 
@@ -2457,7 +2601,7 @@ app.delete('/api/curriculum/:id', authMiddleware, (req, res) => {
 });
 
 // =================================================================
-// PAUSD CATALOG — pre-built Khan-Academy-style courses at PAUSD rigor.
+// PAUSD CATALOG - pre-built Khan-Academy-style courses at PAUSD rigor.
 // Browse the catalog, then enroll → clones the template into the user's
 // curricula list with full IDs and per-unit math-tutor / practice / unit-
 // test lessons (math) or essay (non-math), exactly like AI-generated
@@ -2499,7 +2643,7 @@ app.post('/api/pausd/enroll', authMiddleware, (req, res) => {
     if (!users[email].data) users[email].data = createDefaultData();
     users[email].data = migrateUserData(users[email].data);
 
-    // Bail if already enrolled — show them the existing one rather than
+    // Bail if already enrolled - show them the existing one rather than
     // making a duplicate.
     const existing = (users[email].data.curricula || []).find(c => c.pausdSlug === slug);
     if (existing) return res.json({ curriculum: existing, alreadyEnrolled: true });
@@ -2537,7 +2681,7 @@ app.post('/api/pausd/enroll', authMiddleware, (req, res) => {
       },
       linkedGoalIds: [],
       units: (tpl.units || []).map((unit, ui) => {
-        // Honor explicit `type` from the catalog template — math_tutor and
+        // Honor explicit `type` from the catalog template - math_tutor and
         // practice (canvas) lessons can be authored INLINE inside a unit's
         // lessons array, interspersed between section lessons. Otherwise
         // default to type 'lesson' (chat-based).
@@ -2577,7 +2721,7 @@ app.post('/api/pausd/enroll', authMiddleware, (req, res) => {
           if (!hasInlineMathTutor) {
             lessons.splice(lessons.length - 1, 0, {
               id: `${curriculumId}-u${ui}-mathtutor`,
-              title: `${unit.title} — Math Tutor`,
+              title: `${unit.title} - Math Tutor`,
               description: `Walk through worked problems for ${unit.title} with step-by-step feedback on a handwriting canvas.`,
               type: 'math_tutor',
               tool: 'math_tutor',
@@ -2593,7 +2737,7 @@ app.post('/api/pausd/enroll', authMiddleware, (req, res) => {
           if (!hasInlinePractice) {
             lessons.push({
               id: `${curriculumId}-u${ui}-practice`,
-              title: `${unit.title} — Practice Problems`,
+              title: `${unit.title} - Practice Problems`,
               description: `Solve practice problems for ${unit.title} using the math canvas.`,
               type: 'practice',
               tool: 'math_canvas',
@@ -2609,7 +2753,7 @@ app.post('/api/pausd/enroll', authMiddleware, (req, res) => {
         } else if (!isMathCurriculum && lessons.length >= 2) {
           lessons.push({
             id: `${curriculumId}-u${ui}-essay`,
-            title: `${unit.title} — Graded Essay`,
+            title: `${unit.title} - Graded Essay`,
             description: `Write a graded short essay on ${unit.title}. Feedback is scored against a rubric.`,
             type: 'essay',
             chatHistory: [],
@@ -2624,7 +2768,7 @@ app.post('/api/pausd/enroll', authMiddleware, (req, res) => {
         // Unit assessment last.
         lessons.push({
           id: `${curriculumId}-u${ui}-test`,
-          title: `${unit.title} — Assessment`,
+          title: `${unit.title} - Assessment`,
           description: `Test your knowledge of ${unit.title}`,
           type: 'unit_test',
           chatHistory: [],
@@ -2712,7 +2856,7 @@ app.post('/api/curriculum/:id/lesson/generate', authMiddleware, async (req, res)
   }
 });
 
-// Parse questions from plain-text format — far more robust than JSON.
+// Parse questions from plain-text format - far more robust than JSON.
 // Handles minor formatting variations without failing the whole response.
 function parseQuestionsFromText(text) {
   const questions = [];
@@ -2795,7 +2939,7 @@ app.get('/api/curriculum/:id/lesson/:lessonId/assessment', authMiddleware, async
       ? `\n\nLesson content for context:\n${lessonContent}`
       : '';
 
-    // Plain-text format — the model is much more reliable at this than JSON.
+    // Plain-text format - the model is much more reliable at this than JSON.
     // Regex parsing below is tolerant of minor formatting variations.
     const sys = 'You are a quiz writer. Output ONLY the numbered questions in the exact format shown. No intro, no outro, no markdown.';
     const usr = `Write exactly 12 rigorous multiple-choice questions on "${topic}" (${difficulty} level). Test deep understanding: application, analysis, edge cases.${contentHint}
@@ -2952,12 +3096,12 @@ function advancePhaseIfNeeded(lesson, fullContent) {
   const currentIdx = LESSON_PHASES.indexOf(lesson.phase);
   if (currentIdx < 0) return false;
 
-  // 1. Explicit model signal — [STATUS: advance] OR legacy [PHASE_COMPLETE]
+  // 1. Explicit model signal - [STATUS: advance] OR legacy [PHASE_COMPLETE]
   const modelSaidAdvance = /\[STATUS:\s*advance\]/i.test(fullContent)
     || fullContent.includes('[PHASE_COMPLETE]')
     || fullContent.includes('[LESSON_COMPLETE]');
 
-  // 2. Safety fallback — too many turns in this phase
+  // 2. Safety fallback - too many turns in this phase
   const turnsInPhase = countAssistantTurnsInPhase(lesson);
   const cap = PHASE_TURN_CAPS[lesson.phase] ?? 5;
   const hitCap = turnsInPhase >= cap;
@@ -2974,12 +3118,12 @@ function advancePhaseIfNeeded(lesson, fullContent) {
 
 // Helper: stream AI response as SSE, backed by Google Gemini.
 //
-// SSE event schema (unchanged from the old Anthropic impl — frontend consumers
+// SSE event schema (unchanged from the old Anthropic impl - frontend consumers
 // depend on this exact shape):
-//   { content: "..." }                     -- text delta
-//   { source: { url, title } }             -- new source discovered
+//   { content: "..." }                     (text delta)
+//   { source: { url, title } }             (new source discovered)
 //   { status: "searching"|"reading"|"no_sources" }
-//   { done: true, sources: [{url,title}] } -- end
+//   { done: true, sources: [{url,title}] } (end)
 //   { error: "..." }
 //
 // Two modes:
@@ -2995,7 +3139,7 @@ async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOv
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
-    // Critical for Render / nginx — without this they buffer SSE chunks and the
+    // Critical for Render / nginx - without this they buffer SSE chunks and the
     // client sees nothing until the stream ends, which feels like the AI stopped.
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
@@ -3016,17 +3160,17 @@ async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOv
 
   // Inject true model identity at the TOP of the system prompt so it takes
   // Source mode: sources are retrieved automatically via Google Search
-  // grounding — tell the model it has the capability rather than browbeating
+  // grounding - tell the model it has the capability rather than browbeating
   // it into using the tool.
   const finalSystem = enableWebSearch
     ? `${systemPrompt}
 
 ---
-SOURCE MODE — NON-NEGOTIABLE RULES:
-- You have Google Search. Use it on EVERY single response — short answers, follow-ups, clarifications, and "yes/no" replies included. No message is exempt.
+SOURCE MODE - NON-NEGOTIABLE RULES:
+- You have Google Search. Use it on EVERY single response - short answers, follow-ups, clarifications, and "yes/no" replies included. No message is exempt.
 - Run 2-4 queries before writing each response, then base every factual claim on what the search returns.
 - Cite the supporting source inline using [1], [2], … markers placed immediately after the claim they back. The UI renders the sources list below your message; do NOT write your own "Sources:" footer.
-- If search returns nothing useful, say so plainly and refuse to fabricate — do not fall back to model-only answers in source mode.
+- If search returns nothing useful, say so plainly and refuse to fabricate - do not fall back to model-only answers in source mode.
 - Write naturally and do not mention that you searched.`
     : systemPrompt;
 
@@ -3035,7 +3179,7 @@ SOURCE MODE — NON-NEGOTIABLE RULES:
   // can take a while; 180s was clipping legitimate streams.
   const timeout = setTimeout(() => controller.abort(), 300000);
 
-  // Heartbeat — without periodic bytes, intermediate proxies (Cloudflare,
+  // Heartbeat - without periodic bytes, intermediate proxies (Cloudflare,
   // nginx) close idle SSE connections after ~30s, which the user perceives
   // as the AI "stopping". Comment lines are valid SSE noops the browser
   // ignores, so they keep the pipe warm without polluting events.
@@ -3076,7 +3220,7 @@ SOURCE MODE — NON-NEGOTIABLE RULES:
     let buffered = '';
     let finalResponse = null;
 
-    // Always stream tokens live — both source and non-source mode. In source
+    // Always stream tokens live - both source and non-source mode. In source
     // mode, citation markers get appended at the end (once we have grounding
     // metadata) rather than inline, because Gemini only returns supports
     // after the stream closes.
@@ -3098,7 +3242,7 @@ SOURCE MODE — NON-NEGOTIABLE RULES:
     const finishReason = finalResponse?.candidates?.[0]?.finishReason;
     if (finishReason && finishReason !== 'STOP' && finishReason !== 'FINISH_REASON_UNSPECIFIED') {
       const userMsg = ({
-        MAX_TOKENS: '\n\n_[response cut off — hit length limit; ask the AI to continue]_',
+        MAX_TOKENS: '\n\n_[response cut off - hit length limit; ask the AI to continue]_',
         SAFETY: '\n\n_[response was blocked by safety filters]_',
         RECITATION: '\n\n_[response was cut off due to recitation policy]_',
         OTHER: '\n\n_[response ended unexpectedly]_',
@@ -3138,7 +3282,7 @@ SOURCE MODE — NON-NEGOTIABLE RULES:
         }
       }
 
-      // Some grounding responses emit chunks without matching supports — add
+      // Some grounding responses emit chunks without matching supports - add
       // those URLs too so the sources list is never empty when grounding ran.
       for (const ch of chunksMeta) {
         const url = ch?.web?.uri || ch?.retrievedContext?.uri;
@@ -3156,7 +3300,7 @@ SOURCE MODE — NON-NEGOTIABLE RULES:
       if (sources.length > 0) {
         // Append [1][2][3]... at the very end of the message as a single
         // content event. Inline positioning isn't possible post-stream, so
-        // we clump them — the <Sources> list below the message gives the
+        // we clump them - the <Sources> list below the message gives the
         // fully-clickable bibliography.
         const markerText = ' ' + sources.map((_, i) => `[${i + 1}]`).join('');
         appendedMarkers = markerText;
@@ -3168,7 +3312,7 @@ SOURCE MODE — NON-NEGOTIABLE RULES:
 
     const finalContent = buffered + appendedMarkers;
     // Bookkeeping in onComplete (saving chat history, updating streaks, etc.)
-    // must never surface as an AI error — the AI response is already done.
+    // must never surface as an AI error - the AI response is already done.
     if (onComplete) {
       try { await onComplete(finalContent, sources); }
       catch (bookkeepErr) { console.error('streamAIResponse onComplete threw:', bookkeepErr); }
@@ -3202,13 +3346,13 @@ app.post('/api/curriculum/:id/lesson/:lessonId/chat', authMiddleware, requireMes
     const curriculum = (users[email].data.curricula || []).find(c => c.id === req.params.id);
     if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
 
-    // PAUSD courses are textbook-only. Force web search OFF — the AI must
+    // PAUSD courses are textbook-only. Force web search OFF - the AI must
     // teach inside the chapter scope of the assigned textbook (Big Ideas
     // Math, NGSS), not pull random sources from the wider internet.
     if (curriculum.source === 'pausd') req.sourced = false;
 
     // If the curriculum has attached source material (pdfs / urls), the
-    // model answers ONLY from those — same rule as Study Mode. The
+    // model answers ONLY from those - same rule as Study Mode. The
     // system prompt's ATTACHED SOURCES block forbids invention.
     const lessonSources = Array.isArray(curriculum.sources) ? curriculum.sources : [];
     if (lessonSources.length > 0) req.sourced = false;
@@ -3229,9 +3373,9 @@ app.post('/api/curriculum/:id/lesson/:lessonId/chat', authMiddleware, requireMes
     lesson.chatHistory.push({ role: 'user', content: message, timestamp: new Date().toISOString() });
 
     // Build system prompt for current phase. Pass the WHOLE curriculum so the
-    // prompt builder can compose a "course memory" block — what was already
+    // prompt builder can compose a "course memory" block - what was already
     // taught (with scores + summaries), what's coming up, where this lesson
-    // sits — so the AI builds on prior lessons instead of re-teaching them.
+    // sits - so the AI builds on prior lessons instead of re-teaching them.
     const _activeChildLC = (() => {
       const aid = users[email].data?.parent?.activeStudentId;
       return aid ? (users[email].data.parent.students || []).find(s => s.id === aid) : null;
@@ -3260,13 +3404,13 @@ app.post('/api/curriculum/:id/lesson/:lessonId/chat', authMiddleware, requireMes
       // Phase transition: model signal OR turn-cap fallback
       advancePhaseIfNeeded(lesson, fullContent);
 
-      // Check for lesson completion — sanitize code fences + citation markers first.
+      // Check for lesson completion - sanitize code fences + citation markers first.
       const cleanedCurr = fullContent
         .replace(/```(?:json|javascript|js)?\s*/gi, '')
         .replace(/```/g, '')
         .replace(/\s*\[\d+\]\s*/g, ' ');
       if (/\[LESSON_COMPLETE\]/.test(cleanedCurr)) {
-        // Always mark complete — nothing below can block this.
+        // Always mark complete - nothing below can block this.
         lesson.isCompleted = true;
         lesson.completedAt = new Date().toISOString();
         ensureLessonCompletionFields(users[email].data);
@@ -3361,7 +3505,7 @@ app.post('/api/curriculum/:id/lesson/:lessonId/reset', authMiddleware, (req, res
 //
 // First 7 blocks generated up-front via /blocks/generate. The final
 // quiz is generated lazily via /blocks/final-quiz/generate AFTER Q3
-// is graded — that endpoint reads which questions the student got
+// is graded - that endpoint reads which questions the student got
 // wrong in Q1-Q3 and folds those concepts back in. Spaced repetition
 // for real, not just a label.
 // =========================================================
@@ -3379,7 +3523,7 @@ function findLessonInCurriculum(curriculum, lessonId) {
 }
 
 // =================================================================
-// GRADED MODE — per-lesson assignments + AI grading
+// GRADED MODE - per-lesson assignments + AI grading
 //
 // When a curriculum is created with `settings.graded === true`, each
 // lesson can have an `assignment` attached: a small prompt + rubric that
@@ -3405,7 +3549,7 @@ function findLessonInCurriculum(curriculum, lessonId) {
 // =================================================================
 
 // Lazy generation: called when the student first opens the assignment view
-// for a graded lesson. Idempotent — if `assignment` already exists, return it.
+// for a graded lesson. Idempotent - if `assignment` already exists, return it.
 app.post('/api/curriculum/:id/lesson/:lessonId/assignment/generate', authMiddleware, async (req, res) => {
   try {
     const users = loadUsers();
@@ -3417,12 +3561,12 @@ app.post('/api/curriculum/:id/lesson/:lessonId/assignment/generate', authMiddlew
     const found = findLessonInCurriculum(curriculum, req.params.lessonId);
     if (!found) return res.status(404).json({ error: 'Lesson not found' });
 
-    // Already generated — return as-is.
+    // Already generated - return as-is.
     if (found.lesson.assignment?.prompt) {
       return res.json({ assignment: found.lesson.assignment });
     }
 
-    const system = `You design rigorous short-form assignments for a graded online course. Output STRICT JSON only. The assignment should make the student demonstrate ACTUAL understanding of the lesson — not just recall a definition.
+    const system = `You design rigorous short-form assignments for a graded online course. Output STRICT JSON only. The assignment should make the student demonstrate ACTUAL understanding of the lesson - not just recall a definition.
 
 The student will write a 150-400 word response. The rubric is what the AI uses to grade them. Each rubric criterion is concrete and observable (e.g. "Correctly identifies the bias-variance tradeoff and applies it to the example"), not vague (e.g. "Shows understanding").`;
     const user = `Design ONE assignment for the lesson:
@@ -3434,7 +3578,7 @@ Difficulty: ${curriculum.settings?.difficulty || 'intermediate'}
 
 Return JSON:
 {
-  "prompt": "The assignment prompt — 1-3 sentences, ends with a clear ask. Should require synthesis or application, not just recall.",
+  "prompt": "The assignment prompt - 1-3 sentences, ends with a clear ask. Should require synthesis or application, not just recall.",
   "rubric": [
     { "label": "<2-4 word criterion name>", "weight": <int 1-3>, "criterion": "<one sentence describing what an A response demonstrates for this criterion>" }
   ]
@@ -3490,7 +3634,7 @@ app.post('/api/curriculum/:id/lesson/:lessonId/assignment/submit', authMiddlewar
     const rubricLines = (assignment.rubric || [])
       .map((r, i) => `${i + 1}. [weight ${r.weight}] ${r.label}: ${r.criterion}`)
       .join('\n');
-    const system = `You are a rigorous but fair teacher grading a short-form assignment. Score each rubric criterion 0–100 based on what the student actually demonstrated. Be specific in feedback — quote the student where useful, point to what's missing, and say what an A-grade response would have added.
+    const system = `You are a rigorous but fair teacher grading a short-form assignment. Score each rubric criterion 0-100 based on what the student actually demonstrated. Be specific in feedback - quote the student where useful, point to what's missing, and say what an A-grade response would have added.
 
 Output STRICT JSON only. No markdown fences.`;
     const userMsg = `LESSON: "${found.lesson.title}" (unit: "${found.unit.title}")
@@ -3643,12 +3787,12 @@ function stampBlock(lessonId, b, i, opts = {}) {
       score: null,
     };
   }
-  // Unknown type — preserve raw shape so frontend can render best-effort.
+  // Unknown type - preserve raw shape so frontend can render best-effort.
   return { ...base, ...b };
 }
 
 // Returns the missed-question summaries from any quiz blocks already
-// graded on this lesson — used to feed SRS context into R3 / final quiz
+// graded on this lesson - used to feed SRS context into R3 / final quiz
 // generation.
 function collectMissedFromLesson(lesson) {
   const missed = [];
@@ -3689,42 +3833,42 @@ app.post('/api/curriculum/:id/lesson/:lessonId/blocks/generate', authMiddleware,
     const difficulty = curriculum.difficulty || 'intermediate';
     const blockCount = LESSON_BLOCK_COUNT[difficulty] || LESSON_BLOCK_COUNT.intermediate;
     const middleCount = blockCount - 2;
-    const sys = `You generate one complete lesson as ${blockCount} blocks. You pick the right MIX of block types for the topic — see the schema. Output ONLY valid JSON — no markdown, no fences, no commentary.`;
+    const sys = `You generate one complete lesson as ${blockCount} blocks. You pick the right MIX of block types for the topic - see the schema. Output ONLY valid JSON - no markdown, no fences, no commentary.`;
     const prompt = `Build the lesson "${lesson.title}" from the unit "${unit.title}" of the course "${curriculum.title}".
 ${lesson.description ? `Lesson goal: ${lesson.description}\n` : ''}${curriculum.description ? `Course context: ${curriculum.description}\n` : ''}
 Difficulty: ${difficulty}.
 
-EXACTLY ${blockCount} blocks total (this length is set by the course difficulty — do not deviate). You decide the type of each MIDDLE block based on what best serves this topic. Pick a varied, motivated mix — not all the same type.
+EXACTLY ${blockCount} blocks total (this length is set by the course difficulty - do not deviate). You decide the type of each MIDDLE block based on what best serves this topic. Pick a varied, motivated mix - not all the same type.
 
 FIXED slots:
-  Slot 1:  "reading"  — Core definition + framing of the topic. The simplest correct mental model. 350-500 words of markdown.
-  Slot ${blockCount}: "reading"  — Synthesis + edge cases. Tie the lesson to the surrounding course; surface 1-2 lingering subtleties. 350-500 words.
+  Slot 1:  "reading"  - Core definition + framing of the topic. The simplest correct mental model. 350-500 words of markdown.
+  Slot ${blockCount}: "reading"  - Synthesis + edge cases. Tie the lesson to the surrounding course; surface 1-2 lingering subtleties. 350-500 words.
 
-MIDDLE slots (slots 2 through ${blockCount - 1}, ${middleCount} blocks total) — pick from these types:
-  • "reading"     — A second teaching pass (mechanics, examples). 350-500 words of markdown.
-  • "quiz"        — 3 multiple-choice questions on what's been read so far.
-  • "example"     — A WORKED EXAMPLE. One concrete problem the student would actually face, broken into 3-5 numbered solution steps the student can reveal one at a time, then a short "now you try" prompt.
-  • "recap"       — A CONCEPT RECAP. 4-6 tight bullet points summarising what's been covered so far. Used after dense material to reinforce.
-  • "application" — A REAL-WORLD APPLICATION. 200-300 words of markdown showing where this concept shows up — a product, an event, a phenomenon the student has likely encountered.
-  • "challenge"   — A STRETCH PROBLEM. A harder, non-obvious question with a hint and a full solution. Inserts difficulty when the lesson gets too smooth.
-  • "open"        — An OPEN-ANSWER prompt. A short question the student must answer in their own words (40-150 words). MUST include a 2-3 item rubric — each item is { label, criterion (one sentence describing what an A-grade response shows), weight (1-3) }.
-  • "discussion"  — AN AI DISCUSSION. The student chats back-and-forth with an AI tutor about what they just learned. Give a thoughtful opening question + 3-5 specific talking points the AI should hit across the conversation.
-  • "matching"    — A MATCHING MINIGAME. 5-7 pairs of terms and their definitions/examples the student matches by clicking. Great for vocabulary, formula↔meaning, or cause↔effect drills.
-  • "fill-blank"  — A FILL-IN-THE-BLANK exercise. 4-6 sentences with one key word/phrase omitted. The student types the missing piece. Good for keyword recall after a reading.
+MIDDLE slots (slots 2 through ${blockCount - 1}, ${middleCount} blocks total) - pick from these types:
+  • "reading"     - A second teaching pass (mechanics, examples). 350-500 words of markdown.
+  • "quiz"        - 3 multiple-choice questions on what's been read so far.
+  • "example"     - A WORKED EXAMPLE. One concrete problem the student would actually face, broken into 3-5 numbered solution steps the student can reveal one at a time, then a short "now you try" prompt.
+  • "recap"       - A CONCEPT RECAP. 4-6 tight bullet points summarising what's been covered so far. Used after dense material to reinforce.
+  • "application" - A REAL-WORLD APPLICATION. 200-300 words of markdown showing where this concept shows up - a product, an event, a phenomenon the student has likely encountered.
+  • "challenge"   - A STRETCH PROBLEM. A harder, non-obvious question with a hint and a full solution. Inserts difficulty when the lesson gets too smooth.
+  • "open"        - An OPEN-ANSWER prompt. A short question the student must answer in their own words (40-150 words). MUST include a 2-3 item rubric - each item is { label, criterion (one sentence describing what an A-grade response shows), weight (1-3) }.
+  • "discussion"  - AN AI DISCUSSION. The student chats back-and-forth with an AI tutor about what they just learned. Give a thoughtful opening question + 3-5 specific talking points the AI should hit across the conversation.
+  • "matching"    - A MATCHING MINIGAME. 5-7 pairs of terms and their definitions/examples the student matches by clicking. Great for vocabulary, formula↔meaning, or cause↔effect drills.
+  • "fill-blank"  - A FILL-IN-THE-BLANK exercise. 4-6 sentences with one key word/phrase omitted. The student types the missing piece. Good for keyword recall after a reading.
 
 RULES for the middle ${middleCount} blocks:
   • Include AT LEAST 2 "quiz" blocks (the lesson needs graded checkpoints).
-  • Include AT LEAST ${middleCount >= 5 ? 3 : 2} NON-quiz, NON-reading types — mix freely from {example, recap, application, challenge, open, discussion, matching, fill-blank}. Variety is the point.
+  • Include AT LEAST ${middleCount >= 5 ? 3 : 2} NON-quiz, NON-reading types - mix freely from {example, recap, application, challenge, open, discussion, matching, fill-blank}. Variety is the point.
   • Include AT LEAST 1 "open" OR "discussion" block somewhere in the middle so the student has to express their understanding in their own words.
-  • For lessons of ${middleCount >= 4 ? '4+' : 'any'} middle blocks, include AT LEAST 1 INTERACTIVE type — pick from {matching, fill-blank, discussion} — so the lesson isn't just read-and-quiz.
-  • A "quiz" or "open" block should follow material it can test — never put a checkpoint before the relevant teaching content.
+  • For lessons of ${middleCount >= 4 ? '4+' : 'any'} middle blocks, include AT LEAST 1 INTERACTIVE type - pick from {matching, fill-blank, discussion} - so the lesson isn't just read-and-quiz.
+  • A "quiz" or "open" block should follow material it can test - never put a checkpoint before the relevant teaching content.
   • A "recap" should come AFTER at least one reading or example.
   • A "challenge" should come AFTER the relevant teaching content.
-  • A "discussion" should usually be near the end — it's most useful when the student has something to discuss.
+  • A "discussion" should usually be near the end - it's most useful when the student has something to discuss.
   • "matching" and "fill-blank" work best right after the reading that introduces the terms they test.
   • Sequence the blocks so the lesson flows naturally for a student new to the topic.
 
-SHAPES — each block's fields by type:
+SHAPES - each block's fields by type:
   reading:     {"type":"reading","title":"...","content":"<markdown>"}
   quiz:        {"type":"quiz","title":"...","questions":[{"prompt":"...","choices":["...","...","...","..."],"answer":"<exact text of correct choice>","explanation":"<1-2 sentences>"}, ...3 total...]}
   example:     {"type":"example","title":"...","problem":"<markdown problem statement>","steps":[{"label":"Step name","text":"<markdown>"}, ...3-5 total...],"tryThis":"<short prompt for student to try a variant>"}
@@ -3737,7 +3881,7 @@ SHAPES — each block's fields by type:
   fill-blank:  {"type":"fill-blank","title":"...","instructions":"<one-line how-to>","sentences":[{"before":"<text before the blank>","answer":"<single word or short phrase>","after":"<text after the blank>","hint":"<optional short hint>"}, ...4-6 sentences...]}
 
 Markdown inside content/problem/prompt/solution: ## sub-headings, **bold**, lists, fenced code where useful, math via $...$ or $$...$$ if it fits.
-Distractors in quizzes must be plausible — each wrong option encodes a real misconception named in the explanation.
+Distractors in quizzes must be plausible - each wrong option encodes a real misconception named in the explanation.
 
 Return JSON in this shape:
 { "blocks": [ <block 1>, <block 2>, ... <block ${blockCount}> ] }`;
@@ -3746,7 +3890,7 @@ Return JSON in this shape:
     // and runs ~2-3x faster. Reading + quiz quality is identical because
     // the prompt does the heavy lifting. Pro is reserved for free-form
     // tutoring where reasoning depth matters.
-    // Bump the token ceiling for longer lessons — expert mode emits
+    // Bump the token ceiling for longer lessons - expert mode emits
     // ~14 blocks with a couple readings inside, easily 6k tokens of
     // markdown alone. Flash's hard cap is 8192; we'll use Pro for the
     // deepest two tiers where the ceiling matters.
@@ -3760,7 +3904,7 @@ Return JSON in this shape:
       return res.status(500).json({ error: `Lesson did not return ${blockCount} blocks. Try again.` });
     }
 
-    // No SRS slot anymore — the AI mixes types as it sees fit, so a
+    // No SRS slot anymore - the AI mixes types as it sees fit, so a
     // hard-coded spaced-repetition reading at index 4 no longer makes
     // sense. The "recap" type covers reinforcement when the AI decides
     // that's what the lesson needs.
@@ -3798,10 +3942,10 @@ app.post('/api/curriculum/:id/lesson/:lessonId/blocks/final-quiz/generate', auth
 
     const missed = collectMissedFromLesson(lesson);
     const missedBlock = missed.length
-      ? `MISSED QUESTIONS FROM THE LESSON QUIZZES (use these as the spine of the final quiz — re-test the same concepts from a different angle, do NOT repeat the questions verbatim):\n${missed.map((m, i) => `  ${i + 1}. Prompt: ${m.prompt}\n     Student picked: ${m.userPicked}\n     Correct: ${m.correctAnswer}\n     Why it tripped them: ${m.explanation}`).join('\n')}`
+      ? `MISSED QUESTIONS FROM THE LESSON QUIZZES (use these as the spine of the final quiz - re-test the same concepts from a different angle, do NOT repeat the questions verbatim):\n${missed.map((m, i) => `  ${i + 1}. Prompt: ${m.prompt}\n     Student picked: ${m.userPicked}\n     Correct: ${m.correctAnswer}\n     Why it tripped them: ${m.explanation}`).join('\n')}`
       : `(The student got every mid-quiz question right. Push harder: 5 application / synthesis questions that integrate the lesson's readings.)`;
 
-    const sys = `You write the FINAL QUIZ for a lesson — a 5-question multiple-choice quiz that integrates the whole lesson. Output ONLY valid JSON.`;
+    const sys = `You write the FINAL QUIZ for a lesson - a 5-question multiple-choice quiz that integrates the whole lesson. Output ONLY valid JSON.`;
     const prompt = `Lesson: "${lesson.title}" (unit: "${unit.title}", course: "${curriculum.title}").
 Difficulty: ${curriculum.difficulty || 'intermediate'}.
 
@@ -3809,15 +3953,15 @@ ${missedBlock}
 
 Write 5 multiple-choice questions:
 - 3 of them must directly re-test the missed-concept areas from above (different angle, harder than the original question).
-- 2 of them must test synthesis — pulling ideas from at least 2 different readings together.
+- 2 of them must test synthesis - pulling ideas from at least 2 different readings together.
 
 Each question: a "prompt", 4 "choices" (no A) B) prefixes), an "answer" (the EXACT text of the correct choice), and an "explanation" (1-2 sentences naming the misconception each wrong option encodes).
-Distractors must be plausible — each wrong option encodes a real misconception.
+Distractors must be plausible - each wrong option encodes a real misconception.
 
 Return JSON exactly:
 { "questions": [ ...5 total... ] }`;
 
-    // Flash for speed — same reasoning as the bulk block generator.
+    // Flash for speed - same reasoning as the bulk block generator.
     const result = await callGemini(sys, [{ role: 'user', content: prompt }], GEMINI_FLASH, 4096, { jsonMode: true, temperature: 0.6 });
     if (!result.success) return res.status(500).json({ error: result.error || 'Final quiz generation failed' });
     const parsed = parseAIJson(result.data.content?.[0]?.text || '');
@@ -3894,7 +4038,7 @@ app.post('/api/curriculum/:id/lesson/:lessonId/blocks/:bid/grade-open', authMidd
       : [{ label: 'Understanding', criterion: 'Demonstrates accurate understanding of the lesson concept.', weight: 1 }];
 
     const rubricLines = rubric.map((r, i) => `${i + 1}. [weight ${r.weight ?? 1}] ${r.label}: ${r.criterion}`).join('\n');
-    const system = `You are a rigorous but fair teacher grading a short-form open-answer prompt embedded in a lesson. Score each rubric criterion 0–100 based on what the student actually demonstrated. Be specific in feedback — quote the student where useful, point to what's missing, and say what an A-grade response would have added.
+    const system = `You are a rigorous but fair teacher grading a short-form open-answer prompt embedded in a lesson. Score each rubric criterion 0-100 based on what the student actually demonstrated. Be specific in feedback - quote the student where useful, point to what's missing, and say what an A-grade response would have added.
 
 Output STRICT JSON only. No markdown fences.`;
     const userMsg = `LESSON: "${found.lesson.title}" (unit: "${found.unit.title}")
@@ -3991,7 +4135,7 @@ app.post('/api/curriculum/:id/lesson/:lessonId/blocks/:bid/complete', authMiddle
 });
 
 // =========================================================
-// MIDTERMS / FINALS — course-level SRS exams
+// MIDTERMS / FINALS - course-level SRS exams
 //
 // `midterm`: built once half the lessons in the course are complete.
 // `final`:   built once all (or 90%+) lessons in the course are complete.
@@ -4082,20 +4226,20 @@ app.post('/api/curriculum/:id/exams/:kind/generate', authMiddleware, async (req,
     const questionCount = kind === 'final' ? 20 : 12;
 
     const missedBlock = missed.length
-      ? `MISSED QUESTION POOL (every wrong answer the student gave across the course — use these as the spine):\n${missed.slice(0, 30).map((m, i) => `  ${i + 1}. [${m.unit} / ${m.lesson}] Q: ${m.prompt}\n     Picked: ${m.userPicked}  Correct: ${m.correctAnswer}\n     Why: ${m.explanation}`).join('\n')}`
+      ? `MISSED QUESTION POOL (every wrong answer the student gave across the course - use these as the spine):\n${missed.slice(0, 30).map((m, i) => `  ${i + 1}. [${m.unit} / ${m.lesson}] Q: ${m.prompt}\n     Picked: ${m.userPicked}  Correct: ${m.correctAnswer}\n     Why: ${m.explanation}`).join('\n')}`
       : `(The student got every quiz right so far. Push harder: write ${questionCount} application/synthesis questions integrating the whole course.)`;
 
-    const sys = `You write a ${kind === 'final' ? 'final exam' : 'midterm'} for a course. ${questionCount} multiple-choice questions, integrating concepts across the whole course. Output ONLY valid JSON — no markdown, no fences.`;
+    const sys = `You write a ${kind === 'final' ? 'final exam' : 'midterm'} for a course. ${questionCount} multiple-choice questions, integrating concepts across the whole course. Output ONLY valid JSON - no markdown, no fences.`;
     const prompt = `Course: "${curriculum.title}".
 ${curriculum.description ? `Course description: ${curriculum.description}\n` : ''}Difficulty: ${curriculum.difficulty || 'intermediate'}.
 Units covered:
-${(curriculum.units || []).map((u, i) => `  ${i + 1}. ${u.title}${u.description ? ` — ${u.description}` : ''}`).join('\n')}
+${(curriculum.units || []).map((u, i) => `  ${i + 1}. ${u.title}${u.description ? ` - ${u.description}` : ''}`).join('\n')}
 
 ${missedBlock}
 
 Write ${questionCount} multiple-choice questions for the ${kind}.
-- ${kind === 'final' ? '~70%' : '~60%'} should re-test the missed-concept areas above (DIFFERENT angle, harder than the original — never repeat verbatim).
-- The rest must test synthesis — pulling concepts from MULTIPLE units together.
+- ${kind === 'final' ? '~70%' : '~60%'} should re-test the missed-concept areas above (DIFFERENT angle, harder than the original - never repeat verbatim).
+- The rest must test synthesis - pulling concepts from MULTIPLE units together.
 - ${kind === 'final' ? 'The final has 2-3 cumulative "boss" questions that demand application across 3+ units.' : 'The midterm leans on the FIRST half of the course material.'}
 
 Each question: a "prompt", 4 "choices" (no A) B) prefixes), an "answer" (EXACT text of the correct choice), and an "explanation" (1-2 sentences naming the misconception each wrong option encodes).
@@ -4103,7 +4247,7 @@ Each question: a "prompt", 4 "choices" (no A) B) prefixes), an "answer" (EXACT t
 Return JSON exactly:
 { "questions": [ ...${questionCount} total... ] }`;
 
-    // Flash for speed — exams are 12-20 multiple-choice questions, no
+    // Flash for speed - exams are 12-20 multiple-choice questions, no
     // reasoning depth required beyond the prompt's instructions.
     const result = await callGemini(sys, [{ role: 'user', content: prompt }], GEMINI_FLASH, 8192, { jsonMode: true, temperature: 0.6 });
     if (!result.success) return res.status(500).json({ error: result.error || 'Exam generation failed' });
@@ -4147,7 +4291,7 @@ app.post('/api/curriculum/:id/exams/:examId/grade', authMiddleware, (req, res) =
     const curriculum = findUserCurriculum(users, email, req.params.id);
     if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
 
-    // examId might be `<cid>-midterm` or `<cid>-final` — locate accordingly.
+    // examId might be `<cid>-midterm` or `<cid>-final` - locate accordingly.
     const exams = curriculum.exams || {};
     let exam = null, kind = null;
     for (const k of ['midterm', 'final']) {
@@ -4182,7 +4326,7 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
     const { message, sessionId, context, sourced, images } = req.body;
     // Source-mode + attached sources interaction:
     //   • If the user has attached PDFs/URLs (`context.sources`), the
-    //     model must answer ONLY from those — no web fallback. So when
+    //     model must answer ONLY from those - no web fallback. So when
     //     attached sources are present, we disable web search entirely
     //     even if `sourced=true` was sent. The system prompt's ATTACHED
     //     SOURCES rules already enforce no-fabrication.
@@ -4200,7 +4344,7 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
     users[email].data = migrateUserData(users[email].data);
 
     // Parental block: if the active child has Study Mode disabled, refuse
-    // at the API layer — the client also hides the icon, but this is the
+    // at the API layer - the client also hides the icon, but this is the
     // backstop in case a child opens the URL directly.
     {
       const activeId = users[email].data?.parent?.activeStudentId;
@@ -4291,7 +4435,7 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
 
       saveUsers(users);
       // disableThinking: study chat is the "ask a question, get a quick
-      // answer" surface — first-token latency dominates the perceived
+      // answer" surface - first-token latency dominates the perceived
       // speed. Web-search mode keeps thinking on so the model can plan
       // its searches; everything else skips the hidden CoT phase.
     }, tierModel, { enableWebSearch: !!req.sourced, disableThinking: !req.sourced });
@@ -4735,7 +4879,7 @@ app.post('/api/notes/:nid/generate-summary', authMiddleware, async (req, res) =>
 // ===== NOTE MAPS (Obsidian-style knowledge graphs) =====
 //
 // A user has many `noteMaps`. The first one flagged `isDefault: true` is
-// the auto-sync map — every existing note is mirrored as a node here so
+// the auto-sync map - every existing note is mirrored as a node here so
 // the canvas isn't empty for users who have notes but haven't opened the
 // map. Other maps are user-curated.
 //
@@ -4782,7 +4926,7 @@ function ensureNoteGraph(userData) {
 
 // Cleanup pass for a single map: drops note-backed nodes whose note was
 // deleted, refreshes labels when a note title changes, and drops orphan
-// edges. Does NOT auto-add nodes — pulling notes into a map is an
+// edges. Does NOT auto-add nodes - pulling notes into a map is an
 // explicit user action (client picks them with "Pull from notes").
 function cleanupMap(map, notes) {
   let changed = false;
@@ -4809,7 +4953,7 @@ function cleanupMap(map, notes) {
 }
 
 // Legacy helper kept so any older callsite still compiles. It now only
-// cleans up — it never auto-adds note nodes.
+// cleans up - it never auto-adds note nodes.
 function syncGraphWithNotes(userData) {
   const notes = Array.isArray(userData.notes) ? userData.notes : [];
   let changed = false;
@@ -4877,8 +5021,14 @@ app.post('/api/note-maps', authMiddleware, (req, res) => {
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
     users[email].data = migrateUserData(users[email].data);
-    if (users[email].data.noteMaps.length >= 20) {
-      return res.status(400).json({ error: 'Map limit reached (20).' });
+    const plan = getPlan(users[email], email);
+    const cap = LIMITS[plan]?.noteMaps ?? LIMITS.free.noteMaps;
+    if (cap !== Infinity && users[email].data.noteMaps.length >= cap) {
+      return res.status(402).json({
+        error: 'note_map_limit_reached',
+        message: `Your plan caps note maps at ${cap}. Upgrade for more.`,
+        limit: cap, plan,
+      });
     }
     const map = {
       id: `map_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
@@ -5063,7 +5213,7 @@ app.post('/api/note-maps/:mid/suggest', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Legacy single-graph suggest — now scoped to the default map.
+// Legacy single-graph suggest - now scoped to the default map.
 app.post('/api/note-graph/suggest', authMiddleware, async (req, res) => {
   try {
     const { focus, focusNodeId, count } = req.body || {};
@@ -5089,10 +5239,10 @@ app.post('/api/note-graph/suggest', authMiddleware, async (req, res) => {
 async function generateAssessmentOnce({ topic, type, questionCount, difficulty, context }) {
   const isEssay = type === 'essay';
   const sys = 'Output ONLY valid JSON. No markdown, no preamble, no commentary. Just the JSON object.';
-  // Optional note/source context — when present, the quiz must be grounded
+  // Optional note/source context - when present, the quiz must be grounded
   // in this text rather than the model's general knowledge of the topic.
   const ctxBlock = context && String(context).trim()
-    ? `\n\nGROUND THE QUESTIONS IN THIS SOURCE MATERIAL — do NOT pull from outside knowledge. Every question must be answerable from the text below:\n"""\n${String(context).slice(0, 12000)}\n"""\n`
+    ? `\n\nGROUND THE QUESTIONS IN THIS SOURCE MATERIAL - do NOT pull from outside knowledge. Every question must be answerable from the text below:\n"""\n${String(context).slice(0, 12000)}\n"""\n`
     : '';
   const usr = isEssay
     ? `Create an essay assessment on "${topic}" (${difficulty} level).${ctxBlock}
@@ -5102,7 +5252,7 @@ Return this exact JSON:
 Return this exact JSON:
 {"title":"Quiz: ${topic}","type":"quiz","questions":[{"id":"q1","question":"...","options":["A) ...","B) ...","C) ...","D) ..."],"correct":"A","explanation":"why A is right"}]}`;
 
-  // Tight maxOutputTokens — 2k is plenty for 5 short MCQs and forces
+  // Tight maxOutputTokens - 2k is plenty for 5 short MCQs and forces
   // the model to wrap quickly instead of padding explanations.
   // disableThinking: Gemini 3's CoT on a one-shot JSON quiz add ~3-8s of
   // hidden-token latency without measurably improving question quality.
@@ -5150,7 +5300,7 @@ app.post('/api/assessment/grade', authMiddleware, async (req, res) => {
     if (!email) return res.status(404).json({ error: 'User not found' });
     users[email].data = migrateUserData(users[email].data);
 
-    // ===== ESSAY PATH — AI grades against rubric =====
+    // ===== ESSAY PATH - AI grades against rubric =====
     if (assessment.type === 'essay') {
       const essayText = String(answers.essay || '').trim();
       if (!essayText) return res.status(400).json({ error: 'Essay text required' });
@@ -5158,10 +5308,10 @@ app.post('/api/assessment/grade', authMiddleware, async (req, res) => {
 
       const rubric = Array.isArray(assessment.rubric) ? assessment.rubric : [];
       const rubricLines = rubric.map((r, i) =>
-        `${i + 1}. ${r.criterion} (max ${r.maxScore || 5} pts) — ${r.description || ''}`
-      ).join('\n') || '(no rubric provided — grade holistically out of 5 for organization, evidence, and analysis)';
+        `${i + 1}. ${r.criterion} (max ${r.maxScore || 5} pts) - ${r.description || ''}`
+      ).join('\n') || '(no rubric provided - grade holistically out of 5 for organization, evidence, and analysis)';
 
-      const sys = `You are a strict but fair essay grader. Grade the student's essay against the rubric. Output ONLY valid JSON — no markdown, no preamble.`;
+      const sys = `You are a strict but fair essay grader. Grade the student's essay against the rubric. Output ONLY valid JSON - no markdown, no preamble.`;
       const usr = `ESSAY PROMPT:
 ${assessment.prompt || assessment.title || ''}
 
@@ -5448,7 +5598,7 @@ function clamp(n, lo, hi) { n = Number(n); if (!Number.isFinite(n)) return lo; r
 function sanitizeSvg(raw) {
   if (!raw) return '';
   let s = String(raw).slice(0, 50_000);
-  // Only allow content starting with <svg or a single tag — reject anything else.
+  // Only allow content starting with <svg or a single tag - reject anything else.
   s = s.replace(/<script[\s\S]*?<\/script>/gi, '');
   s = s.replace(/ on[a-z]+\s*=\s*"[^"]*"/gi, '');
   s = s.replace(/ on[a-z]+\s*=\s*'[^']*'/gi, '');
@@ -5469,11 +5619,11 @@ function buildTemplateSlides(id, title, deckId) {
     case 'pitch':
       return [
         s(0, 'title',   title || 'Our Pitch',      'One-line hook for the product', [],      'Open strong. State the problem in one sentence.'),
-        s(1, 'content', 'The Problem',             '', ['Pain point 1', 'Pain point 2', 'Who feels it most'], 'Make it visceral — name the user.'),
+        s(1, 'content', 'The Problem',             '', ['Pain point 1', 'Pain point 2', 'Who feels it most'], 'Make it visceral - name the user.'),
         s(2, 'content', 'Our Solution',            '', ['Core feature', 'What makes us different', 'Why it works'], 'Demo here if you have one.'),
         s(3, 'content', 'Why Now',                 '', ['Shift 1', 'Shift 2', 'Shift 3'], 'Timing is everything.'),
         s(4, 'content', 'Traction',                '', ['Users / revenue', 'Growth rate', 'Notable signals'], 'Hard numbers only.'),
-        s(5, 'content', 'The Team',                '', ['Founder 1 — role', 'Founder 2 — role', 'Advisors'], 'Why this team can win.'),
+        s(5, 'content', 'The Team',                '', ['Founder 1 - role', 'Founder 2 - role', 'Advisors'], 'Why this team can win.'),
         s(6, 'summary', 'The Ask',                 '', ['Amount raising', 'Use of funds', 'Timeline'], 'End with a clear ask.'),
       ];
     case 'lesson':
@@ -5490,8 +5640,8 @@ function buildTemplateSlides(id, title, deckId) {
         s(0, 'title',   title || 'Book Report', 'Author · Year', [], ''),
         s(1, 'content', 'Premise',              '', ['Setting', 'Main character(s)', 'Central conflict'], ''),
         s(2, 'content', 'Plot summary',         '', ['Act 1', 'Act 2', 'Act 3'], 'Keep it under 90 seconds to read aloud.'),
-        s(3, 'content', 'Themes',               '', ['Theme 1 — supporting quote', 'Theme 2 — supporting quote'], ''),
-        s(4, 'quote',   '"A resonant quote from the book."', '— Character / page #', [], ''),
+        s(3, 'content', 'Themes',               '', ['Theme 1 - supporting quote', 'Theme 2 - supporting quote'], ''),
+        s(4, 'quote',   '"A resonant quote from the book."', '- Character / page #', [], ''),
         s(5, 'content', 'What I took away',     '', ['Insight 1', 'Insight 2'], ''),
         s(6, 'summary', 'Rating & recommendation', '', ['Who should read this', 'Who should skip'], ''),
       ];
@@ -5562,7 +5712,7 @@ app.get('/api/slideshows/:id', authMiddleware, (req, res) => {
     users[email].data = migrateUserData(users[email].data);
     const deck = (users[email].data.slideshows || []).find(s => s.id === req.params.id);
     if (!deck) return res.status(404).json({ error: 'Not found' });
-    // Heal legacy slides on read — runs the same mechanical contrast fixer
+    // Heal legacy slides on read - runs the same mechanical contrast fixer
     // over the stored slides before responding. Nothing unreadable should
     // ever reach the client, even if it predates the current fix.
     let mutated = false;
@@ -5590,7 +5740,7 @@ app.delete('/api/slideshows/:id', authMiddleware, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Create a blank slideshow. Body: { title } — everything else defaults.
+// Create a blank slideshow. Body: { title } - everything else defaults.
 // Starts with a single title slide that the user then builds on top of.
 app.post('/api/slideshows', authMiddleware, (req, res) => {
   try {
@@ -5621,21 +5771,21 @@ app.post('/api/slideshows', authMiddleware, (req, res) => {
 // ===== Per-slide AI helpers =====
 //
 // The AI gets a detailed design brief (archetypes, hierarchy rules, color
-// pairings, positioning math) so what comes back is composable — we insert
+// pairings, positioning math) so what comes back is composable - we insert
 // the returned `elements[]` as-is instead of synthesizing a boring
 // title/bullets layout from scratch. The prompt is the difference between
 // "looks like a form" and "looks designed."
-const SLIDE_DESIGN_SYSTEM = `You are a senior presentation designer composing ONE information-dense slide. Your priority is CONTENT: every pixel of space should carry useful information. Visual decoration is secondary — but the slide must still look clean and professional, never ugly.
+const SLIDE_DESIGN_SYSTEM = `You are a senior presentation designer composing ONE information-dense slide. Your priority is CONTENT: every pixel of space should carry useful information. Visual decoration is secondary - but the slide must still look clean and professional, never ugly.
 
 ## Core philosophy
 Function over form. A slide packed with substantive, well-organized text beats a sparse slide with a big icon. Audiences come for information, not aesthetics.
 
-## Archetypes — 90% of slides should be CONTENT or COMPARISON
+## Archetypes - 90% of slides should be CONTENT or COMPARISON
 - CONTENT (default): title top-left, large body text block filling 60-70% of the canvas. Use whenever there is anything to explain.
 - COMPARISON: title + two equal-width columns of dense text. Use for vs., before/after, pros/cons.
 - SUMMARY: title + numbered or bulleted takeaway list. Use for recaps.
-- QUOTE: large italic quote + attribution. ONLY when the slide IS a quote — not just to break things up.
-- HERO: short punchy title + 1-sentence subtitle, NO body. Use ONLY for section openers and title slides — never for content.
+- QUOTE: large italic quote + attribution. ONLY when the slide IS a quote - not just to break things up.
+- HERO: short punchy title + 1-sentence subtitle, NO body. Use ONLY for section openers and title slides - never for content.
 
 Do NOT use HERO slides for content. Do NOT leave slides sparse just to look "designed".
 
@@ -5662,7 +5812,7 @@ Do NOT use HERO slides for content. Do NOT leave slides sparse just to look "des
 
 Weights: 700 for titles, 500 for subtitles, 400 for body.
 
-## Body text — this is the most important part
+## Body text - this is the most important part
 Body elements must contain COMPLETE SENTENCES. Each bullet/point should be 20-35 words explaining the concept in enough depth that someone who has never heard of the topic understands it. Do NOT write fragment labels. Do NOT write 3-word bullets. Write paragraphs or rich bullet lists.
 
 ## Coordinate system
@@ -5672,7 +5822,7 @@ x, y, w, h are PERCENTAGES of the slide (0-100). Each element stays within 3-97 
 Pack lines into ONE text element with "\\n" between them. Do NOT create one element per bullet. A body element should be w:88, h:65 or larger.
 
 ## Output
-Return ONLY valid JSON — no markdown, no code fences, no commentary:
+Return ONLY valid JSON - no markdown, no code fences, no commentary:
 {
   "background": "#RRGGBB",
   "notes": "2-3 sentences of detailed speaker notes the presenter says aloud",
@@ -5711,7 +5861,7 @@ app.post('/api/slideshows/:id/ai/slide', authMiddleware, async (req, res) => {
     // client renders via the legacy SlideCanvas that already looks right.
     const system = `You are a presentation content writer. Your priority is information density. Every slide should teach the viewer something substantive. Default to "content" layout unless the slide is purely a title/opener or a literal quote.
 
-Output ONLY valid JSON — no markdown, no fences.`;
+Output ONLY valid JSON - no markdown, no fences.`;
     const user = `Deck title: "${deck.title || 'Untitled'}".
 Topic: "${topic}".
 
@@ -5721,7 +5871,7 @@ JSON shape:
 {
   "title": "Short title under 10 words",
   "subtitle": "",
-  "bullets": ["5-7 complete-sentence points, each 20-35 words — real teaching sentences that explain the concept in depth, not fragment labels. Empty array only for title/quote slides."],
+  "bullets": ["5-7 complete-sentence points, each 20-35 words - real teaching sentences that explain the concept in depth, not fragment labels. Empty array only for title/quote slides."],
   "notes": "2-4 sentences of detailed speaker notes that add context beyond the slide text",
   "layout": "title" | "content" | "summary" | "quote"
 }`;
@@ -5739,7 +5889,7 @@ JSON shape:
       bullets: Array.isArray(parsed.bullets) ? parsed.bullets.slice(0, 6).map(b => String(b).slice(0, 300)) : [],
       notes: String(parsed.notes || '').slice(0, 1000),
       image: '', imageCaption: '',
-      // Legacy field stays null — renderer uses theme default. Matches how
+      // Legacy field stays null - renderer uses theme default. Matches how
       // the bulk-generated slides work.
       background: null,
       elements: [],
@@ -5747,13 +5897,13 @@ JSON shape:
 
     deck.slides.splice(insertAfter + 1, 0, newSlide);
     saveUsers(users);
-    console.log(`AI slide inserted at ${insertAfter + 1} — layout=${newSlide.layout}, ${newSlide.bullets.length} bullets`);
+    console.log(`AI slide inserted at ${insertAfter + 1} - layout=${newSlide.layout}, ${newSlide.bullets.length} bullets`);
     res.json({ slideshow: deck, insertedAt: insertAfter + 1 });
   } catch (e) { console.error('AI slide error:', e); res.status(500).json({ error: e.message }); }
 });
 
 // ===== Programmatic slide-design validator =====
-// The text-only "self critique" pass was unreliable — the AI would happily
+// The text-only "self critique" pass was unreliable - the AI would happily
 // rationalize a black-on-black slide as fine. Instead we compute the real
 // problems (WCAG contrast, overlap, out-of-bounds, font-size hierarchy),
 // hand the list back to the AI so it has a concrete fix list, and loop
@@ -5781,7 +5931,7 @@ function contrastRatio(a, b) {
   const L1 = Math.max(la, lb), L2 = Math.min(la, lb);
   return (L1 + 0.05) / (L2 + 0.05);
 }
-// Hard minimum — 4.5 on anything. The "3.0 for large text" WCAG allowance
+// Hard minimum - 4.5 on anything. The "3.0 for large text" WCAG allowance
 // was letting borderline-unreadable dark-on-dark slides through.
 const MIN_CONTRAST = 4.5;
 function pickHighContrastText(bgHex) {
@@ -5836,8 +5986,8 @@ function validateSlideDesign(slide) {
   if (textEls.length >= 2) {
     const maxFs = Math.max(...textEls.map(e => Number(e.fontSize) || 0));
     const minFs = Math.min(...textEls.map(e => Number(e.fontSize) || 0));
-    if (maxFs < 32) issues.push('No dominant element — the largest text is under 32px. Make one element clearly the title (40+).');
-    if (maxFs / Math.max(1, minFs) < 1.6) issues.push('Hierarchy is flat — the biggest text should be at least 1.6× the smallest.');
+    if (maxFs < 32) issues.push('No dominant element - the largest text is under 32px. Make one element clearly the title (40+).');
+    if (maxFs / Math.max(1, minFs) < 1.6) issues.push('Hierarchy is flat - the biggest text should be at least 1.6× the smallest.');
   }
 
   return issues;
@@ -5870,7 +6020,7 @@ async function searchWikipediaImage(query) {
   const q = String(query || '').trim();
   if (!q) return null;
   try {
-    // Direct page summary first — cleanest thumbnail match.
+    // Direct page summary first - cleanest thumbnail match.
     const summary = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(q)}`, {
       headers: { 'User-Agent': 'RushilAI/1.0 (rushilkelapure@gmail.com)' },
     }).then(r => r.ok ? r.json() : null).catch(() => null);
@@ -5924,7 +6074,7 @@ async function resolveSlideImageQueries(slide) {
   const resolved = [];
   for (const el of slide.elements) {
     if (el.kind !== 'image') { resolved.push(el); continue; }
-    // Already has a real URL (http/https/data: from paste) — keep.
+    // Already has a real URL (http/https/data: from paste) - keep.
     if (el.src && /^(https?:|data:)/i.test(el.src)) { resolved.push(el); continue; }
     // Gather queries in priority order: searchQuery, query, slide title.
     const queries = [el.searchQuery, el.query, slide.title].filter(Boolean);
@@ -5936,7 +6086,7 @@ async function resolveSlideImageQueries(slide) {
     if (url) {
       resolved.push({ ...el, src: url });
     } else {
-      console.log(`Dropping image element — no match for queries: ${queries.join(' | ')}`);
+      console.log(`Dropping image element - no match for queries: ${queries.join(' | ')}`);
     }
   }
   slide.elements = resolved;
@@ -5945,7 +6095,7 @@ async function resolveSlideImageQueries(slide) {
 
 // ============================================================
 // Hand-designed slide template library. Each template is a complete,
-// polished layout — positioning, typography, color pairings, everything —
+// polished layout - positioning, typography, color pairings, everything -
 // with text slots addressed by `role`. The AI no longer designs slides
 // from scratch; it PICKS which template fits the topic and FILLS the
 // role slots. Because the designs are human-quality, every generated
@@ -6036,7 +6186,7 @@ const SLIDE_TEMPLATES = [
   },
   {
     id: 'two-column',
-    match: 'Comparison — side-by-side ideas, pro/con, before/after, option A vs option B.',
+    match: 'Comparison - side-by-side ideas, pro/con, before/after, option A vs option B.',
     background: '#ffffff',
     layout: 'twoCol',
     elements: [
@@ -6057,7 +6207,7 @@ const SLIDE_TEMPLATES = [
   },
 ];
 
-// Heuristic template picker — simple feature matching on the topic so the
+// Heuristic template picker - simple feature matching on the topic so the
 // server picks a sensible layout EVERY time, even if the AI call fails.
 function pickTemplateForTopic(topic, deckTitle) {
   const t = String(topic || '').trim();
@@ -6070,40 +6220,40 @@ function pickTemplateForTopic(topic, deckTitle) {
   if (/\bvs\.?\b|\bversus\b|\bcompare\b|\bcomparison\b|\bpros? and cons?\b|\bbefore and after\b/i.test(lower)) return SLIDE_TEMPLATES.find(x => x.id === 'two-column');
   // Summary / recap / takeaways
   if (/\btakeaways?\b|\bsummary\b|\brecap\b|\bconclusion\b|\bkey points?\b|\bin short\b/i.test(lower)) return SLIDE_TEMPLATES.find(x => x.id === 'summary-bold');
-  // Hero / section opener (short — likely a section title)
+  // Hero / section opener (short - likely a section title)
   if (t.split(/\s+/).length <= 4 && t.length < 40) return SLIDE_TEMPLATES.find(x => x.id === 'hero-light');
-  // Default: classic content slide — text-first, no images
+  // Default: classic content slide - text-first, no images
   return SLIDE_TEMPLATES.find(x => x.id === 'content-classic');
 }
 
 // Minimal copy-only prompt. The AI fills ONLY the slots the chosen
-// template actually defines — no picking, no design.
+// template actually defines - no picking, no design.
 function buildSlotPrompt(tmpl, topic, deckTitle) {
   const roleLines = tmpl.elements.map(el => {
-    if (el.kind === 'image') return `- imageQuery (string) — a specific noun phrase for a web image search. Example: "Abraham Lincoln portrait"`;
+    if (el.kind === 'image') return `- imageQuery (string) - a specific noun phrase for a web image search. Example: "Abraham Lincoln portrait"`;
     switch (el.role) {
-      case 'title':    return `- title (string, under 10 words) — the slide's headline`;
-      case 'subtitle': return `- subtitle (string, 1 short sentence) — supporting line`;
-      case 'body':     return `- body (string) — 5-7 complete-sentence points SEPARATED BY \\n. Each point is 20-35 words that explains the concept in depth — not a label, a real sentence. No bullet characters.`;
-      case 'stat':     return `- stat (string, under 12 chars) — the headline number/phrase (e.g. "42%", "147B")`;
-      case 'quote':       return `- quote (string) — the actual quote text`;
-      case 'attribution': return `- attribution (string) — the speaker/source (e.g. "— Abraham Lincoln")`;
-      case 'colA':     return `- colA (string) — content for the left column. 3-4 complete-sentence points separated by \\n, each 20-30 words.`;
-      case 'colB':     return `- colB (string) — content for the right column. 3-4 complete-sentence points separated by \\n, each 20-30 words.`;
+      case 'title':    return `- title (string, under 10 words) - the slide's headline`;
+      case 'subtitle': return `- subtitle (string, 1 short sentence) - supporting line`;
+      case 'body':     return `- body (string) - 5-7 complete-sentence points SEPARATED BY \\n. Each point is 20-35 words that explains the concept in depth - not a label, a real sentence. No bullet characters.`;
+      case 'stat':     return `- stat (string, under 12 chars) - the headline number/phrase (e.g. "42%", "147B")`;
+      case 'quote':       return `- quote (string) - the actual quote text`;
+      case 'attribution': return `- attribution (string) - the speaker/source (e.g. "- Abraham Lincoln")`;
+      case 'colA':     return `- colA (string) - content for the left column. 3-4 complete-sentence points separated by \\n, each 20-30 words.`;
+      case 'colB':     return `- colB (string) - content for the right column. 3-4 complete-sentence points separated by \\n, each 20-30 words.`;
       default:         return `- ${el.role} (string)`;
     }
   }).join('\n');
 
   return `Deck title: "${deckTitle}".
 Topic for THIS slide: "${topic}".
-Archetype: ${tmpl.id} — ${tmpl.match}
+Archetype: ${tmpl.id} - ${tmpl.match}
 
-Write the slide's copy. Fill every slot below with ACTUAL content about the topic — do NOT return placeholder text, instructions, or empty strings. If you can't think of content for a slot, invent plausible content for the topic.
+Write the slide's copy. Fill every slot below with ACTUAL content about the topic - do NOT return placeholder text, instructions, or empty strings. If you can't think of content for a slot, invent plausible content for the topic.
 
 Required slots (exact keys):
 ${roleLines}
 
-Also include "notes" (string) — 1-2 sentences of speaker notes.
+Also include "notes" (string) - 1-2 sentences of speaker notes.
 
 Output ONLY JSON:
 {
@@ -6137,7 +6287,7 @@ function materializeTemplateSlide(tmpl, slots, id) {
     }
     return base;
   });
-  // Drop text elements the AI left empty — keeps the design clean.
+  // Drop text elements the AI left empty - keeps the design clean.
   const filtered = elements.filter(el => el.kind === 'image' || (el.text && el.text.trim()));
   return {
     id,
@@ -6153,7 +6303,7 @@ function materializeTemplateSlide(tmpl, slots, id) {
 }
 
 // Pass 1 of "generate a slide from a topic": the AI drafts the raw
-// content (title, bullets, notes, layout) — no positioning, no design
+// content (title, bullets, notes, layout) - no positioning, no design
 // yet. This gives the design pass the same anchor material that the
 // improve flow naturally has (the slide the user already built),
 // so both paths produce equally good final layouts.
@@ -6165,7 +6315,7 @@ Return this exact shape:
 {
   "title": "Short slide title under 10 words",
   "subtitle": "Optional 1-sentence supporting line, or empty string",
-  "bullets": ["5-7 complete-sentence points, each 20-35 words, explaining the concept in depth — not fragment labels, real teaching sentences. Use empty array only for title/quote slides."],
+  "bullets": ["5-7 complete-sentence points, each 20-35 words, explaining the concept in depth - not fragment labels, real teaching sentences. Use empty array only for title/quote slides."],
   "notes": "2-4 sentences of detailed speaker notes that elaborate on the body content",
   "layout": "title" | "content" | "summary" | "quote" | "freeform",
   "imageIdea": ""
@@ -6181,8 +6331,8 @@ Return this exact shape:
 
 // Shared pipeline used by BOTH "generate a new slide" AND "improve this
 // slide". The two endpoints differ only in what they do with the result
-// (insert vs replace). Everything else — the design prompt, retry loop,
-// validation, auto-fix, image resolution, searchQuery cleanup — is
+// (insert vs replace). Everything else - the design prompt, retry loop,
+// validation, auto-fix, image resolution, searchQuery cleanup - is
 // identical so outputs are equally good.
 async function composeAndFinalizeSlide({ users, email, deck, topic, instruction, priorSlide, targetId, fallbackTitle }) {
   const model = modelForUser(users[email], email);
@@ -6215,13 +6365,13 @@ async function aiComposeSlide(topic, seedContext, model, priorSlide = null) {
 
   for (let attempt = 0; attempt < 4; attempt++) {
     const issueBlock = lastIssues?.length
-      ? `\nThe previous draft had THESE issues — fix EVERY one of them:\n- ${lastIssues.join('\n- ')}\n`
+      ? `\nThe previous draft had THESE issues - fix EVERY one of them:\n- ${lastIssues.join('\n- ')}\n`
       : '';
     const priorBlock = priorSlide
       ? `\nCurrent slide you are improving:\n${JSON.stringify(priorSlide)}\n`
       : '';
     const user = `${seedContext}${priorBlock}${issueBlock}
-Compose a single slide about: "${topic}". Output ONLY the design-system JSON — background, notes, layout, elements[].`;
+Compose a single slide about: "${topic}". Output ONLY the design-system JSON - background, notes, layout, elements[].`;
 
     const result = await callGemini(
       SLIDE_DESIGN_SYSTEM,
@@ -6248,14 +6398,14 @@ Compose a single slide about: "${topic}". Output ONLY the design-system JSON —
     lastIssues = issues;
   }
 
-  // Loop exhausted — auto-fix the least-bad draft.
+  // Loop exhausted - auto-fix the least-bad draft.
   const fallback = bestCandidate ? autoFixSlide(bestCandidate) : null;
   return { slide: fallback, attempts: 4, issues: lastIssues || [], autoFixed: true };
 }
 
 // Clamps, validates, and normalizes an AI-composed slide. Critically:
 // ALWAYS persists an explicit background. Without one, the client
-// fell back to the app theme — and the validator's assumption of white
+// fell back to the app theme - and the validator's assumption of white
 // disagreed with a dark-themed render → black-on-black slides.
 function sanitizeComposedSlide(parsed, id, fallbackTopic) {
   const validColor = (c) => typeof c === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : null;
@@ -6287,7 +6437,7 @@ function sanitizeComposedSlide(parsed, id, fallbackTopic) {
     if (el.x + el.w > 100) el.w = Math.max(5, 100 - el.x);
     if (el.y + el.h > 100) el.h = Math.max(3, 100 - el.y);
   }
-  // Always run the mechanical contrast fixer — guarantees no unreadable
+  // Always run the mechanical contrast fixer - guarantees no unreadable
   // slide ever gets persisted, no matter what the AI produced.
   return autoFixSlide({
     id,
@@ -6384,11 +6534,11 @@ Slide JSON (elements are indexed by array position):
 ${JSON.stringify({ background: slide.background, elements: slide.elements }, null, 2)}
 
 Rules for your output:
-- Look at the IMAGE, not just the JSON — trust what you see.
+- Look at the IMAGE, not just the JSON - trust what you see.
 - If the text is unreadable on the background, fix it by changing the element color AND/OR the slide background.
 - If an element is cut off, overlapping another element, or visually cramped, reposition it.
 - If the hierarchy is flat, bump the most-important element's fontSize.
-- Keep it MINIMAL — only patch elements that actually need it.
+- Keep it MINIMAL - only patch elements that actually need it.
 - All coords are 0-100 percentages of the slide.
 
 Output ONLY JSON in this exact shape (no prose, no markdown):
@@ -6460,9 +6610,9 @@ Output ONLY JSON in this exact shape (no prose, no markdown):
 });
 
 // Update a slideshow (manual edits: rename, tweak slide content, reorder).
-// Body: { title?, subtitle?, slides? } — slides is the full replacement array.
+// Body: { title?, subtitle?, slides? } - slides is the full replacement array.
 // Retroactively re-design every slide in an existing deck via the bespoke
-// HTML pipeline. Useful for decks generated before HTML design was added —
+// HTML pipeline. Useful for decks generated before HTML design was added -
 // or for fixing up a deck where the user wants a fresh look without
 // changing the content.
 app.post('/api/slideshows/:id/redesign', authMiddleware, async (req, res) => {
@@ -6534,7 +6684,7 @@ app.put('/api/slideshows/:id', authMiddleware, (req, res) => {
             h: clamp(Number(el.h) || 10, 3, 100),
             text: validKind === 'text' ? String(el.text || '').slice(0, 1000) : '',
             src: validKind === 'image' ? String(el.src || '').slice(0, 2_000_000) : '',
-            // SVG markup — scripts/event handlers stripped.
+            // SVG markup - scripts/event handlers stripped.
             svg: validKind === 'svg' ? sanitizeSvg(String(el.svg || '')) : '',
             // Lucide icon name (e.g. "Lightbulb", "Rocket", "Leaf").
             iconName: validKind === 'icon' ? String(el.iconName || '').slice(0, 60) : '',
@@ -6588,7 +6738,7 @@ app.post('/api/images/generate', authMiddleware, async (req, res) => {
 // ===== Slideshow theme/font tokens (mirrored from client) =====
 // Kept in sync with src/components/desktop/apps/SlideshowApp.jsx so the
 // HTML-design prompt knows the actual color and typography palette the
-// renderer will apply. If these drift, slides will look off — keep them
+// renderer will apply. If these drift, slides will look off - keep them
 // in lock-step.
 const SLIDESHOW_THEMES = {
   newsprint: { mode: 'light', bg: '#fbf7f0', surface: '#f3ece0', border: '#d8cbb1', text: '#1a1a1a', muted: '#5b5443', faint: '#a8a08c', accent: '#9b1c1c', accent2: '#1a3a5c', font: 'editorial' },
@@ -6614,7 +6764,7 @@ const SLIDESHOW_FONTS = {
 // HTML sanitiser. We trust Gemini broadly but strip the obvious foot-guns:
 // scripts, on* event handlers, javascript: URLs, external <link>/<script>
 // references. Whitelist <img src> to https/data URLs only. Keep everything
-// else — Gemini's <style> blocks, <svg>, <div>, etc. are fine.
+// else - Gemini's <style> blocks, <svg>, <div>, etc. are fine.
 function sanitizeSlideHtml(raw) {
   if (!raw) return '';
   let html = String(raw).slice(0, 60_000);
@@ -6630,7 +6780,7 @@ function sanitizeSlideHtml(raw) {
   html = html.replace(/\s+on[a-z]+\s*=\s*[^\s>]+/gi, '');
   // Strip javascript: URLs anywhere.
   html = html.replace(/javascript\s*:/gi, '');
-  // Strip @import in <style> — would let model fetch external CSS.
+  // Strip @import in <style> - would let model fetch external CSS.
   html = html.replace(/@import\b[^;]*;?/gi, '');
   // Strip url(...) references that aren't data: or https: (no http://, no //)
   // Allow {{IMAGE}} placeholder verbatim.
@@ -6644,7 +6794,7 @@ function sanitizeSlideHtml(raw) {
 // leaving a near-empty slide.
 //
 // "Present" is a substring test on visible text (HTML tags stripped, case
-// insensitive). For body we sample the first ~20 chars — covers fragmented
+// insensitive). For body we sample the first ~20 chars - covers fragmented
 // rendering like <span>Struct</span>ured knowledge. For bullets/items we
 // require at least the leading word of each to appear.
 function checkSlideContentPresent(html, slide) {
@@ -6660,14 +6810,14 @@ function checkSlideContentPresent(html, slide) {
   const has = (needle) => {
     const s = String(needle || '').trim().toLowerCase();
     if (!s) return true;
-    // Match on the first 24 chars (or full string if shorter) — enough to
+    // Match on the first 24 chars (or full string if shorter) - enough to
     // disambiguate, short enough to survive minor punctuation rewrites.
     return visible.includes(s.slice(0, Math.min(24, s.length)));
   };
   const missing = [];
   // Title is required on every layout that has one.
   if (slide.title && !has(slide.title)) missing.push('title');
-  // Layouts where body is the whole point — missing body = empty slide.
+  // Layouts where body is the whole point - missing body = empty slide.
   const bodyRequired = !['title', 'section', 'bigText', 'quote'].includes(slide.layout);
   if (bodyRequired && slide.body && slide.body.length > 20 && !has(slide.body)) missing.push('body');
   // Bullets / items: require ≥70% present.
@@ -6682,12 +6832,12 @@ function checkSlideContentPresent(html, slide) {
   return { ok: missing.length === 0, missing };
 }
 
-// Pre-pass: one Pro call that writes a deck-wide design brief — shared mood,
+// Pre-pass: one Pro call that writes a deck-wide design brief - shared mood,
 // type scale, motif, accent rules, diagram style. Every per-slide call is
 // then handed this brief so the 10 slides feel like one deck instead of 10
 // random web pages. This is the single biggest visual-quality lever; on its
 // own it noticeably tightens the deck even without changing the per-slide
-// model. Returns null on failure — per-slide calls then run without a brief.
+// model. Returns null on failure - per-slide calls then run without a brief.
 async function generateDeckDesignBrief({ deck, theme, font }) {
   try {
     const p = buildDeckDesignBriefPrompt({ deck, theme, font });
@@ -6726,7 +6876,7 @@ async function generateBespokeHtmlForDeck({ deck, model, onProgress }) {
   const font = SLIDESHOW_FONTS[fontKey];
   const total = deck.slides.length;
   // Per-slide HTML uses Flash, not Pro. Pro on 10k-token bespoke HTML output
-  // aborted roughly half the time in practice — Pro is too slow for this
+  // aborted roughly half the time in practice - Pro is too slow for this
   // exact workload with the 360s ceiling. Flash + a Pro-written design
   // brief is both faster and far more reliable: the brief carries the
   // design intelligence, and Flash is plenty capable of implementing it.
@@ -6739,7 +6889,7 @@ async function generateBespokeHtmlForDeck({ deck, model, onProgress }) {
   onProgress?.({ phase: `Coding ${total} slides in HTML…`, pct: 86 });
 
   // Stage 2: per-slide HTML, parallel. Brief is shared context.
-  // Each slide gets up to TWO attempts — if the first attempt drops content
+  // Each slide gets up to TWO attempts - if the first attempt drops content
   // (a real failure mode where the model writes just title + decoration),
   // we retry once with a more pointed prompt. Beats shipping an empty slide.
   let completed = 0;
@@ -6764,9 +6914,9 @@ async function generateBespokeHtmlForDeck({ deck, model, onProgress }) {
     try {
       let result = await attempt(null);
       // Retry once if the model dropped required content (most common
-      // quality regression — title + decoration with no body/bullets).
+      // quality regression - title + decoration with no body/bullets).
       if (!result.ok && result.error === 'missing content') {
-        console.warn(`[slideshow-html] slide ${i} (${slide.layout}) missing content on attempt 1: ${result.presence.missing.join(', ')} — retrying`);
+        console.warn(`[slideshow-html] slide ${i} (${slide.layout}) missing content on attempt 1: ${result.presence.missing.join(', ')} - retrying`);
         result = await attempt(`Your previous attempt dropped these required fields: ${result.presence.missing.join(', ')}. Render them ALL in full. Do not output a title-only slide.`);
       }
       tickProgress();
@@ -6807,7 +6957,7 @@ async function generateBespokeHtmlForDeck({ deck, model, onProgress }) {
 // each one. We loop up to MAX_REVIEW_PASSES (2) or until the critic
 // returns "ship it" (no high-severity issues + score ≥ 9).
 //
-// We use the FLASH-LITE model for the critic — it's cheap, fast, and good
+// We use the FLASH-LITE model for the critic - it's cheap, fast, and good
 // at structured output. The reviser uses the same model the user picked
 // for generation, since it needs to write quality prose.
 const MAX_REVIEW_PASSES = 2;
@@ -6864,7 +7014,7 @@ async function reviewAndPolishDeck({ topic, parsed, model }) {
       break;
     }
     if (Array.isArray(revised?.slides) && revised.slides.length === parsed.slides.length) {
-      // Merge revised slides — preserve fields the reviser dropped.
+      // Merge revised slides - preserve fields the reviser dropped.
       parsed.slides = parsed.slides.map((orig, idx) => {
         const r = revised.slides[idx] || {};
         return {
@@ -6888,24 +7038,24 @@ app.post('/api/slideshows/improve-slide', authMiddleware, async (req, res) => {
     if (!slide) return res.status(400).json({ error: 'slide required' });
 
     const intentGuides = {
-      sharpen: 'Tighten and sharpen — cut filler, prefer punchy, concrete wording. Aim for ~20% fewer words while keeping every fact.',
-      expand: 'Add more substance — bring in concrete examples, numbers, or specifics. Bullets/items can grow up to one more line each. Do not pad with fluff.',
-      engaging: 'Make it more engaging — open with a hook, use vivid concrete language, prefer active voice. Keep the facts; lift the energy.',
-      bullets: 'Restructure into clear bullet points — convert body prose into 4–6 strong bullets, each starting with a key term in **bold**.',
+      sharpen: 'Tighten and sharpen - cut filler, prefer punchy, concrete wording. Aim for ~20% fewer words while keeping every fact.',
+      expand: 'Add more substance - bring in concrete examples, numbers, or specifics. Bullets/items can grow up to one more line each. Do not pad with fluff.',
+      engaging: 'Make it more engaging - open with a hook, use vivid concrete language, prefer active voice. Keep the facts; lift the energy.',
+      bullets: 'Restructure into clear bullet points - convert body prose into 4-6 strong bullets, each starting with a key term in **bold**.',
       polish: 'Polish grammar, flow, and word choice. Fix any awkward phrasing. Do not change meaning or content.',
-      simplify: 'Simplify — write so a smart non-expert gets it on first read. Shorter sentences, plain words, no jargon unless essential.',
+      simplify: 'Simplify - write so a smart non-expert gets it on first read. Shorter sentences, plain words, no jargon unless essential.',
     };
     const intentLine = intentGuides[intent] || 'Rewrite to be clearer, more impactful, and more substantive.';
 
-    const system = `You are an expert presentation editor. Given a single slide's content, rewrite it according to the user's specific intent below. Keep the same layout and general structure. Return ONLY valid JSON matching exactly the same fields provided — no extra keys, no commentary.
+    const system = `You are an expert presentation editor. Given a single slide's content, rewrite it according to the user's specific intent below. Keep the same layout and general structure. Return ONLY valid JSON matching exactly the same fields provided - no extra keys, no commentary.
 
 User intent: ${intentLine}
 
 Rules:
 - Titles: punchy, concrete, ≤ 8 words
-- Body prose: dense, specific, no filler — every sentence must earn its place. Prefer active voice.
+- Body prose: dense, specific, no filler - every sentence must earn its place. Prefer active voice.
 - Bullets: each starts with a strong verb or key term in **bold**, followed by a concise factual sentence
-- Items (cards/numbered): label ≤ 4 words, body 1–2 tight sentences with a concrete detail
+- Items (cards/numbered): label ≤ 4 words, body 1-2 tight sentences with a concrete detail
 - Preserve the layout field exactly`;
 
     const user = `Topic context: "${topic || 'unknown'}"\n\nSlide to improve:\n${JSON.stringify(slide, null, 2)}\n\nReturn the improved slide as JSON with the same fields.`;
@@ -6931,7 +7081,7 @@ app.post('/api/slideshows/generate', authMiddleware, async (req, res) => {
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
   const send = (obj) => { try { res.write(`data: ${JSON.stringify(obj)}\n\n`); res.flush?.(); } catch {} };
-  // Heartbeat every 8s — prevents Render's 30s idle-connection kill.
+  // Heartbeat every 8s - prevents Render's 30s idle-connection kill.
   const keepalive = setInterval(() => { try { res.write(': keepalive\n\n'); res.flush?.(); } catch {} }, 8000);
 
   try {
@@ -6949,8 +7099,8 @@ app.post('/api/slideshows/generate', authMiddleware, async (req, res) => {
       ? buildFlashSlideshowPrompt({ topic: topic.trim(), slideCount: Math.min(Number(slideCount) || 8, 10) })
       : buildSlideshowPrompt({ topic: topic.trim(), slideCount, difficulty, style, template, customInfo, sourceText: safeSourceText });
     // Flash: bumped to GEMINI_FLASH (not Lite) + 8k tokens so flash decks
-    // can actually carry substantive bodies/bullets — Lite + 4k was capping
-    // body fields at 1–2 sentences. Advanced: Pro + full prompt = ~90s.
+    // can actually carry substantive bodies/bullets - Lite + 4k was capping
+    // body fields at 1-2 sentences. Advanced: Pro + full prompt = ~90s.
     const model = genMode === 'flash' ? GEMINI_FLASH : GEMINI_PRO;
     console.log(`[slideshow-generate] mode=${genMode} model=${model}`);
     const maxTokens = genMode === 'flash' ? 8192 : 16384;
@@ -6968,7 +7118,7 @@ app.post('/api/slideshows/generate', authMiddleware, async (req, res) => {
       send({ type: 'error', error: 'AI response was malformed. Try again.' }); return res.end();
     }
 
-    // Flash skips review and bespoke HTML — one AI call, done in ~15s.
+    // Flash skips review and bespoke HTML - one AI call, done in ~15s.
     let reviewLog = [];
     if (genMode !== 'flash') {
       send({ type: 'progress', phase: 'Reviewing content…', pct: 55 });
@@ -6980,7 +7130,7 @@ app.post('/api/slideshows/generate', authMiddleware, async (req, res) => {
       'title','hero','content','summary','quote','stat','twoCol','section','split','freeform',
       // Google-Slides-grade additions: structured layouts the prompt now produces.
       'agenda','bullets','cards','numbered','compare','bigText',
-      // Image-forward layouts — picture is the visual element, not a wash.
+      // Image-forward layouts - picture is the visual element, not a wash.
       'imageHero','imageRight','imageLeft','imageFull',
     ];
     // Track HTML generation outcome so the client can show a status chip.
@@ -7028,7 +7178,7 @@ app.post('/api/slideshows/generate', authMiddleware, async (req, res) => {
       createdAt: new Date().toISOString(),
     };
 
-    // Flash skips bespoke HTML — uses template renderer, saves ~20s.
+    // Flash skips bespoke HTML - uses template renderer, saves ~20s.
     if (genMode !== 'flash') {
       send({ type: 'progress', phase: 'Drafting design brief…', pct: 80 });
       try {
@@ -7231,7 +7381,7 @@ app.post('/api/social/friends/add', authMiddleware, (req, res) => {
     // Already sent
     const existing = social.friendRequests.find(r => r.from === req.userId && r.to === friendId && r.status === 'pending');
     if (existing) return res.json({ status: 'already_sent' });
-    // Check if they sent us one — auto-accept
+    // Check if they sent us one - auto-accept
     const incoming = social.friendRequests.find(r => r.from === friendId && r.to === req.userId && r.status === 'pending');
     if (incoming) {
       incoming.status = 'accepted';
@@ -7413,10 +7563,10 @@ if (!existsSync(UPLOADS_DIR)) mkdirSync(UPLOADS_DIR, { recursive: true });
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 // =========================================================
-// FILE EXTRACT — generic endpoint the chat composer hits when the user
+// FILE EXTRACT - generic endpoint the chat composer hits when the user
 // drops a PDF / text file. Returns the extracted plain text so the
 // client can prepend it to the outgoing message. Images are NOT
-// extracted here — they go through the existing inline_data path
+// extracted here - they go through the existing inline_data path
 // (base64 in the message body) so Gemini sees the actual pixels.
 // =========================================================
 app.post('/api/files/extract', authMiddleware, upload.array('files', 5), async (req, res) => {
@@ -7454,7 +7604,7 @@ app.post('/api/files/extract', authMiddleware, upload.array('files', 5), async (
 // =========================================================
 // SOURCE-MATERIAL URL EXTRACTOR
 //
-// Stateless companion to /api/files/extract — fetches a single URL,
+// Stateless companion to /api/files/extract - fetches a single URL,
 // strips HTML to plain text, returns it. Used by the New-Curriculum
 // "Add sources" panel so the user can drop in textbook PDFs AND web
 // pages alongside the topic, and the curriculum-generation prompt
@@ -7528,7 +7678,7 @@ app.post('/api/sources/extract-url', authMiddleware, async (req, res) => {
 });
 
 // =========================================================
-// CURRICULUM EDIT — text instruction + optional PDF/text attachments
+// CURRICULUM EDIT - text instruction + optional PDF/text attachments
 // =========================================================
 app.post('/api/curriculum/:id/edit', authMiddleware, upload.array('files', 10), async (req, res) => {
   try {
@@ -7568,7 +7718,7 @@ app.post('/api/curriculum/:id/edit', authMiddleware, upload.array('files', 10), 
 
     // IMPORTANT: preserve chatHistory / phase / completion state. The model
     // only gets a SKELETON of the current curriculum (no per-lesson chat
-    // history — that would blow the context, and we don't want the model
+    // history - that would blow the context, and we don't want the model
     // rewriting it anyway).
     const skeleton = {
       id: curriculum.id,
@@ -7596,7 +7746,7 @@ RULES:
 - Preserve existing ids on units/lessons whenever you keep them. For new units/lessons generate new ids using the pattern "\${curriculumId}-u\${n}" and "\${curriculumId}-u\${n}-l\${m}" with sensible numbers.
 - Every unit must have a "lessons" array and "locked":false.
 - Every lesson must have "id", "title", "description", and "type" (one of: "lesson", "math_tutor", "practice", "essay", "unit_test"). "math_tutor" = step-by-step worked problems on a handwriting canvas (math only). "essay" = a graded short essay (scored against a rubric).
-- DO NOT invent user progress fields like chatHistory, isCompleted, score, phase — the server preserves those on the client side.
+- DO NOT invent user progress fields like chatHistory, isCompleted, score, phase - the server preserves those on the client side.
 - If the instruction is ambiguous, use your best judgment. Do NOT refuse.
 
 Return JSON with this exact shape:
@@ -7686,12 +7836,18 @@ Return JSON with this exact shape:
 });
 
 // (Standalone Textbooks app removed. Curriculum source-material upload
-// — PDF + URL ingestion at /api/files/extract and /api/sources/extract-url
-// — replaces it for the "give me a course aligned to this PDF" flow.)
+// - PDF + URL ingestion at /api/files/extract and /api/sources/extract-url
+// - replaces it for the "give me a course aligned to this PDF" flow.)
 
 // ===== ADMIN =====
 
 function isAdmin(userId) {
+  // Owners (OWNER_EMAILS) always have admin access. Legacy fallback:
+  // any social profile with the @goon handle stays admin too, since
+  // existing tooling relied on that.
+  const users = loadUsers();
+  const email = findEmailById(users, userId);
+  if (isOwner(email)) return true;
   const social = loadSocial();
   const profile = social.profiles[userId];
   return profile?.handle === 'goon';
@@ -7716,12 +7872,16 @@ function requireMessageQuota(req, res, next) {
   const cost = sourced ? 2 : 1;
   const result = consumeMessage(users, email, cost);
   if (!result.allowed) {
+    const upgradeKind = result.plan === 'free' ? 'refer' : 'upgrade';
+    const upgradeHint = upgradeKind === 'refer'
+      ? 'Refer 2 friends to unlock Plus-Lite (free) for higher limits.'
+      : 'Upgrade to the next plan for more daily messages.';
     return res.status(402).json({
       error: 'message_limit_reached',
       message: sourced
-        ? `A sourced answer costs 2 messages and you only have ${result.remaining} left today. Upgrade to Pro for unlimited.`
-        : `You've hit the free-plan daily limit of ${result.limit} messages. Upgrade to Pro for unlimited.`,
-      limit: result.limit, remaining: result.remaining, plan: result.plan,
+        ? `A sourced answer costs 2 messages and you only have ${result.remaining} left today. ${upgradeHint}`
+        : `You've hit today's message limit (${result.limit}). ${upgradeHint}`,
+      limit: result.limit, remaining: result.remaining, plan: result.plan, upgradeKind,
     });
   }
   saveUsers(users);
@@ -7769,7 +7929,7 @@ app.get('/api/lessons', authMiddleware, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Create a new standalone lesson (no AI generation — we just record the topic.
+// Create a new standalone lesson (no AI generation - we just record the topic.
 // The actual teaching happens in the chat endpoint below.)
 app.post('/api/lessons', authMiddleware, (req, res) => {
   try {
@@ -7869,7 +8029,7 @@ app.post('/api/lessons/:id/reset', authMiddleware, (req, res) => {
 });
 
 // =========================================================
-// STANDALONE-LESSON BLOCKS — same Claudius 4R/4Q + final SRS
+// STANDALONE-LESSON BLOCKS - same Claudius 4R/4Q + final SRS
 // flow as curriculum lessons, but without a parent unit/course.
 // Mirrors POST /api/curriculum/:id/lesson/:lessonId/blocks/* but
 // operates on users[email].data.lessons[].
@@ -7892,40 +8052,40 @@ app.post('/api/lessons/:id/blocks/generate', authMiddleware, async (req, res) =>
     const difficulty = lesson.difficulty || 'beginner';
     const blockCount = LESSON_BLOCK_COUNT[difficulty] || LESSON_BLOCK_COUNT.intermediate;
     const middleCount = blockCount - 2;
-    const sys = `You generate one complete lesson as ${blockCount} blocks. You pick the right MIX of block types for the topic — see the schema. Output ONLY valid JSON — no markdown, no fences, no commentary.`;
+    const sys = `You generate one complete lesson as ${blockCount} blocks. You pick the right MIX of block types for the topic - see the schema. Output ONLY valid JSON - no markdown, no fences, no commentary.`;
     const prompt = `Build a standalone lesson on "${lesson.topic || lesson.title}".
 Difficulty: ${difficulty}.
 
-EXACTLY ${blockCount} blocks total (this length is set by the difficulty — do not deviate). You decide the type of each MIDDLE block based on what best serves this topic. Pick a varied, motivated mix — not all the same type.
+EXACTLY ${blockCount} blocks total (this length is set by the difficulty - do not deviate). You decide the type of each MIDDLE block based on what best serves this topic. Pick a varied, motivated mix - not all the same type.
 
 FIXED slots:
-  Slot 1:  "reading"  — Core definition + framing of the topic. The simplest correct mental model. 350-500 words of markdown.
-  Slot ${blockCount}: "reading"  — Synthesis + edge cases. Surface 1-2 lingering subtleties. 350-500 words.
+  Slot 1:  "reading"  - Core definition + framing of the topic. The simplest correct mental model. 350-500 words of markdown.
+  Slot ${blockCount}: "reading"  - Synthesis + edge cases. Surface 1-2 lingering subtleties. 350-500 words.
 
-MIDDLE slots (slots 2 through ${blockCount - 1}, ${middleCount} blocks total) — pick from these types:
-  • "reading"     — A second teaching pass (mechanics, examples). 350-500 words of markdown.
-  • "quiz"        — 3 multiple-choice questions on what's been read so far.
-  • "example"     — A WORKED EXAMPLE. One concrete problem the student would face, broken into 3-5 numbered solution steps the student can reveal one at a time, then a short "now you try" prompt.
-  • "recap"       — A CONCEPT RECAP. 4-6 tight bullet points summarising what's been covered so far.
-  • "application" — A REAL-WORLD APPLICATION. 200-300 words of markdown showing where this concept shows up.
-  • "challenge"   — A STRETCH PROBLEM. A harder, non-obvious question with a hint and a full solution.
-  • "open"        — An OPEN-ANSWER prompt. A short question the student must answer in their own words (40-150 words). MUST include a 2-3 item rubric — each item is { label, criterion (one sentence describing what an A-grade response shows), weight (1-3) }.
-  • "discussion"  — AN AI DISCUSSION. The student chats back-and-forth with an AI tutor about what they just learned. Give a thoughtful opening question + 3-5 specific talking points the AI should hit across the conversation.
-  • "matching"    — A MATCHING MINIGAME. 5-7 pairs of terms and their definitions/examples the student matches by clicking. Great for vocabulary, formula↔meaning, or cause↔effect drills.
-  • "fill-blank"  — A FILL-IN-THE-BLANK exercise. 4-6 sentences with one key word/phrase omitted. The student types the missing piece. Good for keyword recall after a reading.
+MIDDLE slots (slots 2 through ${blockCount - 1}, ${middleCount} blocks total) - pick from these types:
+  • "reading"     - A second teaching pass (mechanics, examples). 350-500 words of markdown.
+  • "quiz"        - 3 multiple-choice questions on what's been read so far.
+  • "example"     - A WORKED EXAMPLE. One concrete problem the student would face, broken into 3-5 numbered solution steps the student can reveal one at a time, then a short "now you try" prompt.
+  • "recap"       - A CONCEPT RECAP. 4-6 tight bullet points summarising what's been covered so far.
+  • "application" - A REAL-WORLD APPLICATION. 200-300 words of markdown showing where this concept shows up.
+  • "challenge"   - A STRETCH PROBLEM. A harder, non-obvious question with a hint and a full solution.
+  • "open"        - An OPEN-ANSWER prompt. A short question the student must answer in their own words (40-150 words). MUST include a 2-3 item rubric - each item is { label, criterion (one sentence describing what an A-grade response shows), weight (1-3) }.
+  • "discussion"  - AN AI DISCUSSION. The student chats back-and-forth with an AI tutor about what they just learned. Give a thoughtful opening question + 3-5 specific talking points the AI should hit across the conversation.
+  • "matching"    - A MATCHING MINIGAME. 5-7 pairs of terms and their definitions/examples the student matches by clicking. Great for vocabulary, formula↔meaning, or cause↔effect drills.
+  • "fill-blank"  - A FILL-IN-THE-BLANK exercise. 4-6 sentences with one key word/phrase omitted. The student types the missing piece. Good for keyword recall after a reading.
 
 RULES for the middle ${middleCount} blocks:
   • Include AT LEAST 2 "quiz" blocks.
-  • Include AT LEAST ${middleCount >= 5 ? 3 : 2} NON-quiz, NON-reading types — mix freely from {example, recap, application, challenge, open, discussion, matching, fill-blank}.
+  • Include AT LEAST ${middleCount >= 5 ? 3 : 2} NON-quiz, NON-reading types - mix freely from {example, recap, application, challenge, open, discussion, matching, fill-blank}.
   • Include AT LEAST 1 "open" OR "discussion" block so the student has to express their understanding in their own words.
-  • For lessons of ${middleCount >= 4 ? '4+' : 'any'} middle blocks, include AT LEAST 1 INTERACTIVE type — pick from {matching, fill-blank, discussion} — so the lesson isn't just read-and-quiz.
-  • A "quiz" or "open" must follow material it can test — never put a checkpoint before the relevant teaching content.
+  • For lessons of ${middleCount >= 4 ? '4+' : 'any'} middle blocks, include AT LEAST 1 INTERACTIVE type - pick from {matching, fill-blank, discussion} - so the lesson isn't just read-and-quiz.
+  • A "quiz" or "open" must follow material it can test - never put a checkpoint before the relevant teaching content.
   • A "recap" comes AFTER at least one reading or example.
-  • A "discussion" should usually be near the end — it's most useful when the student has something to discuss.
+  • A "discussion" should usually be near the end - it's most useful when the student has something to discuss.
   • "matching" and "fill-blank" work best right after the reading that introduces the terms they test.
   • Sequence the blocks so the lesson flows naturally for a student new to the topic.
 
-SHAPES — each block's fields by type:
+SHAPES - each block's fields by type:
   reading:     {"type":"reading","title":"...","content":"<markdown>"}
   quiz:        {"type":"quiz","title":"...","questions":[{"prompt":"...","choices":["...","...","...","..."],"answer":"<exact text of correct choice>","explanation":"<1-2 sentences>"}, ...3 total...]}
   example:     {"type":"example","title":"...","problem":"<markdown problem statement>","steps":[{"label":"Step name","text":"<markdown>"}, ...3-5 total...],"tryThis":"<short prompt for student to try a variant>"}
@@ -7981,10 +8141,10 @@ app.post('/api/lessons/:id/blocks/final-quiz/generate', authMiddleware, async (r
 
     const missed = collectMissedFromLesson(lesson);
     const missedBlock = missed.length
-      ? `MISSED QUESTIONS FROM Q1-Q3 (use these as the spine of the final quiz — re-test the same concepts from a different angle, do NOT repeat the questions verbatim):\n${missed.map((m, i) => `  ${i + 1}. Prompt: ${m.prompt}\n     Student picked: ${m.userPicked}\n     Correct: ${m.correctAnswer}\n     Why it tripped them: ${m.explanation}`).join('\n')}`
+      ? `MISSED QUESTIONS FROM Q1-Q3 (use these as the spine of the final quiz - re-test the same concepts from a different angle, do NOT repeat the questions verbatim):\n${missed.map((m, i) => `  ${i + 1}. Prompt: ${m.prompt}\n     Student picked: ${m.userPicked}\n     Correct: ${m.correctAnswer}\n     Why it tripped them: ${m.explanation}`).join('\n')}`
       : `(The student got every Q1-Q3 question right. Push harder: 5 application / synthesis questions that integrate readings 1-4.)`;
 
-    const sys = `You write the FINAL QUIZ for a lesson — a 5-question multiple-choice quiz that integrates the whole lesson. Output ONLY valid JSON.`;
+    const sys = `You write the FINAL QUIZ for a lesson - a 5-question multiple-choice quiz that integrates the whole lesson. Output ONLY valid JSON.`;
     const prompt = `Lesson: "${lesson.topic || lesson.title}".
 Difficulty: ${lesson.difficulty || 'beginner'}.
 
@@ -7992,10 +8152,10 @@ ${missedBlock}
 
 Write 5 multiple-choice questions:
 - 3 of them must directly re-test the missed-concept areas from above (different angle, harder than the original question).
-- 2 of them must test synthesis — pulling ideas from at least 2 different readings together.
+- 2 of them must test synthesis - pulling ideas from at least 2 different readings together.
 
 Each question: a "prompt", 4 "choices" (no A) B) prefixes), an "answer" (the EXACT text of the correct choice), and an "explanation" (1-2 sentences naming the misconception each wrong option encodes).
-Distractors must be plausible — each wrong option encodes a real misconception.
+Distractors must be plausible - each wrong option encodes a real misconception.
 
 Return JSON exactly:
 { "questions": [ ...5 total... ] }`;
@@ -8071,7 +8231,7 @@ app.post('/api/lessons/:id/blocks/:bid/grade-open', authMiddleware, async (req, 
       : [{ label: 'Understanding', criterion: 'Demonstrates accurate understanding of the lesson concept.', weight: 1 }];
 
     const rubricLines = rubric.map((r, i) => `${i + 1}. [weight ${r.weight ?? 1}] ${r.label}: ${r.criterion}`).join('\n');
-    const system = `You are a rigorous but fair teacher grading a short-form open-answer prompt embedded in a lesson. Score each rubric criterion 0–100 based on what the student actually demonstrated. Be specific in feedback.
+    const system = `You are a rigorous but fair teacher grading a short-form open-answer prompt embedded in a lesson. Score each rubric criterion 0-100 based on what the student actually demonstrated. Be specific in feedback.
 
 Output STRICT JSON only.`;
     const userMsg = `LESSON: "${lesson.topic || lesson.title}".
@@ -8171,7 +8331,7 @@ app.post('/api/lessons/:id/blocks/:bid/complete', authMiddleware, (req, res) => 
   }
 });
 
-// Chat (SSE) — free-form single-lesson teaching. No phases; AI decides when done via [LESSON_DONE].
+// Chat (SSE) - free-form single-lesson teaching. No phases; AI decides when done via [LESSON_DONE].
 app.post('/api/lessons/:id/chat', authMiddleware, requireMessageQuota, async (req, res) => {
   try {
     const { message, sourced, images } = req.body || {};
@@ -8209,7 +8369,7 @@ app.post('/api/lessons/:id/chat', authMiddleware, requireMessageQuota, async (re
       if (sources && sources.length) assistantMsg.sources = sources;
       lesson.chatHistory.push(assistantMsg);
 
-      // Completion — AI-decided. Accepts [LESSON_DONE] (new) and [LESSON_COMPLETE] (legacy).
+      // Completion - AI-decided. Accepts [LESSON_DONE] (new) and [LESSON_COMPLETE] (legacy).
       // Gemini sometimes wraps the JSON in code fences and source-mode inserts
       // [n] citation markers in the text, so we sanitize before matching.
       const cleaned = fullContent
@@ -8239,13 +8399,13 @@ app.post('/api/lessons/:id/chat', authMiddleware, requireMessageQuota, async (re
             }
           } catch (e) { console.warn('lesson completionData parse failed:', e.message); }
         } else {
-          // No JSON blob — still record a minimal completion so the client
+          // No JSON blob - still record a minimal completion so the client
           // gets a consistent shape to render the completion banner.
           lesson.completionData = lesson.completionData || { xpEarned: 20, summary: 'Lesson completed.' };
           users[email].data.profile.xp = (users[email].data.profile.xp || 0) + 20;
         }
 
-        // Streak bookkeeping — defensive so a bad field can't kill the save below.
+        // Streak bookkeeping - defensive so a bad field can't kill the save below.
         try {
           const today = new Date().toISOString().slice(0, 10);
           const streaks = users[email].data.studyStreaks;
@@ -8261,7 +8421,7 @@ app.post('/api/lessons/:id/chat', authMiddleware, requireMessageQuota, async (re
         } catch (e) { console.warn('lesson streak bookkeeping failed:', e.message); }
       }
 
-      // Always persist — whether the lesson completed or not, chat history
+      // Always persist - whether the lesson completed or not, chat history
       // + isCompleted flag + streak updates all need to survive.
       try { saveUsers(users); } catch (e) { console.error('saveUsers failed:', e.message); }
     }, tierModel, { enableWebSearch: !!req.sourced });
@@ -8273,7 +8433,7 @@ app.post('/api/lessons/:id/chat', authMiddleware, requireMessageQuota, async (re
 
 
 // =========================================================
-// MATH TUTOR — single endpoint, stateless from the server's POV.
+// MATH TUTOR - single endpoint, stateless from the server's POV.
 // The client owns the conversation history (so users can fork / edit freely)
 // and passes it in on each turn along with topic + custom instructions.
 // =========================================================
@@ -8311,7 +8471,7 @@ app.post('/api/math-tutor/chat', authMiddleware, requireMessageQuota, async (req
       systemPrompt,
       aiMessages,
       async () => {
-        // No server-side persistence — client holds state. Just consume the quota.
+        // No server-side persistence - client holds state. Just consume the quota.
       },
       tierModel,
       { enableWebSearch: false },
@@ -8364,7 +8524,153 @@ app.get('/api/billing/status', authMiddleware, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Create a Stripe Checkout session. Frontend redirects to `url`.
+// Public: pricing config - what the client needs to render the tier
+// picker. Each entry tells the frontend whether the tier is buyable
+// (priceId present) and how to label/price it.
+// Per-user usage snapshot for the Upgrade popover.
+// Returns the caller's current plan, the LIMITS row for it, AND how
+// much they've already used in the current day / week buckets so the
+// UI can render "X / Y" gauges per resource.
+app.get('/api/billing/usage', authMiddleware, (req, res) => {
+  const users = loadUsers();
+  const email = findEmailById(users, req.userId);
+  if (!email) return res.status(404).json({ error: 'User not found' });
+  users[email].data = migrateUserData(users[email].data);
+  ensureUsageBucket(users[email]);
+  const plan = getPlan(users[email], email);
+  const limits = LIMITS[plan] || LIMITS.free;
+  const u = users[email].data;
+  res.json({
+    plan,
+    limits,
+    used: {
+      dailyMessages: u.usage?.messages || 0,
+      dailyQB: u.usage?.quizBowlGames || 0,
+      weeklyCurricula: u.usage?.curricula || 0,
+      weeklyDebates: u.usage?.debates || 0,
+      noteMaps: (u.noteMaps || []).length,
+    },
+  });
+});
+
+app.get('/api/billing/tiers', (req, res) => {
+  res.json({
+    tiers: {
+      free: {
+        id: 'free', label: 'Free', amountUsd: 0, interval: 'month', mode: null, buyable: false,
+        limits: LIMITS.free,
+      },
+      // Referral unlock - never billed, never bought via Stripe. The
+      // amountUsd is displayed as "value", not a price; the unlock copy
+      // ("Refer 2 friends") is rendered on the client.
+      'plus-lite': {
+        id: 'plus-lite', label: 'Plus-Lite', amountUsd: 2, interval: 'month', mode: null,
+        buyable: false, unlock: 'referral', referralsRequired: REFERRAL_THRESHOLD,
+        limits: LIMITS['plus-lite'],
+      },
+      plus: {
+        id: 'plus', label: 'Plus', amountUsd: TIER_PRICES.plus.amountUsd, interval: 'month',
+        mode: TIER_PRICES.plus.mode, buyable: !!TIER_PRICES.plus.priceId,
+        limits: LIMITS.plus,
+      },
+      lifetime: {
+        id: 'lifetime', label: 'Lifetime', amountUsd: TIER_PRICES.lifetime.amountUsd, interval: 'once',
+        mode: TIER_PRICES.lifetime.mode, buyable: !!TIER_PRICES.lifetime.priceId,
+        limits: LIMITS.lifetime,
+      },
+      pro: {
+        id: 'pro', label: 'Pro', amountUsd: TIER_PRICES.pro.amountUsd, interval: 'month',
+        mode: TIER_PRICES.pro.mode, buyable: !!TIER_PRICES.pro.priceId,
+        limits: LIMITS.pro,
+      },
+    },
+  });
+});
+
+// ===== Referrals =====
+// GET /api/referral/my-code - returns the caller's own code + how many
+// people have redeemed it and how many more are needed to unlock the
+// Plus-Lite tier. Client uses this on Settings + the top bar so the
+// progress is visible.
+app.get('/api/referral/my-code', authMiddleware, (req, res) => {
+  const users = loadUsers();
+  const email = findEmailById(users, req.userId);
+  if (!email) return res.status(404).json({ error: 'User not found' });
+  users[email].data = migrateUserData(users[email].data);
+  const d = users[email].data;
+  // migrate stamped a code if missing, but persist any new one.
+  saveUsers(users);
+  res.json({
+    code: d.referralCode,
+    referralsUsed: d.referralsUsed || 0,
+    referralsRequired: REFERRAL_THRESHOLD,
+    unlocked: (d.referralsUsed || 0) >= REFERRAL_THRESHOLD,
+    redeemedCode: d.referredBy || null,
+  });
+});
+
+// POST /api/referral/redeem { code } - current user redeems someone
+// else's code. Rules:
+//   - code is exactly REFERRAL_CODE_LEN alphanumeric chars
+//   - code must exist on some other account
+//   - caller hasn't redeemed any code before (one per lifetime)
+//   - caller is not the owner of the code (no self-referral)
+// On success: caller.referredBy = code, owner.referralsUsed += 1.
+app.post('/api/referral/redeem', authMiddleware, (req, res) => {
+  const raw = (req.body?.code || '').toString().toUpperCase().trim();
+  if (!/^[A-Z0-9]{8}$/.test(raw)) {
+    return res.status(400).json({ error: 'invalid_format', message: 'Codes are 8 letters or numbers.' });
+  }
+  const users = loadUsers();
+  const myEmail = findEmailById(users, req.userId);
+  if (!myEmail) return res.status(404).json({ error: 'User not found' });
+  users[myEmail].data = migrateUserData(users[myEmail].data);
+
+  // Already redeemed once? Hard stop - one redemption per user, forever.
+  if (users[myEmail].data.referredBy) {
+    return res.status(409).json({
+      error: 'already_redeemed',
+      message: 'You\'ve already used a referral code.',
+      code: users[myEmail].data.referredBy,
+    });
+  }
+
+  // Self-referral guard.
+  if (users[myEmail].data.referralCode === raw) {
+    return res.status(400).json({ error: 'self_referral', message: 'You can\'t redeem your own code.' });
+  }
+
+  // Find the owner.
+  const ownerEmail = Object.keys(users).find(e => users[e].data?.referralCode === raw);
+  if (!ownerEmail) {
+    return res.status(404).json({ error: 'not_found', message: 'That code doesn\'t match any account.' });
+  }
+  users[ownerEmail].data = migrateUserData(users[ownerEmail].data);
+
+  // Apply: stamp redemption + bump the owner's counter.
+  users[myEmail].data.referredBy = raw;
+  users[ownerEmail].data.referralsUsed = (users[ownerEmail].data.referralsUsed || 0) + 1;
+
+  saveUsers(users);
+
+  const ownerUnlocked = users[ownerEmail].data.referralsUsed >= REFERRAL_THRESHOLD;
+  res.json({
+    ok: true,
+    redeemedCode: raw,
+    ownerReferralsUsed: users[ownerEmail].data.referralsUsed,
+    ownerUnlocked,
+    // The redeemer doesn't get an instant boost themselves - they get
+    // a tiny welcome bump (1 extra free message + 1 QB game today) so
+    // the action feels rewarding. The owner gets the real prize.
+    welcomeBonus: { messages: 1, quizBowlGames: 1 },
+  });
+});
+
+// Create a Stripe Checkout session for a specific tier. Body shape:
+//   { tier: 'plus' | 'pro' | 'lifetime' }
+// Subscriptions use mode='subscription'; the one-time Lifetime charge
+// uses mode='payment'. Legacy callers that POST no body still work -
+// they fall back to the Pro monthly tier.
 app.post('/api/billing/create-checkout-session', authMiddleware, async (req, res) => {
   if (!stripe) return res.status(500).json({ error: 'Stripe not configured' });
   try {
@@ -8373,7 +8679,14 @@ app.post('/api/billing/create-checkout-session', authMiddleware, async (req, res
     if (!email) return res.status(404).json({ error: 'User not found' });
     users[email].data = migrateUserData(users[email].data);
 
-    // Reuse or create Stripe customer
+    const requestedTier = (req.body?.tier || 'pro').toLowerCase();
+    const cfg = TIER_PRICES[requestedTier];
+    if (!cfg) return res.status(400).json({ error: 'unknown_tier', tier: requestedTier });
+    if (!cfg.priceId && !STRIPE_PRICE_ID) {
+      return res.status(500).json({ error: `tier "${requestedTier}" has no Stripe price configured` });
+    }
+
+    // Reuse or create Stripe customer.
     let customerId = users[email].data.stripeCustomerId;
     if (!customerId) {
       const customer = await stripe.customers.create({
@@ -8386,34 +8699,24 @@ app.post('/api/billing/create-checkout-session', authMiddleware, async (req, res
       saveUsers(users);
     }
 
-    // Use a preconfigured STRIPE_PRICE_ID if set, otherwise create an inline
-    // price so the user can test without pre-provisioning anything in Stripe.
-    let priceConfig;
-    if (STRIPE_PRICE_ID) {
-      priceConfig = { price: STRIPE_PRICE_ID };
-    } else {
-      const usd = Number(process.env.PRO_PRICE_USD || '10');
-      priceConfig = {
-        price_data: {
-          currency: 'usd',
-          recurring: { interval: 'month' },
-          product_data: { name: 'RushilAI Pro', description: 'Unlimited messages, Gemini 3.1 Pro, unlimited Quiz Bowl, Pro badge.' },
-          unit_amount: Math.round(usd * 100),
-        },
-      };
-    }
-
+    const priceId = cfg.priceId || STRIPE_PRICE_ID;
     const origin = req.headers.origin || `http://localhost:${PORT}`;
     const session = await stripe.checkout.sessions.create({
-      mode: 'subscription',
+      mode: cfg.mode,
       customer: customerId,
-      line_items: [{ ...priceConfig, quantity: 1 }],
-      success_url: `${origin}/?upgraded=1`,
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: `${origin}/?upgraded=1&tier=${requestedTier}`,
       cancel_url: `${origin}/?upgraded=0`,
-      metadata: { userId: req.userId },
+      // The webhook reads `metadata.tier` to decide which plan to set
+      // when a subscription event arrives - without it, a Plus
+      // subscription would be indistinguishable from a Pro one.
+      metadata: { userId: req.userId, tier: requestedTier },
+      ...(cfg.mode === 'subscription'
+        ? { subscription_data: { metadata: { userId: req.userId, tier: requestedTier } } }
+        : {}),
       allow_promotion_codes: true,
     });
-    res.json({ url: session.url, id: session.id });
+    res.json({ url: session.url, id: session.id, tier: requestedTier });
   } catch (e) {
     console.error('checkout session failed', e);
     res.status(500).json({ error: e.message });
@@ -8421,7 +8724,7 @@ app.post('/api/billing/create-checkout-session', authMiddleware, async (req, res
 });
 
 // Verify Stripe subscription status on-demand. Called by the frontend
-// when the user returns from Checkout — works WITHOUT a configured
+// when the user returns from Checkout - works WITHOUT a configured
 // webhook, which is why Pro wasn't activating before.
 app.post('/api/billing/sync', authMiddleware, async (req, res) => {
   if (!stripe) return res.status(500).json({ error: 'Stripe not configured' });
@@ -8431,7 +8734,7 @@ app.post('/api/billing/sync', authMiddleware, async (req, res) => {
     if (!email) return res.status(404).json({ error: 'User not found' });
     users[email].data = migrateUserData(users[email].data);
     let customerId = users[email].data.stripeCustomerId;
-    // Payment Link creates a fresh customer — look it up by email if we don't have one yet.
+    // Payment Link creates a fresh customer - look it up by email if we don't have one yet.
     if (!customerId) {
       try {
         const found = await stripe.customers.list({ email, limit: 5 });
@@ -8459,7 +8762,7 @@ app.post('/api/billing/sync', authMiddleware, async (req, res) => {
         ? new Date(active.current_period_end * 1000).toISOString()
         : new Date(Date.now() + 35 * 86400000).toISOString();
     } else {
-      // No active sub — but don't downgrade owner-granted Pro
+      // No active sub - but don't downgrade owner-granted Pro
       if (users[email].data.proGrantedBy === 'stripe') {
         users[email].data.plan = 'free';
         users[email].data.proUntil = null;
@@ -8520,10 +8823,22 @@ async function handleStripeWebhook(req, res) {
       return key ? { email: key, user: users[key] } : null;
     }
 
+    // Map a Stripe Price object → our internal tier id ('plus' | 'pro' |
+    // 'lifetime'). Falls back to whatever tier metadata the checkout
+    // session set ('tier' in subscription_data.metadata), then to 'pro'
+    // for legacy events that predate the multi-tier setup.
+    function tierFromPriceId(priceId, fallback = 'pro') {
+      if (!priceId) return fallback;
+      for (const [tier, cfg] of Object.entries(TIER_PRICES)) {
+        if (cfg.priceId && cfg.priceId === priceId) return tier;
+      }
+      return fallback;
+    }
+
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
-      // Payment Links create fresh Stripe customers — fall back to email lookup
-      // so link-based payments still activate Pro for the right user.
+      // Payment Links create fresh Stripe customers - fall back to email lookup
+      // so link-based payments still activate the right tier for the right user.
       let entry = userByCustomer(session.customer);
       if (!entry) {
         const email = session.customer_email || session.customer_details?.email;
@@ -8535,12 +8850,22 @@ async function handleStripeWebhook(req, res) {
       }
       if (entry) {
         entry.user.data = migrateUserData(entry.user.data);
-        entry.user.data.plan = 'pro';
-        entry.user.data.proGrantedBy = 'stripe';
-        entry.user.data.stripeSubscriptionId = session.subscription || null;
-        // Subscriptions don't give an end date on this event — we set a
-        // 35-day grace. The subscription.updated webhook will refine it.
-        entry.user.data.proUntil = new Date(Date.now() + 35 * 86400000).toISOString();
+        const tier = session.metadata?.tier || (session.mode === 'payment' ? 'lifetime' : 'pro');
+        if (tier === 'lifetime' || session.mode === 'payment') {
+          // One-time Lifetime purchase - sticky forever, never expires.
+          entry.user.data.plan = 'lifetime';
+          entry.user.data.proGrantedBy = 'stripe';
+          entry.user.data.lifetimePurchasedAt = new Date().toISOString();
+          entry.user.data.proUntil = null;
+        } else {
+          // Subscription (Plus or Pro). The subscription.updated event
+          // will refine proUntil to the actual period_end; we set a 35-day
+          // grace here so the upgrade is felt immediately.
+          entry.user.data.plan = (tier === 'plus') ? 'plus' : 'pro';
+          entry.user.data.proGrantedBy = 'stripe';
+          entry.user.data.stripeSubscriptionId = session.subscription || null;
+          entry.user.data.proUntil = new Date(Date.now() + 35 * 86400000).toISOString();
+        }
         saveUsers(users);
       }
     }
@@ -8560,17 +8885,25 @@ async function handleStripeWebhook(req, res) {
       }
       if (entry) {
         entry.user.data = migrateUserData(entry.user.data);
-        entry.user.data.stripeSubscriptionId = sub.id;
-        if (sub.status === 'active' || sub.status === 'trialing') {
-          entry.user.data.plan = 'pro';
-          entry.user.data.proGrantedBy = 'stripe';
-          const periodEnd = sub.current_period_end ? new Date(sub.current_period_end * 1000) : null;
-          entry.user.data.proUntil = periodEnd ? periodEnd.toISOString() : null;
-        } else if (sub.status === 'canceled' || sub.status === 'unpaid' || sub.status === 'incomplete_expired') {
-          entry.user.data.plan = 'free';
-          entry.user.data.proUntil = null;
+        // Lifetime trumps everything - don't downgrade a lifetime user
+        // if a subscription event happens to flow through for them.
+        if (entry.user.data.plan === 'lifetime' || entry.user.data.lifetimePurchasedAt) {
+          saveUsers(users);
+        } else {
+          entry.user.data.stripeSubscriptionId = sub.id;
+          const subPriceId = sub.items?.data?.[0]?.price?.id;
+          const tier = sub.metadata?.tier || tierFromPriceId(subPriceId, 'pro');
+          if (sub.status === 'active' || sub.status === 'trialing') {
+            entry.user.data.plan = (tier === 'plus') ? 'plus' : 'pro';
+            entry.user.data.proGrantedBy = 'stripe';
+            const periodEnd = sub.current_period_end ? new Date(sub.current_period_end * 1000) : null;
+            entry.user.data.proUntil = periodEnd ? periodEnd.toISOString() : null;
+          } else if (sub.status === 'canceled' || sub.status === 'unpaid' || sub.status === 'incomplete_expired') {
+            entry.user.data.plan = 'free';
+            entry.user.data.proUntil = null;
+          }
+          saveUsers(users);
         }
-        saveUsers(users);
       }
     }
 
@@ -8579,9 +8912,13 @@ async function handleStripeWebhook(req, res) {
       const entry = userByCustomer(sub.customer);
       if (entry) {
         entry.user.data = migrateUserData(entry.user.data);
-        entry.user.data.plan = 'free';
-        entry.user.data.proUntil = null;
-        entry.user.data.stripeSubscriptionId = null;
+        // Same lifetime guard - a deleted subscription shouldn't strip
+        // a Lifetime grant.
+        if (entry.user.data.plan !== 'lifetime' && !entry.user.data.lifetimePurchasedAt) {
+          entry.user.data.plan = 'free';
+          entry.user.data.proUntil = null;
+          entry.user.data.stripeSubscriptionId = null;
+        }
         saveUsers(users);
       }
     }
@@ -8601,17 +8938,25 @@ function ownerMiddleware(req, res, next) {
   next();
 }
 
+// Owner grant - body { userId|email, tier, until }. `tier` defaults to
+// 'pro' for back-compat with the original /grant-pro semantics. Lifetime
+// grants also stamp `lifetimePurchasedAt` so the user model treats them
+// as permanent (not just a sub with no end date).
 app.post('/api/owner/grant-pro', authMiddleware, ownerMiddleware, (req, res) => {
-  const { userId, email: targetEmail, until } = req.body || {};
+  const { userId, email: targetEmail, until, tier: requestedTier } = req.body || {};
+  const tier = ['plus-lite', 'plus', 'pro', 'lifetime'].includes(requestedTier) ? requestedTier : 'pro';
   const users = loadUsers();
   let email = targetEmail && users[targetEmail] ? targetEmail : findEmailById(users, userId);
   if (!email) return res.status(404).json({ error: 'User not found' });
   users[email].data = migrateUserData(users[email].data);
-  users[email].data.plan = 'pro';
+  users[email].data.plan = tier;
   users[email].data.proGrantedBy = 'owner';
-  users[email].data.proUntil = until || null; // null = untimed
+  users[email].data.proUntil = (tier === 'lifetime') ? null : (until || null);
+  if (tier === 'lifetime') {
+    users[email].data.lifetimePurchasedAt = users[email].data.lifetimePurchasedAt || new Date().toISOString();
+  }
   saveUsers(users);
-  res.json({ success: true, user: { email, plan: users[email].data.plan, proUntil: users[email].data.proUntil } });
+  res.json({ success: true, user: { email, plan: users[email].data.plan, proUntil: users[email].data.proUntil, lifetimePurchasedAt: users[email].data.lifetimePurchasedAt } });
 });
 
 app.post('/api/owner/revoke-pro', authMiddleware, ownerMiddleware, (req, res) => {
@@ -8623,6 +8968,9 @@ app.post('/api/owner/revoke-pro', authMiddleware, ownerMiddleware, (req, res) =>
   users[email].data.plan = 'free';
   users[email].data.proUntil = null;
   users[email].data.proGrantedBy = null;
+  // Revoke clears Lifetime too - admin escape hatch for chargebacks /
+  // refunds. The Stripe-side refund happens separately.
+  users[email].data.lifetimePurchasedAt = null;
   saveUsers(users);
   res.json({ success: true });
 });
@@ -8633,7 +8981,7 @@ app.get('/api/admin/check', authMiddleware, (req, res) => {
 });
 
 // List all users
-// Match any auto-created demo user — landing-page mini-OS spins up a
+// Match any auto-created demo user - landing-page mini-OS spins up a
 // throwaway user per tab, and the legacy `dev@covalent.test` fixture.
 // We filter them out of the admin list so the panel isn't flooded.
 function isDemoOrDevEmail(email) {
@@ -8644,7 +8992,7 @@ function isDemoOrDevEmail(email) {
 app.get('/api/admin/users', authMiddleware, adminMiddleware, (req, res) => {
   const users = loadUsers();
   const social = loadSocial();
-  // ?includeDemo=1 — admin panel toggle to show/hide demo-landing-*
+  // ?includeDemo=1 - admin panel toggle to show/hide demo-landing-*
   // and *@covalent.test throwaway accounts. Default OFF so the panel
   // isn't flooded under normal use.
   const includeDemo = req.query.includeDemo === '1' || req.query.includeDemo === 'true';
@@ -8748,12 +9096,12 @@ app.get('/api/admin/users/:uid', authMiddleware, adminMiddleware, (req, res) => 
       notes: (u.data?.notes || []).map(n => ({ id: n.id, title: n.title, type: n.type, updatedAt: n.updatedAt })),
       goals: (u.data?.goals || []).map(g => ({ id: g.id, title: g.title, status: g.status })),
       flashcardDecks: (u.data?.flashcardDecks || []).map(d => ({ id: d.id, title: d.title, cardCount: d.cards?.length || 0 })),
-      // Study sessions (metadata only — full content via /chats/study/:sid)
+      // Study sessions (metadata only - full content via /chats/study/:sid)
       studySessions: (u.data?.studySessions || []).map(s => ({
         id: s.id, title: s.title, messageCount: (s.messages || []).length,
         createdAt: s.createdAt, updatedAt: s.updatedAt,
       })),
-      // Standalone Lessons app — include a summary of the generated
+      // Standalone Lessons app - include a summary of the generated
       // blocks so admins can see WHAT the lesson actually contains, not
       // just the title. Block bodies are trimmed to keep the payload sane.
       standaloneLessons: (u.data?.lessons || []).map(l => ({
@@ -8810,7 +9158,7 @@ app.get('/api/admin/users/:uid', authMiddleware, adminMiddleware, (req, res) => 
       ),
       // Streaks / daily activity
       studyStreaks: u.data?.studyStreaks || null,
-      // Debate history — multiplayer / tournament matches the user has
+      // Debate history - multiplayer / tournament matches the user has
       // finished. Recorded by recordDebateHistoryEntry on match end.
       // Lives on the user document (u.debateHistory), not under u.data.
       debateHistory: (u.debateHistory || []).slice(0, 50).map(d => ({
@@ -8903,7 +9251,7 @@ app.delete('/api/admin/users/:uid', authMiddleware, adminMiddleware, (req, res) 
   const users = loadUsers();
   const email = Object.keys(users).find(e => users[e].id === req.params.uid);
   if (!email) return res.status(404).json({ error: 'User not found' });
-  // Demo / dev accounts are hidden from the panel and cannot be deleted —
+  // Demo / dev accounts are hidden from the panel and cannot be deleted -
   // wiping them mid-session would break the landing-page mini OS for
   // everyone currently using it.
   if (isDemoOrDevEmail(email)) return res.status(403).json({ error: 'Demo / dev accounts are protected. They\u2019re hidden from the panel and cannot be deleted.' });
@@ -8928,7 +9276,7 @@ app.get('/api/health', (req, res) => {
 
 
 // =========================================================
-// QUIZ BOWL — Head-to-head buzz multiplayer.
+// QUIZ BOWL - Head-to-head buzz multiplayer.
 //
 // Design choices to eliminate the lag that killed the old version:
 //   - NO POLLING. Clients subscribe to an SSE stream per match and server
@@ -8943,7 +9291,7 @@ app.get('/api/health', (req, res) => {
 const matches = new Map(); // matchId (code) -> state
 
 // =========================================================
-// QBReader integration — pull real, human-written pyramidal tossups
+// QBReader integration - pull real, human-written pyramidal tossups
 // from qbreader.org's public /api/random-tossup endpoint. Used by:
 //   - Solo Quiz Bowl ("Past QB questions" mode in QuizBowlApp)
 //   - (Optionally) multiplayer match start, when host picks QBReader.
@@ -8990,7 +9338,7 @@ function qbExtractAllAnswers(answerHtml) {
   return out;
 }
 // Pull the NAQT power mark "(*)" out of a tossup. Returns the cleaned
-// display text plus the word index at the mark — the cutoff for +15
+// display text plus the word index at the mark - the cutoff for +15
 // vs +10 scoring. If the source has no mark, powerWordIndex is null
 // and the question simply scores +10/-5/0 with no power bonus path.
 // Recognises common variants: "(*)", "( * )", "( *)", "(* )".
@@ -9054,7 +9402,7 @@ async function fetchQBReaderTossups({ count = 10, category = 'Mixed', difficulty
 
 // ===== QUIZ BOWL HISTORY / RECOMMENDATIONS =====
 //
-// `quizbowlSets` lives on user.data — each completed solo set is saved
+// `quizbowlSets` lives on user.data - each completed solo set is saved
 // here so the QuizBowl hub view can show past sets, category-level
 // performance, and recommend training rounds against the player's
 // weakest categories. Multiplayer matches are not saved here (those
@@ -9082,13 +9430,13 @@ function computeQBCategoryStats(sets) {
 // SECRET STUDENT PROFILE
 // ============================================================
 // A hidden model of the student kept server-side, updated after every
-// completed set. The student never sees this directly — it just biases
+// completed set. The student never sees this directly - it just biases
 // the packet recommendations toward their actual weak spots.
 // ============================================================
 
 // Trim a tossup answer down to a stable key. QBReader answers come back
 // with parenthetical pronouns, "or X" alternates, [accept Y] notes, and
-// case variation — we collapse all of that so "(George) Washington" and
+// case variation - we collapse all of that so "(George) Washington" and
 // "washington" map to the same answer-object.
 function normalizeAnswerKey(raw) {
   if (!raw || typeof raw !== 'string') return '';
@@ -9115,7 +9463,7 @@ function classifyBuzzStyle(avgPosition) {
 
 // Roll a single saved set into the student's secret profile. Mutates the
 // profile in place. Safe to call on a fresh empty profile or a populated
-// one — uses incremental averages so we never need to replay history.
+// one - uses incremental averages so we never need to replay history.
 function updateSecretProfile(profile, entry) {
   if (!profile || !entry || !Array.isArray(entry.perQuestion)) return;
 
@@ -9152,7 +9500,7 @@ function updateSecretProfile(profile, entry) {
     cp.recentAccuracy = Math.round((cp.recent.filter(Boolean).length / cp.recent.length) * 100);
     cp.lastSeenAt = entry.finishedAt || new Date().toISOString();
 
-    // Buzz position for this category — only count actual buzzes (>=0).
+    // Buzz position for this category - only count actual buzzes (>=0).
     if (typeof q.buzzWord === 'number' && q.buzzWord >= 0 && typeof q.totalWords === 'number' && q.totalWords > 0) {
       const pos = Math.round((q.buzzWord / q.totalWords) * 100);
       cp.buzzPositions.push(pos);
@@ -9207,7 +9555,7 @@ function updateSecretProfile(profile, entry) {
     .slice(0, 5);
 
   // Struggle: seen 2+ times, missed at least half. These are the
-  // highest-leverage drill targets — the student keeps tripping on them.
+  // highest-leverage drill targets - the student keeps tripping on them.
   profile.struggleTopics = Object.entries(profile.answerProfile)
     .filter(([, v]) => v.seen >= 2 && v.correct / v.seen < 0.5)
     .sort(([, a], [, b]) => (a.correct / a.seen) - (b.correct / b.seen))
@@ -9275,7 +9623,7 @@ function rebuildSecretProfileFromHistory(sets) {
   return profile;
 }
 
-// POST /api/quizbowl/sets — save a completed solo set. Body shape
+// POST /api/quizbowl/sets - save a completed solo set. Body shape
 // matches the on-disk record above; we backfill `id` + `finishedAt`
 // so the client doesn't have to.
 app.post('/api/quizbowl/sets', authMiddleware, (req, res) => {
@@ -9327,7 +9675,7 @@ app.post('/api/quizbowl/sets', authMiddleware, (req, res) => {
     prof.weaknesses = allScores.filter(([, v]) => (v.attempts || 0) >= 3 && v.score < 60).map(([k]) => k).slice(0, 5);
 
     // Update the hidden student model. This is what packet recommendations
-    // actually read — the student never sees it directly.
+    // actually read - the student never sees it directly.
     if (!users[email].data.secretProfile) {
       users[email].data.secretProfile = rebuildSecretProfileFromHistory(users[email].data.quizbowlSets.slice(1));
     }
@@ -9341,7 +9689,7 @@ app.post('/api/quizbowl/sets', authMiddleware, (req, res) => {
   }
 });
 
-// GET /api/quizbowl/sets — history with aggregate stats. Returns
+// GET /api/quizbowl/sets - history with aggregate stats. Returns
 // { sets, stats } so the client doesn't have to compute the rollups.
 app.get('/api/quizbowl/sets', authMiddleware, (req, res) => {
   try {
@@ -9372,7 +9720,7 @@ app.get('/api/quizbowl/sets', authMiddleware, (req, res) => {
   }
 });
 
-// GET /api/quizbowl/recommendations — Gemini picks 3 specific niche sub-topics
+// GET /api/quizbowl/recommendations - Gemini picks 3 specific niche sub-topics
 // to drill based on the student's category history. Each recommendation launches
 // an AI-generated set focused on that exact topic. Falls back to static logic
 // if Gemini is unavailable.
@@ -9390,7 +9738,7 @@ app.get('/api/quizbowl/recommendations', authMiddleware, async (req, res) => {
     const unplayed = QB_CATEGORIES.filter(c => c !== 'Mixed' && !playedSet.has(c));
     const lastDiff = sets[0]?.difficulty || 'Medium';
 
-    // The secret-profile context is the meat of the prompt — it tells
+    // The secret-profile context is the meat of the prompt - it tells
     // Gemini exactly what the student is weak at, both at the category
     // level and at the level of specific answers they keep blanking on.
     const profileBlock = buildSecretProfileContext(secret);
@@ -9426,23 +9774,23 @@ app.get('/api/quizbowl/recommendations', authMiddleware, async (req, res) => {
 
     const prompt = `You are a quiz bowl coach designing a personalised practice set.
 
-STUDENT PROFILE (kept private — do not echo back to the student):
+STUDENT PROFILE (kept private - do not echo back to the student):
 ${contextBlock}
 
 Recommend EXACTLY 3 packets (specific niche sub-topics) for pyramidal tossup practice. Each packet should pull the student toward mastery using what you know about them:
 
 PACKET COMPOSITION (3 packets total):
-1. ONE packet that drills their #1 weakness — ${weakestCategory ? `target "${weakestCategory}"` : 'pick the category with the lowest accuracy'}. If you see specific answer-objects they keep missing (${topStruggleTopics.length ? topStruggleTopics.map(t => `"${t}"`).join(', ') : 'none recorded yet'}), aim the topic NEAR those — same era, same scientific concept, same author's circle. Don't re-ask the exact same answer; orbit it.
+1. ONE packet that drills their #1 weakness - ${weakestCategory ? `target "${weakestCategory}"` : 'pick the category with the lowest accuracy'}. If you see specific answer-objects they keep missing (${topStruggleTopics.length ? topStruggleTopics.map(t => `"${t}"`).join(', ') : 'none recorded yet'}), aim the topic NEAR those - same era, same scientific concept, same author's circle. Don't re-ask the exact same answer; orbit it.
 2. ONE packet that reinforces a strength they haven't fully cemented (a category with recent dip vs all-time, or a category they crushed once but haven't revisited). If no strengths yet, pick a niche History topic the student has not seen.
-3. ONE packet that EXPANDS their range — pick a niche topic in an unplayed or thin category to broaden coverage.
+3. ONE packet that EXPANDS their range - pick a niche topic in an unplayed or thin category to broaden coverage.
 
 RULES:
 - Be specific. "Krebs Cycle" not "Biology". "Congress of Vienna" not "History". "Waiting for Godot" not "Literature".
-- Each topic must anchor 8–10 distinct tossup questions.
-- Skip any answer-object in their "Already mastered" list — they're done with those.
+- Each topic must anchor 8-10 distinct tossup questions.
+- Skip any answer-object in their "Already mastered" list - they're done with those.
 - Match difficulty to recent performance: if weak category < 50%, drop to Easy; if strong category, push to Hard. Default Medium.
 - At least 1 of the 3 packets must be a History sub-topic (good fallback if you're stuck: "${historyTopic}", "Reconstruction Era", "Punic Wars").
-- "reason" must reference their actual profile — e.g. "you're at 38% in Science and missed 'mitochondria' twice" — not generic encouragement.
+- "reason" must reference their actual profile - e.g. "you're at 38% in Science and missed 'mitochondria' twice" - not generic encouragement.
 
 Return ONLY valid JSON with no markdown:
 {"recommendations":[{"topic":"Specific Topic Name","category":"Science|History|Literature|Geography|Math|Art|Music|Philosophy|Pop Culture","difficulty":"Easy|Medium|Hard","reason":"One sentence referencing their profile","targetsWeakness":"category or specific topic this drills, or null","expectedImpact":"high|medium|low"}]}`;
@@ -9470,7 +9818,7 @@ Return ONLY valid JSON with no markdown:
             expectedImpact: r.expectedImpact || 'medium',
           };
         });
-        // Guarantee at least one History rec — inject if Gemini missed it.
+        // Guarantee at least one History rec - inject if Gemini missed it.
         const hasHistory = recs.some(r => r.category === 'History');
         if (!hasHistory) {
           recs[recs.length - 1] = {
@@ -9478,7 +9826,7 @@ Return ONLY valid JSON with no markdown:
             topic: historyTopic,
             category: 'History',
             difficulty: lastDiff || 'Medium',
-            reason: `Niche history deep-dive — a great QB staple worth mastering.`,
+            reason: `Niche history deep-dive - a great QB staple worth mastering.`,
             source: 'ai',
             customInstructions: `Focus every question specifically on: ${historyTopic}`,
             targetsWeakness: null,
@@ -9494,7 +9842,7 @@ Return ONLY valid JSON with no markdown:
     // personalised even without the LLM.
     const recs = [];
 
-    // Slot 1 — drill weakness. Prefer the secret-profile weakness; fall
+    // Slot 1 - drill weakness. Prefer the secret-profile weakness; fall
     // back to the legacy stats-only weakness if no profile yet.
     if (weakestCategory) {
       const struggle = topStruggleTopics[0];
@@ -9504,27 +9852,27 @@ Return ONLY valid JSON with no markdown:
         difficulty: 'Medium',
         source: 'qbreader',
         reason: struggle
-          ? `Weakest category — you missed "${struggle}" recently.`
+          ? `Weakest category - you missed "${struggle}" recently.`
           : `Weakest category in your profile.`,
         targetsWeakness: weakestCategory,
         expectedImpact: 'high',
       });
     }
-    // Slot 2 — niche history (always present, QB staple).
+    // Slot 2 - niche history (always present, QB staple).
     recs.push({
       kind: 'niche', topic: historyTopic, category: 'History',
       difficulty: lastDiff || 'Medium', source: 'ai',
-      reason: `Niche history set — great for building depth in QB.`,
+      reason: `Niche history set - great for building depth in QB.`,
       customInstructions: `Focus every question specifically on: ${historyTopic}`,
       targetsWeakness: null,
       expectedImpact: 'medium',
     });
-    // Slot 3 — explore unplayed or warm up.
+    // Slot 3 - explore unplayed or warm up.
     if (unplayed.length) {
       const pick = unplayed.find(c => c !== 'History') || unplayed[0];
       recs.push({
         kind: 'explore', category: pick, difficulty: 'Easy', source: 'qbreader',
-        reason: `New territory for you — try ${pick}.`,
+        reason: `New territory for you - try ${pick}.`,
         targetsWeakness: null, expectedImpact: 'medium',
       });
     } else {
@@ -9541,7 +9889,7 @@ Return ONLY valid JSON with no markdown:
   }
 });
 
-// GET /api/quizbowl/patterns — compute buzz timing analytics from the
+// GET /api/quizbowl/patterns - compute buzz timing analytics from the
 // user's history. Returns insights about when the user tends to buzz,
 // how that correlates with accuracy, and per-category buzz habits.
 app.get('/api/quizbowl/patterns', authMiddleware, (req, res) => {
@@ -9573,7 +9921,7 @@ app.get('/api/quizbowl/patterns', authMiddleware, (req, res) => {
     const positions = buzzed.map(q => q.buzzWord / q.totalWords);
     const avgPosition = positions.length ? positions.reduce((a, b) => a + b, 0) / positions.length : 0;
 
-    // Thirds: early (0–33%), mid (33–66%), late (66–100%).
+    // Thirds: early (0-33%), mid (33-66%), late (66-100%).
     const early = buzzed.filter(q => q.buzzWord / q.totalWords < 0.33);
     const mid = buzzed.filter(q => { const p = q.buzzWord / q.totalWords; return p >= 0.33 && p < 0.66; });
     const late = buzzed.filter(q => q.buzzWord / q.totalWords >= 0.66);
@@ -9659,7 +10007,7 @@ app.get('/api/quizbowl/patterns', authMiddleware, (req, res) => {
   }
 });
 
-// GET /api/quizbowl/niche-recommendations — ask Gemini to suggest specific
+// GET /api/quizbowl/niche-recommendations - ask Gemini to suggest specific
 // niche sub-topics within a category for targeted AI drilling. Useful when
 // the student wants to go deeper than a broad QB category allows.
 // ?category=Science&difficulty=Medium
@@ -9713,7 +10061,7 @@ Requirements:
   }
 });
 
-// GET /api/quizbowl/tossups — pull real tossups from QBReader by
+// GET /api/quizbowl/tossups - pull real tossups from QBReader by
 // category + difficulty + count. Used by solo Quiz Bowl. The match
 // flow (multiplayer) has its own AI generation path; this endpoint
 // is the "Past QB questions" alternative for solo + future multiplayer.
@@ -9891,7 +10239,7 @@ function cleanupExpiredMatches() {
 }
 setInterval(cleanupExpiredMatches, 5 * 60 * 1000);
 
-// POST /api/quizbowl/match — create an empty match (instant). Question
+// POST /api/quizbowl/match - create an empty match (instant). Question
 // generation is deferred until /start so the host can configure the game
 // AFTER the opponent has joined.
 app.post('/api/quizbowl/match', authMiddleware, (req, res) => {
@@ -9927,12 +10275,12 @@ app.post('/api/quizbowl/match', authMiddleware, (req, res) => {
 const QUIZBOWL_MAX_PLAYERS = 8;
 
 // Scoring format rules mirroring the client. Three data models coexist:
-//   - NAQT (the default 'standard'): word-position based — +15 if buzz
+//   - NAQT (the default 'standard'): word-position based - +15 if buzz
 //     word < powerWordIndex, +10 if before end, +0 if after, -5 if wrong
 //     interrupt, 0 if wrong after end. See https://www.naqt.com/rules/
 //   - Flat: `getPts`/`negPts` (+ optional `powerThreshold`/`powerPts`).
 //   - Tiered: `tiers: [{ upTo, pts }]` (ascending) with `afterEndPts`,
-//     `negDuring`, `negAfter` — needed for real IAC Playoff (6/5/4/3).
+//     `negDuring`, `negAfter` - needed for real IAC Playoff (6/5/4/3).
 const QUIZBOWL_FORMATS = {
   standard:     { naqt: true, powerPts: 15, getPts: 10, afterEndPts: 10, negDuring: -5, negAfter: 0 },
   'iac-prelim': { powerThreshold: null, powerPts: null, getPts: 1,  negPts: -1 },
@@ -9953,7 +10301,7 @@ function quizbowlScoreForBuzz(match, { correct }) {
   const wordsRead = Math.max(0, Math.min(totalWords, Math.floor(elapsed / Math.max(1, match.revealSpeedMs || 140))));
   const afterEnd = elapsed >= totalReadMs;
 
-  // NAQT path — the real standard scoring quiz bowl uses.
+  // NAQT path - the real standard scoring quiz bowl uses.
   if (fmt.naqt) {
     if (correct) {
       const powerIdx = q && Number.isInteger(q.powerWordIndex) ? q.powerWordIndex : null;
@@ -9982,7 +10330,7 @@ function quizbowlScoreForBuzz(match, { correct }) {
   return fmt.getPts || 0;
 }
 
-// POST /api/quizbowl/match/:code/join — additional player joins.
+// POST /api/quizbowl/match/:code/join - additional player joins.
 app.post('/api/quizbowl/match/:code/join', authMiddleware, (req, res) => {
   const match = matches.get(req.params.code);
   if (!match) return res.status(404).json({ error: 'Match not found' });
@@ -10003,7 +10351,7 @@ app.post('/api/quizbowl/match/:code/join', authMiddleware, (req, res) => {
   res.json({ match: publicMatchState(match) });
 });
 
-// GET /api/quizbowl/match/:code/stream — SSE subscription for state pushes.
+// GET /api/quizbowl/match/:code/stream - SSE subscription for state pushes.
 app.get('/api/quizbowl/match/:code/stream', authMiddleware, (req, res) => {
   const match = matches.get(req.params.code);
   if (!match) return res.status(404).json({ error: 'Match not found' });
@@ -10019,7 +10367,7 @@ app.get('/api/quizbowl/match/:code/stream', authMiddleware, (req, res) => {
   player.stream = res;
   match.lastActivity = Date.now();
   // Fresh stream = reconnect. If we were about to abandon this player,
-  // cancel that grace timer — they're back.
+  // cancel that grace timer - they're back.
   cancelDisconnectAbandon(match, req.userId);
   // Send current snapshot immediately so the client can render without a
   // separate GET round trip.
@@ -10043,7 +10391,7 @@ app.get('/api/quizbowl/match/:code/stream', authMiddleware, (req, res) => {
   });
 });
 
-// POST /api/quizbowl/match/:code/start — host configures + starts.
+// POST /api/quizbowl/match/:code/start - host configures + starts.
 // Accepts { category, difficulty, questionCount, revealSpeedMs }. Question
 // generation happens HERE (so no Gemini spend for matches that don't launch).
 app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => {
@@ -10076,11 +10424,11 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
   res.json({ ok: true });
 
   try {
-    const sys = `You are a quiz bowl question writer. Write pyramidal tossup questions — each starts with obscure clues and progressively gets easier. Include a NAQT-style power mark "(*)" placed roughly 60-70% of the way through each question (after the hard clues but before the "giveaway" clue) — buzzing before the mark earns +15, after earns +10. Output ONLY valid JSON with no markdown, no code fences, no prose before or after.
+    const sys = `You are a quiz bowl question writer. Write pyramidal tossup questions - each starts with obscure clues and progressively gets easier. Include a NAQT-style power mark "(*)" placed roughly 60-70% of the way through each question (after the hard clues but before the "giveaway" clue) - buzzing before the mark earns +15, after earns +10. Output ONLY valid JSON with no markdown, no code fences, no prose before or after.
 
 Exact format:
 {"questions":[{"text":"Hard clues here, more clues, (*) easier clues here, giveaway clue.","answer":"Answer"}]}`;
-    const userMsg = `Generate ${questionCount} pyramidal quiz bowl questions in category "${category}" at ${difficulty} difficulty. Each MUST contain exactly one (*) power mark. Return ONLY the JSON object described — nothing else.`;
+    const userMsg = `Generate ${questionCount} pyramidal quiz bowl questions in category "${category}" at ${difficulty} difficulty. Each MUST contain exactly one (*) power mark. Return ONLY the JSON object described - nothing else.`;
     // Flash is faster + more reliable for raw-JSON tasks; Pro's thinking
     // tokens often consume the budget before emitting output.
     const result = await callGemini(sys, [{ role: 'user', content: userMsg }], GEMINI_FLASH, 8192);
@@ -10092,7 +10440,7 @@ Exact format:
       throw new Error('Failed to parse questions');
     }
 
-    // Double-check the match still exists — someone may have left during gen.
+    // Double-check the match still exists - someone may have left during gen.
     if (!matches.has(match.code)) return;
     // Strip power marks into structured powerWordIndex so the scorer can
     // award +15 vs +10. Questions without (*) score flat +10 / -5 / 0.
@@ -10122,7 +10470,7 @@ Exact format:
   }
 });
 
-// POST /api/quizbowl/match/:code/buzz — atomic; first-in wins.
+// POST /api/quizbowl/match/:code/buzz - atomic; first-in wins.
 app.post('/api/quizbowl/match/:code/buzz', authMiddleware, (req, res) => {
   const match = matches.get(req.params.code);
   if (!match) return res.status(404).json({ error: 'Match not found' });
@@ -10139,7 +10487,7 @@ app.post('/api/quizbowl/match/:code/buzz', authMiddleware, (req, res) => {
   res.json({ ok: true, buzzAt: match.buzzAt });
 });
 
-// POST /api/quizbowl/match/:code/answer — only the buzz winner can submit.
+// POST /api/quizbowl/match/:code/answer - only the buzz winner can submit.
 app.post('/api/quizbowl/match/:code/answer', authMiddleware, (req, res) => {
   const match = matches.get(req.params.code);
   if (!match) return res.status(404).json({ error: 'Match not found' });
@@ -10206,7 +10554,7 @@ app.post('/api/quizbowl/match/:code/answer', authMiddleware, (req, res) => {
   //   1. exact match after normalization
   //   2. typo of full answer (\u2264 floor(len/6), capped at 2)
   //   3. exact key word    ("einstein" for "albert einstein")
-  //   4. typo of key word  (\u2264 floor(len/6), capped at 1) \u2014 at least 4 chars
+  //   4. typo of key word  (\u2264 floor(len/6), capped at 1), at least 4 chars
   //
   // Deliberately NOT used (these were previous false-positive sources):
   //   - c.includes(a) / a.includes(c)  \u2192 matches one-letter answers
@@ -10266,7 +10614,7 @@ app.post('/api/quizbowl/match/:code/answer', authMiddleware, (req, res) => {
   res.json({ ok: true, correct });
 });
 
-// POST /api/quizbowl/match/:code/next — host advances to the next question.
+// POST /api/quizbowl/match/:code/next - host advances to the next question.
 app.post('/api/quizbowl/match/:code/next', authMiddleware, (req, res) => {
   const match = matches.get(req.params.code);
   if (!match) return res.status(404).json({ error: 'Match not found' });
@@ -10275,10 +10623,10 @@ app.post('/api/quizbowl/match/:code/next', authMiddleware, (req, res) => {
   res.json({ ok: true, finished: match.state === 'finished' });
 });
 
-// POST /api/quizbowl/match/:code/end — host ends the match immediately.
+// POST /api/quizbowl/match/:code/end - host ends the match immediately.
 // Stops all pending timers, snapshots current scores, and pushes match_end.
 // Lets the host call the game early without burning through the rest of
-// the question bank — useful when running a custom-length packet or when
+// the question bank - useful when running a custom-length packet or when
 // time's just up.
 app.post('/api/quizbowl/match/:code/end', authMiddleware, (req, res) => {
   const match = matches.get(req.params.code);
@@ -10298,10 +10646,10 @@ app.post('/api/quizbowl/match/:code/end', authMiddleware, (req, res) => {
   res.json({ ok: true });
 });
 
-// POST /api/quizbowl/match/:code/leave — graceful exit.
+// POST /api/quizbowl/match/:code/leave - graceful exit.
 //
 // Leaving during a LIVE question (state=playing | reveal | generating) is
-// treated as abandoning the match — we cancel ALL scheduled timers
+// treated as abandoning the match - we cancel ALL scheduled timers
 // (question_end, auto_advance) and push `match_end` with abandoned=true.
 // Without this, the questionTimeoutId / revealTimeoutId we scheduled
 // earlier would keep firing and the remaining player would see the
@@ -10341,7 +10689,7 @@ app.post('/api/quizbowl/match/:code/leave', authMiddleware, (req, res) => {
 });
 
 // =========================================================
-// DEBATE — head-to-head multiplayer with AI-graded turns + dual-end voting.
+// DEBATE - head-to-head multiplayer with AI-graded turns + dual-end voting.
 //
 // Flow:
 //   1. Host POSTs /api/debate/match → returns { code }. Match is in
@@ -10401,7 +10749,7 @@ function publicDebateState(match) {
     timedMode: !!match.timedMode,
     turnLimitMs: match.turnLimitMs || 0,
     turnStartedAt: match.turnStartedAt || 0,
-    // Round cap (per side). 0 = infinite — match ends only on vote-end.
+    // Round cap (per side). 0 = infinite - match ends only on vote-end.
     maxRounds: match.maxRounds || 0,
     // Live spectator count. Eliminated tournament players + the organizer
     // can open the match stream as read-only watchers.
@@ -10409,7 +10757,7 @@ function publicDebateState(match) {
     // Link back to the parent tournament so clients know this is a
     // bracket match (used to decide spectator capability).
     tournamentCode: match.tournamentCode || null,
-    // Live-typing state — only meaningful when timedMode is on. Both
+    // Live-typing state - only meaningful when timedMode is on. Both
     // players see the field; the active player ignores their own draft
     // for display purposes.
     draftText: match.draftText || '',
@@ -10421,7 +10769,7 @@ function pushDebateEvent(match, type, payload) {
   match.lastActivity = Date.now();
   // Always include the full public match snapshot in every event so the
   // client's setMatch(ev.match) path picks up turn additions, score
-  // updates, and end-vote changes — not just the join / started /
+  // updates, and end-vote changes - not just the join / started /
   // finished events that historically carried the snapshot. Without
   // this, "turn_added" events were missing match and the opponent's UI
   // stayed frozen on the previous turn.
@@ -10436,7 +10784,7 @@ function pushDebateEvent(match, type, payload) {
   if (match.spectators) for (const s of match.spectators.values()) writeTo(s);
 }
 
-// POST /api/debate/match — create empty match.
+// POST /api/debate/match - create empty match.
 app.post('/api/debate/match', authMiddleware, (req, res) => {
   try {
     const users = loadUsers();
@@ -10468,7 +10816,7 @@ app.post('/api/debate/match', authMiddleware, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// POST /api/debate/match/:code/join — second player joins.
+// POST /api/debate/match/:code/join - second player joins.
 app.post('/api/debate/match/:code/join', authMiddleware, (req, res) => {
   const match = debateMatches.get(req.params.code);
   if (!match) return res.status(404).json({ error: 'Match not found' });
@@ -10492,10 +10840,10 @@ app.post('/api/debate/match/:code/join', authMiddleware, (req, res) => {
   res.json({ match: publicDebateState(match) });
 });
 
-// GET /api/debate/match/:code/stream — SSE for state pushes.
+// GET /api/debate/match/:code/stream - SSE for state pushes.
 // Players get the regular player-stream slot. If the requester isn't a
 // player but the match is part of a tournament they're in (or organize),
-// they're admitted as a spectator — counted in match.spectators and
+// they're admitted as a spectator - counted in match.spectators and
 // included in pushDebateEvent fanout.
 app.get('/api/debate/match/:code/stream', authMiddleware, (req, res) => {
   const match = debateMatches.get(req.params.code);
@@ -10556,7 +10904,7 @@ app.get('/api/debate/match/:code/stream', authMiddleware, (req, res) => {
   });
 });
 
-// POST /api/debate/match/:code/ready — toggle the caller's ready check-in.
+// POST /api/debate/match/:code/ready - toggle the caller's ready check-in.
 // Body: { ready: bool }. Defaults to true (set ready) when omitted.
 app.post('/api/debate/match/:code/ready', authMiddleware, (req, res) => {
   const match = debateMatches.get(req.params.code);
@@ -10572,7 +10920,7 @@ app.post('/api/debate/match/:code/ready', authMiddleware, (req, res) => {
   res.json({ match: publicDebateState(match) });
 });
 
-// POST /api/debate/match/:code/start — host configures topic + sides.
+// POST /api/debate/match/:code/start - host configures topic + sides.
 app.post('/api/debate/match/:code/start', authMiddleware, (req, res) => {
   const match = debateMatches.get(req.params.code);
   if (!match) return res.status(404).json({ error: 'Match not found' });
@@ -10609,7 +10957,7 @@ app.post('/api/debate/match/:code/start', authMiddleware, (req, res) => {
   res.json({ match: publicDebateState(match) });
 });
 
-// POST /api/debate/match/:code/move — submit an argument; AI grades it.
+// POST /api/debate/match/:code/move - submit an argument; AI grades it.
 app.post('/api/debate/match/:code/move', authMiddleware, async (req, res) => {
   const match = debateMatches.get(req.params.code);
   if (!match) return res.status(404).json({ error: 'Match not found' });
@@ -10642,7 +10990,7 @@ app.post('/api/debate/match/:code/move', authMiddleware, async (req, res) => {
     const turn = {
       userId: req.userId,
       side: player.side,
-      content: '(time expired — no argument submitted)',
+      content: '(time expired - no argument submitted)',
       images: [],
       score: { argumentation: 0, evidence: 0, rhetoric: 0, total: 0 },
       feedback: 'Time expired. No argument was made in the allotted 2 minutes.',
@@ -10664,7 +11012,7 @@ app.post('/api/debate/match/:code/move', authMiddleware, async (req, res) => {
     return res.json({ turn, match: publicDebateState(match) });
   }
 
-  // Normal-submit minimum-length gate. Timeouts with content bypass it —
+  // Normal-submit minimum-length gate. Timeouts with content bypass it -
   // even a couple of sentences is worth grading rather than zeroing out.
   if (!isTimeout && argument.length < 20 && images.length === 0) {
     return res.status(400).json({ error: 'Argument must be at least 20 characters (or attach an image)' });
@@ -10676,31 +11024,31 @@ app.post('/api/debate/match/:code/move', authMiddleware, async (req, res) => {
   ).join('\n\n');
   const sys = `You are a strict, opinionated debate judge. Grade the argument on three axes (1-10 integer each):
 - argumentation (logical structure, claim → reasoning → conclusion)
-- evidence (specific facts, examples, data — penalize hand-waving)
+- evidence (specific facts, examples, data - penalize hand-waving)
 - rhetoric (clarity, persuasiveness, addressing the opponent's strongest point)
 
 USE THE FULL 1-10 RANGE. Do NOT default everything to 5. Anchor:
 - 1-2: incoherent, nothing supported, off-topic, or a single weak sentence.
-- 3-4: below average — has a claim but support is vague or generic.
-- 5-6: average debate-class output — claim plus a reason or two, not memorable.
-- 7-8: strong — specific evidence, addresses opponent, clean logical structure.
-- 9-10: exceptional — surprising specifics, decisive counter to opponent, quotable.
-You MUST score each axis independently — it is normal for the same argument to score 8 on argumentation and 3 on evidence. Avoid giving 5/5/5; if you find yourself there, push at least one axis up or down based on which way the argument actually leans.
+- 3-4: below average - has a claim but support is vague or generic.
+- 5-6: average debate-class output - claim plus a reason or two, not memorable.
+- 7-8: strong - specific evidence, addresses opponent, clean logical structure.
+- 9-10: exceptional - surprising specifics, decisive counter to opponent, quotable.
+You MUST score each axis independently - it is normal for the same argument to score 8 on argumentation and 3 on evidence. Avoid giving 5/5/5; if you find yourself there, push at least one axis up or down based on which way the argument actually leans.
 
-The argument may include attached images (charts, screenshots, photographs of evidence). Treat them as part of the argument — if the image carries the claim's evidence, weight it under "evidence"; if the user uses it rhetorically, weight it under "rhetoric". If the player ran out of time and submitted nothing or near-nothing, all three axes are 1.
+The argument may include attached images (charts, screenshots, photographs of evidence). Treat them as part of the argument - if the image carries the claim's evidence, weight it under "evidence"; if the user uses it rhetorically, weight it under "rhetoric". If the player ran out of time and submitted nothing or near-nothing, all three axes are 1.
 
 Output STRICT JSON only.`;
   const usr = `Topic: "${match.topic}"
 This player is arguing ${player.side.toUpperCase()}.
 
 Previous turns (most recent last):
-${prevTurns || '(none — opening statement)'}
+${prevTurns || '(none - opening statement)'}
 
 NEW ARGUMENT from this player:
 """
-${argument.slice(0, 8000) || '(no text — see attached image(s))'}
+${argument.slice(0, 8000) || '(no text - see attached image(s))'}
 """
-${images.length ? `\n[The player attached ${images.length} image${images.length === 1 ? '' : 's'} — see the image(s) below.]` : ''}
+${images.length ? `\n[The player attached ${images.length} image${images.length === 1 ? '' : 's'} - see the image(s) below.]` : ''}
 
 Return JSON exactly:
 {
@@ -10725,7 +11073,7 @@ Return JSON exactly:
       const parsed = parseAIJson(rawText);
       if (parsed && (parsed.argumentation != null || parsed.evidence != null || parsed.rhetoric != null)) {
         // Use Number.isFinite so a legitimate 0 doesn't get bumped to 5
-        // by the truthy-fallback. Also accept missing axes — they default
+        // by the truthy-fallback. Also accept missing axes - they default
         // to 5 rather than dropping the whole grade.
         const num = (v, fallback = 5) => {
           const n = Number(v);
@@ -10777,10 +11125,10 @@ Return JSON exactly:
   }
 });
 
-// POST /api/debate/match/:code/draft — live-typing broadcast. The
+// POST /api/debate/match/:code/draft - live-typing broadcast. The
 // active player POSTs their in-progress argument text every ~500ms
 // while typing; the server forwards via SSE so the opponent can see
-// the draft as it's written. Pure transient state — never persisted,
+// the draft as it's written. Pure transient state - never persisted,
 // dropped on disconnect, and only honored when timedMode is on (to
 // keep the non-timed mode feeling private).
 app.post('/api/debate/match/:code/draft', authMiddleware, (req, res) => {
@@ -10791,7 +11139,7 @@ app.post('/api/debate/match/:code/draft', authMiddleware, (req, res) => {
   if (!match.timedMode) return res.json({ ok: true }); // silently no-op when not timed
   const text = String(req.body?.text || '').slice(0, 4000);
   match.lastActivity = Date.now();
-  // Only push if the text actually changed — avoids flooding the
+  // Only push if the text actually changed - avoids flooding the
   // opponent's SSE with no-op events while the client polls.
   if (match.draftText === text && match.draftBy === req.userId) return res.json({ ok: true });
   match.draftText = text;
@@ -10800,7 +11148,7 @@ app.post('/api/debate/match/:code/draft', authMiddleware, (req, res) => {
   res.json({ ok: true });
 });
 
-// POST /api/debate/match/:code/vote-end — vote to end. When both vote,
+// POST /api/debate/match/:code/vote-end - vote to end. When both vote,
 // AI generates final verdict and the match flips to 'finished'.
 // Per-user debate history. Stored on the user record in users.json so
 // finished matches survive server restarts and show up under Debate ▸
@@ -10808,7 +11156,7 @@ app.post('/api/debate/match/:code/draft', authMiddleware, (req, res) => {
 function recordDebateHistoryEntry(userId, entry) {
   if (!userId) return;
   const users = loadUsers();
-  // users.json is keyed by email, not userId — look up the email first.
+  // users.json is keyed by email, not userId - look up the email first.
   // Previous code did `users[userId]` which was always undefined, so
   // every history write silently no-op'd.
   const email = findEmailById(users, userId);
@@ -10825,10 +11173,10 @@ function recordDebateHistoryEntry(userId, entry) {
 
 // Shared verdict-generation path. Used by /vote-end (both players agreed)
 // and by /move when a round cap is hit (auto-finalize). Mutates the match
-// in place — sets verdict + state='finished' and pushes the SSE event.
+// in place - sets verdict + state='finished' and pushes the SSE event.
 async function finalizeDebateMatch(match) {
   const transcript = match.turns.map((t, i) =>
-    `Turn ${i + 1} — ${t.side.toUpperCase()} (score ${t.score.total}/30): ${t.content.slice(0, 800)}`
+    `Turn ${i + 1} - ${t.side.toUpperCase()} (score ${t.score.total}/30): ${t.content.slice(0, 800)}`
   ).join('\n\n') || '(no turns played)';
 
   const forPlayer = match.players.find(p => p.side === 'for');
@@ -10847,8 +11195,8 @@ Return JSON exactly:
 {
   "winner": "for" | "against" | "tie",
   "summary": "3-5 sentences. Name the strongest argument from each side, then explain why your winner won.",
-  "forStrongest": "1 sentence — strongest moment from the FOR side",
-  "againstStrongest": "1 sentence — strongest moment from the AGAINST side"
+  "forStrongest": "1 sentence - strongest moment from the FOR side",
+  "againstStrongest": "1 sentence - strongest moment from the AGAINST side"
 }`;
 
   const aiResp = await callGemini(sys, [{ role: 'user', content: usr }], DEFAULT_MODEL, 1500, { jsonMode: true, temperature: 0.3 });
@@ -10886,7 +11234,7 @@ Return JSON exactly:
     userId: t.userId, side: t.side, content: t.content,
     score: t.score, feedback: t.feedback, at: t.at, timedOut: !!t.timedOut,
   }));
-  // Tournament context — if this is a bracket match, attach the parent
+  // Tournament context - if this is a bracket match, attach the parent
   // tournament's name + round so the history view can label it.
   let tournamentContext = null;
   if (match.tournamentCode) {
@@ -10923,7 +11271,7 @@ Return JSON exactly:
 }
 
 // Record a forfeit-style verdict in both players' history. Used when a
-// tournament participant leaves mid-match — the leaver loses, the
+// tournament participant leaves mid-match - the leaver loses, the
 // opponent wins, but we still want the row in both histories.
 function recordForfeitHistory(match, leaverId) {
   if (!match || !Array.isArray(match.players) || match.players.length < 2) return;
@@ -10995,7 +11343,7 @@ app.post('/api/debate/match/:code/vote-end', authMiddleware, async (req, res) =>
   }
 });
 
-// POST /api/debate/match/:code/leave — graceful exit. Notifies the
+// POST /api/debate/match/:code/leave - graceful exit. Notifies the
 // remaining player via SSE so they can show a "your opponent left"
 // modal instead of staring at a frozen scoreboard, and marks the match
 // abandoned so subsequent move/vote calls won't 500.
@@ -11017,12 +11365,12 @@ app.post('/api/debate/match/:code/leave', authMiddleware, (req, res) => {
 });
 
 // =========================================================
-// SINGLEPLAYER DEBATE — final verdict (called from /move when no
+// SINGLEPLAYER DEBATE - final verdict (called from /move when no
 // multiplayer match exists). Splits the singleplayer flow's "End Debate"
 // button so the AI gives a winner verdict instead of just a wrap-up.
 // =========================================================
 
-// GET /api/debate/my-active-tournament — return the in-progress
+// GET /api/debate/my-active-tournament - return the in-progress
 // tournament this user is participating in (player or organizer-host),
 // if any. Used by the debate mode menu to surface a Rejoin button so
 // signing in on a second device doesn't strand the user.
@@ -11038,7 +11386,7 @@ app.get('/api/debate/my-active-tournament', authMiddleware, (req, res) => {
   res.json({ tournament: null });
 });
 
-// POST /api/debate/suggest-topics — return 6 fresh AI-picked debate
+// POST /api/debate/suggest-topics - return 6 fresh AI-picked debate
 // topics. Optional body { theme: string, exclude: string[] } to bias the
 // suggestions. Used by every debate setup screen (solo, 1v1, tournament).
 app.post('/api/debate/suggest-topics', authMiddleware, async (req, res) => {
@@ -11052,7 +11400,7 @@ Each topic should:
 - Be short (under 12 words).
 - Mix categories: tech, education, ethics, policy, culture, science.
 - Avoid loaded language; phrase as a claim ("X should Y") or a question.
-- Be fresh — DON'T repeat any of the user's excluded topics or near-duplicates.`;
+- Be fresh - DON'T repeat any of the user's excluded topics or near-duplicates.`;
     const usr = `Return JSON exactly:
 { "topics": ["...", "...", "...", "...", "...", "..."] }
 
@@ -11085,7 +11433,7 @@ app.post('/api/debate/singleplayer/verdict', authMiddleware, async (req, res) =>
     }
     const sys = `You are a debate judge. Read the full transcript and declare a winner. Output STRICT JSON only.`;
     const lines = transcript.map((m, i) =>
-      `Turn ${i + 1} — ${m.role === 'user' ? `STUDENT (${userSide.toUpperCase()})` : `AI (${userSide === 'for' ? 'AGAINST' : 'FOR'})`}: ${(m.content || '').slice(0, 1500)}`
+      `Turn ${i + 1} - ${m.role === 'user' ? `STUDENT (${userSide.toUpperCase()})` : `AI (${userSide === 'for' ? 'AGAINST' : 'FOR'})`}: ${(m.content || '').slice(0, 1500)}`
     ).join('\n\n');
     const usr = `Topic: "${topic}"
 Student argued ${userSide.toUpperCase()}; AI argued the opposite.
@@ -11099,9 +11447,9 @@ Return JSON:
   "studentScore": N,           // 0-100
   "aiScore": N,                // 0-100
   "summary": "3-5 sentences explaining who won and why.",
-  "studentStrongest": "1 sentence — strongest moment from the student",
-  "studentWeakest": "1 sentence — weakest moment from the student",
-  "improve": "1-2 sentences — what the student should drill next"
+  "studentStrongest": "1 sentence - strongest moment from the student",
+  "studentWeakest": "1 sentence - weakest moment from the student",
+  "improve": "1-2 sentences - what the student should drill next"
 }`;
     const aiResp = await callGemini(sys, [{ role: 'user', content: usr }], DEFAULT_MODEL, 1500, { jsonMode: true, temperature: 0.3 });
     if (!aiResp.success) return res.status(500).json({ error: aiResp.error });
@@ -11139,7 +11487,7 @@ Return JSON:
 });
 
 // =========================================================
-// TOURNAMENTS — single-elimination brackets of 4/8/16 players.
+// TOURNAMENTS - single-elimination brackets of 4/8/16 players.
 // Players join a tournament code, host starts when full, server pairs
 // players randomly and spawns standard debate matches for each pairing.
 // When each match finishes (via finalizeDebateMatch), the bracket
@@ -11228,7 +11576,7 @@ function createTournamentRound(t, roundNum, playerIds) {
     const pa = t.players.find(p => p.userId === a);
     const pb = t.players.find(p => p.userId === b);
     if (!pa || !pb) continue;
-    // Random side assignment — coin flip per match.
+    // Random side assignment - coin flip per match.
     const aIsFor = Math.random() < 0.5;
     const code = newDebateCode();
     // Per-round topic if host set one for this round, otherwise the main
@@ -11247,7 +11595,7 @@ function createTournamentRound(t, roundNum, playerIds) {
       turnOf: aIsFor ? pa.userId : pb.userId, // FOR side opens
       scores: { [pa.userId]: 0, [pb.userId]: 0 },
       endVotes: new Set(),
-      readyUserIds: new Set([pa.userId, pb.userId]), // pre-readied — match is live
+      readyUserIds: new Set([pa.userId, pb.userId]), // pre-readied - match is live
       // Eliminated players + the organizer can subscribe here as spectators.
       spectators: new Map(),
       verdict: null,
@@ -11288,7 +11636,7 @@ function advanceTournamentBracket(tournamentCode, finishedMatchCode) {
 
   let winnerId = null;
   if (match.verdict.winner === 'tie') {
-    // Score tiebreak — higher total wins; if still tied, FOR side wins.
+    // Score tiebreak - higher total wins; if still tied, FOR side wins.
     const forP = match.players.find(p => p.side === 'for');
     const againstP = match.players.find(p => p.side === 'against');
     const forScore = match.scores[forP.userId] || 0;
@@ -11331,7 +11679,7 @@ function advanceTournamentBracket(tournamentCode, finishedMatchCode) {
   pushTournamentEvent(t, 'round_advanced', { tournament: publicTournamentState(t) });
 }
 
-// POST /api/debate/tournament — create empty tournament; host joins.
+// POST /api/debate/tournament - create empty tournament; host joins.
 app.post('/api/debate/tournament', authMiddleware, (req, res) => {
   try {
     const size = [4, 8, 16].includes(Number(req.body?.size)) ? Number(req.body.size) : 8;
@@ -11365,7 +11713,7 @@ app.post('/api/debate/tournament', authMiddleware, (req, res) => {
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
 
-    // Host can opt out of playing — they organize and watch, others fill
+    // Host can opt out of playing - they organize and watch, others fill
     // the bracket. Defaults to playing (true) for backwards-compat.
     const hostPlays = req.body?.hostPlays !== false;
     const hostName = users[email].name || email.split('@')[0];
@@ -11402,12 +11750,12 @@ app.post('/api/debate/tournament', authMiddleware, (req, res) => {
   }
 });
 
-// POST /api/debate/tournament/:code/join — add a player to the lobby.
+// POST /api/debate/tournament/:code/join - add a player to the lobby.
 app.post('/api/debate/tournament/:code/join', authMiddleware, (req, res) => {
   const t = tournaments.get(req.params.code);
   if (!t) return res.status(404).json({ error: 'Tournament not found' });
   if (t.state !== 'waiting') return res.status(409).json({ error: 'Tournament already started' });
-  // Organizer-only host calling /join is a no-op — they're already in
+  // Organizer-only host calling /join is a no-op - they're already in
   // the tournament via t.hostId, just not as a player.
   if (!t.hostPlays && req.userId === t.hostId) {
     t.lastActivity = Date.now();
@@ -11430,7 +11778,7 @@ app.post('/api/debate/tournament/:code/join', authMiddleware, (req, res) => {
   res.json({ tournament: publicTournamentState(t) });
 });
 
-// GET /api/debate/tournament/:code/stream — SSE for bracket updates.
+// GET /api/debate/tournament/:code/stream - SSE for bracket updates.
 app.get('/api/debate/tournament/:code/stream', authMiddleware, (req, res) => {
   const t = tournaments.get(req.params.code);
   if (!t) return res.status(404).json({ error: 'Tournament not found' });
@@ -11459,7 +11807,7 @@ app.get('/api/debate/tournament/:code/stream', authMiddleware, (req, res) => {
   });
 });
 
-// POST /api/debate/tournament/:code/kick — host removes a player from
+// POST /api/debate/tournament/:code/kick - host removes a player from
 // the lobby. Only allowed while the tournament is in 'waiting' state.
 app.post('/api/debate/tournament/:code/kick', authMiddleware, (req, res) => {
   const t = tournaments.get(req.params.code);
@@ -11488,7 +11836,7 @@ app.post('/api/debate/tournament/:code/kick', authMiddleware, (req, res) => {
   res.json({ tournament: publicTournamentState(t) });
 });
 
-// POST /api/debate/tournament/:code/start — host starts when lobby is full.
+// POST /api/debate/tournament/:code/start - host starts when lobby is full.
 app.post('/api/debate/tournament/:code/start', authMiddleware, (req, res) => {
   const t = tournaments.get(req.params.code);
   if (!t) return res.status(404).json({ error: 'Tournament not found' });
@@ -11506,7 +11854,7 @@ app.post('/api/debate/tournament/:code/start', authMiddleware, (req, res) => {
   res.json({ tournament: publicTournamentState(t) });
 });
 
-// GET /api/debate/tournament/:code — fetch current state. Useful for
+// GET /api/debate/tournament/:code - fetch current state. Useful for
 // players returning to the bracket view from inside a match.
 app.get('/api/debate/tournament/:code', authMiddleware, (req, res) => {
   const t = tournaments.get(req.params.code);
@@ -11517,7 +11865,7 @@ app.get('/api/debate/tournament/:code', authMiddleware, (req, res) => {
   res.json({ tournament: publicTournamentState(t) });
 });
 
-// POST /api/debate/tournament/:code/leave — leave the lobby (waiting),
+// POST /api/debate/tournament/:code/leave - leave the lobby (waiting),
 // or forfeit your current bracket match (playing).
 app.post('/api/debate/tournament/:code/leave', authMiddleware, (req, res) => {
   const t = tournaments.get(req.params.code);
@@ -11563,12 +11911,12 @@ app.post('/api/debate/tournament/:code/leave', authMiddleware, (req, res) => {
       match.lastActivity = Date.now();
       pushDebateEvent(match, 'finished', { match: publicDebateState(match) });
       // Forfeit goes into both players' history before the bracket
-      // advances — finalizeDebateMatch isn't called here.
+      // advances - finalizeDebateMatch isn't called here.
       try { recordForfeitHistory(match, req.userId); } catch (e) { console.error('Forfeit history failed:', e); }
       advanceTournamentBracket(t.code, match.code);
     }
   } else {
-    // Not in a live match — just mark eliminated.
+    // Not in a live match - just mark eliminated.
     player.eliminated = true;
     player.eliminatedAt = Date.now();
     pushTournamentEvent(t, 'player_left', { tournament: publicTournamentState(t) });
@@ -11577,13 +11925,13 @@ app.post('/api/debate/tournament/:code/leave', authMiddleware, (req, res) => {
   res.json({ ok: true });
 });
 
-// GET /api/debate/history — list this user's finished matches.
+// GET /api/debate/history - list this user's finished matches.
 app.get('/api/debate/history', authMiddleware, (req, res) => {
   const users = loadUsers();
   const email = findEmailById(users, req.userId);
   const u = email ? users[email] : null;
   const history = Array.isArray(u?.debateHistory) ? u.debateHistory : [];
-  // Summary list (lightweight) — exclude full transcripts by default to
+  // Summary list (lightweight) - exclude full transcripts by default to
   // keep the response small. Fetch individual entries via ?full=1 when
   // viewing a specific record.
   const wantFull = req.query?.full === '1';
@@ -11606,7 +11954,7 @@ app.get('/api/debate/history', authMiddleware, (req, res) => {
   });
 });
 
-// GET /api/debate/history/:id — fetch one match with full transcript.
+// GET /api/debate/history/:id - fetch one match with full transcript.
 // `id` is the finishedAt timestamp (history records are keyed by it
 // since match codes get reused once a match leaves the live Map).
 app.get('/api/debate/history/:id', authMiddleware, (req, res) => {
@@ -11621,7 +11969,7 @@ app.get('/api/debate/history/:id', authMiddleware, (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════
-// TRIAL MODE — QB-style tossup + spaced repetition (SM-2)
+// TRIAL MODE - QB-style tossup + spaced repetition (SM-2)
 // ═══════════════════════════════════════════════════════
 
 function sm2Update(card, quality) {
@@ -11696,7 +12044,7 @@ app.get('/api/trial/queue', authMiddleware, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Save trial session results — updates SM-2 state per item
+// Save trial session results - updates SM-2 state per item
 app.post('/api/trial/save', authMiddleware, (req, res) => {
   try {
     const { results } = req.body;

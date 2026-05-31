@@ -33,13 +33,13 @@ export const removeStudent = (pin, sid) =>
     headers: { 'x-parent-pin': String(pin || '') },
   });
 
-// Switch the active child profile. No PIN required — kids should be able
+// Switch the active child profile. No PIN required - kids should be able
 // to swap freely. Going BACK to parent view requires PIN (see exitChild).
 export const switchToStudent = (sid) =>
   apiFetch(`/api/parent/students/${sid}/switch`, { method: 'POST' });
 
 // Select the parent admin profile from the ProfilePicker. When parent
-// mode is enabled the server REQUIRES the PIN — otherwise a kid could
+// mode is enabled the server REQUIRES the PIN - otherwise a kid could
 // just click the admin tile to escape restrictions. On a fresh account
 // (parent mode never set up) the server returns `requiresSetup: true`
 // and the caller should route to the setup form.
@@ -65,7 +65,7 @@ export const disableParentMode = (pin) =>
     body: JSON.stringify({ pin }),
   });
 
-// Aggregate activity feed across all children — newest 30 events
+// Aggregate activity feed across all children - newest 30 events
 // (curricula created, lessons completed, assignments graded, study
 // sessions). PIN-gated.
 export const getParentActivity = (pin) =>

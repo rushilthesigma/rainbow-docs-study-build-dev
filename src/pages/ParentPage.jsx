@@ -56,7 +56,7 @@ export default function ParentPage() {
   const [showAddChild, setShowAddChild] = useState(false);
   // Which top-level admin tab is showing.
   const [tab, setTab] = useState('overview'); // 'overview' | 'activity' | 'settings'
-  // Open modals — at most one of these is set at a time.
+  // Open modals - at most one of these is set at a time.
   const [controlsStudent, setControlsStudent] = useState(null);
   const [chatsStudent, setChatsStudent] = useState(null);
 
@@ -72,7 +72,7 @@ export default function ParentPage() {
 
   // Auto-unlock from sessionStorage. When the ProfilePicker collected the
   // PIN and called /api/parent/select-admin, it stashed the PIN here so
-  // the admin panel can skip its own unlock screen — the parent already
+  // the admin panel can skip its own unlock screen - the parent already
   // proved who they were one screen earlier. We clear the stash on
   // logout / browser close (sessionStorage handles the latter).
   useEffect(() => {
@@ -108,7 +108,7 @@ export default function ParentPage() {
   async function handleSetup(e) {
     e?.preventDefault?.();
     setError(null);
-    if (!/^[0-9]{4,6}$/.test(newPin)) { setError('PIN must be 4–6 digits.'); return; }
+    if (!/^[0-9]{4,6}$/.test(newPin)) { setError('PIN must be 4-6 digits.'); return; }
     if (newPin !== newPinConfirm) { setError('PINs do not match.'); return; }
     const students = seedStudents.filter(s => s.name.trim());
     if (!students.length) { setError('Add at least one child profile.'); return; }
@@ -129,7 +129,7 @@ export default function ParentPage() {
   async function handleUnlock(e) {
     e?.preventDefault?.();
     setError(null);
-    if (!/^[0-9]{4,6}$/.test(pinInput)) { setError('PIN must be 4–6 digits.'); return; }
+    if (!/^[0-9]{4,6}$/.test(pinInput)) { setError('PIN must be 4-6 digits.'); return; }
     setSubmitting(true);
     try {
       // When a child profile is currently active the server refuses verifyPin
@@ -212,7 +212,7 @@ export default function ParentPage() {
         <form onSubmit={handleSetup} className="rounded-xl border border-white/[0.07] bg-white/[0.03] backdrop-blur-sm p-6 space-y-5">
           <div className="grid grid-cols-2 gap-3">
             <Input
-              label="PIN (4–6 digits)"
+              label="PIN (4-6 digits)"
               type="password"
               inputMode="numeric"
               autoComplete="new-password"
@@ -341,7 +341,7 @@ export default function ParentPage() {
 
   return (
     <div className="max-w-5xl mx-auto">
-      {/* Header — clarifies that the parent is signed in as admin, not a kid */}
+      {/* Header - clarifies that the parent is signed in as admin, not a kid */}
       <div className="flex items-start justify-between mb-5">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-lg bg-blue-500/[0.12] border border-blue-400/[0.20] flex items-center justify-center">
@@ -368,15 +368,15 @@ export default function ParentPage() {
         <div className="mb-4 text-[13px] text-rose-300 bg-rose-900/20 border border-rose-700/30 rounded-lg px-3 py-2">{error}</div>
       )}
 
-      {/* Top stats — at-a-glance roll-ups across every child */}
+      {/* Top stats - at-a-glance roll-ups across every child */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-5">
         <HeaderStat icon={Users}        label="Children"      value={students.length} />
         <HeaderStat icon={BookOpen}     label="Total courses" value={totalCourses} />
         <HeaderStat icon={CheckCircle2} label="Lessons done"  value={`${totalLessonsDone}/${totalLessons}`} />
-        <HeaderStat icon={Award}        label="Avg grade"     value={averageGradeAcrossKids != null ? `${averageGradeAcrossKids}%` : '—'} />
+        <HeaderStat icon={Award}        label="Avg grade"     value={averageGradeAcrossKids != null ? `${averageGradeAcrossKids}%` : '-'} />
       </div>
 
-      {/* Tab bar — Overview, Activity feed, Settings */}
+      {/* Tab bar - Overview, Activity feed, Settings */}
       <div className="flex items-center gap-1 mb-4 border-b border-white/[0.06]">
         <AdminTab id="overview" current={tab} onClick={setTab} icon={LayoutDashboard} label="Overview" />
         <AdminTab id="activity" current={tab} onClick={setTab} icon={Activity}        label={`Activity${activity?.length ? ` (${activity.length})` : ''}`} />
@@ -478,7 +478,7 @@ function AdminTab({ id, current, onClick, icon: Icon, label }) {
   );
 }
 
-// Stream of recent events — newest first. Each row shows the child it
+// Stream of recent events - newest first. Each row shows the child it
 // belongs to (avatar dot in their color), a one-line description, and a
 // relative timestamp.
 function ActivityFeed({ events }) {
@@ -553,7 +553,7 @@ function relativeTime(iso) {
 }
 
 // Parent-account settings: rotate the PIN, fully turn parent mode off.
-// Sits behind the same PIN gate as everything else — but every individual
+// Sits behind the same PIN gate as everything else - but every individual
 // action also re-verifies via its own endpoint.
 function SettingsTab({ pinForSession, onPinChanged, onDisabled }) {
   const [oldPin, setOldPin] = useState('');
@@ -572,7 +572,7 @@ function SettingsTab({ pinForSession, onPinChanged, onDisabled }) {
     e?.preventDefault?.();
     setPinError(null);
     setPinSuccess(false);
-    if (!/^[0-9]{4,6}$/.test(newPin)) { setPinError('New PIN must be 4–6 digits.'); return; }
+    if (!/^[0-9]{4,6}$/.test(newPin)) { setPinError('New PIN must be 4-6 digits.'); return; }
     if (newPin !== newPinConfirm) { setPinError('PINs do not match.'); return; }
     setSavingPin(true);
     try {
@@ -607,7 +607,7 @@ function SettingsTab({ pinForSession, onPinChanged, onDisabled }) {
           <h3 className="text-[14px] font-semibold text-white/90">Change PIN</h3>
         </div>
         <p className="text-[12px] text-white/45 mb-3">
-          The PIN protects the admin panel, child controls, and chat viewer. Choose 4–6 digits.
+          The PIN protects the admin panel, child controls, and chat viewer. Choose 4-6 digits.
         </p>
         <form onSubmit={handleChangePin} className="grid sm:grid-cols-3 gap-3">
           <Input
@@ -624,7 +624,7 @@ function SettingsTab({ pinForSession, onPinChanged, onDisabled }) {
             inputMode="numeric"
             value={newPin}
             onChange={e => setNewPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
-            placeholder="4–6 digits"
+            placeholder="4-6 digits"
           />
           <Input
             label="Confirm new"
@@ -680,7 +680,7 @@ function SettingsTab({ pinForSession, onPinChanged, onDisabled }) {
   );
 }
 
-// Shared grade-badge color helper — keeps the dashboard and activity feed visually consistent.
+// Shared grade-badge color helper - keeps the dashboard and activity feed visually consistent.
 function gradeBadgeStyle(score) {
   if (score == null) return 'bg-white/[0.06] text-white/55';
   if (score >= 90) return 'bg-emerald-500/[0.18] border border-emerald-400/[0.30] text-emerald-200';
@@ -794,7 +794,7 @@ function StudentCard({ student, onSwitch, onRemove, onManage, onViewChats }) {
           <div className="grid grid-cols-3 gap-2 mt-3">
             <Stat icon={BookOpen} label="Courses" value={s.totalCurricula ?? 0} />
             <Stat icon={CheckCircle2} label="Lessons done" value={`${s.completedLessons || 0}/${s.totalLessons || 0}`} />
-            <Stat icon={Award} label="Avg grade" value={s.avgGrade != null ? `${s.avgGrade}%` : '—'} />
+            <Stat icon={Award} label="Avg grade" value={s.avgGrade != null ? `${s.avgGrade}%` : '-'} />
           </div>
 
           {s.courses?.length > 0 && (
@@ -879,7 +879,7 @@ function ControlsModal({ student, onClose, onSave }) {
   }
 
   return (
-    <Modal open={!!student} onClose={onClose} title={`Controls — ${student.name}`} size="lg">
+    <Modal open={!!student} onClose={onClose} title={`Controls - ${student.name}`} size="lg">
       <div className="space-y-5">
 
         {/* ── Learning & Difficulty ─────────────────────────────── */}
@@ -888,7 +888,7 @@ function ControlsModal({ student, onClose, onSave }) {
           <div className="rounded-lg border border-white/[0.07] bg-white/[0.02] p-3 space-y-3">
             <Toggle
               label="Require graded mode"
-              description="Every new course this child creates will automatically include AI-graded assignments — the form toggle is locked."
+              description="Every new course this child creates will automatically include AI-graded assignments - the form toggle is locked."
               checked={!!controls.requireGraded}
               onChange={v => setControls(prev => ({ ...prev, requireGraded: v }))}
             />
@@ -921,7 +921,7 @@ function ControlsModal({ student, onClose, onSave }) {
           <div className="rounded-lg border border-amber-400/[0.12] bg-amber-500/[0.04] p-3 space-y-3">
             <Toggle
               label="Socratic mode"
-              description="The AI will never give direct answers — it guides through questions only. If your child asks for the answer, the AI asks another question instead."
+              description="The AI will never give direct answers - it guides through questions only. If your child asks for the answer, the AI asks another question instead."
               checked={!!controls.socraticMode}
               onChange={v => setControls(prev => ({ ...prev, socraticMode: v }))}
             />
@@ -979,7 +979,7 @@ function ControlsModal({ student, onClose, onSave }) {
   );
 }
 
-// Chats modal — list pane + reader pane. Lists every lesson chat + study
+// Chats modal - list pane + reader pane. Lists every lesson chat + study
 // session belonging to this child; clicking one loads the full transcript.
 function ChatsModal({ student, pin, onClose }) {
   const [chats, setChats] = useState(null);
@@ -1021,7 +1021,7 @@ function ChatsModal({ student, pin, onClose }) {
         <div className="flex items-center justify-center h-48"><LoadingSpinner size={24} /></div>
       ) : chats.length === 0 ? (
         <div className="text-center py-10 text-[13px] text-white/55">
-          No chats yet — {student.name} hasn't started any lessons or study sessions.
+          No chats yet - {student.name} hasn't started any lessons or study sessions.
         </div>
       ) : (
         <div className="grid grid-cols-[260px_1fr] gap-3 h-[440px]">

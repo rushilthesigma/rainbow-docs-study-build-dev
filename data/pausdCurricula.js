@@ -16,7 +16,7 @@
 
 export const PAUSD_CATALOG = [
   // =====================================================================
-  // MATH — PAUSD's actual course names + actual textbook structure
+  // MATH - PAUSD's actual course names + actual textbook structure
   // =====================================================================
 
   {
@@ -26,10 +26,10 @@ export const PAUSD_CATALOG = [
     subject: 'math',
     grade: '6',
     difficulty: 'advanced',
-    textbook: 'Big Ideas Math: Modeling Real Life — Grade 6',
+    textbook: 'Big Ideas Math: Modeling Real Life - Grade 6',
     units: [
       {
-        title: 'Ch 1 — Numerical Expressions and Factors',
+        title: 'Ch 1 - Numerical Expressions and Factors',
         description: 'Powers, order of operations, prime factorization, GCF, LCM.',
         lessons: [
           { title: '1.1 Powers and Exponents', description: 'Write and evaluate powers; apply order of operations to expressions with exponents.' },
@@ -40,7 +40,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 2 — Fractions and Decimals',
+        title: 'Ch 2 - Fractions and Decimals',
         description: 'Operations with fractions and multi-digit decimals.',
         lessons: [
           { title: '2.1 Multiplying Fractions', description: 'Multiply fractions and mixed numbers; simplify before multiplying.' },
@@ -52,7 +52,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 3 — Algebraic Expressions and Properties',
+        title: 'Ch 3 - Algebraic Expressions and Properties',
         description: 'Building, evaluating, and simplifying algebraic expressions.',
         lessons: [
           { title: '3.1 Algebraic Expressions', description: 'Translate words to algebraic expressions; identify terms, coefficients, constants.' },
@@ -63,7 +63,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 4 — Areas of Polygons',
+        title: 'Ch 4 - Areas of Polygons',
         description: 'Area of triangles, parallelograms, trapezoids, composite figures, and polygons on the coordinate plane.',
         lessons: [
           { title: '4.1 Areas of Parallelograms', description: 'Derive and apply the parallelogram area formula by decomposing into a rectangle.' },
@@ -74,7 +74,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 5 — Ratios and Rates',
+        title: 'Ch 5 - Ratios and Rates',
         description: 'Ratios, rates, ratio tables, and percent.',
         lessons: [
           { title: '5.1 Ratios', description: 'Write ratios in three forms; identify equivalent ratios.' },
@@ -87,7 +87,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 6 — Integers and the Coordinate Plane',
+        title: 'Ch 6 - Integers and the Coordinate Plane',
         description: 'Integers, absolute value, rational numbers, and the four-quadrant coordinate plane.',
         lessons: [
           { title: '6.1 Integers', description: 'Use integers to represent quantities; identify opposites.' },
@@ -98,7 +98,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 7 — Equations and Inequalities',
+        title: 'Ch 7 - Equations and Inequalities',
         description: 'One-variable equations and inequalities and their graphs.',
         lessons: [
           { title: '7.1 Writing Equations in One Variable', description: 'Translate verbal sentences into equations; check solutions by substitution.' },
@@ -111,7 +111,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 8 — Surface Area and Volume',
+        title: 'Ch 8 - Surface Area and Volume',
         description: 'Surface area of prisms and pyramids; volume of rectangular prisms with fractional edges.',
         lessons: [
           { title: '8.1 Three-Dimensional Figures', description: 'Identify prisms, pyramids, cylinders, cones, and spheres; describe cross-sections.' },
@@ -121,7 +121,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 9 — Statistical Measures',
+        title: 'Ch 9 - Statistical Measures',
         description: 'Statistical questions, measures of center and variation, and outliers.',
         lessons: [
           { title: '9.1 Introduction to Statistics', description: 'Distinguish statistical from non-statistical questions.' },
@@ -132,7 +132,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 10 — Data Displays',
+        title: 'Ch 10 - Data Displays',
         description: 'Stem-and-leaf, histograms, box plots, and shape of distributions.',
         lessons: [
           { title: '10.1 Stem-and-Leaf Plots', description: 'Construct and read stem-and-leaf plots; describe the distribution.' },
@@ -151,10 +151,10 @@ export const PAUSD_CATALOG = [
     subject: 'math',
     grade: '7',
     difficulty: 'advanced',
-    textbook: 'Big Ideas Math: Modeling Real Life — Course 2 Accelerated',
+    textbook: 'Big Ideas Math: Modeling Real Life - Course 2 Accelerated',
     units: [
       {
-        title: 'Ch 1 — Adding and Subtracting Rational Numbers',
+        title: 'Ch 1 - Adding and Subtracting Rational Numbers',
         description: 'Signed-rational addition and subtraction with full algorithmic fluency.',
         lessons: [
           { title: '1.1 Rational Numbers', description: 'Identify rational numbers; convert between fraction and decimal forms.' },
@@ -165,7 +165,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 2 — Multiplying and Dividing Rational Numbers',
+        title: 'Ch 2 - Multiplying and Dividing Rational Numbers',
         description: 'Signed-rational multiplication and division.',
         lessons: [
           { title: '2.1 Multiplying Integers', description: 'Apply sign rules to multiply integers.' },
@@ -176,7 +176,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 3 — Expressions',
+        title: 'Ch 3 - Expressions',
         description: 'Algebraic expressions and the distributive property.',
         lessons: [
           { title: '3.1 Algebraic Expressions', description: 'Translate verbal phrases into algebraic expressions and back.' },
@@ -186,7 +186,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 4 — Equations and Inequalities',
+        title: 'Ch 4 - Equations and Inequalities',
         description: 'Multi-step equations and inequalities with rational coefficients.',
         lessons: [
           { title: '4.1 Solving Equations Using Addition or Subtraction', description: 'Solve one-step equations; verify by substitution.' },
@@ -198,7 +198,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 5 — Ratios and Proportions',
+        title: 'Ch 5 - Ratios and Proportions',
         description: 'Proportional relationships and the constant of proportionality.',
         lessons: [
           { title: '5.1 Ratios and Ratio Tables', description: 'Build ratio tables; find equivalent ratios in context.' },
@@ -210,7 +210,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 6 — Percents',
+        title: 'Ch 6 - Percents',
         description: 'Percent of change, simple interest, and percent applications.',
         lessons: [
           { title: '6.1 Fractions, Decimals, and Percents', description: 'Convert between forms; place values on a number line.' },
@@ -222,7 +222,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 7 — Probability',
+        title: 'Ch 7 - Probability',
         description: 'Theoretical and experimental probability, simulations, and compound events.',
         lessons: [
           { title: '7.1 Probability', description: 'Compute theoretical probability for uniform models.' },
@@ -233,7 +233,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 8 — Statistics',
+        title: 'Ch 8 - Statistics',
         description: 'Sampling, inference, and comparing populations.',
         lessons: [
           { title: '8.1 Samples and Populations', description: 'Distinguish samples from populations; identify biased sampling methods.' },
@@ -242,7 +242,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 9 — Geometric Shapes and Angles',
+        title: 'Ch 9 - Geometric Shapes and Angles',
         description: 'Angle relationships, polygon angle sums, and circle measures.',
         lessons: [
           { title: '9.1 Adjacent and Vertical Angles', description: 'Identify and apply adjacent and vertical angle relationships.' },
@@ -253,7 +253,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 10 — Surface Area and Volume',
+        title: 'Ch 10 - Surface Area and Volume',
         description: 'Surface area and volume of prisms, pyramids, cylinders, cones, and spheres.',
         lessons: [
           { title: '10.1 Circles and Circumference', description: 'Apply C = 2πr; solve composite-figure problems.' },
@@ -266,7 +266,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 11 — Transformations',
+        title: 'Ch 11 - Transformations',
         description: 'Translations, reflections, rotations, dilations, and similar figures.',
         lessons: [
           { title: '11.1 Translations', description: 'Apply translation rules to coordinates; verify congruence.' },
@@ -279,7 +279,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 12 — Real Numbers and the Pythagorean Theorem',
+        title: 'Ch 12 - Real Numbers and the Pythagorean Theorem',
         description: 'Roots, irrationals, and the Pythagorean theorem with applications.',
         lessons: [
           { title: '12.1 Finding Square Roots', description: 'Compute square roots; classify roots as rational or irrational.' },
@@ -302,7 +302,7 @@ export const PAUSD_CATALOG = [
     textbook: 'Big Ideas Math Algebra 1: A Common Core Curriculum',
     units: [
       {
-        title: 'Ch 1 — Solving Linear Equations',
+        title: 'Ch 1 - Solving Linear Equations',
         description: 'One-variable linear equations including absolute-value and literal equations.',
         textbookContext: 'Big Ideas Math Algebra 1, Chapter 1 covers Sections 1.1-1.5: simple equations, multi-step equations, variables on both sides, absolute-value equations, and rewriting formulas. Standard problem types include 2(x+3)-4=12, |2x-5|=11, and solving I=Prt for r.',
         lessons: [
@@ -312,11 +312,11 @@ export const PAUSD_CATALOG = [
           { title: '1.3 Solving Equations with Variables on Both Sides', description: 'Solve equations with variables on both sides; identify identities and contradictions.' },
           { title: '1.4 Solving Absolute Value Equations', description: 'Solve |ax + b| = c; reason about the two-case structure.' },
           { title: '1.5 Rewriting Equations and Formulas', description: 'Rearrange formulas to solve for a specified variable.' },
-          { title: 'Practice Set: Chapter 1', description: 'Solve a mixed Chapter 1 problem set on the math canvas — mostly section-3+ difficulty with one stretch problem.', type: 'practice' },
+          { title: 'Practice Set: Chapter 1', description: 'Solve a mixed Chapter 1 problem set on the math canvas - mostly section-3+ difficulty with one stretch problem.', type: 'practice' },
         ],
       },
       {
-        title: 'Ch 2 — Solving Linear Inequalities',
+        title: 'Ch 2 - Solving Linear Inequalities',
         description: 'Linear inequalities, compound inequalities, and absolute-value inequalities.',
         lessons: [
           { title: '2.1 Writing and Graphing Inequalities', description: 'Translate verbal inequalities; graph on a number line.' },
@@ -328,7 +328,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 3 — Graphing Linear Functions',
+        title: 'Ch 3 - Graphing Linear Functions',
         description: 'Functions, function notation, slope, and graphing linear functions.',
         lessons: [
           { title: '3.1 Functions', description: 'Define functions; apply the vertical line test; identify domain and range.' },
@@ -341,7 +341,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 4 — Writing Linear Functions',
+        title: 'Ch 4 - Writing Linear Functions',
         description: 'Writing equations of lines, scatter plots, and arithmetic sequences.',
         lessons: [
           { title: '4.1 Writing Equations in Slope-Intercept Form', description: 'Write y = mx + b given a graph or two points.' },
@@ -354,7 +354,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 5 — Solving Systems of Linear Equations',
+        title: 'Ch 5 - Solving Systems of Linear Equations',
         description: 'Systems by graphing, substitution, and elimination, plus systems of inequalities.',
         lessons: [
           { title: '5.1 Solving Systems of Linear Equations by Graphing', description: 'Solve by graphing; classify the three solution cases.' },
@@ -367,7 +367,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 6 — Exponential Functions and Sequences',
+        title: 'Ch 6 - Exponential Functions and Sequences',
         description: 'Exponent rules, exponential functions, and geometric sequences.',
         lessons: [
           { title: '6.1 Properties of Exponents', description: 'Apply product, quotient, and power-of-a-power rules.' },
@@ -380,7 +380,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 7 — Polynomial Equations and Factoring',
+        title: 'Ch 7 - Polynomial Equations and Factoring',
         description: 'Polynomial operations, special products, and factoring.',
         lessons: [
           { title: '7.1 Adding and Subtracting Polynomials', description: 'Combine polynomials; collect like terms.' },
@@ -394,7 +394,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 8 — Graphing Quadratic Functions',
+        title: 'Ch 8 - Graphing Quadratic Functions',
         description: 'Quadratic functions in standard, vertex, and intercept form.',
         lessons: [
           { title: '8.1 Graphing f(x) = ax²', description: 'Graph the basic parabola; identify vertex and axis of symmetry.' },
@@ -406,7 +406,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 9 — Solving Quadratic Equations',
+        title: 'Ch 9 - Solving Quadratic Equations',
         description: 'Solving quadratic equations by all standard methods.',
         lessons: [
           { title: '9.1 Properties of Radicals', description: 'Simplify radicals using product and quotient properties.' },
@@ -418,7 +418,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 10 — Radical Functions and Equations',
+        title: 'Ch 10 - Radical Functions and Equations',
         description: 'Radical functions, equations, and inverses.',
         lessons: [
           { title: '10.1 Graphing Square Root Functions', description: 'Graph y = √x and its transformations.' },
@@ -428,7 +428,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 11 — Data Analysis and Displays',
+        title: 'Ch 11 - Data Analysis and Displays',
         description: 'Univariate and bivariate statistics with regression and two-way tables.',
         lessons: [
           { title: '11.1 Measures of Center and Variation', description: 'Compute mean, median, range, IQR, and standard deviation.' },
@@ -451,7 +451,7 @@ export const PAUSD_CATALOG = [
     textbook: 'Big Ideas Math Geometry: A Common Core Curriculum',
     units: [
       {
-        title: 'Ch 1 — Basics of Geometry',
+        title: 'Ch 1 - Basics of Geometry',
         description: 'Points, lines, planes, distance, midpoint, and constructions.',
         lessons: [
           { title: '1.1 Points, Lines, and Planes', description: 'Use proper geometric notation; identify and name geometric objects.' },
@@ -463,7 +463,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 2 — Reasoning and Proofs',
+        title: 'Ch 2 - Reasoning and Proofs',
         description: 'Logic, conditionals, and the structure of geometric proof.',
         lessons: [
           { title: '2.1 Conditional Statements', description: 'Write conditionals, converses, inverses, contrapositives, and biconditionals.' },
@@ -476,7 +476,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 3 — Parallel and Perpendicular Lines',
+        title: 'Ch 3 - Parallel and Perpendicular Lines',
         description: 'Parallel lines, transversals, and slopes.',
         lessons: [
           { title: '3.1 Pairs of Lines and Angles', description: 'Identify all eight angles formed by parallel lines and a transversal.' },
@@ -487,7 +487,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 4 — Transformations',
+        title: 'Ch 4 - Transformations',
         description: 'Translations, reflections, rotations, dilations, and similarity transformations.',
         lessons: [
           { title: '4.1 Translations', description: 'Apply translation rules; verify congruence by sequence of motions.' },
@@ -500,7 +500,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 5 — Congruent Triangles',
+        title: 'Ch 5 - Congruent Triangles',
         description: 'Triangle congruence postulates and proofs.',
         lessons: [
           { title: '5.1 Angles of Triangles', description: 'Apply the triangle angle-sum and exterior-angle theorems.' },
@@ -515,7 +515,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 6 — Relationships Within Triangles',
+        title: 'Ch 6 - Relationships Within Triangles',
         description: 'Bisectors, medians, altitudes, and the triangle inequality.',
         lessons: [
           { title: '6.1 Perpendicular and Angle Bisectors', description: 'Apply the perpendicular and angle bisector theorems.' },
@@ -528,7 +528,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 7 — Quadrilaterals and Other Polygons',
+        title: 'Ch 7 - Quadrilaterals and Other Polygons',
         description: 'Polygon angle sums and properties of special quadrilaterals.',
         lessons: [
           { title: '7.1 Angles of Polygons', description: 'Derive and apply the polygon interior and exterior angle-sum theorems.' },
@@ -539,7 +539,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 8 — Similarity',
+        title: 'Ch 8 - Similarity',
         description: 'Similar polygons, similarity postulates, and proportions in geometry.',
         lessons: [
           { title: '8.1 Similar Polygons', description: 'Identify similar polygons; apply the scale factor.' },
@@ -550,7 +550,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 9 — Right Triangles and Trigonometry',
+        title: 'Ch 9 - Right Triangles and Trigonometry',
         description: 'Pythagorean theorem, special triangles, and trigonometry.',
         lessons: [
           { title: '9.1 The Pythagorean Theorem', description: 'Apply Pythagoras and its converse; classify triangles using sides.' },
@@ -564,7 +564,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 10 — Circles',
+        title: 'Ch 10 - Circles',
         description: 'Circle theorems, central and inscribed angles, and tangent properties.',
         lessons: [
           { title: '10.1 Lines and Segments That Intersect Circles', description: 'Identify chords, secants, tangents, and arcs.' },
@@ -577,7 +577,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 11 — Circumference, Area, and Volume',
+        title: 'Ch 11 - Circumference, Area, and Volume',
         description: 'Areas and volumes of plane and solid figures, plus Cavalieri\'s principle.',
         lessons: [
           { title: '11.1 Circumference and Arc Length', description: 'Apply C = 2πr; compute arc length in radians and degrees.' },
@@ -592,7 +592,7 @@ export const PAUSD_CATALOG = [
         ],
       },
       {
-        title: 'Ch 12 — Probability',
+        title: 'Ch 12 - Probability',
         description: 'Probability, conditional probability, and geometric probability.',
         lessons: [
           { title: '12.1 Sample Spaces and Probability', description: 'Build sample spaces; compute probabilities for compound events.' },
@@ -608,13 +608,13 @@ export const PAUSD_CATALOG = [
   },
 
   // =====================================================================
-  // SCIENCE — NGSS California Integrated 1/2/3 (PAUSD's middle-school
+  // SCIENCE - NGSS California Integrated 1/2/3 (PAUSD's middle-school
   // sequence). Honors-tier expectations within the standard sequence.
   // =====================================================================
   {
     slug: 'science-6-earth',
     title: 'PAUSD 6th Grade Science: Earth & Space',
-    description: 'NGSS California Integrated 1: plate tectonics, rocks, weathering, weather, climate, the solar system, and engineering design — at PAUSD honors-tier expectation.',
+    description: 'NGSS California Integrated 1: plate tectonics, rocks, weathering, weather, climate, the solar system, and engineering design - at PAUSD honors-tier expectation.',
     subject: 'science',
     grade: '6',
     difficulty: 'advanced',
@@ -707,7 +707,7 @@ export const PAUSD_CATALOG = [
   {
     slug: 'science-7-life',
     title: 'PAUSD 7th Grade Science: Life Science',
-    description: 'NGSS California Integrated 2: cells, energy, body systems, genetics, evolution, ecology, and human impact — at PAUSD honors-tier expectation.',
+    description: 'NGSS California Integrated 2: cells, energy, body systems, genetics, evolution, ecology, and human impact - at PAUSD honors-tier expectation.',
     subject: 'science',
     grade: '7',
     difficulty: 'advanced',
@@ -803,7 +803,7 @@ export const PAUSD_CATALOG = [
   {
     slug: 'science-8-physical',
     title: 'PAUSD 8th Grade Science: Physical Science',
-    description: 'NGSS California Integrated 3: atoms, chemical reactions, forces, energy, waves, and electricity & magnetism — at PAUSD honors-tier expectation.',
+    description: 'NGSS California Integrated 3: atoms, chemical reactions, forces, energy, waves, and electricity & magnetism - at PAUSD honors-tier expectation.',
     subject: 'science',
     grade: '8',
     difficulty: 'advanced',

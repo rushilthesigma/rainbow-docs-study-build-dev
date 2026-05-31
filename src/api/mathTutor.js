@@ -1,6 +1,6 @@
 import { getToken } from './client';
 
-// Streams a math-tutor turn. Stateless server-side — client owns the history.
+// Streams a math-tutor turn. Stateless server-side - client owns the history.
 // body = { topic, customInstructions, messages, phase, images? }
 // phase: 'lesson' | 'practice' | 'grade'
 // handlers = { onChunk, onDone, onError, onStatus }
@@ -41,7 +41,7 @@ export function sendMathTutorMessage(body, { onChunk, onDone, onError, onStatus 
           } catch {}
         }
       }
-      // Stream closed without `done`/`error` — connection dropped. Surface
+      // Stream closed without `done`/`error` - connection dropped. Surface
       // a soft error so the streaming bubble closes.
       if (!finished) onError?.('Connection ended unexpectedly. Try again.');
     })

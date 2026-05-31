@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { apiFetch } from '../../api/client';
 
-// Discussion block — AI converses with the student about what they just
+// Discussion block - AI converses with the student about what they just
 // learned. Block shape:
 //   { type: 'discussion', title, prompt, talkingPoints: [string,...] }
 //
@@ -12,7 +12,7 @@ import { apiFetch } from '../../api/client';
 // trades 4+ exchanges with the student. Marks complete once the student
 // has answered at least 3 substantive messages OR clicks "Wrap up".
 //
-// Keeps the entire chat in local state — nothing persists server-side
+// Keeps the entire chat in local state - nothing persists server-side
 // (this is a learning interaction, not a chat thread). Uses the shared
 // /api/chat endpoint with a tutor-style system prompt.
 export default function DiscussionBlock({ block, onComplete }) {
@@ -49,7 +49,7 @@ export default function DiscussionBlock({ block, onComplete }) {
         block.title ? ` Topic: "${block.title}".` : ''
       }${
         points.length ? ` Hit these talking points across the discussion: ${points.map(p => `"${p}"`).join(', ')}.` : ''
-      } Ask probing follow-up questions, validate correct understanding briefly, gently correct misconceptions, and keep replies to 2–4 sentences. Plain prose; no markdown headings or bullet lists. End most replies with a single question that pushes the student's thinking forward.`;
+      } Ask probing follow-up questions, validate correct understanding briefly, gently correct misconceptions, and keep replies to 2-4 sentences. Plain prose; no markdown headings or bullet lists. End most replies with a single question that pushes the student's thinking forward.`;
       const result = await apiFetch('/api/chat', {
         method: 'POST',
         body: JSON.stringify({
@@ -61,7 +61,7 @@ export default function DiscussionBlock({ block, onComplete }) {
       const reply = result?.content?.[0]?.text || '…';
       setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
     } catch (err) {
-      setMessages(prev => [...prev, { role: 'assistant', content: '(I lost the thread for a second — try resending that?)' }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: '(I lost the thread for a second - try resending that?)' }]);
     } finally {
       setBusy(false);
       setTimeout(() => inputRef.current?.focus(), 0);
@@ -147,7 +147,7 @@ export default function DiscussionBlock({ block, onComplete }) {
       <div className="flex justify-end items-center gap-3 border-t border-white/[0.05] pt-5">
         <span className="text-[11px] text-white/35">
           {canFinish
-            ? 'Nice exchange — finish when you feel done.'
+            ? 'Nice exchange - finish when you feel done.'
             : `Send ${Math.max(0, 2 - studentReplies)} more substantive ${studentReplies === 1 ? 'reply' : 'replies'} to finish.`}
         </span>
         <button

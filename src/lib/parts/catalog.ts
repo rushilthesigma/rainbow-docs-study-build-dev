@@ -423,7 +423,7 @@ function helicalGear(p: Record<string, number>): THREE.BufferGeometry {
 }
 
 function bevelGear(p: Record<string, number>): THREE.BufferGeometry {
-  // Approximate as cone with crenellated rim — easier-to-render frustum
+  // Approximate as cone with crenellated rim - easier-to-render frustum
   const teeth = Math.max(8, Math.floor(p.teeth));
   const r = p.radius;
   const rTop = r * 0.65;
@@ -632,7 +632,7 @@ function cornerBracket(p: Record<string, number>): THREE.BufferGeometry {
 /* ---------------- Springs ---------------- */
 
 function extensionSpring(p: Record<string, number>): THREE.BufferGeometry {
-  // Same as compression but with closed end loops — visually similar.
+  // Same as compression but with closed end loops - visually similar.
   return helicalSpring(p);
 }
 
@@ -940,7 +940,7 @@ function omniWheel(p: Record<string, number>): THREE.BufferGeometry {
   const hub = new THREE.CylinderGeometry(D * 0.35, D * 0.35, w, 24);
   hub.rotateZ(Math.PI / 2);
   let g: THREE.BufferGeometry = hub;
-  // Roller pockets around the rim — small cylinders perpendicular to the wheel axis
+  // Roller pockets around the rim - small cylinders perpendicular to the wheel axis
   const N = 12;
   for (let i = 0; i < N; i++) {
     const a = (i / N) * Math.PI * 2;

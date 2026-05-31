@@ -10,9 +10,9 @@ import { Z } from '../../styles/tokens';
 // transitions, Apple-flavored typography, and a back / continue chrome
 // at the bottom.
 //
-//   1. Welcome   — big "Hello" + brand mark, sets the tone.
-//   2. Wallpaper — pick a desktop background.
-//   3. Tour      — offer the guided tour.
+//   1. Welcome   - big "Hello" + brand mark, sets the tone.
+//   2. Wallpaper - pick a desktop background.
+//   3. Tour      - offer the guided tour.
 const STEPS = ['welcome', 'wallpaper', 'tour'];
 
 export default function Onboarding({ onComplete }) {
@@ -21,7 +21,7 @@ export default function Onboarding({ onComplete }) {
   const { wallpaper, setWallpaper } = useUIPreference();
   const dark = true; // always dark
 
-  // Wallpaper picks for the onboarding grid — subset of the full
+  // Wallpaper picks for the onboarding grid - subset of the full
   // catalog so the choice doesn't feel overwhelming. Includes the
   // canonical default (lavender) at the top.
   const PICKS = ['lavender', 'forest', 'aurora', 'ocean', 'galaxy', 'milkyway', 'cosmos', 'nebula'];
@@ -32,7 +32,7 @@ export default function Onboarding({ onComplete }) {
   function back() { setStep((s) => Math.max(0, s - 1)); }
 
   // Mark onboarded on the server (no localStorage). Tour-step also
-  // moves into preferences — the GuidedTour component reads it.
+  // moves into preferences - the GuidedTour component reads it.
   async function finish(takeTour) {
     try {
       const next = {
@@ -50,7 +50,7 @@ export default function Onboarding({ onComplete }) {
 
   const firstName = (user?.name || user?.email || 'there').split(/[\s@]/)[0];
 
-  // Background gradient — slow color shift between steps so each panel
+  // Background gradient - slow color shift between steps so each panel
   // feels like its own "scene" without being jarring.
   const bg = dark
     ? STEP_BG_DARK[STEPS[step]] || STEP_BG_DARK.welcome
@@ -58,82 +58,47 @@ export default function Onboarding({ onComplete }) {
 
   return (
     <div
-      className="fixed inset-0 flex items-center justify-center p-6 transition-[background] duration-700 ease-out"
+      className="fixed inset-0 flex flex-col transition-[background] duration-700 ease-out"
       style={{ zIndex: Z.tour, background: bg }}
     >
-      {/* macOS-style floating setup panel — matches the desktop's
-          regular Window chrome (traffic lights + translucent titlebar)
-          so the onboarding visually rhymes with the desktop the user is
-          about to land on. Traffic lights are inert during onboarding —
-          there's no closing it without finishing. */}
-      <div
-        className={`relative w-full max-w-3xl rounded-xl overflow-hidden flex flex-col backdrop-blur-2xl shadow-[0_30px_80px_rgba(0,0,0,0.55),0_0_0_1px_rgba(255,255,255,0.08)] animate-modal-in ${
-          dark ? 'bg-[#1a1a26]/92 ring-1 ring-white/[0.10]' : 'bg-white/95 ring-1 ring-black/[0.08]'
-        }`}
-        style={{ maxHeight: 'min(720px, calc(100vh - 48px))' }}
-      >
-        <TrafficLightBar title="Setup Assistant" dark={dark} />
+      <ProgressDots count={STEPS.length} active={step} dark={dark} />
 
-        <ProgressDots count={STEPS.length} active={step} dark={dark} />
-
-        <main className="flex-1 min-h-0 overflow-y-auto flex items-center justify-center px-8 py-6">
-          <div className="w-full max-w-xl">
-            {STEPS[step] === 'welcome' && (
-              <Welcome name={firstName} dark={dark} />
-            )}
-            {STEPS[step] === 'wallpaper' && (
-              <WallpaperPick wallpaper={wallpaper} setWallpaper={setWallpaper} picks={PICKS} dark={dark} />
-            )}
-            {STEPS[step] === 'tour' && (
-              <Tour onSkip={() => finish(false)} onTour={() => finish(true)} dark={dark} />
-            )}
-          </div>
-        </main>
-
-        {/* Bottom chrome — Back / Continue, anchored inside the panel */}
-        <div className={`flex items-center justify-between px-6 py-4 border-t ${dark ? 'border-white/[0.07]' : 'border-black/[0.08]'}`}>
-          {step > 0 ? (
-            <button
-              onClick={back}
-              className={`inline-flex items-center gap-1 px-4 py-2 rounded-md text-[13px] font-medium ${
-                dark ? 'text-white/70 hover:bg-white/[0.08]' : 'text-gray-600 hover:bg-black/[0.04]'
-              } transition-colors`}
-            >
-              <ChevronLeft size={14} /> Back
-            </button>
-          ) : <span />}
-
-          {STEPS[step] !== 'tour' && (
-            <button
-              onClick={next}
-              className="inline-flex items-center gap-2 px-6 py-2.5 rounded-md bg-blue-500 hover:bg-blue-400 active:scale-[0.98] text-white text-[13.5px] font-semibold transition-colors"
-            >
-              Continue <ChevronRight size={14} />
-            </button>
+      <main className="flex-1 min-h-0 flex items-center justify-center px-6">
+        <div className="w-full max-w-xl">
+          {STEPS[step] === 'welcome' && (
+            <Welcome name={firstName} dark={dark} />
+          )}
+          {STEPS[step] === 'wallpaper' && (
+            <WallpaperPick wallpaper={wallpaper} setWallpaper={setWallpaper} picks={PICKS} dark={dark} />
+          )}
+          {STEPS[step] === 'tour' && (
+            <Tour onSkip={() => finish(false)} onTour={() => finish(true)} dark={dark} />
           )}
         </div>
-      </div>
-    </div>
-  );
-}
+      </main>
 
-// macOS-style title bar: three traffic-light circles + centered title.
-// During onboarding the dots are inert — the user has to finish setup,
-// so we don't wire close/min/max here. Slightly dimmed dots make that
-// clear without a tooltip.
-function TrafficLightBar({ title, dark }) {
-  return (
-    <div
-      className={`h-8 flex items-center flex-shrink-0 select-none ${
-        dark ? 'bg-[rgba(36,36,40,0.92)] border-b border-white/[0.06]' : 'bg-[rgba(232,232,234,0.92)] border-b border-black/[0.06]'
-      }`}
-    >
-      <div className="flex items-center gap-[7px] px-3" aria-hidden="true">
-        <span className="w-3 h-3 rounded-full bg-[#FF5F57] opacity-70" />
-        <span className="w-3 h-3 rounded-full bg-[#FEBC2E] opacity-70" />
-        <span className="w-3 h-3 rounded-full bg-[#28C840] opacity-70" />
+      {/* Bottom chrome - macOS-style buttons (rounded-lg, solid blue accent). */}
+      <div className="flex items-center justify-between px-8 py-6">
+        {step > 0 ? (
+          <button
+            onClick={back}
+            className={`inline-flex items-center gap-1 px-4 py-2 rounded-lg text-[13px] font-medium ${
+              dark ? 'text-white/70 hover:bg-white/[0.08]' : 'text-gray-600 hover:bg-black/[0.04]'
+            } transition-colors`}
+          >
+            <ChevronLeft size={14} /> Back
+          </button>
+        ) : <span />}
+
+        {STEPS[step] !== 'tour' && (
+          <button
+            onClick={next}
+            className="inline-flex items-center gap-2 px-6 py-2.5 rounded-lg bg-blue-500 hover:bg-blue-400 active:scale-[0.98] text-white text-[13.5px] font-semibold transition-colors"
+          >
+            Continue <ChevronRight size={14} />
+          </button>
+        )}
       </div>
-      <div className={`flex-1 text-center text-xs font-medium pr-12 pointer-events-none ${dark ? 'text-white/65' : 'text-gray-600'}`}>{title}</div>
     </div>
   );
 }
@@ -141,7 +106,7 @@ function TrafficLightBar({ title, dark }) {
 // ===== Progress dots =====
 function ProgressDots({ count, active, dark }) {
   return (
-    <div className="pt-4 pb-1 flex justify-center gap-1.5">
+    <div className="pt-7 flex justify-center gap-1.5">
       {Array.from({ length: count }).map((_, i) => (
         <span
           key={i}
@@ -160,7 +125,7 @@ function ProgressDots({ count, active, dark }) {
 
 // ===== Step 1: Welcome =====
 //
-// Animated "Hello" — fades + slides up, then the RushilAI brand
+// Animated "Hello" - fades + slides up, then the RushilAI brand
 // settles in below it. Apple's setup assistant uses calligraphic
 // "Hello" handwriting; we use Inter italics with a subtle gradient
 // (no custom fonts to load).
@@ -168,8 +133,8 @@ function Welcome({ name, dark }) {
   return (
     <div className="text-center select-none">
       <div className="mb-6 flex justify-center">
-        <div className="relative w-20 h-20 rounded-xl bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 grid place-items-center ring-1 ring-blue-400/40 animate-fade-up">
-          <Sparkles size={38} className="text-white drop-shadow-lg" strokeWidth={2.2} />
+        <div className="relative w-20 h-20 rounded-2xl bg-blue-500 grid place-items-center animate-fade-up">
+          <Sparkles size={38} className="text-white" strokeWidth={2.2} />
         </div>
       </div>
       <h1
@@ -225,7 +190,7 @@ function WallpaperPick({ wallpaper, setWallpaper, picks, dark }) {
               />
               <div className="absolute inset-0 bg-black/10 group-hover:bg-black/0 transition-colors" />
               {isActive && (
-                <span className="absolute top-1.5 right-1.5 w-6 h-6 rounded-sm bg-blue-500 grid place-items-center text-white">
+                <span className="absolute top-1.5 right-1.5 w-6 h-6 rounded-md bg-blue-500 grid place-items-center text-white">
                   <Check size={12} strokeWidth={3} />
                 </span>
               )}
@@ -249,13 +214,13 @@ function Tour({ onSkip, onTour, dark }) {
       </div>
       <Header
         title="You&rsquo;re all set"
-        sub="Want a quick tour of the desktop? It points at the dock + curriculum flow — about 60 seconds. You can replay anytime in Settings."
+        sub="Want a quick tour of the desktop? It points at the dock + curriculum flow - about 60 seconds. You can replay anytime in Settings."
         dark={dark}
       />
       <div className="mt-8 flex items-center justify-center gap-2.5">
         <button
           onClick={onSkip}
-          className={`px-5 py-2.5 rounded-md border text-[13.5px] font-semibold transition-colors ${
+          className={`px-5 py-2.5 rounded-lg border text-[13.5px] font-semibold transition-colors ${
             dark
               ? 'border-white/15 text-white/80 hover:bg-white/[0.08]'
               : 'border-gray-300 text-gray-700 hover:bg-black/[0.04]'
@@ -265,7 +230,7 @@ function Tour({ onSkip, onTour, dark }) {
         </button>
         <button
           onClick={onTour}
-          className="inline-flex items-center gap-2 px-6 py-2.5 rounded-md bg-blue-500 hover:bg-blue-400 active:scale-[0.98] text-white text-[13.5px] font-semibold transition-all border border-blue-400/50"
+          className="inline-flex items-center gap-2 px-6 py-2.5 rounded-lg bg-blue-500 hover:bg-blue-400 active:scale-[0.98] text-white text-[13.5px] font-semibold transition-colors"
         >
           Show me around <ArrowRight size={14} />
         </button>

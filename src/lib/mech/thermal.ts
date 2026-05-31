@@ -1,6 +1,6 @@
 /**
  * 2D steady-state heat conduction on a rectangular plate, solved by
- * finite differences + Gauss–Seidel iteration with successive over-relaxation.
+ * finite differences + Gauss-Seidel iteration with successive over-relaxation.
  *
  *   ∇²T + q/k = 0   (Poisson) with Dirichlet edge temperatures.
  *

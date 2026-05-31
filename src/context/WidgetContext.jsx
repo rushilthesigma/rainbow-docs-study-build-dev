@@ -3,7 +3,7 @@ import { createContext, useContext, useState, useCallback } from 'react';
 const WidgetContext = createContext(null);
 const KEY = 'cov-widgets-v4'; // v4: removed insight default
 
-// Mirror of the grid constants in DesktopWidgets.jsx — kept in sync manually.
+// Mirror of the grid constants in DesktopWidgets.jsx - kept in sync manually.
 // STEP_X = GRID_CELL_W(190) + GRID_GAP_X(10), STEP_Y = GRID_CELL_H(160) + GRID_GAP_Y(10)
 const G_OX = 20, G_OY = 42, G_STEP_X = 200, G_STEP_Y = 170;
 function snapPos(x, y) {
@@ -61,13 +61,13 @@ function save(w) {
 
 export function WidgetProvider({ children }) {
   const [widgets, setWidgets]     = useState(load);
-  const [snapGrid, setSnapGrid]   = useState(false); // off by default — overlay is opt-in via Dock or ⌘⇧H
+  const [snapGrid, setSnapGrid]   = useState(false); // off by default - overlay is opt-in via Dock or ⌘⇧H
   const [isDragging, setIsDragging] = useState(false);
 
   const toggleSnapGrid = useCallback(() => {
     setSnapGrid(p => {
       if (!p) {
-        // snap is turning ON — immediately align every widget to its nearest cell
+        // snap is turning ON - immediately align every widget to its nearest cell
         setWidgets(prev => {
           const next = prev.map(w => ({ ...w, position: snapPos(w.position.x, w.position.y) }));
           save(next);

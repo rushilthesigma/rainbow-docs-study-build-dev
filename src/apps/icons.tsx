@@ -1,6 +1,6 @@
 /**
  * Bespoke app icons. Each component renders a centered SVG glyph designed for
- * its app — meant to feel like an iOS app icon. The dock + spotlight already
+ * its app - meant to feel like an iOS app icon. The dock + spotlight already
  * place these inside a squircle with the manifest's `accent` gradient, so we
  * only draw the white glyph and let the chrome supply the colored backdrop.
  *

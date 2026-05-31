@@ -3,7 +3,7 @@ import { ArrowLeft, RotateCw, Wifi, BatteryFull, Signal, Shield, ExternalLink } 
 import { checkAdmin } from '../../api/admin';
 import LoadingSpinner from '../shared/LoadingSpinner';
 
-// Standalone admin-only "Mobile Preview" app — an iframe of the
+// Standalone admin-only "Mobile Preview" app - an iframe of the
 // actual site sized to a phone viewport. Because the iframe's
 // `window.innerWidth` is ~375px, the same App.jsx breakpoint
 // (`MOBILE_BREAKPOINT = 768`) that drives real phone visitors flips
@@ -12,7 +12,7 @@ import LoadingSpinner from '../shared/LoadingSpinner';
 // same APIs, same everything.
 //
 // Window sizing is locked at 380×870 by the WindowManager `fixedSize`
-// flag for `mobilepreview` — no resize, no maximize.
+// flag for `mobilepreview` - no resize, no maximize.
 //
 // Three-layer admin gate:
 //   1. appRegistry `adminOnly: true`
@@ -50,7 +50,7 @@ export default function MobilePreview() {
   const src = `${window.location.origin}/?mobilepreview=1`;
 
   function reload() {
-    setReloadKey((k) => k + 1); // remount the iframe — fastest path
+    setReloadKey((k) => k + 1); // remount the iframe - fastest path
   }
 
   function openInTab() {
@@ -60,7 +60,7 @@ export default function MobilePreview() {
   return (
     <div className="h-full w-full flex flex-col bg-black">
       <DevToolbar onReload={reload} onOpenInTab={openInTab} />
-      {/* The phone screen — black bg behind status bar, then the live
+      {/* The phone screen - black bg behind status bar, then the live
           iframe of the real site at phone width. */}
       <div className="relative flex-1 min-h-0 overflow-hidden">
         <MockStatusBar />
@@ -70,7 +70,7 @@ export default function MobilePreview() {
           src={src}
           title="Mobile site preview"
           className="absolute inset-0 w-full h-full pt-[26px] bg-white dark:bg-[#0a0a14] border-0"
-          // sandbox is intentionally NOT restricted — we want full
+          // sandbox is intentionally NOT restricted - we want full
           // same-origin access so the iframe can hit the real APIs
           // and share the auth token via localStorage.
           allow="clipboard-write *;"

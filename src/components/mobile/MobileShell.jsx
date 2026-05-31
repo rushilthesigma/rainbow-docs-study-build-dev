@@ -36,7 +36,7 @@ const PAGE_MAP = {
 const MAIN_TABS = ['home', 'curricula', 'lessons', 'notes', 'settings'];
 
 // Modern mobile shell. Renders full-bleed in a phone viewport (or
-// inside the AdminApp Mobile Preview cutout — either way it sizes to
+// inside the AdminApp Mobile Preview cutout - either way it sizes to
 // its parent via h-full + w-full).
 //
 // Exposes an imperative `goBack()` / `goHome()` API via ref so the
@@ -132,7 +132,7 @@ const MobileShell = forwardRef(function MobileShell(_props, ref) {
           // Pages that own their own scrolling get a bounded flex
           // column. The page renders as a flex-1 child of THIS column
           // so its `h-full` / `flex-1 flex-col` resolves against a
-          // real bounded height — without `flex flex-col` here, the
+          // real bounded height - without `flex flex-col` here, the
           // child's h-full collapsed to its content size and the form
           // floated wherever the messages list ended.
           <div className="flex-1 min-h-0 overflow-hidden flex flex-col">

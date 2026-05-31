@@ -1,4 +1,4 @@
-// Skeleton primitives — gray placeholder boxes that pulse to suggest
+// Skeleton primitives - gray placeholder boxes that pulse to suggest
 // the content is loading. Use these instead of a centered spinner
 // whenever the eventual layout is known (which is most of the time).
 //
@@ -56,7 +56,7 @@ export function SkeletonCardList({ count = 3, lines = 2, className = '' }) {
   );
 }
 
-// Avatar — circle with line beside it. Useful for user / message rows.
+// Avatar - circle with line beside it. Useful for user / message rows.
 export function SkeletonAvatar({ size = 36, className = '' }) {
   return (
     <div
@@ -86,7 +86,7 @@ export function SkeletonPage({ className = '' }) {
   );
 }
 
-// Default export — tiny one-liner for inline "still loading" places.
+// Default export - tiny one-liner for inline "still loading" places.
 export default function Skeleton({ w = '100%', h = 12, className = '' }) {
   return <SkeletonLine w={w} h={h} className={className} />;
 }

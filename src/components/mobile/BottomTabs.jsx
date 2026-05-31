@@ -1,7 +1,7 @@
 import { Home, BookOpen, Lightbulb, FileText, Settings } from 'lucide-react';
 import { useUIPreference } from '../../context/UIPreferenceContext';
 
-// Five primary tabs. `More` is gone — secondary surfaces (Study,
+// Five primary tabs. `More` is gone - secondary surfaces (Study,
 // Quiz Bowl) are reachable from the Home tiles, and Settings lives
 // here as its own tab.
 const TABS = [
@@ -13,7 +13,7 @@ const TABS = [
 ];
 
 // Glassy tab bar with a sliding pill behind the active tab. Sits
-// ABOVE the BrowserControls row at the bottom of the screen — the
+// ABOVE the BrowserControls row at the bottom of the screen - the
 // `bottom` offset accounts for the controls height (32) + the iOS
 // home-indicator inset.
 export default function BottomTabs({ active, onSelect }) {
@@ -39,7 +39,7 @@ export default function BottomTabs({ active, onSelect }) {
               aria-current={isActive ? 'page' : undefined}
               className="group relative flex-1 flex flex-col items-center justify-center gap-0.5 active:scale-[0.94] transition-transform select-none"
             >
-              {/* Active indicator: thin top accent bar (Apple-style) — instantly
+              {/* Active indicator: thin top accent bar (Apple-style) - instantly
                   legible at a glance and works without a colored background. */}
               <span
                 className={`absolute top-0 left-1/2 -translate-x-1/2 h-[3px] rounded-b-full transition-all duration-200 ${

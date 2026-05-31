@@ -233,7 +233,7 @@ export default function MobileCurricula() {
         {loading ? 'Loading…' : `${items.length} ${items.length === 1 ? 'course' : 'courses'}`}
       </p>
 
-      {/* Single full-width "New course" CTA — PAUSD catalog isn't
+      {/* Single full-width "New course" CTA - PAUSD catalog isn't
           surfaced on mobile (catalog browse is a desktop-class flow). */}
       <button
         onClick={() => { setTopic(''); setGenError(null); setView('new'); }}

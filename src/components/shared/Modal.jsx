@@ -26,7 +26,7 @@ export default function Modal({
   const titleId = useId();
   const descId = useId();
 
-  // Body scroll lock — runs only while open. Cleanup restores overflow
+  // Body scroll lock - runs only while open. Cleanup restores overflow
   // even if the component unmounts mid-open.
   useEffect(() => {
     if (!open) return;
@@ -37,7 +37,7 @@ export default function Modal({
     };
   }, [open]);
 
-  // Focus management — capture the previously focused element on open,
+  // Focus management - capture the previously focused element on open,
   // move focus into the dialog, restore on close.
   useEffect(() => {
     if (!open) return;

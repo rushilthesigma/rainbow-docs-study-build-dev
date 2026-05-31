@@ -1,6 +1,6 @@
 // Cross-app bridge for "open Lessons with a specific topic prefilled".
 // Any app can call setPendingLesson({ topic, difficulty }) and then
-// openApp('lessons', 'Lessons') — LessonsApp listens for the event and
+// openApp('lessons', 'Lessons') - LessonsApp listens for the event and
 // auto-creates a lesson for that topic on mount.
 
 let pending = null;

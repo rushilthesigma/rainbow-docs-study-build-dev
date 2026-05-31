@@ -4,9 +4,9 @@ import { useWindowManager } from '../../context/WindowManagerContext';
 import { useUIPreference } from '../../context/UIPreferenceContext';
 
 // macOS traffic lights. Green button = in-app "zoom" (full window inside
-// the macOS shell — covers the dock area but stays inside the browser
+// the macOS shell - covers the dock area but stays inside the browser
 // window). For TRUE OS-level fullscreen (taking over the whole monitor),
-// use ⌘⇧P — that calls the browser Fullscreen API.
+// use ⌘⇧P - that calls the browser Fullscreen API.
 function MacTitleBar({ windowId, isActive, title, onDragStart, onDoubleClick, titlebarOpacity = 80 }) {
   const { closeWindow, minimizeWindow, maximizeWindow } = useWindowManager();
   const [hovered, setHovered] = useState(false);
@@ -23,7 +23,7 @@ function MacTitleBar({ windowId, isActive, title, onDragStart, onDoubleClick, ti
       <div className="flex items-center gap-[7px] px-3" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
         <button onClick={e => { e.stopPropagation(); closeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FF5F57] hover:brightness-90 flex items-center justify-center" title="Close"><X size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#4a0002]" /></button>
         <button onClick={e => { e.stopPropagation(); minimizeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FEBC2E] hover:brightness-90 flex items-center justify-center" title="Minimize"><Minus size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#5a3e00]" /></button>
-        <button onClick={e => { e.stopPropagation(); maximizeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#28C840] hover:brightness-90 flex items-center justify-center" title="Zoom — fills the desktop. ⌘⇧P for true fullscreen."><Maximize2 size={hovered ? 7 : 0} strokeWidth={2.5} className="text-[#005200]" /></button>
+        <button onClick={e => { e.stopPropagation(); maximizeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#28C840] hover:brightness-90 flex items-center justify-center" title="Zoom - fills the desktop. ⌘⇧P for true fullscreen."><Maximize2 size={hovered ? 7 : 0} strokeWidth={2.5} className="text-[#005200]" /></button>
       </div>
       <div className="flex-1 text-center text-xs font-medium text-gray-600 dark:text-white/65 truncate pr-12 pointer-events-none">{title}</div>
     </div>
@@ -85,7 +85,7 @@ export default function Window({ win, isActive, children }) {
     function onMove(ev) {
       const dx = ev.clientX - startX; const dy = ev.clientY - startY;
       const vw = window.innerWidth; const vh = window.innerHeight;
-      // Same fixed top/bottom reserves as the drag handler — menu bar
+      // Same fixed top/bottom reserves as the drag handler - menu bar
       // 28px, floating macOS dock 84px, both always present.
       const topBar = 28;
       const bottomBar = 84;
@@ -113,7 +113,7 @@ export default function Window({ win, isActive, children }) {
   const maxed = win.isMaximized;
 
   // ===== Real fullscreen (browser-level, OS-level) =====
-  // The green traffic-light button calls this. ESC exits — that's
+  // The green traffic-light button calls this. ESC exits - that's
   // browser-native behavior of the Fullscreen API; we don't need a
   // separate keydown listener. We DO listen for `fullscreenchange` so
   // a tracked `isFullscreen` flag stays in sync (used to hide our
@@ -156,14 +156,14 @@ export default function Window({ win, isActive, children }) {
     ? { ...maxStyle, zIndex: win.zIndex }
     : { left: win.position.x, top: win.position.y, width: win.size.w, height: win.size.h, zIndex: win.zIndex };
 
-  // Opening/closing keyframe classes only — minimize/restore are handled
+  // Opening/closing keyframe classes only - minimize/restore are handled
   // below via a CSS transition on transform/opacity (simpler, no state race).
   const animClass =
     animState === 'opening' ? 'window-opening' :
     animState === 'closing' ? 'window-closing' :
     '';
 
-  // macOS chrome — soft rounded corners on a floating window. Snapped
+  // macOS chrome - soft rounded corners on a floating window. Snapped
   // to `rounded-none` whenever the window is taking the full screen
   // (zoom OR browser fullscreen) so corners don't leave dark gaps
   // against the desktop / OS chrome.
@@ -178,7 +178,7 @@ export default function Window({ win, isActive, children }) {
       className={`absolute flex flex-col ${radius} overflow-hidden ${animClass} backdrop-blur-xl`}
       style={{
         ...style,
-        // Belt-and-suspenders for the rounded-none class — explicit
+        // Belt-and-suspenders for the rounded-none class - explicit
         // borderRadius:0 so any inherited radius from a parent (or a
         // hot-reload class race) can't reintroduce visible corners.
         ...(fullBleed ? { borderRadius: 0 } : null),

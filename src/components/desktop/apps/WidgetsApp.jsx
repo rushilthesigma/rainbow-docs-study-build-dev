@@ -8,7 +8,7 @@ import { useWidgets } from '../../../context/WidgetContext';
 
 // ── Widget catalog ──────────────────────────────────────────────────
 // The set of built-in widget types the user can add. AI-generated
-// widgets bypass this list — they live under `custom_*` types and
+// widgets bypass this list - they live under `custom_*` types and
 // surface in the "AI Created" group.
 const WIDGET_CATALOG = [
   { type: 'clock',      label: 'Clock',        icon: Clock,        desc: 'Date & time' },
@@ -22,7 +22,7 @@ const WIDGET_CATALOG = [
 ];
 
 // Group widgets by the app they relate to. The gallery shows one
-// section per app, each with 1-2 widgets — so users browse "what
+// section per app, each with 1-2 widgets - so users browse "what
 // widgets go with Notes?" instead of scrolling a flat catalog.
 const WIDGET_GROUPS = [
   { appId: 'curricula', label: 'Curricula',  types: ['calendar', 'streak']      },
@@ -94,7 +94,7 @@ function WidgetPreview({ type }) {
   if (type === 'quote') return (
     <div className="w-full h-full flex flex-col justify-center px-3">
       <p className="text-[10px] text-white/75 italic leading-tight">&ldquo;Slow is smooth, smooth is fast.&rdquo;</p>
-      <p className="text-[8px] text-white/30 mt-1">— Navy SEAL adage</p>
+      <p className="text-[8px] text-white/30 mt-1">- Navy SEAL adage</p>
     </div>
   );
 
@@ -147,7 +147,7 @@ function ToggleSwitch({ checked, onChange }) {
 // ── Widgets app ─────────────────────────────────────────────────────
 // Used to be a floating popup glued to the dock's + button. Now lives
 // in a proper fixed-size window opened via openApp('widgets'). The
-// content is unchanged — tabs, catalog grid, AI generator — minus the
+// content is unchanged - tabs, catalog grid, AI generator - minus the
 // outer chrome (the Window component provides title bar + close).
 export default function WidgetsApp() {
   const { widgets, addWidget, removeWidget, updateWidget, snapGrid, toggleSnapGrid } = useWidgets();
@@ -204,7 +204,7 @@ Today is ${new Date().toISOString().slice(0, 10)}. Output the JSON now.`,
       setAiPrompt('');
       setAppFilter('mine');
     } catch {
-      setAiError('Could not generate widget — try rephrasing.');
+      setAiError('Could not generate widget - try rephrasing.');
     } finally {
       setAiGenerating(false);
     }
@@ -212,7 +212,7 @@ Today is ${new Date().toISOString().slice(0, 10)}. Output the JSON now.`,
 
   return (
     <div className="h-full flex flex-col bg-[#131316] text-white">
-      {/* Top row — title + snap-to-grid toggle */}
+      {/* Top row - title + snap-to-grid toggle */}
       <div className="flex items-center justify-between px-4 pt-3 pb-2 flex-shrink-0">
         <span className="text-[11px] font-semibold text-white/70 tracking-wide">Widget Gallery</span>
         <button
@@ -259,7 +259,7 @@ Today is ${new Date().toISOString().slice(0, 10)}. Output the JSON now.`,
         })}
       </div>
 
-      {/* Widget list — scrollable middle */}
+      {/* Widget list - scrollable middle */}
       <div className="px-3 pb-3 space-y-2.5 flex-1 min-h-0 overflow-y-auto">
         {appFilter === 'mine' ? (
           <div>
@@ -457,7 +457,7 @@ Today is ${new Date().toISOString().slice(0, 10)}. Output the JSON now.`,
         )}
       </div>
 
-      {/* AI Create — pinned to the bottom */}
+      {/* AI Create - pinned to the bottom */}
       <div className="border-t border-white/[0.07] px-3 pt-2.5 pb-3 flex-shrink-0">
         <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-white/25 mb-1.5">AI Create</p>
         <div className="flex gap-1.5">

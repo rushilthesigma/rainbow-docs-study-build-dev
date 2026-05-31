@@ -1,5 +1,5 @@
 /**
- * 2D truss finite-element solver — the linear direct-stiffness method, the
+ * 2D truss finite-element solver - the linear direct-stiffness method, the
  * same approach CalculiX uses for bar/truss elements. Each node has 2 DOFs
  * (ux, uy). We assemble the global stiffness matrix K, apply displacement
  * boundary conditions, solve K·u = F, then recover member axial forces.

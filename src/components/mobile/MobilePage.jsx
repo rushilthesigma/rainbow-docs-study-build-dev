@@ -1,5 +1,5 @@
 // Generic mobile page chrome. Centered title + spacious content area.
-// Use this for tabs that don't yet have a fully-bespoke mobile UI —
+// Use this for tabs that don't yet have a fully-bespoke mobile UI -
 // the wrapper gives them a consistent mobile feel (centered header,
 // padded edges, pleasant spacing) without rewriting their guts.
 export default function MobilePage({ title, subtitle, eyebrow, children }) {

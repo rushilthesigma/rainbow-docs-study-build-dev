@@ -6,9 +6,13 @@ import PillGroup from '../components/shared/PillGroup';
 import Toggle from '../components/shared/Toggle';
 import { Textarea } from '../components/shared/Input';
 import Button from '../components/shared/Button';
-import { Settings, Save, GraduationCap, ChevronDown, Check } from 'lucide-react';
+import { Settings, Save, GraduationCap, ChevronDown, Check, Crown, Sparkles, Zap, Gift, Copy } from 'lucide-react';
 import { useUIPreference } from '../context/UIPreferenceContext';
 import { WALLPAPER_LIST } from '../components/desktop/DesktopBackground';
+import { openBillingPortal } from '../api/billing';
+import { planFromUser, canUseModel, requiredPlanFor, resolveModelTier } from '../components/billing/modelAccess';
+import { getMyReferralCode } from '../api/referral';
+import { useToast } from '../components/shared/Toast';
 
 function Dropdown({ label, value, options, onChange }) {
   const [open, setOpen] = useState(false);
@@ -66,7 +70,7 @@ function OpacitySlider({ label, value, onChange, leftHint, rightHint }) {
   const clamped = Math.max(0, Math.min(100, value ?? 0));
   const [local, setLocal] = useState(clamped);
   const draggingRef = useRef(false);
-  // Keep local in sync with the prop whenever the prop changes — but only
+  // Keep local in sync with the prop whenever the prop changes - but only
   // when we're not actively dragging. Otherwise an async server roundtrip
   // would yank the thumb back mid-drag.
   useEffect(() => {
@@ -117,7 +121,7 @@ function Section({ title, children }) {
 }
 
 function InterfaceSection() {
-  // Window Style toggle was removed — the shell is now Windows 11 only.
+  // Window Style toggle was removed - the shell is now Windows 11 only.
   // No more osStyle preference, no Mac / ChromeOS / Linux paths.
   const { wallpaper, setWallpaper, dockSize, setDockSize, iconStyle, setIconStyle, windowOpacity, setWindowOpacity, titlebarOpacity, setTitlebarOpacity } = useUIPreference();
   const wallpaperOpts = WALLPAPER_LIST.map(w => ({ value: w.id, label: w.label }));
@@ -169,6 +173,7 @@ function savePrefsMirror(prefs) {
 
 export default function SettingsPage() {
   const { user, fetchUser } = useAuth();
+  const toast = useToast();
   const isDemo = isDemoEmail(user?.email);
 
   useEffect(() => {
@@ -252,7 +257,9 @@ export default function SettingsPage() {
       {/* AI Behavior */}
       <Section title="AI Behavior">
         {(() => {
+          const plan = planFromUser(user);
           async function setTier(v) {
+            if (!canUseModel(v, plan)) return; // locked tiers aren't selectable
             const next = { ...prefs, modelTier: v };
             setPrefs(next);
             dirtyKeys.current.add('modelTier');
@@ -262,7 +269,15 @@ export default function SettingsPage() {
               await fetchUser();
             } catch (err) { console.error('Failed to save model tier:', err); }
           }
-          const effectiveValue = prefs.modelTier || 'pro';
+          const options = [
+            { value: 'pro',        label: 'Pro',        description: '· smartest' },
+            { value: 'flash',      label: 'Flash',      description: '· faster' },
+            { value: 'flash-lite', label: 'Flash Lite', description: '· fastest' },
+          ].map((o) => {
+            if (canUseModel(o.value, plan)) return o;
+            return { ...o, locked: true, lockLabel: requiredPlanFor(o.value)?.label };
+          });
+          const effectiveValue = resolveModelTier(prefs.modelTier, plan);
           return (
             <div>
               <div className="flex items-center gap-2 mb-2">
@@ -270,11 +285,7 @@ export default function SettingsPage() {
                 <span className="text-[10px] text-white/20">· auto-saves</span>
               </div>
               <PillGroup
-                options={[
-                  { value: 'pro',        label: 'Pro',        description: '· smartest' },
-                  { value: 'flash',      label: 'Flash',      description: '· faster' },
-                  { value: 'flash-lite', label: 'Flash Lite', description: '· fastest' },
-                ]}
+                options={options}
                 value={effectiveValue}
                 onChange={setTier}
               />
@@ -292,7 +303,7 @@ export default function SettingsPage() {
 
         <Textarea
           label="Custom instructions"
-          placeholder="e.g. Always respond in bullet points. Never explain what you're about to do — just do it."
+          placeholder="e.g. Always respond in bullet points. Never explain what you're about to do - just do it."
           value={prefs.customInstructions || ''}
           onChange={e => update('customInstructions', e.target.value)}
           rows={4}
@@ -319,6 +330,9 @@ export default function SettingsPage() {
           {saved ? 'Saved!' : 'Save Settings'}
         </Button>
       </div>
+
+      {/* Plan */}
+      <PlanSection user={user} />
 
       {/* Account */}
       <Section title="Account">
@@ -353,7 +367,7 @@ export default function SettingsPage() {
           <div className="min-w-0">
             <p className="text-[13px] font-medium text-white/85">Restart onboarding</p>
             <p className="text-[11px] text-white/35 mt-0.5 leading-relaxed">
-              Replay the welcome flow — appearance, wallpaper, handle, guided tour.
+              Replay the welcome flow - appearance, wallpaper, handle, guided tour.
             </p>
           </div>
           <button
@@ -362,7 +376,7 @@ export default function SettingsPage() {
               // Onboarding state lives in user.data.preferences on the
               // server. Clearing the flag + tourStep there is what
               // actually flips the gate; the old localStorage keys are
-              // dead code from a previous design — kept the removeItem
+              // dead code from a previous design - kept the removeItem
               // calls as a defensive cleanup for any stale browsers.
               try {
                 const nextPrefs = {
@@ -374,7 +388,7 @@ export default function SettingsPage() {
                 await fetchUser();
               } catch (err) {
                 console.error('Failed to clear onboarded flag:', err);
-                alert('Could not restart onboarding right now. Please try again.');
+                toast.error('Could not restart onboarding right now. Please try again.');
                 return;
               }
               try {
@@ -393,5 +407,120 @@ export default function SettingsPage() {
       </Section>
 
     </div>
+  );
+}
+
+// Plan / billing block - current tier badge + Manage Billing + referral
+// code. Plan comparison lives in the top-bar Upgrade popover.
+function PlanSection({ user }) {
+  const toast = useToast();
+  const [portalBusy, setPortalBusy] = useState(false);
+  const [refInfo, setRefInfo] = useState(null);
+  const [copied, setCopied] = useState(false);
+
+  const plan = user?.data?.plan || 'free';
+  const proUntil = user?.data?.proUntil;
+  const isLifetime = plan === 'lifetime' || !!user?.data?.lifetimePurchasedAt;
+  const isPaid = ['plus', 'pro'].includes(plan) || isLifetime;
+  // Refs from server take precedence - they include real-time
+  // referralsUsed in case the user's data prop is stale.
+  const effectivePlan = refInfo?.unlocked && !isPaid ? 'plus-lite' : plan;
+
+  useEffect(() => {
+    getMyReferralCode().then(setRefInfo).catch(() => {});
+  }, []);
+
+  const TIER_META = {
+    free:         { label: 'Free',       Icon: Zap,      tone: 'text-white/55 bg-white/[0.05] border-white/[0.10]' },
+    'plus-lite':  { label: 'Plus-Lite',  Icon: Gift,     tone: 'text-emerald-200 bg-emerald-500/15 border-emerald-400/30' },
+    plus:         { label: 'Plus',       Icon: Zap,      tone: 'text-violet-200 bg-violet-500/15 border-violet-400/30' },
+    lifetime:     { label: 'Lifetime',   Icon: Sparkles, tone: 'text-blue-200  bg-blue-500/15  border-blue-400/35' },
+    pro:          { label: 'Pro',        Icon: Crown,    tone: 'text-amber-200 bg-amber-500/15 border-amber-400/35' },
+  };
+  const meta = TIER_META[effectivePlan] || TIER_META.free;
+  const Icon = meta.Icon;
+
+  async function handleManage() {
+    if (portalBusy) return;
+    setPortalBusy(true);
+    try {
+      const { url } = await openBillingPortal();
+      if (url) window.location.href = url;
+    } catch (e) {
+      toast.error(e?.message || 'Could not open billing portal.');
+    }
+    setPortalBusy(false);
+  }
+
+  function copyCode() {
+    if (!refInfo?.code) return;
+    try {
+      navigator.clipboard.writeText(refInfo.code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {}
+  }
+
+  const refsUsed = refInfo?.referralsUsed ?? 0;
+  const refsNeeded = refInfo?.referralsRequired ?? 2;
+  const refsUnlocked = refsUsed >= refsNeeded;
+
+  return (
+    <Section title="Plan">
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-bold uppercase tracking-wider ${meta.tone}`}>
+          <Icon size={11} /> {meta.label}
+        </div>
+        {proUntil && !isLifetime && (
+          <span className="text-[11px] text-white/45">
+            Renews {new Date(proUntil).toLocaleDateString()}
+          </span>
+        )}
+        {isLifetime && (
+          <span className="text-[11px] text-white/45">Permanent · paid once</span>
+        )}
+        {isPaid && !isLifetime && (
+          <Button size="sm" variant="ghost" onClick={handleManage} loading={portalBusy}>
+            Manage billing
+          </Button>
+        )}
+        {!isPaid && (
+          <span className="text-[11px] text-white/40">Upgrade from the top bar.</span>
+        )}
+      </div>
+
+      {/* Referral block - same data the top-bar chip uses, but a fuller
+          view with copy + a contextual line. */}
+      {refInfo && (
+        <div className="mt-4 rounded-xl border border-white/[0.07] bg-white/[0.03] p-3">
+          <div className="flex items-center gap-2 mb-2">
+            <Gift size={12} className="text-emerald-300" />
+            <p className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-white/45">Your referral code</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 font-mono text-[15px] font-bold text-white tracking-[0.18em] bg-white/[0.05] border border-white/[0.08] rounded-md px-2.5 py-1.5 text-center">
+              {refInfo.code}
+            </code>
+            <button
+              onClick={copyCode}
+              title="Copy"
+              className="p-1.5 rounded-md text-white/55 hover:text-white hover:bg-white/[0.06] transition-colors"
+            >
+              {copied ? <Check size={13} className="text-emerald-300" /> : <Copy size={13} />}
+            </button>
+          </div>
+          <p className={`text-[11px] mt-2 ${refsUnlocked ? 'text-emerald-300' : 'text-white/55'}`}>
+            {refsUnlocked
+              ? `Plus-Lite unlocked · ${refsUsed} friends joined.`
+              : `${refsUsed} / ${refsNeeded} friends joined. Share your code to unlock Plus-Lite (≈$2/mo of usage, free forever).`}
+          </p>
+          {refInfo.redeemedCode && (
+            <p className="text-[10.5px] text-white/35 mt-1.5">
+              You redeemed <span className="font-mono text-white/65">{refInfo.redeemedCode}</span>.
+            </p>
+          )}
+        </div>
+      )}
+    </Section>
   );
 }

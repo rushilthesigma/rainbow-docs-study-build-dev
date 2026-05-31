@@ -132,7 +132,7 @@ export default function ExamBlock({ curriculumId }) {
         />
       </div>
       <p className="text-[10px] text-gray-500 italic flex items-center gap-1.5">
-        <Repeat size={10} /> Both exams use spaced repetition — questions come from concepts you missed across the course.
+        <Repeat size={10} /> Both exams use spaced repetition - questions come from concepts you missed across the course.
       </p>
     </div>
   );

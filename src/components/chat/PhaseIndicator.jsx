@@ -1,6 +1,6 @@
 import { LESSON_PHASES } from '../../utils/constants';
 
-// Segmented progress bar — one slim pill per phase, the current one
+// Segmented progress bar - one slim pill per phase, the current one
 // glows with a gradient + halo, completed ones stay solid, upcoming
 // ones are muted. The labels live below as a single line so they
 // don't crowd the bar. Active phase label is highlighted; the rest
@@ -32,7 +32,7 @@ export default function PhaseIndicator({ currentPhase }) {
         })}
       </div>
 
-      {/* Label row — phase names, current one highlighted */}
+      {/* Label row - phase names, current one highlighted */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5 min-w-0">
           <span className="text-[10.5px] font-bold uppercase tracking-[0.14em] text-blue-300/90 truncate">

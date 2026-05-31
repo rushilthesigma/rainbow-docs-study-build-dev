@@ -8,7 +8,7 @@ export const generateSlideImage = (body) => apiFetch('/api/images/generate', { m
 export const updateSlideshow = (id, body) => apiFetch(`/api/slideshows/${id}`, { method: 'PUT', body: JSON.stringify(body) });
 export const redesignSlideshow = (id) => apiFetch(`/api/slideshows/${id}/redesign`, { method: 'POST' });
 
-// SSE-based generation — streams progress events and a final done event.
+// SSE-based generation - streams progress events and a final done event.
 // callbacks: { onProgress({ phase, pct }), onDone(slideshow), onError(msg) }
 export async function generateSlideshow(body, { onProgress, onDone, onError } = {}) {
   const token = getToken();
@@ -39,7 +39,7 @@ export async function generateSlideshow(body, { onProgress, onDone, onError } = 
     try {
       event = JSON.parse(line.slice(6));
     } catch {
-      // Malformed or truncated payload — skip this line rather than aborting
+      // Malformed or truncated payload - skip this line rather than aborting
       // the whole stream. The next chunk may carry a complete event.
       return;
     }
@@ -60,7 +60,7 @@ export async function generateSlideshow(body, { onProgress, onDone, onError } = 
   if (buffer) processLine(buffer);
 
   if (!gotDone) {
-    const msg = 'Generation ended before completing — please try again.';
+    const msg = 'Generation ended before completing - please try again.';
     onError?.(msg);
     throw new Error(msg);
   }

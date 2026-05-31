@@ -1,7 +1,7 @@
 import { Shield } from 'lucide-react';
 
 // Red "Advisor" pill. Render next to a user's name/handle anywhere an
-// Owner/Pro badge also appears. Small and inline — not a block element.
+// Owner/Pro badge also appears. Small and inline - not a block element.
 export default function AdvisorBadge({ size = 'sm' }) {
   const sz = size === 'xs'
     ? 'text-[9px] px-1 py-[1px] gap-0.5'

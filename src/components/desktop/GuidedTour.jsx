@@ -30,28 +30,28 @@ const STEPS = [
     id: 'new-button',
     target: '[data-tour="new-curriculum-button"]',
     title: 'Make a new curriculum',
-    body: 'Click "+ New". The AI builds a full course — units, lessons, assessments — from any topic you give it.',
+    body: 'Click "+ New". The AI builds a full course - units, lessons, assessments - from any topic you give it.',
     advanceOn: 'click',
   },
   {
     id: 'topic-input',
     target: '[data-tour="curriculum-topic-input"]',
     title: 'Pick a topic',
-    body: 'Type anything you want to learn — "Cellular biology", "WWII Pacific theatre", "Python for data analysis", whatever. Then hit Next.',
+    body: 'Type anything you want to learn - "Cellular biology", "WWII Pacific theatre", "Python for data analysis", whatever. Then hit Next.',
     advanceOn: 'next',
   },
   {
     id: 'generate-button',
     target: '[data-tour="curriculum-generate-button"]',
     title: 'Generate the curriculum',
-    body: 'Click Generate. Takes 20-40 seconds — the AI builds your full unit + lesson tree. After it lands, open any lesson and the AI tutor takes over.',
+    body: 'Click Generate. Takes 20-40 seconds - the AI builds your full unit + lesson tree. After it lands, open any lesson and the AI tutor takes over.',
     advanceOn: 'click',
   },
   {
     id: 'wrap-up',
     target: null,
     title: "You're set",
-    body: 'Curriculum is generating. Once it\'s done, open any lesson and the AI tutor will drive it — built-in quizzes, escalating practice, XP per lesson. Replay this tour anytime from Settings.',
+    body: 'Curriculum is generating. Once it\'s done, open any lesson and the AI tutor will drive it - built-in quizzes, escalating practice, XP per lesson. Replay this tour anytime from Settings.',
     advanceOn: 'finish',
     placement: 'center',
   },
@@ -118,7 +118,7 @@ export default function GuidedTour() {
 
   // Note: we used to auto-advance from the first step when the Curricula
   // app window opened, but that fired in addition to the click-handler
-  // advance below — the click already queued an advance, then the
+  // advance below - the click already queued an advance, then the
   // window-state effect fired a SECOND advance, jumping past the next
   // step entirely. Now we rely solely on the click handler. If the user
   // opens Curricula without clicking the highlighted icon (e.g. via
@@ -137,7 +137,7 @@ export default function GuidedTour() {
       if (el) {
         const r = el.getBoundingClientRect();
         if (r.width > 4 && r.height > 4) {
-          // First sighting — scroll into view politely.
+          // First sighting - scroll into view politely.
           if (!hasScrolled) {
             try { el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' }); } catch {}
             setHasScrolled(true);
@@ -156,7 +156,7 @@ export default function GuidedTour() {
   }, [step, hasScrolled]);
 
   // Click on the highlighted target advances. Capture phase so we see the
-  // event before it triggers the underlying handler — but we let the click
+  // event before it triggers the underlying handler - but we let the click
   // propagate (no preventDefault) so the actual UI action still fires.
   useEffect(() => {
     if (!step || step.advanceOn !== 'click') return;
@@ -246,7 +246,7 @@ export default function GuidedTour() {
         <rect width={vw} height={vh} fill="rgba(5, 8, 22, 0.55)" mask="url(#tour-mask)" />
       </svg>
 
-      {/* Pulsing ring around the target — Win11 accent blue so it reads
+      {/* Pulsing ring around the target - Win11 accent blue so it reads
           as the same focus color used elsewhere in the chrome (taskbar
           active-app indicator, Search button focus ring, etc.). */}
       {showHole && (
@@ -276,7 +276,7 @@ export default function GuidedTour() {
           WebkitBackdropFilter: 'blur(32px)',
         }}
       >
-        {/* Step progress bars — active step shows the Win11 accent blue
+        {/* Step progress bars - active step shows the Win11 accent blue
             so the tour's focus color matches the spotlight ring outside
             the tooltip. Completed steps get a dimmed blue; future steps
             stay neutral. */}

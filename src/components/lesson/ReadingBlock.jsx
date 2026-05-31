@@ -5,7 +5,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 
-// Reading panel: no card, no border, no tinted background — the content
+// Reading panel: no card, no border, no tinted background - the content
 // sits on the page like a book chapter, separated from the chrome above
 // by a single hairline. Reading column is capped to ~68ch for an
 // optical comfortable line length, then the continue button sits on the

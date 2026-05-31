@@ -99,7 +99,7 @@ export function buildPrimitive(type: PrimitiveType, params: PrimitiveParams = {}
 
 /**
  * Convert a 2D polygon (xy points) into an extruded 3D geometry. Used by the
- * Modeler3D sketch tool — let users draw a closed loop on a plane and pull it
+ * Modeler3D sketch tool - let users draw a closed loop on a plane and pull it
  * into a solid.
  */
 export function extrudePolygon(

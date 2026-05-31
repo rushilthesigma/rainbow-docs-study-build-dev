@@ -21,7 +21,7 @@ export async function refineCurriculum(topic, difficulty, audience) {
   });
 }
 
-// Pull plain text out of a public web URL (server-side fetch — bypasses
+// Pull plain text out of a public web URL (server-side fetch - bypasses
 // CORS). Returns { url, title, kind:'url', content, chars }.
 export async function extractSourceUrl(url) {
   return apiFetch('/api/sources/extract-url', {
@@ -161,7 +161,7 @@ export async function resetLesson(curriculumId, lessonId) {
   return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/reset`, { method: 'POST' });
 }
 
-// ===== GRADED MODE — assignments + course grade =====
+// ===== GRADED MODE - assignments + course grade =====
 // Lazy-generate the assignment prompt + rubric on first open. Idempotent.
 export async function generateAssignment(curriculumId, lessonId) {
   return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/assignment/generate`, {
@@ -226,7 +226,7 @@ function streamSSE(url, body, { onChunk, onDone, onError, onMeta, onSource, onSt
           }
         }
       }
-      // Stream closed without a `done` or `error` event — connection dropped
+      // Stream closed without a `done` or `error` event - connection dropped
       // (proxy timeout, network blip, etc.). Surface as a soft error so the
       // streaming bubble closes instead of spinning forever.
       if (!finished) onError?.('Connection ended unexpectedly. Try sending the message again.');

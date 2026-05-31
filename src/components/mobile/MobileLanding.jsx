@@ -10,7 +10,7 @@ import { ArrowRight, BookOpen, Brain, Zap, Lightbulb, Sparkles, Shield, Cpu, Pen
 export default function MobileLanding({ onSignIn }) {
   return (
     <div className="relative h-full w-full overflow-y-auto bg-[#F4F5F7] dark:bg-[#0a0a14] text-gray-900 dark:text-white">
-      {/* Atmospheric glow — dark mode only; light mode keeps a clean
+      {/* Atmospheric glow - dark mode only; light mode keeps a clean
           surface so the page doesn't look smeared. */}
       <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-[420px] overflow-hidden hidden dark:block">
         <div className="absolute -top-32 left-1/2 -translate-x-1/2 w-[600px] h-[600px] rounded-full opacity-40 blur-[100px]"
@@ -66,14 +66,14 @@ export default function MobileLanding({ onSignIn }) {
         </div>
       </section>
 
-      {/* How it works — 3 steps stacked */}
+      {/* How it works - 3 steps stacked */}
       <section className="relative z-10 px-5 pb-12">
         <div className="text-center mb-6">
           <p className="text-[10.5px] font-bold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-300 mb-1">The flow</p>
           <h2 className="text-[22px] font-bold tracking-[-0.02em] text-gray-900 dark:text-white">Build → Learn → Master.</h2>
         </div>
         <div className="space-y-3">
-          <Step n="01" title="Build" body="Units, lessons, quizzes, midterm + final — generated in seconds." />
+          <Step n="01" title="Build" body="Units, lessons, quizzes, midterm + final - generated in seconds." />
           <Step n="02" title="Learn" body="Each lesson runs 4 readings + 4 quizzes with spaced repetition." />
           <Step n="03" title="Master" body="Quiz Bowl on real packets, math canvas that grades your steps." />
         </div>

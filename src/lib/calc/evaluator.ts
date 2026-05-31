@@ -326,7 +326,7 @@ export function evaluate(expr: string, opts: EvalOptions = {}): number {
 }
 
 /**
- * Try to evaluate, returning null instead of throwing — useful for live previews.
+ * Try to evaluate, returning null instead of throwing - useful for live previews.
  */
 export function tryEvaluate(expr: string, opts?: EvalOptions): number | null {
   try {
@@ -341,7 +341,7 @@ export function tryEvaluate(expr: string, opts?: EvalOptions): number | null {
 export function formatNumber(n: number, precision = 10): string {
   if (Number.isNaN(n)) return 'NaN';
   if (!Number.isFinite(n)) return n > 0 ? '∞' : '-∞';
-  // Use a sensible default — fix trailing zeros from precision.
+  // Use a sensible default - fix trailing zeros from precision.
   if (n === 0) return '0';
   const abs = Math.abs(n);
   if (abs >= 1e15 || (abs < 1e-6 && abs > 0)) return n.toExponential(precision - 1);

@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 import { Z, ToastDuration } from '../../styles/tokens';
 
-// Toast system — replaces silent `catch {}` and ad-hoc inline error
+// Toast system - replaces silent `catch {}` and ad-hoc inline error
 // messages. Mount <ToastProvider> once at the app root, then call
 // `useToast()` from any component:
 //
@@ -75,7 +75,7 @@ export function ToastProvider({ children }) {
 export function useToast() {
   const ctx = useContext(ToastContext);
   if (!ctx) {
-    // Soft fallback so a missing provider doesn't crash callers —
+    // Soft fallback so a missing provider doesn't crash callers -
     // log instead and noop visibly. Should never happen in app code.
     return {
       show: (m) => console.warn('[toast:no-provider]', m),
@@ -88,7 +88,7 @@ export function useToast() {
   return ctx;
 }
 
-// Toast surfaces need solid theme-aware backgrounds — the previous
+// Toast surfaces need solid theme-aware backgrounds - the previous
 // `bg-white/[0.08]` was invisible against a light wallpaper. Each variant
 // uses a tinted but solid surface in both modes so toasts always pop.
 const variantStyles = {

@@ -165,6 +165,6 @@ export function downloadBlob(filename: string, content: string | ArrayBuffer, mi
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-  // fire-and-forget toast notification — async-imported to avoid a circular dep
+  // fire-and-forget toast notification - async-imported to avoid a circular dep
   import('@/store/toastStore').then(({ toast }) => toast.success('Exported', filename));
 }

@@ -17,7 +17,7 @@ const GROUPS = [
       { keys: [MOD, '/'],         desc: 'Show this shortcuts list' },
       { keys: [MOD, 'W'],         desc: 'Close the active window' },
       { keys: [MOD, 'M'],         desc: 'Minimize the active window' },
-      { keys: [MOD, '1', '–', '9'], desc: 'Switch to the Nth open window' },
+      { keys: [MOD, '1', '-', '9'], desc: 'Switch to the Nth open window' },
       { keys: ['Esc'],            desc: 'Close any open modal / overlay' },
     ],
   },
@@ -89,7 +89,7 @@ export default function ShortcutsHelp({ open, onClose }) {
 }
 
 function Kbd({ char }) {
-  if (char === '–') return <span className="text-gray-400 text-[11px]">–</span>;
+  if (char === '-') return <span className="text-gray-400 text-[11px]">-</span>;
   return (
     <kbd className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded-md border border-gray-300 dark:border-[#2A2A40] bg-gray-50 dark:bg-[#0D0D14] text-[11px] font-mono font-semibold text-gray-700 dark:text-gray-200 shadow-[0_1px_0_0_rgba(0,0,0,0.05)]">
       {char}

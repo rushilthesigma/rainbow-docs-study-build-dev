@@ -31,7 +31,7 @@ const NR_MAX_ITER = 80;
 /** Collect non-ground nodes and assign them an index in the MNA matrix. */
 function buildNodeMap(circuit: AnalogCircuit): { idx: Map<string, number>; n: number } {
   const idx = new Map<string, number>();
-  // Identify ground nodes — any node connected to a ground component pin
+  // Identify ground nodes - any node connected to a ground component pin
   const groundNodes = new Set<string>();
   for (const c of circuit.components) {
     if (c.type === 'ground') {
@@ -118,7 +118,7 @@ function buildSystem(circuit: AnalogCircuit, opts: BuildOpts): MNASystem {
       const a = nodeIdx.get(c.pins.a)!;
       const bn = nodeIdx.get(c.pins.b)!;
       if (opts.dt === 0) {
-        // DC operating point: open circuit — do nothing
+        // DC operating point: open circuit - do nothing
       } else {
         const Geq = c.value / opts.dt;
         const Vprev = opts.state.capV.get(c.id) ?? 0;
@@ -188,7 +188,7 @@ function buildSystem(circuit: AnalogCircuit, opts: BuildOpts): MNASystem {
       stamp(a, bn, -g);
       stamp(bn, a, -g);
     } else if (c.type === 'potentiometer') {
-      // 3-terminal: a — wiper(w) — b. R total = value; ratio in `initial` (0..1)
+      // 3-terminal: a - wiper(w) - b. R total = value; ratio in `initial` (0..1)
       const a = nodeIdx.get(c.pins.a)!;
       const w = nodeIdx.get(c.pins.w)!;
       const bn = nodeIdx.get(c.pins.b)!;

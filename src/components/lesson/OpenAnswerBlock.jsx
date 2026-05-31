@@ -8,7 +8,7 @@ import 'katex/dist/katex.min.css';
 import { InlineProgress } from '../shared/ProgressBar';
 
 // Open-answer block. The student types a free-form response and the
-// AI grades it inline against a small rubric — no separate Assignment
+// AI grades it inline against a small rubric - no separate Assignment
 // surface. Sits in the lesson flow like any other block.
 //
 // Block shape:
@@ -81,7 +81,7 @@ export default function OpenAnswerBlock({ block, onComplete, gradeFn, hideContin
             </ReactMarkdown>
           </article>
 
-          {/* Rubric — what the grader will look for */}
+          {/* Rubric - what the grader will look for */}
           {rubric.length > 0 && (
             <div className="mt-5 rounded-xl border border-white/[0.07] bg-white/[0.02] px-4 py-3.5">
               <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/45 mb-2">Rubric</p>
@@ -114,7 +114,7 @@ export default function OpenAnswerBlock({ block, onComplete, gradeFn, hideContin
             </div>
           )}
 
-          {/* Submission state — graded */}
+          {/* Submission state - graded */}
           {submission ? (
             <div className="mt-5 rounded-xl border border-emerald-400/[0.22] bg-emerald-500/[0.05] px-4 py-3.5">
               <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-emerald-300/80 mb-1.5">Feedback</p>
@@ -129,7 +129,7 @@ export default function OpenAnswerBlock({ block, onComplete, gradeFn, hideContin
               </details>
             </div>
           ) : (
-            /* Submission state — input */
+            /* Submission state - input */
             <div className="mt-6">
               <label className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/45 mb-2 block">Your response</label>
               <textarea
@@ -187,7 +187,7 @@ function gradeStyle(score) {
 }
 
 function letterFor(score) {
-  if (score == null) return '—';
+  if (score == null) return '-';
   if (score >= 93) return 'A';
   if (score >= 90) return 'A-';
   if (score >= 87) return 'B+';

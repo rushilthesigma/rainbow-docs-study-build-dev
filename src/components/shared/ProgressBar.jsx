@@ -53,7 +53,7 @@ export default function ProgressBar({
 
 // Compact "something is happening" indicator. Originally rendered a
 // fake-percentage progress pill (simulated easing toward 92%), but the
-// imaginary percentage was misleading and visually noisy — every loading
+// imaginary percentage was misleading and visually noisy - every loading
 // button looked like a real progress tracker even when the underlying
 // task was a single LLM call. Now it's three staggered bouncing dots in
 // the current text color, which read as activity without lying about

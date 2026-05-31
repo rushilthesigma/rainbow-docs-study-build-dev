@@ -16,7 +16,7 @@ const sizes = {
 
 // Loading button: `loading={true}` just sets `disabled` and dims the
 // button. Call sites that want a visual cue swap their own children
-// (e.g. {loading ? 'Rewriting…' : 'Rewrite'}) — the previous fake
+// (e.g. {loading ? 'Rewriting…' : 'Rewrite'}) - the previous fake
 // in-button progress pill was misleading and noisy, so it's gone.
 export default function Button({ children, variant = 'primary', size = 'md', loading, disabled, className = '', ...props }) {
   return (

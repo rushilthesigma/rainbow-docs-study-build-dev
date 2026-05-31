@@ -7,7 +7,7 @@
  *   Cd = Cd0 + k·Cl²              (parabolic drag polar with induced-drag term)
  *   Re = ρ·V·c / μ
  *
- * These are textbook approximations — useful for intuition, not for design.
+ * These are textbook approximations - useful for intuition, not for design.
  */
 
 import { getAirfoil, type AirfoilId } from './naca';
@@ -22,11 +22,11 @@ export interface AeroInputs {
   rho: number;
   /** chord length m */
   chord: number;
-  /** dynamic viscosity Pa·s — air at 15 °C */
+  /** dynamic viscosity Pa·s - air at 15 °C */
   mu?: number;
-  /** Override the zero-lift angle (radians) — used by custom NACA shapes */
+  /** Override the zero-lift angle (radians) - used by custom NACA shapes */
   alphaZero?: number;
-  /** Override the zero-AoA drag coefficient — used by custom NACA shapes */
+  /** Override the zero-AoA drag coefficient - used by custom NACA shapes */
   cd0?: number;
 }
 
@@ -66,7 +66,7 @@ export function aero(input: AeroInputs): AeroResults {
   } else if (!stalled) {
     cl = 2 * Math.PI * Math.sin(aEff);
   } else {
-    // Past stall: gradually drop toward 0 — crude post-stall model
+    // Past stall: gradually drop toward 0 - crude post-stall model
     const sign = Math.sign(aoa);
     const over = Math.abs(aoa) - (STALL_DEG * Math.PI) / 180;
     const peak = 2 * Math.PI * Math.sin((STALL_DEG * Math.PI) / 180 - a0 * sign);

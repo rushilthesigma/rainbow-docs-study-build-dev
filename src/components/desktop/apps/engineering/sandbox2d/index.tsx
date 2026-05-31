@@ -120,7 +120,7 @@ const TOOLS: ToolDef[] = [
     id: 'select',
     icon: <MousePointer2 size={15} />,
     label: 'Select & Move',
-    desc: 'Click a body to select it, then drag to move it around — works on dynamic bodies AND stiff (static) bodies.',
+    desc: 'Click a body to select it, then drag to move it around - works on dynamic bodies AND stiff (static) bodies.',
     how: 'Click → select · Drag → move · Shift+drag → rotate · Alt+drag → force-move dynamic body while sim runs · Right-click → context menu',
   },
   {
@@ -135,7 +135,7 @@ const TOOLS: ToolDef[] = [
     icon: <Maximize2 size={15} />,
     label: 'Resize Body',
     desc: 'Drag outward from a body to scale it up, inward to shrink it. Mass updates automatically.',
-    how: 'Click on a body and drag — distance from center controls scale. Release to confirm.',
+    how: 'Click on a body and drag - distance from center controls scale. Release to confirm.',
   },
   {
     id: 'rotate',
@@ -148,7 +148,7 @@ const TOOLS: ToolDef[] = [
     id: 'draw',
     icon: <PenLine size={15} />,
     label: 'Freehand Sketch',
-    desc: 'Draw any closed shape — it becomes a solid convex polygon body that obeys physics.',
+    desc: 'Draw any closed shape - it becomes a solid convex polygon body that obeys physics.',
     how: 'Click and drag to sketch a path. Release to create the body.',
   },
   {
@@ -156,7 +156,7 @@ const TOOLS: ToolDef[] = [
     icon: <Circle size={15} />,
     label: 'Circle',
     desc: 'Create a ball / wheel. Great for stacking, rolling, and using with the motor tool.',
-    how: 'Click and drag — distance from start sets the radius.',
+    how: 'Click and drag - distance from start sets the radius.',
   },
   {
     id: 'box',
@@ -183,7 +183,7 @@ const TOOLS: ToolDef[] = [
     id: 'hinge',
     icon: <Link size={15} />,
     label: 'Hinge / Pin',
-    desc: 'Pin two bodies together at a point so they swing freely around it — or pin a body to the world.',
+    desc: 'Pin two bodies together at a point so they swing freely around it - or pin a body to the world.',
     how: 'Drag between two bodies for a hinge. Drag from a body to empty space to pin it to the world.',
   },
   {
@@ -197,14 +197,14 @@ const TOOLS: ToolDef[] = [
     id: 'tracer',
     icon: <Route size={15} />,
     label: 'Tracer',
-    desc: 'Draws a trailing line behind a body — perfect for plotting trajectories.',
+    desc: 'Draws a trailing line behind a body - perfect for plotting trajectories.',
     how: 'Click a body to toggle the tracer on or off.',
   },
   {
     id: 'push',
     icon: <Hand size={15} />,
     label: 'Push',
-    desc: 'Brush nearby bodies and water with velocity — like blowing on them.',
+    desc: 'Brush nearby bodies and water with velocity - like blowing on them.',
     how: 'Click and drag in the direction you want to push.',
   },
   {
@@ -541,7 +541,7 @@ function Sandbox2D({ appId }: { appId: string }) {
 
           {/* Snap toggle */}
           <button
-            title={snapEnabled ? 'Snap to grid: ON — click to disable' : 'Snap to grid: OFF — click to enable'}
+            title={snapEnabled ? 'Snap to grid: ON - click to disable' : 'Snap to grid: OFF - click to enable'}
             onClick={() => setSnap(!snapEnabled)}
             className={`flex items-center gap-1 px-2 h-6 rounded-md text-xs transition-colors ${
               snapEnabled
@@ -633,7 +633,7 @@ function Sandbox2D({ appId }: { appId: string }) {
 
             <button
               onClick={() => setHorizonsOpen(o => !o)}
-              title="New Horizons — chat with an AI advisor about your scene"
+              title="New Horizons - chat with an AI advisor about your scene"
               className={`flex items-center gap-1 px-2 h-6 rounded-md text-xs transition-colors ${
                 horizonsOpen
                   ? 'bg-gradient-to-r from-violet-500/40 to-pink-500/40 text-white'
@@ -655,7 +655,7 @@ function Sandbox2D({ appId }: { appId: string }) {
           </div>
         </div>
 
-        {/* Timeline scrubber — only visible once history exists */}
+        {/* Timeline scrubber - only visible once history exists */}
         {history.length > 1 && (
           <div className="flex items-center gap-2 px-3 h-7 border-b border-white/10 bg-black/20 shrink-0">
             {/* time label */}
@@ -1436,7 +1436,7 @@ function HelpModal({ onClose, currentTool }: { onClose: () => void; currentTool:
           <div>
             <div className="text-lg font-semibold">What do the tools do?</div>
             <div className="text-xs text-white/55 mt-0.5">
-              Algodoo-style sandbox — click any tool on the left, then read its row below.
+              Algodoo-style sandbox - click any tool on the left, then read its row below.
             </div>
           </div>
           <button
@@ -1586,7 +1586,7 @@ function diagnose(): DoctorIssue[] {
     return issues;
   }
 
-  // No floor — every dynamic body would fall forever
+  // No floor - every dynamic body would fall forever
   if (dyn.length > 0 && stat.length === 0) {
     issues.push({
       id: 'no-floor',
@@ -1610,7 +1610,7 @@ function diagnose(): DoctorIssue[] {
       id: 'zero-g',
       severity: 'info',
       title: 'Gravity is zero',
-      detail: 'Bodies will drift in straight lines forever. Fine for spaceships — odd for terrestrial scenes.',
+      detail: 'Bodies will drift in straight lines forever. Fine for spaceships - odd for terrestrial scenes.',
       fixLabel: 'Set Earth gravity',
       fix: () => s.setGravity(0, 9.81),
     });
@@ -1619,7 +1619,7 @@ function diagnose(): DoctorIssue[] {
       id: 'rev-g',
       severity: 'info',
       title: 'Gravity is upward',
-      detail: `Gravity y is ${g.y.toFixed(2)} — things will fall upward. Cool effect, often not intended.`,
+      detail: `Gravity y is ${g.y.toFixed(2)} - things will fall upward. Cool effect, often not intended.`,
       fixLabel: 'Flip to normal',
       fix: () => s.setGravity(g.x, Math.abs(g.y || 9.81)),
     });
@@ -1686,12 +1686,12 @@ function diagnose(): DoctorIssue[] {
         },
       });
       if (m.active === false) {
-        // also noted, but skip — the static issue is the louder one
+        // also noted, but skip - the static issue is the louder one
       }
     }
   }
 
-  // Springs / pins where both ends are static — they do nothing
+  // Springs / pins where both ends are static - they do nothing
   for (const c of world.constraints) {
     if (c.kind === 'spring' || c.kind === 'pin' || c.kind === 'distance') {
       const aStat = c.a.isStatic;
@@ -1701,7 +1701,7 @@ function diagnose(): DoctorIssue[] {
           id: `cst-frozen-${c.a.id}-${c.b?.id ?? 'world'}`,
           severity: 'warn',
           title: 'Constraint between two immovable points',
-          detail: `A ${c.kind} between two static (or world-pinned) bodies has no observable effect — neither side can move.`,
+          detail: `A ${c.kind} between two static (or world-pinned) bodies has no observable effect - neither side can move.`,
         });
         break; // one is enough to make the point
       }
@@ -1728,7 +1728,7 @@ function diagnose(): DoctorIssue[] {
     });
   }
 
-  // Overlap / interpenetration check — sample-based, only for circles
+  // Overlap / interpenetration check - sample-based, only for circles
   for (let i = 0; i < bodies.length; i++) {
     for (let j = i + 1; j < bodies.length; j++) {
       const A = bodies[i], B = bodies[j];
@@ -1755,7 +1755,7 @@ function diagnose(): DoctorIssue[] {
       id: 'ok',
       severity: 'ok',
       title: 'Looks good!',
-      detail: 'No common issues found. Have fun — your scene is in a healthy state.',
+      detail: 'No common issues found. Have fun - your scene is in a healthy state.',
     });
   }
 

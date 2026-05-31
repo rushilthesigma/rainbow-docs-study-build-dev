@@ -178,7 +178,7 @@ function solveDistanceLike(c: BaseConstraint, restLength: number) {
 }
 
 export function solvePin(c: PinConstraint): void {
-  // Pin: keep anchor points coincident — same as distance with rest length 0,
+  // Pin: keep anchor points coincident - same as distance with rest length 0,
   // but iterate both x and y components.
   const wa = worldAnchor(c.a, c.anchorA);
   const wb = c.b ? worldAnchor(c.b, c.anchorB) : c.anchorB;

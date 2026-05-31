@@ -26,7 +26,7 @@ import LoadingSpinner from './components/shared/LoadingSpinner';
 
 // Phone / narrow-viewport breakpoint. Below this width we render the
 // real MobileShell (the same one the admin Mobile Preview app shows
-// inside its phone cutout — it IS the mobile site). Tablet and up
+// inside its phone cutout - it IS the mobile site). Tablet and up
 // gets the macOS-style DesktopShell.
 const MOBILE_BREAKPOINT = 768;
 function getIsMobile() {
@@ -36,7 +36,7 @@ function getIsMobile() {
 
 // Demo / throwaway accounts (landing-page mini-OS spawns them with emails
 // like demo-landing-XXX@covalent.test). They MUST not appear in the real
-// dashboard — if a demo session leaks into the protected app shell
+// dashboard - if a demo session leaks into the protected app shell
 // (token contamination, restored from a stale localStorage, etc.), force
 // a logout + bounce to the landing page so the user signs in fresh.
 function isDemoEmail(email) {
@@ -55,7 +55,7 @@ function ProtectedRoute({ children }) {
     if (loading || !user || bounced) return;
     if (isDemoSession) {
       setBounced(true);
-      // Fire-and-forget logout — clears the demo token + sets user=null,
+      // Fire-and-forget logout - clears the demo token + sets user=null,
       // which flips the route guard below and redirects to "/".
       logout().catch(() => {});
     }
@@ -64,7 +64,7 @@ function ProtectedRoute({ children }) {
   if (loading) return <LoadingSpinner fullScreen />;
   if (!user) return <Navigate to="/" replace />;
   if (isDemoSession) {
-    // Show the spinner while the logout effect resolves — never render
+    // Show the spinner while the logout effect resolves - never render
     // the protected children with a demo identity.
     return <LoadingSpinner fullScreen />;
   }
@@ -133,7 +133,7 @@ function AppRouter() {
   if (loading) return <LoadingSpinner fullScreen />;
 
   // Signed-out: same macOS-style login screen on every viewport. The
-  // page is responsive — wallpaper + form scale to phone width without
+  // page is responsive - wallpaper + form scale to phone width without
   // breaking the layout, so we don't need a separate mobile variant.
   if (!user) {
     return <Routes><Route path="*" element={<LandingPage />} /></Routes>;
@@ -144,7 +144,7 @@ function AppRouter() {
     // on a phone. On mobile, auto-mark onboarded server-side so the
     // user lands directly in MobileShell.
     if (isMobile) {
-      // Fire-and-forget — by the time fetchUser refreshes, the gate
+      // Fire-and-forget - by the time fetchUser refreshes, the gate
       // re-evaluates with onboarded=true and we render MobileShell.
       autoCompleteOnboarding(user);
       return <LoadingSpinner fullScreen />;

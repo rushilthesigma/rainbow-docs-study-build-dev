@@ -179,7 +179,7 @@ function FEAForge({ appId }: { appId: string }) {
 
   const runSolve = () => {
     const r = solve();
-    if (r.unstable) toast.warn('Unstable structure', 'Not enough supports — it is a mechanism.');
+    if (r.unstable) toast.warn('Unstable structure', 'Not enough supports - it is a mechanism.');
     else
       toast.success(
         'Solved',
@@ -426,7 +426,7 @@ function FEAForge({ appId }: { appId: string }) {
                 onTool={() => {
                   if (tool === 'support') toggleSupport(nd.id);
                   else if (tool === 'load') {
-                    // select the node — the load is edited inline in the panel
+                    // select the node - the load is edited inline in the panel
                     select(nd.id);
                   } else if (tool === 'element') {
                     if (elementFrom) finishElement(nd.id);
@@ -462,7 +462,7 @@ function FEAForge({ appId }: { appId: string }) {
               <Row k="members" v={String(result.elements.length)} />
               {result.maxStress >= yieldStress && (
                 <div className="text-traffic-red text-[11px] pt-1">
-                  ⚠ a member exceeds yield — the structure would fail
+                  ⚠ a member exceeds yield - the structure would fail
                 </div>
               )}
               {(() => {
@@ -669,7 +669,7 @@ const module: AppModule = {
   manifest: {
     id: 'feaforge',
     name: 'FEAForge',
-    description: 'Truss/frame finite-element analysis — direct stiffness solver',
+    description: 'Truss/frame finite-element analysis - direct stiffness solver',
     icon: Grid3x3,
     defaultSize: { width: 1080, height: 680 },
     accent: 'linear-gradient(135deg, #db2777 0%, #f59e0b 100%)',

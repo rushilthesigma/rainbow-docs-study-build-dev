@@ -350,7 +350,7 @@ export default function Renderer() {
         ctx.lineTo(b.pos.x + b.vel.x * 0.1, b.pos.y + b.vel.y * 0.1);
         ctx.stroke();
       }
-      // Forces — show gravity in red
+      // Forces - show gravity in red
       if (debug.forces && !b.isStatic) {
         ctx.strokeStyle = '#ef4444';
         ctx.lineWidth = 1.5 / scale;

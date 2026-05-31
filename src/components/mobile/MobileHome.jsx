@@ -7,7 +7,7 @@ import { listCurricula } from '../../api/curriculum';
 import { listLessons } from '../../api/lessons';
 
 // Mobile home: greeting + Continue card + a 6-tile quick-actions grid.
-// Stats / recent-lessons sections were intentionally cut — the home
+// Stats / recent-lessons sections were intentionally cut - the home
 // screen is meant to be a single decision: "what do I do right now."
 export default function MobileHome({ onNavigate }) {
   const { user } = useAuth();
@@ -44,7 +44,7 @@ export default function MobileHome({ onNavigate }) {
         </h1>
       </div>
 
-      {/* Continue card — only shown when there's actual progress to resume */}
+      {/* Continue card - only shown when there's actual progress to resume */}
       {continueCard && !loading && (
         <button
           onClick={() => onNavigate(continueCard.kind === 'curriculum' ? 'curricula' : 'lessons')}
@@ -68,7 +68,7 @@ export default function MobileHome({ onNavigate }) {
         </button>
       )}
 
-      {/* Quick actions — bigger tiles, icon + title only, no subtext */}
+      {/* Quick actions - bigger tiles, icon + title only, no subtext */}
       <div className="grid grid-cols-2 gap-3">
         <Action tone="blue"     icon={<BookOpen size={28} />}      title="Build a course" onClick={() => onNavigate('curricula')} />
         <Action tone="amber"    icon={<Lightbulb size={28} />}     title="Quick lesson"   onClick={() => onNavigate('lessons')} />

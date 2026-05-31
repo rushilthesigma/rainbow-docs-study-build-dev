@@ -143,7 +143,7 @@ export default function LessonPage() {
     const prevUserText = messages[userIdx].content || '';
     const userMsgSnapshot = messages[userIdx];
     setMessages(prev => [...prev.slice(0, userIdx), userMsgSnapshot]);
-    const hidden = `${prevUserText}\n\n[SYSTEM NOTE: Regenerate your previous answer — this time ${instruction.trim()}. Do NOT acknowledge this instruction. Output the revised answer directly.]`;
+    const hidden = `${prevUserText}\n\n[SYSTEM NOTE: Regenerate your previous answer - this time ${instruction.trim()}. Do NOT acknowledge this instruction. Output the revised answer directly.]`;
     setTimeout(() => doSend(hidden, { hideUserInDisplay: true }), 30);
   }
 
@@ -204,7 +204,7 @@ export default function LessonPage() {
         </button>
       </div>
 
-      {/* Hero header — unit tag + big lesson title */}
+      {/* Hero header - unit tag + big lesson title */}
       <div className="mb-5 flex-shrink-0">
         <div className="flex items-center gap-2 mb-2">
           <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-blue-300/80 bg-blue-500/[0.10] border border-blue-400/[0.20] rounded-full px-2.5 py-0.5">
@@ -219,7 +219,7 @@ export default function LessonPage() {
         </h1>
       </div>
 
-      {/* Completion celebration — gradient card with trophy + XP */}
+      {/* Completion celebration - gradient card with trophy + XP */}
       {completed && completionData && (
         <div
           className="relative overflow-hidden rounded-2xl p-5 mb-4 flex-shrink-0 border border-emerald-400/25"
@@ -249,7 +249,7 @@ export default function LessonPage() {
         </div>
       )}
 
-      {/* Graded-mode assignment — only renders when the course is graded.
+      {/* Graded-mode assignment - only renders when the course is graded.
           Sits above the chat so the student sees the assignment + can either
           submit there or use the chat below to work through the content first. */}
       {curriculum.graded && currentLesson.type === 'lesson' && (
@@ -267,7 +267,7 @@ export default function LessonPage() {
         </div>
       )}
 
-      {/* Chat — takes remaining space */}
+      {/* Chat - takes remaining space */}
       <ChatContainer
         messages={messages}
         streamingContent={streamingContent}
@@ -280,7 +280,7 @@ export default function LessonPage() {
         onAiInstruct={handleAiInstruct}
       />
 
-      {/* Prev / Next nav — proper outlined buttons with lesson previews */}
+      {/* Prev / Next nav - proper outlined buttons with lesson previews */}
       <div className="grid grid-cols-2 gap-3 mt-4 flex-shrink-0">
         <LessonNavButton
           dir="prev"
@@ -327,7 +327,7 @@ function LessonNavButton({ dir, lesson, onClick }) {
           {isPrev ? 'Previous' : 'Next'}
         </p>
         <p className={`text-[13px] mt-0.5 truncate ${disabled ? 'text-white/30' : 'text-white/85'}`}>
-          {lesson?.title || '—'}
+          {lesson?.title || '-'}
         </p>
       </div>
     </button>

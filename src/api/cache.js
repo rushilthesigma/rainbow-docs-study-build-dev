@@ -33,14 +33,14 @@ export function set(key, value) {
   emit(key, value);
 }
 
-// Drop one or more cache entries — typically after a mutation that
+// Drop one or more cache entries - typically after a mutation that
 // changes the underlying data. Next `fetchOnce` for the key will do a
 // full network round trip.
 export function bust(...keys) {
   for (const k of keys) cache.delete(k);
 }
 
-// Same as `bust` but matches by prefix — useful for hierarchical keys
+// Same as `bust` but matches by prefix - useful for hierarchical keys
 // like `notes:*` or `admin:users:*`.
 export function bustPrefix(prefix) {
   for (const k of cache.keys()) {

@@ -11,14 +11,14 @@ import {
 } from 'lucide-react';
 
 // Two scroll-snap sections, Apple-homepage style:
-//   1. Hero    — big headline over the wallpaper, scroll cue
-//   2. Sign-in — macOS-style lock screen with "Why not GPT?" link
+//   1. Hero    - big headline over the wallpaper, scroll cue
+//   2. Sign-in - macOS-style lock screen with "Why not GPT?" link
 //
 // The "Why not GPT?" link opens a full-screen modal with the
 // RushilAI vs ChatGPT comparison rather than living as its own
 // section in the scroll flow.
 //
-// The wallpaper stays fixed under everything (parallax effect — the
+// The wallpaper stays fixed under everything (parallax effect - the
 // content sections slide up over it). CSS scroll-snap on the
 // container makes each section come to rest at the top of the
 // viewport when the user scrolls.
@@ -78,7 +78,7 @@ export default function LandingPage() {
     if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
-  // Pre-auth welcome screen is locked to a nighttime sky — the user's
+  // Pre-auth welcome screen is locked to a nighttime sky - the user's
   // chosen wallpaper preference only kicks in once they're signed in.
   // Keeps the welcome handshake aesthetically aligned with the
   // Onboarding "Welcome" step's deep-blue gradient backdrop.
@@ -86,7 +86,7 @@ export default function LandingPage() {
 
   return (
     <div className="relative h-screen w-full overflow-hidden bg-black text-white select-none">
-      {/* Fixed wallpaper layer — parallax bedrock for every section */}
+      {/* Fixed wallpaper layer - parallax bedrock for every section */}
       <div className="absolute inset-0 z-0">
         <div
           className="absolute inset-0 bg-cover bg-center bg-no-repeat scale-110"
@@ -119,10 +119,10 @@ export default function LandingPage() {
         />
       </div>
 
-      {/* Why not GPT? modal — full-screen overlay over the snap flow */}
+      {/* Why not GPT? modal - full-screen overlay over the snap flow */}
       {whyOpen && <WhyNotGptModal onClose={() => setWhyOpen(false)} />}
 
-      {/* Hidden GIS button — mounted off-screen so the script + button
+      {/* Hidden GIS button - mounted off-screen so the script + button
           are present in the DOM. All sign-in CTAs click this. */}
       <div
         ref={googleBtnRef}
@@ -144,20 +144,20 @@ function HeroSection({ onNext }) {
       <div className="absolute inset-0 bg-black/35" />
 
       <div className="relative z-10 max-w-4xl text-center animate-fade-up">
-        <h1 className="text-[44px] sm:text-[68px] md:text-[88px] leading-[0.95] font-bold tracking-[-0.04em] text-white drop-shadow-2xl">
+        <h1 className="text-[44px] sm:text-[68px] md:text-[88px] leading-[0.95] font-bold tracking-[-0.04em] text-white">
           Type a topic.
           <br />
-          <span className="bg-gradient-to-br from-blue-300 via-indigo-300 to-fuchsia-300 bg-clip-text text-transparent">
+          <span className="text-blue-300">
             Get a curriculum.
           </span>
         </h1>
-        <p className="mt-6 text-[16px] sm:text-[19px] leading-relaxed text-white/85 max-w-2xl mx-auto drop-shadow-md">
+        <p className="mt-6 text-[16px] sm:text-[19px] leading-relaxed text-white/85 max-w-2xl mx-auto">
           Make a fully featured curriculum in a single click (well, maybe a few).
         </p>
 
         <button
           onClick={onNext}
-          className="mt-10 inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-xl bg-gradient-to-b from-blue-500 to-indigo-600 hover:bg-blue-400 active:scale-[0.98] text-white text-[14.5px] font-semibold tracking-[-0.005em] transition-all border border-blue-400/55"
+          className="mt-10 inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-xl bg-blue-500 hover:bg-blue-400 active:scale-[0.98] text-white text-[14.5px] font-semibold tracking-[-0.005em] transition-colors"
         >
           Get started <ChevronDown size={15} />
         </button>
@@ -206,9 +206,9 @@ function HowItWorksSection() {
       <div className="absolute inset-0 bg-black/35" />
       <div className="relative z-10 max-w-6xl w-full animate-fade-up">
         <p className="text-center text-[11px] font-bold uppercase tracking-[0.22em] text-white/55 mb-3">How it works</p>
-        <h2 className="text-center text-[34px] sm:text-[44px] md:text-[56px] leading-[1.05] font-bold tracking-[-0.025em] text-white drop-shadow-2xl mb-12">
+        <h2 className="text-center text-[34px] sm:text-[44px] md:text-[56px] leading-[1.05] font-bold tracking-[-0.025em] text-white mb-12">
           Three steps,{' '}
-          <span className="bg-gradient-to-br from-blue-300 via-indigo-300 to-fuchsia-300 bg-clip-text text-transparent italic">
+          <span className="text-blue-300 italic">
             no busywork.
           </span>
         </h2>
@@ -218,7 +218,7 @@ function HowItWorksSection() {
             return (
               <div
                 key={s.n}
-                className="rounded-lg p-6 ring-1 ring-white/[0.10] bg-white/[0.05] backdrop-blur-[20px] backdrop-saturate-150 shadow-[0_8px_24px_rgba(0,0,0,0.30)]"
+                className="rounded-lg p-6 ring-1 ring-white/[0.10] bg-white/[0.05] backdrop-blur-md"
               >
                 <div className="flex items-center justify-between mb-5">
                   <span className="text-[11px] font-mono font-bold tracking-wider text-white/45">{s.n}</span>
@@ -244,9 +244,9 @@ function FeaturesGridSection() {
       <div className="absolute inset-0 bg-black/35" />
       <div className="relative z-10 max-w-6xl w-full animate-fade-up">
         <p className="text-center text-[11px] font-bold uppercase tracking-[0.22em] text-white/55 mb-3">What&apos;s inside</p>
-        <h2 className="text-center text-[34px] sm:text-[44px] md:text-[56px] leading-[1.05] font-bold tracking-[-0.025em] text-white drop-shadow-2xl mb-10">
+        <h2 className="text-center text-[34px] sm:text-[44px] md:text-[56px] leading-[1.05] font-bold tracking-[-0.025em] text-white mb-10">
           One app,{' '}
-          <span className="bg-gradient-to-br from-blue-300 via-indigo-300 to-fuchsia-300 bg-clip-text text-transparent italic">
+          <span className="text-blue-300 italic">
             every learning surface.
           </span>
         </h2>
@@ -297,9 +297,8 @@ function FeaturesGridSection() {
 function FeatureTile({ icon: Icon, title, body, tone, className = '', big = false }) {
   return (
     <div
-      className={`relative rounded-lg p-4 sm:p-5 ring-1 ring-white/[0.10] bg-white/[0.05] backdrop-blur-[20px] backdrop-saturate-150 shadow-[0_8px_24px_rgba(0,0,0,0.30)] overflow-hidden flex flex-col ${className}`}
+      className={`relative rounded-lg p-4 sm:p-5 ring-1 ring-white/[0.10] bg-white/[0.05] backdrop-blur-md overflow-hidden flex flex-col ${className}`}
     >
-      <div className={`absolute inset-0 bg-gradient-to-br ${tone} pointer-events-none`} />
       <div className="relative z-10 flex flex-col h-full">
         <span className="grid place-items-center w-9 h-9 rounded-xl bg-white/15 border border-white/20 mb-3">
           <Icon size={16} className="text-white" strokeWidth={2} />
@@ -327,9 +326,9 @@ function NumbersStrip() {
     <section data-section="numbers" className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative">
       <div className="absolute inset-0 bg-black/35" />
       <div className="relative z-10 max-w-5xl w-full animate-fade-up">
-        <h2 className="text-center text-[28px] sm:text-[36px] md:text-[44px] leading-[1.05] font-bold tracking-[-0.025em] text-white drop-shadow-2xl mb-3">
+        <h2 className="text-center text-[28px] sm:text-[36px] md:text-[44px] leading-[1.05] font-bold tracking-[-0.025em] text-white mb-3">
           Built thin,{' '}
-          <span className="italic bg-gradient-to-br from-blue-300 to-indigo-300 bg-clip-text text-transparent">
+          <span className="italic text-blue-300">
             runs heavy.
           </span>
         </h2>
@@ -340,7 +339,7 @@ function NumbersStrip() {
           {STATS.map((s) => (
             <div
               key={s.label}
-              className={`group rounded-lg p-5 ring-1 bg-white/[0.05] backdrop-blur-[20px] backdrop-saturate-150 text-center transition-all duration-300 hover:-translate-y-0.5 hover:bg-white/[0.07] ${
+              className={`group rounded-lg p-5 ring-1 bg-white/[0.05] backdrop-blur-md text-center transition-all duration-300 hover:-translate-y-0.5 hover:bg-white/[0.07] ${
                 s.highlight
                   ? 'ring-blue-300/30 hover:ring-blue-300/50'
                   : 'ring-white/[0.10] hover:ring-white/[0.18]'
@@ -356,7 +355,7 @@ function NumbersStrip() {
                   s.prefix ? 'text-[30px] sm:text-[36px]' : 'text-[34px] sm:text-[40px]'
                 } ${
                   s.highlight
-                    ? 'bg-gradient-to-br from-blue-200 to-indigo-300 bg-clip-text text-transparent'
+                    ? 'text-blue-200'
                     : 'text-white'
                 }`}
               >
@@ -416,9 +415,9 @@ function SubjectsSpotlight() {
       <div className="absolute inset-0 bg-black/35" />
       <div className="relative z-10 w-full max-w-6xl animate-fade-up">
         <p className="text-center text-[11px] font-bold uppercase tracking-[0.22em] text-white/55 mb-3">Built for</p>
-        <h2 className="text-center text-[32px] sm:text-[40px] md:text-[50px] leading-[1.05] font-bold tracking-[-0.025em] text-white drop-shadow-2xl mb-10">
+        <h2 className="text-center text-[32px] sm:text-[40px] md:text-[50px] leading-[1.05] font-bold tracking-[-0.025em] text-white mb-10">
           Whatever you&apos;re{' '}
-          <span className="italic bg-gradient-to-br from-blue-300 via-indigo-300 to-fuchsia-300 bg-clip-text text-transparent">
+          <span className="italic text-blue-300">
             studying.
           </span>
         </h2>
@@ -427,12 +426,11 @@ function SubjectsSpotlight() {
           {SAMPLES.map((s) => (
             <div
               key={s.title}
-              // Soft inner ring instead of a hard 15%-white border —
+              // Soft inner ring instead of a hard 15%-white border -
               // the previous 1px white outline lit up against the
               // night-sky wallpaper and read as a hard, jarring edge.
-              className="relative rounded-lg p-5 ring-1 ring-white/[0.10] bg-white/[0.05] backdrop-blur-[20px] backdrop-saturate-150 shadow-[0_8px_24px_rgba(0,0,0,0.30)] overflow-hidden flex flex-col"
+              className="relative rounded-lg p-5 ring-1 ring-white/[0.10] bg-white/[0.05] backdrop-blur-md overflow-hidden flex flex-col"
             >
-              <div className={`absolute inset-0 bg-gradient-to-br ${s.tone} pointer-events-none`} />
               <div className="relative z-10 flex flex-col h-full">
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-[10px] font-mono uppercase tracking-[0.16em] text-white/55">{s.tag}</span>
@@ -486,8 +484,8 @@ function SignInSection({ loading, onSignIn, onWhyNotGpt }) {
 
       <div className="relative z-10 flex flex-col items-center w-full max-w-sm animate-fade-up">
         {/* Brand mark */}
-        <div className="relative w-16 h-16 rounded-xl bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 grid place-items-center ring-1 ring-blue-400/40">
-          <Sparkles size={30} className="text-white drop-shadow-lg" strokeWidth={2.2} />
+        <div className="relative w-16 h-16 rounded-xl bg-blue-500 grid place-items-center">
+          <Sparkles size={30} className="text-white" strokeWidth={2.2} />
         </div>
 
         <h1 className="mt-5 text-[32px] sm:text-[40px] leading-[1.05] font-semibold tracking-[-0.02em] text-white">
@@ -497,11 +495,11 @@ function SignInSection({ loading, onSignIn, onWhyNotGpt }) {
           Continue with your Google account to start learning.
         </p>
 
-        {/* Google OAuth — primary (and only) sign-in path */}
+        {/* Google OAuth - primary (and only) sign-in path */}
         <button
           onClick={onSignIn}
           disabled={loading}
-          className="mt-8 w-full py-3 rounded-lg bg-white hover:bg-white/95 active:scale-[0.98] text-[14px] font-semibold text-slate-800 transition-all disabled:opacity-50 shadow-[0_4px_14px_rgba(0,0,0,0.25)] inline-flex items-center justify-center gap-2.5"
+          className="mt-8 w-full py-3 rounded-lg bg-white hover:bg-white/95 active:scale-[0.98] text-[14px] font-semibold text-slate-800 transition-all disabled:opacity-50 inline-flex items-center justify-center gap-2.5"
         >
           {loading ? (
             <span className="inline-flex items-center gap-2"><Loader size={14} className="animate-spin" /> Working...</span>
@@ -526,7 +524,7 @@ function SignInSection({ loading, onSignIn, onWhyNotGpt }) {
           href="https://discord.gg/E9YXNj4F"
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-white/70 hover:text-white drop-shadow-md transition-colors"
+          className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-white/70 hover:text-white transition-colors"
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path d="M20.317 4.492c-1.53-.69-3.17-1.2-4.885-1.49a.075.075 0 0 0-.079.036c-.21.369-.444.85-.608 1.23a18.566 18.566 0 0 0-5.487 0 12.36 12.36 0 0 0-.617-1.23A.077.077 0 0 0 8.562 3c-1.714.29-3.354.8-4.885 1.491a.07.07 0 0 0-.032.027C.533 9.093-.32 13.555.099 17.961a.08.08 0 0 0 .031.055 20.03 20.03 0 0 0 5.993 2.98.078.078 0 0 0 .084-.026c.462-.62.874-1.275 1.226-1.963a.074.074 0 0 0-.041-.104 13.201 13.201 0 0 1-1.872-.878.075.075 0 0 1-.008-.125c.126-.093.252-.19.372-.287a.075.075 0 0 1 .078-.01c3.927 1.764 8.18 1.764 12.061 0a.075.075 0 0 1 .079.009c.12.098.245.195.372.288a.075.075 0 0 1-.006.125c-.598.344-1.22.635-1.873.877a.075.075 0 0 0-.041.105c.36.687.772 1.341 1.225 1.962a.077.077 0 0 0 .084.028 19.963 19.963 0 0 0 6.002-2.981.076.076 0 0 0 .032-.054c.5-5.094-.838-9.52-3.549-13.442a.06.06 0 0 0-.031-.028ZM8.02 15.278c-1.182 0-2.157-1.069-2.157-2.38 0-1.312.956-2.38 2.157-2.38 1.21 0 2.176 1.077 2.157 2.38 0 1.312-.956 2.38-2.157 2.38Zm7.975 0c-1.183 0-2.157-1.069-2.157-2.38 0-1.312.955-2.38 2.157-2.38 1.21 0 2.176 1.077 2.157 2.38 0 1.312-.946 2.38-2.157 2.38Z" />
@@ -536,7 +534,7 @@ function SignInSection({ loading, onSignIn, onWhyNotGpt }) {
         <span className="text-white/25">·</span>
         <button
           onClick={onWhyNotGpt}
-          className="text-[12.5px] font-medium text-white/70 hover:text-white drop-shadow-md transition-colors"
+          className="text-[12.5px] font-medium text-white/70 hover:text-white transition-colors"
         >
           Why not GPT?
         </button>
@@ -582,7 +580,7 @@ function WhyNotGptModal({ onClose }) {
             '0 1px 0 rgba(255,255,255,0.06) inset',
         }}
       >
-        {/* macOS-style window titlebar — traffic lights left, centered title */}
+        {/* macOS-style window titlebar - traffic lights left, centered title */}
         <div className="relative h-9 flex items-center px-4 border-b border-white/[0.07] bg-white/[0.025]">
           <div className="flex items-center gap-1.5">
             <button
@@ -603,7 +601,7 @@ function WhyNotGptModal({ onClose }) {
         {/* Header */}
         <div className="relative px-7 pt-7 pb-5 border-b border-white/[0.07]">
           <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 grid place-items-center ring-1 ring-blue-300/30">
+            <div className="w-10 h-10 rounded-xl bg-blue-500 grid place-items-center">
               <Sparkles size={18} className="text-white drop-shadow" />
             </div>
             <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-blue-300">RushilAI vs ChatGPT</span>
@@ -611,7 +609,7 @@ function WhyNotGptModal({ onClose }) {
           <h2 className="text-[28px] sm:text-[32px] font-semibold tracking-[-0.02em] text-white leading-tight">
             ChatGPT answers questions.
             <br />
-            <span className="bg-gradient-to-br from-blue-300 via-indigo-300 to-fuchsia-300 bg-clip-text text-transparent">RushilAI actually teaches you.</span>
+            <span className="text-blue-300">RushilAI actually teaches you.</span>
           </h2>
           <p className="mt-3 text-[13.5px] text-white/60 leading-relaxed max-w-xl">
             One&apos;s a chatbot. The other walks you through a real course. Here&apos;s what that looks like:
@@ -620,12 +618,12 @@ function WhyNotGptModal({ onClose }) {
 
         {/* Comparison rows */}
         <div className="px-3 sm:px-5 py-4 space-y-1">
-          <Row icon={<BookOpen size={15} />} title="It builds the course for you" us="Type a topic and get a real course back — units, lessons, quizzes, even a midterm and final. Takes a few seconds." them="Spits out a wall of text. You'd have to organize it into a course on your own." />
+          <Row icon={<BookOpen size={15} />} title="It builds the course for you" us="Type a topic and get a real course back - units, lessons, quizzes, even a midterm and final. Takes a few seconds." them="Spits out a wall of text. You'd have to organize it into a course on your own." />
           <Row icon={<Repeat size={15} />}   title="It remembers what you missed" us="When you get something wrong on a quiz, it shows up again on the next one. The final quiz hits all your weak spots." them="Forgets everything the second the chat ends." />
-          <Row icon={<Brain size={15} />}    title="It picks up where you left off" us="Your courses, lessons, streaks — all saved. Open it next week and just keep going." them="Every chat starts from scratch. You're the one keeping track of where you are." />
+          <Row icon={<Brain size={15} />}    title="It picks up where you left off" us="Your courses, lessons, streaks - all saved. Open it next week and just keep going." them="Every chat starts from scratch. You're the one keeping track of where you are." />
           <Row icon={<PenTool size={15} />}  title="It grades your math, not just your answer" us="Solve on a real canvas. We read your work line by line and tell you where you slipped." them="Just gives you the answer. If you got the wrong number, you won't know why." />
           <Row icon={<Zap size={15} />}      title="You can play your friends" us="Head-to-head Quiz Bowl with a real buzzer. Pyramidal tossups, real packets, real scoreboard." them="Can't do this. It's one person, one chat box." />
-          <Row icon={<Cpu size={15} />}      title="Built for school" us="Made for studying first. We use whichever AI is best right now — Gemini, Claude, GPT, whoever." them="One model, one chat box. That's the whole app." />
+          <Row icon={<Cpu size={15} />}      title="Built for school" us="Made for studying first. We use whichever AI is best right now - Gemini, Claude, GPT, whoever." them="One model, one chat box. That's the whole app." />
         </div>
 
         {/* Footer */}
@@ -673,7 +671,7 @@ function Row({ icon, title, us, them }) {
 }
 
 // ===== Menu bar =====
-// Faux macOS menu bar pinned to the top — slim glass strip with the
+// Faux macOS menu bar pinned to the top - slim glass strip with the
 // brand mark on the left and a live date / time on the right. Sets
 // the macOS tone before the user has scrolled to anything.
 function MenuBar() {
@@ -694,7 +692,7 @@ function MenuBar() {
       }}
     >
       <div className="flex items-center gap-1.5">
-        <div className="w-4 h-4 rounded-[5px] bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-600 grid place-items-center ring-1 ring-blue-300/30">
+        <div className="w-4 h-4 rounded-[5px] bg-blue-500 grid place-items-center">
           <Sparkles size={9} className="text-white" strokeWidth={2.6} />
         </div>
         <span className="text-[12.5px] font-semibold tracking-[-0.005em] text-white/95">RushilAI</span>

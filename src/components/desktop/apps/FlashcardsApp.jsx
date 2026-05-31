@@ -308,7 +308,7 @@ export default function FlashcardsApp() {
       {/* Create form */}
       {showForm && (
         <form onSubmit={handleCreate} className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4 mb-4 flex flex-col gap-3 shrink-0">
-          <input className={inputCls} placeholder="Topic — AI generates cards" value={topic} onChange={e => setTopic(e.target.value)} />
+          <input className={inputCls} placeholder="Topic - AI generates cards" value={topic} onChange={e => setTopic(e.target.value)} />
           <input className={inputCls} placeholder="Deck title (optional)" value={deckTitle} onChange={e => setDeckTitle(e.target.value)} />
           <div className="flex gap-2">
             <button

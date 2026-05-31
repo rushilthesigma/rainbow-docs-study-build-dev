@@ -20,7 +20,7 @@ const NICHE_TOPICS = [
   'Medieval History', 'Quantum Physics', 'Marine Biology', 'Theater',
 ];
 
-// ── 7 bots — generic Player N names by default ───────────────────────────
+// ── 7 bots - generic Player N names by default ───────────────────────────
 const BOT_ROSTER = [
   { id: 'biscuit', name: 'Player 2', label: 'Newbie',       stars: 1, color: 'slate',   buzzAt: 0.90, accuracy: 0.40, thinkMs: 3000 },
   { id: 'alex',    name: 'Player 3', label: 'Amateur',      stars: 2, color: 'emerald', buzzAt: 0.80, accuracy: 0.58, thinkMs: 1800 },
@@ -53,7 +53,7 @@ const DIFFICULTIES = [
 // Tossup point rules per format. Two data models coexist for back-compat:
 //   - Simple flat (`getPts`/`negPts`, optional `powerThreshold`+`powerPts`)
 //   - Tiered (`tiers: [{ upTo, pts }, …]` with optional `afterEndPts`,
-//     `negDuring`, `negAfter`) — required for real IAC Playoff scoring.
+//     `negDuring`, `negAfter`) - required for real IAC Playoff scoring.
 // Values for IAC Prelim/Playoff come from the official IAC rules PDFs
 // (iacompetitions.com). `target` is points-to-win in 1v1 mode.
 const SCORING_FORMATS = [
@@ -175,7 +175,7 @@ export default function TrialPage() {
         const due  = all.filter(isDue);
         const pool = due.length > 0 ? due : all;
         if (pool.length === 0) {
-          setError('No review items yet — play a Quick Trial first to build your queue.');
+          setError('No review items yet - play a Quick Trial first to build your queue.');
           setScreen('lobby'); return;
         }
         qs = pool.slice(0, 10).map(item => ({
@@ -437,7 +437,7 @@ export default function TrialPage() {
               <span className="text-sm font-semibold text-cyan-300">Full 8-Player Tournament Room</span>
             </div>
             <p className="text-xs text-white/40">
-              All 7 AI players compete simultaneously. Everyone buzzes on every tossup —
+              All 7 AI players compete simultaneously. Everyone buzzes on every tossup -
               whoever answers correctly first scores. First to finish 20 questions wins most points.
             </p>
           </div>
@@ -477,7 +477,7 @@ export default function TrialPage() {
             <p className="text-xs text-white/40">
               {dueCount > 0
                 ? `${dueCount} items due today. Questions you struggled with return sooner; mastered ones are spaced further out.`
-                : 'No items due yet — play other modes first to build your review queue.'}
+                : 'No items due yet - play other modes first to build your review queue.'}
             </p>
           </div>
         )}
@@ -573,13 +573,13 @@ export default function TrialPage() {
           <p className="text-xs font-semibold text-white/35 uppercase tracking-wider">How it works</p>
           <ul className="space-y-1.5">
             {[
-              'Questions reveal word-by-word — buzz any time with BUZZ or Space bar',
+              'Questions reveal word-by-word - buzz any time with BUZZ or Space bar',
               'Buzz early for more XP; late buzzes score fewer points',
-              'Lobby Match: 8 simultaneous players (you + all 7 AI) — full tournament room',
+              'Lobby Match: 8 simultaneous players (you + all 7 AI) - full tournament room',
               '1v1: head-to-head against one opponent, first to 10 pts wins',
               'QBReader pulls real past tournament questions from the live database',
               'AI Generated unlocks niche topics (Mythology, Quantum Physics, Opera…)',
-              'SM-2 spaced repetition tracks every answer — weak topics come back sooner',
+              'SM-2 spaced repetition tracks every answer - weak topics come back sooner',
             ].map((tip, i) => (
               <li key={i} className="flex gap-2 text-xs text-white/35">
                 <span className="text-blue-500/50 flex-shrink-0 mt-0.5">•</span>{tip}

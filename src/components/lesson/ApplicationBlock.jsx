@@ -6,7 +6,7 @@ import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 
 // Real-world application block. Connects the lesson concept to
-// something tangible the student would recognize — a product, a
+// something tangible the student would recognize - a product, a
 // historical event, a phenomenon they've seen. Reads like a short
 // magazine column rather than a textbook.
 //

@@ -18,7 +18,7 @@ import { Z } from '../../styles/tokens';
 //   • Tooltip with the app label floats above the hovered icon.
 //
 // The search button + clock that the Win11 taskbar carried have moved
-// out — Spotlight has its own keyboard shortcut (⌘K) plus a magnifier
+// out - Spotlight has its own keyboard shortcut (⌘K) plus a magnifier
 // in the menu bar, and the clock lives in the menu bar too. The dock
 // only carries Launchpad → pinned apps → Settings → Widgets.
 
@@ -105,7 +105,7 @@ function DockIcon({ app, mouseX, isOpen, isActive, onClick, size, iconStyle }) {
   );
 }
 
-// + button in the dock tray — opens the Widgets app (a fixed-size
+// + button in the dock tray - opens the Widgets app (a fixed-size
 // window registered in AppWindow). The window spawns anchored above
 // this button, centered horizontally on it, with an 18px gap so it
 // looks like it's coming out of the +.
@@ -147,7 +147,7 @@ export default function Dock(_props) {
 
   const [isAdmin, setIsAdmin] = useState(false);
   // Cursor x-position, tracked while the pointer is inside the dock.
-  // Each DockIcon reads this on every render to compute its scale —
+  // Each DockIcon reads this on every render to compute its scale -
   // when null (mouse left the dock) every icon snaps back to base size.
   const [mouseX, setMouseX] = useState(null);
   const handleMouseMove = useCallback((e) => setMouseX(e.clientX), []);
@@ -175,7 +175,7 @@ export default function Dock(_props) {
       {/* macOS-style floating dock. Centered glass pill, ~8px above the
           screen edge. Hugs its content (no flex-1 spacers) so the pill
           width tracks the icon count. Icons magnify on cursor proximity
-          via mouseX — see DockIcon. The pill height fits the base icon
+          via mouseX - see DockIcon. The pill height fits the base icon
           + the indicator row; magnified icons grow upward and out of
           the pill, the way macOS does it. */}
       <div

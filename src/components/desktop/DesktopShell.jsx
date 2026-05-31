@@ -15,7 +15,7 @@ import DesktopWidgets from './DesktopWidgets';
 
 // macOS is the only desktop shell. Win11 / ChromeOS / Linux paths were
 // removed along with the OS-style picker. The HTML root gets a
-// hardcoded `os-macos` class — there are no macOS-specific index.css
+// hardcoded `os-macos` class - there are no macOS-specific index.css
 // rules at the moment, so `os-macos` is effectively the baseline (no
 // forced font swap, no squared corners, components keep their declared
 // Tailwind radii).
@@ -28,7 +28,7 @@ function MacOSContent() {
   // Slides-specific full-screen takeover logic lived here. It minimized
   // every other visible window when the slides deck went maximized and
   // restored them on exit. Now that slides is gone, the shell behaves
-  // like every other app — maximize fills the workspace but doesn't
+  // like every other app - maximize fills the workspace but doesn't
   // touch siblings.
 
   useEffect(() => {
@@ -62,7 +62,7 @@ function MacOSContent() {
         </Window>
       ))}
       {/* Both the dock and the menu bar hide when a window is maximized
-          so fullscreened apps get the entire viewport — true edge-to-
+          so fullscreened apps get the entire viewport - true edge-to-
           edge fullscreen, no chrome peeking through at the bottom. */}
       {!anyMaximized && <Dock onSpotlight={toggleSpotlight} />}
       <ContextMenu onSpotlight={toggleSpotlight} />
@@ -73,7 +73,7 @@ function MacOSContent() {
 
 // Maps known URL paths to the dock app id they should open. When the
 // router navigates to one of these (e.g. /parent from the ProfilePicker),
-// DesktopShell opens the matching app window — the desktop doesn't use
+// DesktopShell opens the matching app window - the desktop doesn't use
 // ClassicRoutes, so without this hook the URL change is silent.
 const PATH_TO_APP = {
   '/settings':    { appId: 'settings',  title: 'Settings' },
@@ -109,7 +109,7 @@ function ShellContent() {
   }, [location.pathname]);
 
   // Tag <html> with `os-macos`. There are no macOS-specific overrides in
-  // index.css right now — the class exists so future per-shell tweaks
+  // index.css right now - the class exists so future per-shell tweaks
   // have a hook, and so any stale `os-windows` / `os-chromeos` / `os-linux`
   // class left over from an earlier build gets cleared on mount.
   useEffect(() => {

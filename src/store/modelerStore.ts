@@ -174,7 +174,7 @@ export const useModelerStore = create<ModelerStore>((set, get) => ({
       const geom = csg(a.geometry, aMat, b.geometry, bMat, op);
       const name = `${a.name} ${op} ${b.name}`;
       const obj = makeObject(name, geom, 'csg', { color: a.color });
-      // Dispose the source geometries — they're being replaced by the CSG result
+      // Dispose the source geometries - they're being replaced by the CSG result
       a.geometry.dispose();
       b.geometry.dispose();
       set((s) => ({

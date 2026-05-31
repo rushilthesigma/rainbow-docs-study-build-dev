@@ -29,7 +29,7 @@ export default function MathText({ children, className, as: Tag = 'span' }) {
     } catch {}
   }, [children]);
 
-  // Render an empty element — content is set imperatively above so React
+  // Render an empty element - content is set imperatively above so React
   // never reconciles over the KaTeX-rendered HTML.
   return <Tag ref={ref} className={className} />;
 }

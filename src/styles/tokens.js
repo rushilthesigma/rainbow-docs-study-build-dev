@@ -1,4 +1,4 @@
-// Design tokens — the single source of truth for cross-cutting numeric
+// Design tokens - the single source of truth for cross-cutting numeric
 // values. Anything you'd otherwise hardcode in JSX (z-index, durations,
 // breakpoints) goes here so changes ripple through the app instead of
 // hiding in 100+ component files.
@@ -8,20 +8,20 @@
 // for component-local stacking without colliding with the next tier.
 //
 // Layout flow (low → high):
-//   content        — normal in-flow UI
-//   dock           — macOS dock
-//   window         — windowed apps in DesktopShell
-//   menubar        — top menu bar
-//   menubarMenu    — menu bar dropdowns
-//   overlay        — dim/blur overlays under modals
-//   modal          — standard modals
-//   contextMenu    — right-click menus (must beat modals)
-//   spotlight      — command palette
-//   sheet          — mobile bottom sheets (above desktop chrome)
-//   tour           — onboarding spotlight
-//   shortcuts      — keyboard cheat sheet
-//   toast          — top-level toasts
-//   presentation   — fullscreen takeover (slideshow)
+//   content        - normal in-flow UI
+//   dock           - macOS dock
+//   window         - windowed apps in DesktopShell
+//   menubar        - top menu bar
+//   menubarMenu    - menu bar dropdowns
+//   overlay        - dim/blur overlays under modals
+//   modal          - standard modals
+//   contextMenu    - right-click menus (must beat modals)
+//   spotlight      - command palette
+//   sheet          - mobile bottom sheets (above desktop chrome)
+//   tour           - onboarding spotlight
+//   shortcuts      - keyboard cheat sheet
+//   toast          - top-level toasts
+//   presentation   - fullscreen takeover (slideshow)
 export const Z = {
   content: 10,
   dock: 100,

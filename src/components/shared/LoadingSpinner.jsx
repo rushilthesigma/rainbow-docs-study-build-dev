@@ -1,15 +1,15 @@
-// LoadingSpinner — kept as a name-stable export, but the implementation
+// LoadingSpinner - kept as a name-stable export, but the implementation
 // no longer spins. Every call site now gets a skeleton screen (when the
 // surrounding layout is known) or a determinate progress bar with a live
 // percentage (when it's a thin row inside a card / button area).
 //
 // Modes (prop `as`):
-//   - 'auto' (default) — fullScreen → SkeletonPage, otherwise → SkeletonCardList
-//   - 'bar'            — renders a ProgressBar with simulated %
-//   - 'skeleton'       — forces SkeletonCardList regardless of fullScreen
+//   - 'auto' (default) - fullScreen → SkeletonPage, otherwise → SkeletonCardList
+//   - 'bar'            - renders a ProgressBar with simulated %
+//   - 'skeleton'       - forces SkeletonCardList regardless of fullScreen
 //
 // Existing call sites pass `<LoadingSpinner fullScreen />` or
-// `<LoadingSpinner size={24} />` — those keep working with the new visuals.
+// `<LoadingSpinner size={24} />` - those keep working with the new visuals.
 import { SkeletonPage, SkeletonCardList } from './Skeleton';
 import ProgressBar from './ProgressBar';
 

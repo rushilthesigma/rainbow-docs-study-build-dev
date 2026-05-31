@@ -1,7 +1,7 @@
 import { ArrowRight, ListChecks } from 'lucide-react';
 
 // Concept recap. Tight bullet-point summary of what's been covered so
-// far — used by the AI after a confusing reading or before moving on
+// far - used by the AI after a confusing reading or before moving on
 // to a harder section. No quiz, just a "got it" continue.
 //
 // Block shape:

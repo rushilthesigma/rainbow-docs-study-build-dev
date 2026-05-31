@@ -12,12 +12,12 @@ import DebatePanel from '../study/DebatePanel';
 import ErrorBoundary from '../shared/ErrorBoundary';
 import { useUIPreference } from '../../context/UIPreferenceContext';
 
-// The standalone Assessments app was retired — per-curriculum quizzes
+// The standalone Assessments app was retired - per-curriculum quizzes
 // (CurriculumAssessmentPage) still exist inside lessons; the
 // generic "make a quiz on any topic" surface is gone.
-// Dev Forum was also retired — the AI-collaboration board got removed
+// Dev Forum was also retired - the AI-collaboration board got removed
 // along with its server endpoints.
-// Slides was axed too — the deck-builder is no longer mounted here.
+// Slides was axed too - the deck-builder is no longer mounted here.
 const APP_COMPONENTS = {
   curricula: CurriculaApp,
   lessons: LessonsApp,
@@ -35,7 +35,7 @@ const APP_COMPONENTS = {
 // Apps that need flex container without scroll (they manage their own scrolling)
 const FLEX_APPS = new Set(['notes', 'study', 'debate', 'mathtutor', 'mobilepreview']);
 
-// Full-bleed apps (no padding, no overflow-hidden) — widgets gallery
+// Full-bleed apps (no padding, no overflow-hidden) - widgets gallery
 // owns its own internal padding, so the default p-4/p-5 wrapper would
 // double-pad the layout.
 const FULLBLEED_APPS = new Set(['widgets']);
@@ -46,7 +46,7 @@ export default function AppWindow({ appId, meta = {} }) {
   // The desktop apps are written dark-first with `text-white/X` and
   // `bg-white/X` classes baked in. Tagging the window root with
   // data-app-theme="light" triggers the global shim in index.css that
-  // remaps those whites to legible dark tones — so the app pages don't
+  // remaps those whites to legible dark tones - so the app pages don't
   // each have to thread a theme prop through their entire tree.
   const themeAttr = theme === 'light' ? 'light' : 'dark';
 

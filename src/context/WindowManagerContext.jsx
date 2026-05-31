@@ -12,16 +12,16 @@ function getDefaultSize(appId) {
     newcurriculum: { w: 650, h: 550 },
     goals: { w: 950, h: 600 },
     // Mobile Preview: window size matches a phone (375×812 + window
-    // chrome). The window itself IS the phone — no inner bezel.
+    // chrome). The window itself IS the phone - no inner bezel.
     mobilepreview: { w: 380, h: 870 },
-    // Widgets gallery is intentionally small + fixed — it's a picker,
+    // Widgets gallery is intentionally small + fixed - it's a picker,
     // not a workspace.
     widgets: { w: 420, h: 580 },
   };
   return sizes[appId] || { w: 800, h: 560 };
 }
 
-// Apps whose windows are locked to their default size — no resize, no
+// Apps whose windows are locked to their default size - no resize, no
 // maximize. Used for the Mobile Preview cutout (changing the dimensions
 // would defeat the point of the preview) and the Widgets gallery
 // (sized as a tight picker; resizing it would just create empty space).
@@ -35,7 +35,7 @@ function getCascadePos(offset) {
   return { x: Math.min(x, window.innerWidth - 500), y: Math.min(y, window.innerHeight - 400) };
 }
 
-// Keep an anchored spawn point on-screen — accounts for the menu bar
+// Keep an anchored spawn point on-screen - accounts for the menu bar
 // (28px) at the top and a small margin at every edge so the title bar
 // stays grabbable.
 function clampToViewport(pos, size) {
@@ -55,7 +55,7 @@ function reducer(state, action) {
       // Multi-instance: by default `openApp(id)` opens a NEW window
       // every time, so the user can have several Curricula or Study
       // windows side-by-side. The legacy "focus existing instead" path
-      // is opt-in via `action.focusIfOpen` — used by the Dock so a
+      // is opt-in via `action.focusIfOpen` - used by the Dock so a
       // single click on an app icon doesn't spawn a duplicate when
       // the app is already running and visible.
       const focusIfOpen = !!action.focusIfOpen;
@@ -141,7 +141,7 @@ function reducer(state, action) {
     case 'MAXIMIZE_WINDOW': {
       const w = state.windows[action.windowId];
       if (!w) return state;
-      // Fixed-size apps (Mobile Preview) ignore zoom — the dimensions
+      // Fixed-size apps (Mobile Preview) ignore zoom - the dimensions
       // are the whole point of the app.
       if (w.fixedSize) return state;
       if (w.isMaximized) {
@@ -198,13 +198,13 @@ export function WindowManagerProvider({ children }) {
 
   // Default: spawn a fresh window (multi-instance). Pass
   // `focusIfOpen=true` (3rd arg) when you want the legacy "single
-  // instance per app" behaviour — used by the Dock click handler so
+  // instance per app" behaviour - used by the Dock click handler so
   // the user can refocus a running app without spawning duplicates.
   // metaOrFocus: pass `true` for single-instance focus-if-open (Dock),
   // or pass an object `{ initialMessage, ... }` to seed the app with data.
   const openApp = useCallback((appId, title, metaOrFocus = false) => {
     // Legacy shape: third arg is `true` for single-instance focus-if-open.
-    // New shape: third arg is an object — supports `meta.focusIfOpen` AND
+    // New shape: third arg is an object - supports `meta.focusIfOpen` AND
     // `meta.position` for spawn-point pinning (e.g. the dock's +
     // button placing the Widgets app directly above itself).
     const isObj = metaOrFocus && typeof metaOrFocus === 'object';
@@ -237,7 +237,7 @@ export function useWindowManager() {
 }
 
 // Like useWindowManager but returns null instead of throwing when used
-// outside the provider — for shared components that work in both the
+// outside the provider - for shared components that work in both the
 // desktop shell (windowed) and the mobile/classic shells (router-based).
 export function useWindowManagerOptional() {
   return useContext(WindowManagerContext);

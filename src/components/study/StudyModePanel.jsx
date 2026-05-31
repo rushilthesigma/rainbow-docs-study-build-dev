@@ -28,7 +28,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   const [sourceMode, setSourceMode] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [sessionId, setSessionId] = useState(null);
-  // Debate sub-view — replaces the chat with the DebatePanel when true.
+  // Debate sub-view - replaces the chat with the DebatePanel when true.
   const [debateOpen, setDebateOpen] = useState(false);
   // Curriculum integration + extra sources. Both flow into the
   // request `context` object on every send. Sheets toggle from the
@@ -62,7 +62,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
     streamContentRef.current = '';
     streamSourcesRef.current = [];
 
-    // Build the context payload — only include what the server cares
+    // Build the context payload - only include what the server cares
     // about. `sources` already contains extracted text from /api/files
     // /extract-url so the server doesn't have to re-fetch.
     const ctx = {};
@@ -305,7 +305,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
     setMessages(prev => prev.slice(0, idx));
     setTimeout(() => doSend(newContent), 30);
   }
-  // Regenerate the AI bubble in place — do not show the instruction as a
+  // Regenerate the AI bubble in place - do not show the instruction as a
   // user turn. We rely on doSend-with-hidden-first-message pattern.
   function handleAiInstruct(idx, instruction) {
     if (streaming || !instruction?.trim()) return;
@@ -316,11 +316,11 @@ export default function StudyModePanel({ className = '', flush = false, initialM
     const userMsgSnapshot = messages[userIdx];
     if (abortRef.current) try { abortRef.current(); } catch {}
     setMessages(prev => [...prev.slice(0, userIdx), userMsgSnapshot]);
-    const hidden = `${prevUserText}\n\n[SYSTEM NOTE: Regenerate your previous answer — this time ${instruction.trim()}. Do NOT acknowledge this instruction. Just output the revised answer directly.]`;
+    const hidden = `${prevUserText}\n\n[SYSTEM NOTE: Regenerate your previous answer - this time ${instruction.trim()}. Do NOT acknowledge this instruction. Just output the revised answer directly.]`;
     setTimeout(() => doSend(hidden, { hideUserInDisplay: true }), 30);
   }
 
-  // Rich empty state — quick-prompt cards, NOT ChatGPT's blank greeting.
+  // Rich empty state - quick-prompt cards, NOT ChatGPT's blank greeting.
   const emptyState = (
     <div className="h-full flex flex-col items-center justify-center px-4 py-6">
       <div className="grid sm:grid-cols-2 gap-2 w-full max-w-md">

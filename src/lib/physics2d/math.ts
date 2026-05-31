@@ -11,7 +11,7 @@ export const vscale = (a: Vec2, s: number): Vec2 => ({ x: a.x * s, y: a.y * s })
 export const vdot = (a: Vec2, b: Vec2): number => a.x * b.x + a.y * b.y;
 /** 2D scalar cross: a × b = ax*by - ay*bx */
 export const vcross = (a: Vec2, b: Vec2): number => a.x * b.y - a.y * b.x;
-/** Cross of scalar w with vector b — useful for r × F = w * perp(r). */
+/** Cross of scalar w with vector b - useful for r × F = w * perp(r). */
 export const vcrossSV = (s: number, b: Vec2): Vec2 => ({ x: -s * b.y, y: s * b.x });
 export const vlen = (a: Vec2): number => Math.hypot(a.x, a.y);
 export const vlenSq = (a: Vec2): number => a.x * a.x + a.y * a.y;

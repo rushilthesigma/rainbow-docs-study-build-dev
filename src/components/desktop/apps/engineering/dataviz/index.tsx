@@ -442,7 +442,7 @@ const module: AppModule = {
   manifest: {
     id: 'dataviz',
     name: 'DataViz',
-    description: 'Scientific data visualization — fields, filters, colormaps',
+    description: 'Scientific data visualization - fields, filters, colormaps',
     icon: BarChart3,
     defaultSize: { width: 1060, height: 660 },
     accent: 'linear-gradient(135deg, #7c3aed 0%, #2563eb 100%)',

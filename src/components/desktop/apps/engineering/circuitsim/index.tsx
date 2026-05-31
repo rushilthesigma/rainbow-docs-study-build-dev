@@ -102,7 +102,7 @@ function CircuitSim({ appId }: { appId: string }) {
 
   const selected = selectedId ? components.find((c) => c.id === selectedId) ?? null : null;
 
-  /* Palette placement stagger — avoids stacking components at a single point */
+  /* Palette placement stagger - avoids stacking components at a single point */
   const placeIdxRef = useRef(0);
   const nextPlacePos = () => {
     const idx = placeIdxRef.current % 20;
@@ -112,7 +112,7 @@ function CircuitSim({ appId }: { appId: string }) {
     return { x: 80 + col * 100, y: 80 + row * 80 };
   };
 
-  /* Pin voltage overlay — computed from last DC solve */
+  /* Pin voltage overlay - computed from last DC solve */
   const pinVoltages = useMemo<Record<string, number>>(() => {
     if (!dc || !components.length) return {};
     const { pinNode } = buildNodes(components);
@@ -267,7 +267,7 @@ function CircuitSim({ appId }: { appId: string }) {
               try {
                 runDC();
                 import('@/store/toastStore').then(({ toast }) =>
-                  toast.success('DC operating point', 'Solved — voltages shown at each pin.'),
+                  toast.success('DC operating point', 'Solved - voltages shown at each pin.'),
                 );
               } catch (e) {
                 import('@/store/toastStore').then(({ toast }) =>
@@ -748,7 +748,7 @@ function CircuitCanvas({
       onMouseMove={(e) => {
         const p = screenToCanvas(e);
         if (wiringFrom) {
-          // Snap cursor to grid while wiring — wire segments align cleanly
+          // Snap cursor to grid while wiring - wire segments align cleanly
           setCursor({ x: snap(p.x), y: snap(p.y) });
         } else {
           setCursor(p);
@@ -770,7 +770,7 @@ function CircuitCanvas({
         </pattern>
       </defs>
 
-      {/* Background — click handler lives here so all empty-space clicks route correctly */}
+      {/* Background - click handler lives here so all empty-space clicks route correctly */}
       {breadboard ? (
         <g>
           <rect width={size.w} height={size.h} fill="#243049" onMouseDown={handleBgMouseDown} />
@@ -929,7 +929,7 @@ function CompShape({
   const onBodyDown = (e: React.MouseEvent) => {
     e.stopPropagation();
 
-    /* Always find the nearest pin — used for both wiring and click-to-wire */
+    /* Always find the nearest pin - used for both wiring and click-to-wire */
     const p0 = screenToCanvas(e);
     const relX = p0.x - comp.x;
     const relY = p0.y - comp.y;
@@ -953,7 +953,7 @@ function CompShape({
        - Drag (> 6 px movement)  → move component
        - Click (no significant movement) → start a wire from nearest pin
        This means clicking any two components auto-creates a wire between
-       their nearest pins — no need to hit tiny pin dots precisely. */
+       their nearest pins - no need to hit tiny pin dots precisely. */
     onSelect();
     let didDrag = false;
     let snapshotted = false;
@@ -1090,7 +1090,7 @@ function CompShape({
             >
               <title>{p.name}</title>
             </circle>
-            {/* DC voltage label — hidden while wiring to reduce clutter */}
+            {/* DC voltage label - hidden while wiring to reduce clutter */}
             {voltage !== undefined && !wiringActive && (
               <text
                 x={lblX}

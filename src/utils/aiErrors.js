@@ -2,12 +2,36 @@
 // Keep messages short, specific, and actionable. Never expose stack traces
 // or full upstream JSON payloads to end users.
 //
-// NOTE: All plan-tier gating has been removed from the product — every
-// authenticated user has unlimited usage. This file no longer translates
-// quota/limit codes into "upgrade" CTAs.
+// Quota errors (HTTP 402 + `error: 'message_limit_reached'`) get a
+// plan-aware CTA: free users are pushed to the referral unlock for
+// Plus-Lite, paid users are pushed to the next paid tier.
 export function friendlyAIError(raw) {
   const serverMsg = typeof raw?.message === 'string' ? raw.message : '';
   const msg = String(serverMsg || raw?.error || raw || '').toLowerCase();
+
+  // Message-limit hit: the streamer attaches `_code` from the server's
+  // `error` field and (since the limit update) the plan/upgradeKind.
+  const code = raw?._code || raw?.error;
+  const isLimit = code === 'message_limit_reached'
+    || msg.includes('message_limit_reached')
+    || msg.includes("today's message limit")
+    || msg.includes('daily message limit')
+    || msg.includes('hit the free-plan daily limit');
+  if (isLimit) {
+    const plan = raw?.plan;
+    const kind = raw?.upgradeKind || (plan === 'free' ? 'refer' : 'upgrade');
+    const limitTxt = raw?.limit ? ` (${raw.limit}/day)` : '';
+    if (kind === 'refer') {
+      return {
+        title: 'Daily message limit reached',
+        body: `You've used today's free messages${limitTxt}. Refer 2 friends to unlock Plus-Lite (free) for higher limits, or upgrade any time.`,
+      };
+    }
+    return {
+      title: 'Daily message limit reached',
+      body: `You've used today's messages${limitTxt}. Upgrade to the next plan for more.`,
+    };
+  }
 
   if (!msg || msg === 'undefined' || msg === 'null') {
     return { title: 'Something went wrong', body: 'The AI didn\'t respond. Try sending again in a moment.' };

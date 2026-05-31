@@ -18,7 +18,7 @@ import { useWindowManagerOptional } from '../../context/WindowManagerContext';
 // "AI Edit" pass that rewrites/extends the note based on a free-form
 // instruction (e.g. "make it shorter", "add a section on X").
 //
-// Works in both shells — when the WindowManagerContext is present we
+// Works in both shells - when the WindowManagerContext is present we
 // launch desktop windows with seeded meta; otherwise we navigate via
 // react-router (mobile + classic routes).
 //
@@ -107,7 +107,7 @@ export default function NoteActions({ note, onNoteUpdated }) {
 // instruction ("tighten this", "add a section on Y", "convert to a
 // table"), and the AI rewrites mainNotes (and the title, if it
 // volunteers a better one) in place. Cornell extras (cues/summary)
-// pass through untouched — those have their own dedicated regenerate
+// pass through untouched - those have their own dedicated regenerate
 // buttons.
 function AIEditNoteModal({ open, onClose, note, noteText, onApplied }) {
   const [instruction, setInstruction] = useState('');
@@ -129,7 +129,7 @@ function AIEditNoteModal({ open, onClose, note, noteText, onApplied }) {
     setError(null);
     try {
       const isCornell = note.type === 'cornell';
-      const system = `You revise an existing study note based on the student's instruction. Output ONLY valid JSON, no markdown fences, no prose. Shape: {"title": "...", "mainNotes": "..."}. Keep the note's overall topic but apply the requested change. Write mainNotes as plain text only — no markdown, no asterisks, no hashes, no bullet dashes. Use line breaks and indentation for structure. The note should remain organized, dense, and useful for studying.`;
+      const system = `You revise an existing study note based on the student's instruction. Output ONLY valid JSON, no markdown fences, no prose. Shape: {"title": "...", "mainNotes": "..."}. Keep the note's overall topic but apply the requested change. Write mainNotes as plain text only - no markdown, no asterisks, no hashes, no bullet dashes. Use line breaks and indentation for structure. The note should remain organized, dense, and useful for studying.`;
       const userMessage = `INSTRUCTION FROM THE STUDENT:
 ${instr}
 
@@ -165,7 +165,7 @@ Return the revised note as JSON.`;
       if (typeof parsed.mainNotes === 'string') patch.mainNotes = parsed.mainNotes;
       await updateNote(note.id, patch);
       onApplied?.(patch);
-      // Hint not used here, but keep Cornell intact — server merges by
+      // Hint not used here, but keep Cornell intact - server merges by
       // patch keys, so cues/summary stay untouched.
       void isCornell;
       handleClose();
@@ -309,14 +309,14 @@ function QuizFromNoteModal({ open, onClose, noteTitle, noteText }) {
     setGrading(false);
   }
 
-  // Setup phase — difficulty / question count
+  // Setup phase - difficulty / question count
   if (open && !quiz && !generating) {
     return (
       <Modal open={open} onClose={handleClose} title={`Quiz on "${noteTitle}"`}>
         <form onSubmit={handleGenerate} className="flex flex-col gap-4">
           <div className="rounded-lg border border-blue-300 bg-blue-50 text-blue-900 dark:border-blue-400/25 dark:bg-blue-500/[0.08] dark:text-blue-100/90 px-3 py-2 text-[12px] leading-relaxed flex items-start gap-2">
             <Sparkles size={12} className="text-blue-600 dark:text-blue-300 mt-0.5 flex-shrink-0" />
-            <span>The AI will write questions <span className="font-semibold">grounded in your note</span> — not generic ones about the topic.</span>
+            <span>The AI will write questions <span className="font-semibold">grounded in your note</span> - not generic ones about the topic.</span>
           </div>
           <PillGroup label="Difficulty" options={DIFFICULTY_OPTIONS} value={difficulty} onChange={setDifficulty} />
           <div>
@@ -421,7 +421,7 @@ function QuizFromNoteModal({ open, onClose, noteTitle, noteText }) {
                   {!d.correct && (
                     <p className="text-[11px] text-gray-600 dark:text-blue-200/65 mt-1.5 break-words">
                       <span className="text-gray-500 dark:text-blue-300/55">Your answer:</span>{' '}
-                      <span className="text-rose-600 dark:text-rose-300 font-medium">{d.answer || '—'}</span>
+                      <span className="text-rose-600 dark:text-rose-300 font-medium">{d.answer || '-'}</span>
                       <span className="mx-1.5 text-gray-300 dark:text-blue-300/25">·</span>
                       <span className="text-gray-500 dark:text-blue-300/55">Correct:</span>{' '}
                       <span className="text-emerald-600 dark:text-emerald-300 font-medium">{d.correctAnswer}</span>

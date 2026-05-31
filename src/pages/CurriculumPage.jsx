@@ -121,9 +121,9 @@ export default function CurriculumPage() {
         </div>
       )}
 
-      {/* Course-grade card — only shown in graded mode. Hidden until at
+      {/* Course-grade card - only shown in graded mode. Hidden until at
           least one assignment is submitted so it doesn't dangle an empty
-          "—" at the top of a brand new course. */}
+          "-" at the top of a brand new course. */}
       {curriculum.graded && courseGrade?.percent != null && (
         <div className="mt-2 mb-6 rounded-xl border border-blue-400/[0.20] bg-blue-500/[0.06] backdrop-blur-sm p-4 flex items-center gap-4">
           <div className="w-12 h-12 rounded-lg bg-blue-500/[0.15] border border-blue-400/[0.25] flex items-center justify-center text-[18px] font-bold text-blue-200">

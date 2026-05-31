@@ -26,16 +26,16 @@ function modeGroup(mode) {
 }
 
 // =========================================================
-// DEBATE PANEL — embedded inside Study Mode (no longer a top-level app).
+// DEBATE PANEL - embedded inside Study Mode (no longer a top-level app).
 // Modes:
-//   menu          — pick singleplayer or multiplayer
-//   single-setup  — pick topic + side, start solo debate vs AI
-//   single-debate — chat with AI; click End Debate → final verdict
-//   single-verdict — read AI verdict + scores
-//   mp-menu       — Create or Join code
-//   mp-lobby      — waiting room; host configures topic/side and starts
-//   mp-game       — turn-based with AI per-move grade + dual end vote
-//   mp-verdict    — final verdict
+//   menu          - pick singleplayer or multiplayer
+//   single-setup  - pick topic + side, start solo debate vs AI
+//   single-debate - chat with AI; click End Debate → final verdict
+//   single-verdict - read AI verdict + scores
+//   mp-menu       - Create or Join code
+//   mp-lobby      - waiting room; host configures topic/side and starts
+//   mp-game       - turn-based with AI per-move grade + dual end vote
+//   mp-verdict    - final verdict
 // =========================================================
 const QUICK_TOPICS = [
   'Social media is harmful',
@@ -46,7 +46,7 @@ const QUICK_TOPICS = [
   'Self-driving cars are safer than humans',
 ];
 
-// Subject categories — clicking one filters TopicChips to a specific
+// Subject categories - clicking one filters TopicChips to a specific
 // area instead of forcing users into the generic six. Each category
 // carries a handful of concrete debate-ready topics so users in the
 // h2h lobby actually have specific things to argue about, not just the
@@ -181,7 +181,7 @@ export default function DebatePanel({ onBack }) {
   // Tournament-rejoin entry point. When the mode menu detects this user
   // is already in an active tournament (via /my-active-tournament), the
   // Rejoin banner sets this and selectMode('tour-lobby' or 'tour-bracket')
-  // — the Tournament component reads `rejoinTournament` and skips its
+  // - the Tournament component reads `rejoinTournament` and skips its
   // own create/join screen.
   const [rejoinTournament, setRejoinTournament] = useState(null);
   const selectMode = (m) => {
@@ -199,10 +199,10 @@ export default function DebatePanel({ onBack }) {
   //   - On the mode menu:
   //       · if onBack is provided (e.g., mounted inside StudyMode as a
   //         sub-view, with a parent that wants to take over) call it.
-  //       · otherwise (mounted as its own top-level app) hide the arrow —
+  //       · otherwise (mounted as its own top-level app) hide the arrow -
   //         the window's own close button is the only sensible exit.
   const onMenu = mode === 'menu';
-  // Lock the header back arrow during active games — leaving must go
+  // Lock the header back arrow during active games - leaving must go
   // through the in-match Leave flow so the opponent gets notified and
   // the match state advances correctly.
   const isActiveGame = mode === 'mp-game' || mode === 'single-debate';
@@ -284,7 +284,7 @@ function ModeMenu({ onSelect, onRejoinTournament }) {
   const card = 'flex flex-col items-center justify-center gap-2.5 p-6 rounded-xl border transition-colors group';
   // Detect a tournament this user is already in (created/joined on
   // another device or earlier session). If found, surface a Rejoin
-  // banner at the top — clicking it routes straight to lobby/bracket
+  // banner at the top - clicking it routes straight to lobby/bracket
   // without going through create/join.
   const [activeTour, setActiveTour] = useState(null);
   useEffect(() => {
@@ -570,25 +570,25 @@ function HistoryDetail({ entry, onBack }) {
 // =========================================================
 function buildAdversarialSystem(side) {
   const opp = side === 'for' ? 'AGAINST' : 'FOR';
-  return `You are a sharp, openly adversarial debate opponent. The user is arguing ${side === 'for' ? 'FOR' : 'AGAINST'} the topic — you argue ${opp}. Your job is to make this hard for them.
+  return `You are a sharp, openly adversarial debate opponent. The user is arguing ${side === 'for' ? 'FOR' : 'AGAINST'} the topic - you argue ${opp}. Your job is to make this hard for them.
 
 How to debate (read this twice):
 - Be DIRECT and POINTED. Don't soften ("I see your point but…"). Open with a counter-claim, name the user's weakest assumption, and make them defend it.
-- Use REAL DATA. You have web search — pull specific numbers, studies, examples, dates. Cite them inline naturally (no separate Sources section — the UI shows one). If you can't find data, attack the user's lack of data instead.
+- Use REAL DATA. You have web search - pull specific numbers, studies, examples, dates. Cite them inline naturally (no separate Sources section - the UI shows one). If you can't find data, attack the user's lack of data instead.
 - ATTACK the user's strongest argument first, not their weakest. Don't strawman; quote their actual claim and dismantle it.
-- DEMAND specifics when they hand-wave. "Which study?" "What time period?" "Compared to what baseline?" — push back hard on vagueness.
+- DEMAND specifics when they hand-wave. "Which study?" "What time period?" "Compared to what baseline?" - push back hard on vagueness.
 - Keep responses TIGHT. 2-3 paragraphs max per turn. Lead with the strongest counter, support it, end with a question that puts them on the defensive.
 
 What you do NOT do:
 - Don't moderate or summarize unless the user explicitly asks for a recap.
-- Don't say "good point" or "I agree" — you're arguing the opposite side.
+- Don't say "good point" or "I agree" - you're arguing the opposite side.
 - Don't volunteer to end the debate; the user has an "End Debate" button for that.
 
 Format: GitHub-flavored markdown. **Bold** key claims, use - bullets for evidence lists, $math$ if relevant.`;
 }
 
 // =========================================================
-// TOURNAMENT — single-elimination bracket of 4/8/16 players.
+// TOURNAMENT - single-elimination bracket of 4/8/16 players.
 // Handles create/join, lobby (waiting for players), and the live bracket
 // view. When the user has a live match they're routed inline into the
 // existing Multiplayer game UI via the presetCode + tournamentCode path.
@@ -609,33 +609,33 @@ function Tournament({ mode, setMode, onExit, rejoinTournament = null }) {
   const [timedMode, setTimedMode] = useState(false);
   const [maxRounds, setMaxRounds] = useState(5);
   const [joinInput, setJoinInput] = useState('');
-  // Per-round topics. Off by default — same topic everywhere. When on,
+  // Per-round topics. Off by default - same topic everywhere. When on,
   // host can specify the semi/final etc. their own topic; any empty
   // round falls back to the main topic on the server.
   const [perRoundTopics, setPerRoundTopics] = useState(false);
   const [roundTopics, setRoundTopics] = useState({}); // { [roundNum]: string }
-  // Host can opt out of playing — useful for teachers / organizers
+  // Host can opt out of playing - useful for teachers / organizers
   // running a bracket without taking a player slot.
   const [hostPlays, setHostPlays] = useState(true);
   // In-match mode: switch the panel from the bracket view to the
   // Multiplayer game view scoped to the user's current bracket match.
   const [activeMatchCode, setActiveMatchCode] = useState(null);
-  // Set to true when the user opens a match they're NOT playing in —
+  // Set to true when the user opens a match they're NOT playing in -
   // eliminated player or organizer watching a live match.
   const [activeMatchIsSpectator, setActiveMatchIsSpectator] = useState(false);
-  // Local "in-match" mode for Multiplayer's controlled state — it doesn't
+  // Local "in-match" mode for Multiplayer's controlled state - it doesn't
   // need to share with the parent setMode because the user never goes back
   // to mp-menu from a tournament match.
   const [matchMode, setMatchMode] = useState('mp-game');
   const streamRef = useRef(null);
-  // Host-only snapshot modal — exports the full bracket state as a PNG
+  // Host-only snapshot modal - exports the full bracket state as a PNG
   // and a copy-pasteable text summary.
   const [showSnapshot, setShowSnapshot] = useState(false);
   const [copiedSnap, setCopiedSnap] = useState(false);
   const [downloadingPng, setDownloadingPng] = useState(false);
   const snapshotRef = useRef(null);
 
-  // SSE stream — same shape as the match stream, just hits the tournament
+  // SSE stream - same shape as the match stream, just hits the tournament
   // endpoint. Every event carries `tournament` and we just setTournament.
   useEffect(() => {
     if (!code) return;
@@ -762,7 +762,7 @@ function Tournament({ mode, setMode, onExit, rejoinTournament = null }) {
     if (!code) return;
     navigator.clipboard.writeText(code)
       .then(() => toast.success(`Code ${code} copied`))
-      .catch(() => toast.error('Copy failed — select the code manually'));
+      .catch(() => toast.error('Copy failed - select the code manually'));
   }
 
   // ===== ACTIVE BRACKET MATCH =====
@@ -840,7 +840,7 @@ function Tournament({ mode, setMode, onExit, rejoinTournament = null }) {
           </span>
         </button>
 
-        {/* Host-plays toggle. Default is "play" — uncheck to organize-only,
+        {/* Host-plays toggle. Default is "play" - uncheck to organize-only,
             useful for a teacher / spectator running a bracket. */}
         <button
           type="button"
@@ -963,7 +963,7 @@ function Tournament({ mode, setMode, onExit, rejoinTournament = null }) {
         )}
         <p className="text-[12px] text-white/75 text-center mb-5 truncate">"{tournament.topic}"</p>
 
-        {/* Organizer-host chip — shown when host opted out of playing. */}
+        {/* Organizer-host chip - shown when host opted out of playing. */}
         {!tournament.hostPlays && iAmHost && (
           <div className="rounded-xl border border-blue-400/35 bg-blue-500/[0.10] p-3 mb-3 flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-full bg-blue-500/30 border border-blue-400/50 grid place-items-center flex-shrink-0">
@@ -971,7 +971,7 @@ function Tournament({ mode, setMode, onExit, rejoinTournament = null }) {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-[11px] font-bold text-blue-100">You're the organizer</p>
-              <p className="text-[10.5px] text-blue-200/65">Not playing — just running the bracket.</p>
+              <p className="text-[10.5px] text-blue-200/65">Not playing - just running the bracket.</p>
             </div>
           </div>
         )}
@@ -1091,7 +1091,7 @@ function Tournament({ mode, setMode, onExit, rejoinTournament = null }) {
           {tournament.hostId === myId && (
             <button
               onClick={() => setShowSnapshot(true)}
-              title="Snapshot — export bracket state"
+              title="Snapshot - export bracket state"
               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-blue-200 bg-blue-500/10 border border-blue-500/25 hover:bg-blue-500/20 hover:border-blue-500/45 hover:text-blue-100 transition-colors flex-shrink-0"
             >
               <Camera size={11} /> Snapshot
@@ -1132,7 +1132,7 @@ function Tournament({ mode, setMode, onExit, rejoinTournament = null }) {
             <div className="w-7 h-7 rounded-full bg-blue-500/25 border border-blue-400/45 grid place-items-center flex-shrink-0">
               <Trophy size={12} className="text-blue-200" />
             </div>
-            <p className="text-[12px] text-blue-100/85 flex-1">Organizing — bracket auto-advances as matches finish.</p>
+            <p className="text-[12px] text-blue-100/85 flex-1">Organizing - bracket auto-advances as matches finish.</p>
           </div>
         )}
         {!finished && !myLiveMatch && iAmEliminated && !iAmOrganizer && (
@@ -1236,7 +1236,7 @@ function Tournament({ mode, setMode, onExit, rejoinTournament = null }) {
     );
   }
 
-  // Fallback — no tournament loaded yet.
+  // Fallback - no tournament loaded yet.
   return (
     <div className="p-6 text-center">
       <Loader2 size={20} className="mx-auto text-blue-300/40 animate-spin" />
@@ -1248,7 +1248,7 @@ function PlayerRow({ player, score, won, matchFinished, self }) {
   if (!player) {
     return (
       <div className="flex items-center gap-2 px-1 py-1 opacity-50">
-        <span className="text-[11px] text-blue-300/40">—</span>
+        <span className="text-[11px] text-blue-300/40">-</span>
       </div>
     );
   }
@@ -1272,7 +1272,7 @@ function PlayerRow({ player, score, won, matchFinished, self }) {
 }
 
 // =========================================================
-// TOURNAMENT SNAPSHOT — host-only export. Renders a full, printable view
+// TOURNAMENT SNAPSHOT - host-only export. Renders a full, printable view
 // of the bracket state and offers Copy (text summary) and Download PNG.
 // =========================================================
 function TournamentSnapshotModal({ tournament, roundsMap, roundNumbers, roundLabel, snapshotRef, onClose, copiedSnap, setCopiedSnap, downloadingPng, setDownloadingPng }) {
@@ -1296,14 +1296,14 @@ function TournamentSnapshotModal({ tournament, roundsMap, roundNumbers, roundLab
     lines.push('');
     lines.push('BRACKET');
     for (const rn of roundNumbers) {
-      lines.push(`  ${roundLabel(rn)}${tournament.roundTopics?.[rn] && tournament.roundTopics[rn] !== tournament.topic ? ` — "${tournament.roundTopics[rn]}"` : ''}`);
+      lines.push(`  ${roundLabel(rn)}${tournament.roundTopics?.[rn] && tournament.roundTopics[rn] !== tournament.topic ? ` - "${tournament.roundTopics[rn]}"` : ''}`);
       for (const m of roundsMap[rn].sort((a, b) => a.matchIndex - b.matchIndex)) {
         const p1 = tournament.players.find(p => p.userId === m.players[0]);
         const p2 = tournament.players.find(p => p.userId === m.players[1]);
         const s1 = m.scores?.[p1?.userId];
         const s2 = m.scores?.[p2?.userId];
         const winId = m.winnerId;
-        const fmt = (p, s) => p ? `${p.name}${typeof s === 'number' ? ` (${s})` : ''}${winId === p.userId ? ' ✓' : ''}` : '—';
+        const fmt = (p, s) => p ? `${p.name}${typeof s === 'number' ? ` (${s})` : ''}${winId === p.userId ? ' ✓' : ''}` : '-';
         lines.push(`    ${fmt(p1, s1)} vs ${fmt(p2, s2)}${m.state === 'finished' ? '' : '  [in progress]'}`);
       }
     }
@@ -1375,7 +1375,7 @@ function TournamentSnapshotModal({ tournament, roundsMap, roundNumbers, roundLab
           </div>
         </div>
 
-        {/* Capture target — what gets exported to PNG */}
+        {/* Capture target - what gets exported to PNG */}
         <div ref={snapshotRef} className="p-6 bg-gradient-to-b from-[#0b1220] to-[#0e1426]">
           <div className="flex items-start justify-between gap-4 mb-4">
             <div>
@@ -1426,7 +1426,7 @@ function TournamentSnapshotModal({ tournament, roundsMap, roundNumbers, roundLab
             </div>
           </div>
 
-          {/* Bracket columns — same layout as the live bracket */}
+          {/* Bracket columns - same layout as the live bracket */}
           <div className="flex gap-3 overflow-x-auto pb-1">
             {roundNumbers.map(rn => {
               const rTopic = tournament.roundTopics?.[rn];
@@ -1466,7 +1466,7 @@ function TournamentSnapshotModal({ tournament, roundsMap, roundNumbers, roundLab
 }
 
 function SnapshotPlayerRow({ player, score, won, matchFinished }) {
-  if (!player) return <div className="flex items-center gap-2 px-1 py-1 opacity-50"><span className="text-[11px] text-blue-300/40">—</span></div>;
+  if (!player) return <div className="flex items-center gap-2 px-1 py-1 opacity-50"><span className="text-[11px] text-blue-300/40">-</span></div>;
   const eliminated = matchFinished && !won;
   return (
     <div className={`flex items-center gap-2 px-1 py-1 ${eliminated ? 'opacity-50' : ''}`}>
@@ -1507,7 +1507,7 @@ function Singleplayer({ mode, setMode, onExit }) {
     setTopic(t);
     setMode('single-debate');
     systemRef.current = buildAdversarialSystem(s);
-    doSend(`Topic: "${t}". I'm arguing ${s === 'for' ? 'FOR' : 'AGAINST'} this. Open with your counter — give me your strongest argument first.`);
+    doSend(`Topic: "${t}". I'm arguing ${s === 'for' ? 'FOR' : 'AGAINST'} this. Open with your counter - give me your strongest argument first.`);
   }
 
   async function doSend(text) {
@@ -1692,7 +1692,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
   const [voting, setVoting] = useState(false);
   const [copied, setCopied] = useState(false);
   const streamRef = useRef(null);
-  // Tick state for the timed-mode countdown — refreshes once a second.
+  // Tick state for the timed-mode countdown - refreshes once a second.
   // Computed from match.turnLimitMs - (now - match.turnStartedAt).
   const [nowTick, setNowTick] = useState(Date.now());
   const timeoutFiredRef = useRef(null);
@@ -1726,7 +1726,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
   // Tournament entry path: when a presetCode is passed in, idempotently
   // join the match (server treats already-a-player as a no-op) and load
   // its current state so the user lands directly in the game view without
-  // touching the create/join flow. Spectator entry skips /join entirely —
+  // touching the create/join flow. Spectator entry skips /join entirely -
   // the SSE stream below auto-snapshots the match read-only.
   useEffect(() => {
     if (!presetCode || code) return;
@@ -1796,21 +1796,21 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
   }, [code, mode, setMode, myId]);
 
   // Tick the countdown when the player is in a timed game. The effect
-  // is a no-op when timed mode is off — no setInterval at all.
+  // is a no-op when timed mode is off - no setInterval at all.
   useEffect(() => {
     if (!match?.timedMode || match.state !== 'playing') return;
     const id = setInterval(() => setNowTick(Date.now()), 500);
     return () => clearInterval(id);
   }, [match?.timedMode, match?.state, match?.turnStartedAt]);
 
-  // Reset the timeout-fired ref whenever the turn changes — otherwise a
+  // Reset the timeout-fired ref whenever the turn changes - otherwise a
   // late timeout from the previous turn could no-op the next.
   useEffect(() => {
     timeoutFiredRef.current = null;
   }, [match?.turnStartedAt]);
 
   // Auto-submit on clock expiry. Lives in an effect (not inline render
-  // code) so it fires once per turn — the timeoutFiredRef inside
+  // code) so it fires once per turn - the timeoutFiredRef inside
   // handleTimeout still guards re-entry, but moving the call here means
   // we don't even attempt it on every render.
   useEffect(() => {
@@ -1821,12 +1821,12 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
     if (submittingMove) return;
     handleTimeout();
     // handleTimeout reads `argument` / `argImages` via closure; we
-    // intentionally don't list them as deps — once the clock hits 0 we
+    // intentionally don't list them as deps - once the clock hits 0 we
     // want to submit whatever's in the box at that exact moment.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nowTick, match?.timedMode, match?.state, match?.turnOf, match?.turnStartedAt, match?.turnLimitMs, myId, submittingMove]);
 
-  // Live-typing broadcast — only in timed mode, only on the active
+  // Live-typing broadcast - only in timed mode, only on the active
   // player's side, debounced ~400ms so we're not hammering the server
   // with one POST per keystroke. The opponent reads match.draftText
   // from the SSE stream and renders it inline.
@@ -1901,15 +1901,15 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
 
   // Time-expired auto-submit. Sends whatever's in the textbox (plus any
   // attached images) with a timedOut marker so the server can grade what
-  // they had instead of stalling — empty drafts still fall back to 0/0/0.
+  // they had instead of stalling - empty drafts still fall back to 0/0/0.
   //
-  // Three guards keep this idempotent — the bug was that any one of them
+  // Three guards keep this idempotent - the bug was that any one of them
   // alone leaked a second POST under realistic timing:
   //   1. `timeoutFiredRef` keyed on the turn start time so multiple
   //      renders during the await all bail.
   //   2. `submittingMove` flips to true synchronously so the manual Send
   //      button (which only checks `submittingMove`) goes disabled the
-  //      instant the timer fires — closes the window where a panicked
+  //      instant the timer fires - closes the window where a panicked
   //      user click would land a second POST.
   //   3. The async fetch and the cleanup are in try/finally so a network
   //      error doesn't strand the button in a permanently-disabled state.
@@ -1932,7 +1932,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
       setArgument('');
       setArgImages([]);
     } catch (e) {
-      // Server may reject (already-not-your-turn etc.) — swallow.
+      // Server may reject (already-not-your-turn etc.) - swallow.
       console.warn('Timeout submit failed:', e?.message);
     } finally {
       setSubmittingMove(false);
@@ -1946,14 +1946,14 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
     if (!code) { onExit(); return; }
     setLeaving(true);
     try {
-      // In tournament context, leaving forfeits the bracket match — the
+      // In tournament context, leaving forfeits the bracket match - the
       // tournament endpoint synthesizes a verdict and advances the bracket
       // for us. Outside tournaments, plain match leave is fine.
       const path = tournamentCode
         ? `/api/debate/tournament/${tournamentCode}/leave`
         : `/api/debate/match/${code}/leave`;
       await apiFetch(path, { method: 'POST' });
-    } catch {} // best effort — UI exits either way
+    } catch {} // best effort - UI exits either way
     setLeaving(false);
     setConfirmLeave(false);
     onExit();
@@ -1989,7 +1989,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       })
-      .catch(() => toast.error('Copy failed — select the code manually'));
+      .catch(() => toast.error('Copy failed - select the code manually'));
   }
 
   // ===== MENU (Create / Join) =====
@@ -2092,7 +2092,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
           </div>
         </div>
 
-        {/* Ready toggle — visible to both players. Host's Start button
+        {/* Ready toggle - visible to both players. Host's Start button
             is gated below until both check in. */}
         <button
           type="button"
@@ -2166,7 +2166,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
                 <button
                   key={opt.label}
                   onClick={() => setMaxRounds(opt.v)}
-                  title={opt.v === 0 ? 'Infinite — ends on vote' : `${opt.v} arguments per side, then auto-finalize`}
+                  title={opt.v === 0 ? 'Infinite - ends on vote' : `${opt.v} arguments per side, then auto-finalize`}
                   className={`py-2 rounded-lg text-[12.5px] font-bold tabular-nums border transition-colors ${
                     maxRounds === opt.v
                       ? 'bg-blue-500/20 text-blue-100 border-blue-500/50'
@@ -2191,12 +2191,12 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
             <p className="text-xs text-blue-300/50 text-center italic py-4">
               {!allReady ? 'Ready up to start…' : 'Waiting for the host to pick a topic and start…'}
             </p>
-            {/* Joiner used to be locked out of topic discovery entirely — gave
+            {/* Joiner used to be locked out of topic discovery entirely - gave
                 them zero agency. Now they can browse the same category-filtered
                 topic chips as the host; clicking one copies it to clipboard so
                 they can tell the host "let's debate X" in chat / voice. */}
             <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2 mt-3">Topic ideas</p>
-            <p className="text-[10.5px] text-blue-300/40 mb-2">Click a topic to copy it — share with the host.</p>
+            <p className="text-[10.5px] text-blue-300/40 mb-2">Click a topic to copy it - share with the host.</p>
             <TopicChips
               showCategories
               onPick={async (t) => {
@@ -2227,7 +2227,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
     const remainingMs = match.timedMode && match.turnStartedAt
       ? Math.max(0, (match.turnLimitMs || 120000) - (nowTick - match.turnStartedAt))
       : null;
-    // Auto-submit on timeout is handled in a useEffect below — calling
+    // Auto-submit on timeout is handled in a useEffect below - calling
     // an async setter from render fires once per render and was the
     // reason scores were getting double-counted under the old code.
     const formatClock = (ms) => {
@@ -2237,7 +2237,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
       return `${mm}:${ss}`;
     };
 
-    // Per-side round count. Used for the round badge — clamped to maxRounds
+    // Per-side round count. Used for the round badge - clamped to maxRounds
     // so the display reads "5/5" once the cap hits even if a stray turn
     // lands while finalization is in flight.
     const myTurnsUsed = match.turns.filter(t => t.userId === myId).length;
@@ -2256,12 +2256,12 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
             <span className="text-gray-300 dark:text-gray-600">vs</span>
             <ScorePill name={opp?.name || 'Opponent'} side={opp?.side} score={oppScore} active={!myTurn && !spectator} />
             <span
-              title={match.maxRounds > 0 ? `Rounds used / cap per side. Match auto-ends when both sides hit ${match.maxRounds}.` : 'Infinite rounds — ends on vote'}
+              title={match.maxRounds > 0 ? `Rounds used / cap per side. Match auto-ends when both sides hit ${match.maxRounds}.` : 'Infinite rounds - ends on vote'}
               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10.5px] font-semibold tabular-nums bg-blue-500/10 border border-blue-500/25 text-blue-300/85"
             >
               <Swords size={10} /> {roundsDisplay}
             </span>
-            {/* Live spectator count — visible to everyone when > 0. */}
+            {/* Live spectator count - visible to everyone when > 0. */}
             {match.spectatorCount > 0 && (
               <span
                 title={`${match.spectatorCount} spectator${match.spectatorCount === 1 ? '' : 's'} watching`}
@@ -2296,7 +2296,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
                 <button
                   onClick={handleVoteEnd}
                   disabled={voting || iVoted}
-                  title={iVoted ? 'Waiting for opponent to vote' : oppVoted ? 'Opponent voted — confirm to end' : 'Vote to end'}
+                  title={iVoted ? 'Waiting for opponent to vote' : oppVoted ? 'Opponent voted - confirm to end' : 'Vote to end'}
                   className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
                     iVoted
                       ? 'bg-blue-500/15 border border-blue-500/30 text-blue-300/80'
@@ -2415,7 +2415,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
             );
           })}
 
-          {/* Live opponent draft — only renders in timed mode while it's
+          {/* Live opponent draft - only renders in timed mode while it's
               the opponent's turn AND they have actually typed something.
               Visually distinct from a sent turn (lower opacity, dashed
               border, blinking caret) so it's clearly in-progress. */}
@@ -2437,7 +2437,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
           )}
         </div>
 
-        {/* Composer — hidden for spectators (read-only). */}
+        {/* Composer - hidden for spectators (read-only). */}
         {!spectator && <div
           className="relative bg-transparent px-3 pt-2 pb-3"
           onDragEnter={e => {
@@ -2662,7 +2662,7 @@ function ScorePill({ name, side, score, active, self }) {
   return (
     <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-colors ${active ? 'ring-2 ring-white/40 dark:ring-white/20 bg-white/20 dark:bg-white/10' : ''}`}>
       <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-300">
-        {side === 'for' ? 'FOR' : side === 'against' ? 'AG.' : '—'}
+        {side === 'for' ? 'FOR' : side === 'against' ? 'AG.' : '-'}
       </span>
       <span className="text-[11px] font-bold text-gray-800 dark:text-gray-100 tabular-nums">{score}</span>
       <span className="text-[10px] text-gray-500 dark:text-gray-400 truncate max-w-[80px]">

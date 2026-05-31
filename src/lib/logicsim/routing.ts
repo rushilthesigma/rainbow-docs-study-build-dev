@@ -18,7 +18,7 @@ export function routeWire(a: Point, b: Point): string {
   const aStub = { x: a.x + STUB, y: a.y };
   const bStub = { x: b.x - STUB, y: b.y };
   if (b.x - STUB > a.x + STUB) {
-    // Plenty of room — route through midpoint
+    // Plenty of room - route through midpoint
     const midX = (aStub.x + bStub.x) / 2;
     return [
       `M ${a.x},${a.y}`,

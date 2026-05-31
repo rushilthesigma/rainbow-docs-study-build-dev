@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, FileText, Plus, Trash2, Layout, Sparkles, Wand2, Loader2, BookOpen, Network } from 'lucide-react';
+import { ArrowLeft, FileText, Plus, Trash2, Pencil, Layout, Sparkles, Wand2, Loader2, BookOpen, Network } from 'lucide-react';
 import { InlineProgress } from '../../shared/ProgressBar';
 import { listNotes, createNote, deleteNote, getNote, updateNote, generateCues, generateSummary,
          listNoteMaps, createNoteMap, deleteNoteMap, updateNoteMap } from '../../../api/notes';
@@ -13,6 +13,7 @@ import Modal from '../../shared/Modal';
 import useBrowserBack from '../../../hooks/useBrowserBack';
 import NoteActions from '../../notes/NoteActions';
 import NoteMap from '../../notes/NoteMap';
+import { useToast } from '../../shared/Toast';
 
 function NoteEditor({ noteId, onBack }) {
   const [note, setNote] = useState(null);
@@ -133,10 +134,11 @@ function NoteEditor({ noteId, onBack }) {
 }
 
 export default function NotesApp({ initialNoteId = null, initialMapId = null, initialView = null } = {}) {
-  // Optional meta props from the desktop window manager — `initialNoteId`
+  // Optional meta props from the desktop window manager - `initialNoteId`
   // jumps straight into the editor for that note; `initialMapId` opens
   // the merged Maps view on that specific map. The legacy Note Map app
   // entry passes initialView='map' so existing dock icons keep working.
+  const toast = useToast();
   const startView = initialNoteId ? 'editor'
                     : initialMapId ? 'map'
                     : initialView === 'map' ? 'map'
@@ -144,13 +146,13 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
   const [view, setView] = useState(startView);
   // Back button returns to the notes list instead of leaving the site.
   useBrowserBack(view !== 'list', () => setView('list'));
-  // Seed from the in-memory cache so re-opening the app feels instant —
+  // Seed from the in-memory cache so re-opening the app feels instant -
   // the most-recent list paints on first render and we kick a background
   // refresh below.
   const cachedNotes = peek('notes:list');
   const cachedMaps = peek('notes:maps');
   const [notes, setNotes] = useState(() => cachedNotes?.notes || []);
-  // Multi-map state. Maps are summaries — each map's nodes+edges are
+  // Multi-map state. Maps are summaries - each map's nodes+edges are
   // fetched inside <NoteMap> by id.
   const [maps, setMaps] = useState(() => cachedMaps?.maps || []);
   const [mapsLoading, setMapsLoading] = useState(!cachedMaps);
@@ -171,7 +173,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
   const [selectedLessonIds, setSelectedLessonIds] = useState([]); // [] = whole curriculum
   const [curriculumLoading, setCurriculumLoading] = useState(false);
   const [selectedNoteId, setSelectedNoteId] = useState(initialNoteId);
-  // In-app naming modal — replaces the native browser prompt() that
+  // In-app naming modal - replaces the native browser prompt() that
   // surfaces the URL banner ("www.rushil12.com says…"). `mode` is
   // 'create' for new map, 'rename' when editing an existing one.
   const [nameDialog, setNameDialog] = useState(null);
@@ -215,7 +217,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
   }
 
   // Single submit handler for both create + rename. Keeps the modal
-  // generic — the surrounding state decides what to do with the name.
+  // generic - the surrounding state decides what to do with the name.
   async function handleNameSubmit(name) {
     const trimmed = (name || '').trim() || 'Untitled Map';
     const dialog = nameDialog;
@@ -231,7 +233,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
         }
         await reloadMaps(true);
       } catch (e) {
-        alert(e?.message || 'Could not create map.');
+        toast.error(e?.message || 'Could not create map.');
       }
       setCreatingMap(false);
     } else if (dialog.mode === 'rename') {
@@ -239,19 +241,19 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
       try {
         await updateNoteMap(dialog.mapId, { name: trimmed });
         await reloadMaps(true);
-      } catch (e) { alert(e?.message || 'Rename failed.'); }
+      } catch (e) { toast.error(e?.message || 'Rename failed.'); }
     }
   }
 
   async function handleDeleteMap(e, map) {
     e.stopPropagation();
-    if (map.isDefault) { alert("Can't delete the default map."); return; }
+    if (map.isDefault) { toast.error("Can't delete the default map."); return; }
     if (!confirm(`Delete the map "${map.name}"? Nodes and edges will be lost.`)) return;
     try {
       await deleteNoteMap(map.id);
       if (selectedMapId === map.id) setSelectedMapId(null);
       await reloadMaps(true);
-    } catch (err) { alert(err?.message || 'Delete failed.'); }
+    } catch (err) { toast.error(err?.message || 'Delete failed.'); }
   }
 
   function openMap(map) {
@@ -337,9 +339,9 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
       const isCornell = aiType === 'cornell';
       const system = `You are a study-note generator. Output ONLY valid JSON, no markdown fences, no prose. ${
         isCornell
-          ? `Shape: {"title": "...", "mainNotes": "...", "cues": ["keyword 1", ...], "summary": "..."}. Write mainNotes as plain text only — no markdown, no asterisks, no hashes, no bullet dashes. Use line breaks and indentation for structure. Cues are 4-8 short keyword phrases. Summary is 2-3 plain sentences.`
-          : `Shape: {"title": "...", "mainNotes": "..."}. Write mainNotes as plain text only — no markdown, no asterisks, no hashes, no bullet dashes. Use line breaks and indentation for structure.`
-      } The note should be organized, dense, and useful for studying — not a paragraph of fluff.${
+          ? `Shape: {"title": "...", "mainNotes": "...", "cues": ["keyword 1", ...], "summary": "..."}. Write mainNotes as plain text only - no markdown, no asterisks, no hashes, no bullet dashes. Use line breaks and indentation for structure. Cues are 4-8 short keyword phrases. Summary is 2-3 plain sentences.`
+          : `Shape: {"title": "...", "mainNotes": "..."}. Write mainNotes as plain text only - no markdown, no asterisks, no hashes, no bullet dashes. Use line breaks and indentation for structure.`
+      } The note should be organized, dense, and useful for studying - not a paragraph of fluff.${
         usingCurriculum ? ' When LESSON MATERIAL is provided, base the note on that material: pull definitions, examples, formulas, and key points directly from the lessons. Do not invent facts that the lessons don\'t support.' : ''
       }`;
       const result = await apiFetch('/api/chat', {
@@ -425,10 +427,11 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
             {activeMap && (
               <button
                 onClick={() => handleRenameMap(activeMap)}
-                className="hover:text-white/70 underline-offset-4 hover:underline"
+                className="flex items-center gap-1 hover:text-white/70 underline-offset-4 hover:underline"
                 title="Rename map"
               >
                 {activeMap.name}
+                <Pencil size={11} className="opacity-50" />
               </button>
             )}
             {activeMap && activeMap.isDefault && (
@@ -461,7 +464,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
         </div>
       </div>
 
-      {/* Maps section — merged from the standalone Note Map app. Each map
+      {/* Maps section - merged from the standalone Note Map app. Each map
           is its own canvas; clicking opens the merged map view. */}
       <div className="mb-5">
         <div className="flex items-center justify-between mb-2">
@@ -495,6 +498,13 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
                     {m.isDefault ? ' · default' : ''}
                   </div>
                 </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleRenameMap(m); }}
+                  className="opacity-0 group-hover:opacity-100 text-white/20 hover:text-white/70 transition-opacity"
+                  title="Rename map"
+                >
+                  <Pencil size={12} />
+                </button>
                 {!m.isDefault && (
                   <button
                     onClick={(e) => handleDeleteMap(e, m)}
@@ -508,7 +518,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
             ))}
             {maps.length === 0 && !mapsLoading && (
               <div className="col-span-full text-[11px] text-white/30 italic px-1">
-                No maps yet — click <span className="font-semibold text-white/55">New map</span> to start one.
+                No maps yet - click <span className="font-semibold text-white/55">New map</span> to start one.
               </div>
             )}
           </div>
@@ -559,7 +569,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
                   onChange={e => setSelectedCurriculumId(e.target.value || null)}
                   className="w-full px-3 py-2 rounded-xl border border-white/[0.06] bg-white/[0.04] text-sm text-white/70 outline-none"
                 >
-                  <option value="">— Pick a curriculum —</option>
+                  <option value="">- Pick a curriculum -</option>
                   {curricula.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
                 </select>
               </div>

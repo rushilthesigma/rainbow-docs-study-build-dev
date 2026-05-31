@@ -1,5 +1,5 @@
 /**
- * Euler–Bernoulli beam analysis. Supports two boundary conditions:
+ * Euler-Bernoulli beam analysis. Supports two boundary conditions:
  *   - cantilever  (fixed at x=0, free at x=L)
  *   - simple      (pin at x=0, roller at x=L)
  *

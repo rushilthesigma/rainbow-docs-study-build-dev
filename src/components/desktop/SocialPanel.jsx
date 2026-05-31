@@ -6,12 +6,12 @@ import {
 } from '../../api/social';
 import { Z } from '../../styles/tokens';
 
-// SocialPanel — menu-bar dropdown for the Social experience.
+// SocialPanel - menu-bar dropdown for the Social experience.
 //
 // Anchored to the bell icon in MenuBar. Single click on the bell
 // opens it; clicking the bell again, clicking outside the panel, or
 // hitting Escape closes it. There is intentionally no "expand to
-// full window" affordance — Social lives only in the menu bar
+// full window" affordance - Social lives only in the menu bar
 // dropdown per the user's spec.
 //
 // Layout (top → bottom):
@@ -19,10 +19,10 @@ import { Z } from '../../styles/tokens';
 //   • Friend requests (if any) with Accept / Decline
 //   • Search-by-handle box (debounced, results inline)
 //   • Friends list with quick-DM
-//   • Active DM thread (when one is selected) — composer at the
+//   • Active DM thread (when one is selected) - composer at the
 //     bottom of the panel
 //
-// We intentionally don't surface group chats here — they need more
+// We intentionally don't surface group chats here - they need more
 // canvas than a popover can provide. The bell is for friend
 // requests and 1:1 DMs.
 export default function SocialPanel({ open, onClose, anchorRect }) {
@@ -90,7 +90,7 @@ export default function SocialPanel({ open, onClose, anchorRect }) {
     return () => clearTimeout(t);
   }, [q]);
 
-  // Poll the active chat every 3s — same cadence as the full Social app.
+  // Poll the active chat every 3s - same cadence as the full Social app.
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
     if (!chatPeer) return;

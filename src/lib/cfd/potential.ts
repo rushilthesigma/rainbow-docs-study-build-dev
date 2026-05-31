@@ -5,11 +5,11 @@
  *   - uniform freestream V (rotated by AoA)
  *   - a doublet at the quarter-chord representing displacement thickness
  *   - a clockwise vortex of circulation Γ chosen to satisfy Kutta condition,
- *     i.e. Γ = π · c · V · sin(α) — gives the correct lift slope.
+ *     i.e. Γ = π · c · V · sin(α) - gives the correct lift slope.
  *
  * This is NOT a true panel-method solve, but produces streamlines that
  * visibly stagnate near the leading edge, accelerate over the upper surface,
- * and bend the wake downward — which is exactly the visualization we need
+ * and bend the wake downward - which is exactly the visualization we need
  * for a Fusion-360-style "Simple mode" feel.
  */
 
@@ -83,7 +83,7 @@ export function makeFlowField(p: FlowParams): FlowField {
 }
 
 /**
- * Advance a particle through a flow field by classic RK2 — gives smoother
+ * Advance a particle through a flow field by classic RK2 - gives smoother
  * streamlines than Euler at the same step count.
  */
 export function advectRK2(field: FlowField, p: Vec2, dt: number): Vec2 {

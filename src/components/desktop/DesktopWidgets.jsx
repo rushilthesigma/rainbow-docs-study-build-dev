@@ -87,13 +87,13 @@ const rowsToHeight = (rows) => rows * CELL_H + (rows - 1) * CELL_GAP;
 // Linear scale-up that lets widget content grow with the chosen cols/rows
 // preset. At 1×1, returns `base`. Each extra column adds `perCol` (default
 // 8% of base) and each extra row adds `perRow` (default 12%). Tuned to
-// stay subtle — at 5×3 a number grows ~56%, not 100%+. Rounded so inline
+// stay subtle - at 5×3 a number grows ~56%, not 100%+. Rounded so inline
 // font-sizes don't end up sub-pixel.
 function scale(base, cols = 1, rows = 1, perCol = 0.08, perRow = 0.12) {
   return Math.round(base * (1 + (cols - 1) * perCol + (rows - 1) * perRow));
 }
 
-// Widget width presets — visually mapped 1:1 to a grid column span. The two
+// Widget width presets - visually mapped 1:1 to a grid column span. The two
 // largest sizes (XL/Huge) are wide enough to host AI custom widgets with extra
 // chart/list content.
 const GRID_SIZES = [
@@ -104,7 +104,7 @@ const GRID_SIZES = [
   { cols: 5, label: 'Huge' },
 ];
 
-// Widget height presets — multi-row widgets get extra vertical padding so
+// Widget height presets - multi-row widgets get extra vertical padding so
 // content with variable density (notes, todos) feels roomy instead of cramped.
 const ROW_SIZES = [
   { rows: 1, label: '1' },
@@ -437,7 +437,7 @@ function Shell({
   const dark = theme !== 'light';
   const [menu, setMenu] = useState(null);
   const width  = customWidth  ?? colsToWidth(cols);
-  // Only set minHeight when rows > 1 — single-row widgets stay tight to their
+  // Only set minHeight when rows > 1 - single-row widgets stay tight to their
   // content, matching previous behavior.
   const minHeight = customHeight ?? (rows > 1 ? rowsToHeight(rows) : undefined);
 
@@ -446,7 +446,7 @@ function Shell({
 
   // In light mode, widget bodies need a near-white background and a darker
   // border so they read against a light wallpaper. Children still use
-  // `text-white/...` classes — those are scoped via the data-theme attr
+  // `text-white/...` classes - those are scoped via the data-theme attr
   // below so dark utility classes get mirrored for light mode.
   const surfaceBg = dark
     ? `rgba(17,17,24,${opacity / 100})`
@@ -516,7 +516,7 @@ function Shell({
 
 /* ── clock ── */
 // The live time display is split into a leaf so the 1Hz tick only re-renders
-// the clock digits — not the surrounding Shell (drag handler, styles, etc.).
+// the clock digits - not the surrounding Shell (drag handler, styles, etc.).
 // Re-rendering the whole widget every second caused intermittent paint
 // glitches where the desktop flashed to bare wallpaper for a frame.
 function ClockBody({ format, showSeconds, showDate, cols, rows }) {
@@ -1029,7 +1029,7 @@ function TodoWidget({ id, position, cols, rows, accent, opacity, radius, setting
       <div className="px-3 pb-3" data-nodrag>
         <ul className="space-y-1 mb-1.5">
           {items.length === 0 && (
-            <li className="text-white/30 italic px-0.5" style={{ fontSize: emptyFont }}>Nothing yet — add a task.</li>
+            <li className="text-white/30 italic px-0.5" style={{ fontSize: emptyFont }}>Nothing yet - add a task.</li>
           )}
           {items.map((it, i) => (
             <li key={it.id ?? i} className="flex items-center gap-1.5 group">
@@ -1075,7 +1075,7 @@ const QUOTES = [
   { text: 'Slow is smooth, smooth is fast.',                             by: 'Navy SEAL adage' },
 ];
 function QuoteWidget({ id, position, cols, rows, accent, opacity, radius }) {
-  // Stable across the day — index from the day-of-year so it rotates daily.
+  // Stable across the day - index from the day-of-year so it rotates daily.
   const day = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0)) / 86400000);
   const q = QUOTES[day % QUOTES.length];
   const quoteFont = scale(13, cols, rows, 0.06, 0.12);
@@ -1084,7 +1084,7 @@ function QuoteWidget({ id, position, cols, rows, accent, opacity, radius }) {
     <Shell id={id} position={position} label="Quote" cols={cols} rows={rows} accent={accent} opacity={opacity} radius={radius}>
       <div className="px-3.5 pb-3.5">
         <p className="text-white/85 leading-snug italic" style={{ fontSize: quoteFont }}>&ldquo;{q.text}&rdquo;</p>
-        <p className="text-white/35 mt-1.5" style={{ fontSize: bylineFont }}>— {q.by}</p>
+        <p className="text-white/35 mt-1.5" style={{ fontSize: bylineFont }}>- {q.by}</p>
       </div>
     </Shell>
   );

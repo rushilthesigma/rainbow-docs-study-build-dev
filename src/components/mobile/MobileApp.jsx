@@ -408,7 +408,7 @@ const TABS = [
 ];
 
 export default function MobileApp() {
-  // Mobile is disabled for now — show a coming-soon splash instead of the app.
+  // Mobile is disabled for now - show a coming-soon splash instead of the app.
   // The rest of the mobile components (MobileStudy, MobileCurricula, etc.)
   // stay defined above so we can re-enable them quickly when ready.
   return (

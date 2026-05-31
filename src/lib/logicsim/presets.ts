@@ -103,7 +103,7 @@ const fullAdder: Preset = {
 const srLatch: Preset = {
   id: 'sr-latch',
   name: 'SR Latch (NOR)',
-  description: 'Cross-coupled NOR gates — classic set/reset memory cell.',
+  description: 'Cross-coupled NOR gates - classic set/reset memory cell.',
   build: () =>
     build(
       [

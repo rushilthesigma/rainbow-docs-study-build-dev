@@ -163,7 +163,7 @@ export default function FillBlankBlock({ block, onComplete }) {
   );
 }
 
-// Normalise an answer for forgiving comparison — case-insensitive,
+// Normalise an answer for forgiving comparison - case-insensitive,
 // whitespace-collapsed, punctuation-stripped. Matches anything
 // reasonable: "Paris", "paris", "PARIS", " Paris " all equate.
 function normalize(s) {

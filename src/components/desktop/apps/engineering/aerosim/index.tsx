@@ -78,7 +78,7 @@ function AeroSim({ appId }: { appId: string }) {
           silhouette: sil,
           geometry: geom,
         });
-        toast.success('Model imported', `${file.name} — testing its silhouette in the flow.`);
+        toast.success('Model imported', `${file.name} - testing its silhouette in the flow.`);
       }
     } catch (err) {
       toast.error('Import failed', (err as Error).message);

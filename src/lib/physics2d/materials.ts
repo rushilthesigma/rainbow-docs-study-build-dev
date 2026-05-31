@@ -1,6 +1,6 @@
 /**
  * Engineering material presets for PhysicsBench. Density is in kg/m² (since
- * everything's 2D — the engine uses density × area as mass). Restitution and
+ * everything's 2D - the engine uses density × area as mass). Restitution and
  * friction coefficients come from rough textbook values.
  */
 export interface MaterialPreset {

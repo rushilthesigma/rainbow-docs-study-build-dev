@@ -3,7 +3,7 @@ import {
 } from 'lucide-react';
 
 // =========================================================
-// Trail view (BETA) — gamifies a curriculum as a zigzag learning path,
+// Trail view (BETA) - gamifies a curriculum as a zigzag learning path,
 // Duolingo-style. Lessons become circular nodes connected by curved
 // SVG segments. Completed nodes: emerald + check. Current: blue with
 // pulsing ring. Future: gray ring. Click any unlocked node to open
@@ -25,7 +25,7 @@ const TYPE_LABEL = {
   unit_test: 'Assessment',
 };
 
-// Zig-zag horizontal offset per node — alternates left / center / right.
+// Zig-zag horizontal offset per node - alternates left / center / right.
 const X_OFFSETS = [-90, -45, 0, 45, 90, 45, 0, -45]; // 8-step cycle
 const NODE_SPACING = 110; // vertical px between nodes
 
@@ -47,7 +47,7 @@ export default function TrailView({ curriculum, onOpenLesson }) {
     (n, u) => n + (u.lessons || []).filter(l => l.isCompleted).length, 0
   );
 
-  // Find the "current" lesson — first incomplete node that has chat history,
+  // Find the "current" lesson - first incomplete node that has chat history,
   // or the first incomplete node if none have been started.
   let currentNodeIdx = -1;
   let firstIncompleteIdx = -1;
@@ -65,7 +65,7 @@ export default function TrailView({ curriculum, onOpenLesson }) {
 
   return (
     <div className="relative">
-      {/* Top banner — progress summary */}
+      {/* Top banner - progress summary */}
       <div className="relative mb-6 rounded-2xl overflow-hidden border border-white/[0.08] bg-white/[0.04] p-4">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center text-white shadow-sm">
@@ -178,7 +178,7 @@ function TrailNode({ lesson, x, prevX, isCompleted, isCurrent, hasStarted, onOpe
 
   return (
     <div className="relative flex flex-col items-center" style={{ marginTop: NODE_SPACING - size / 2 }}>
-      {/* Connector to previous node — a curved SVG segment */}
+      {/* Connector to previous node - a curved SVG segment */}
       <svg
         className="absolute pointer-events-none"
         width={Math.abs(dx) + 20}

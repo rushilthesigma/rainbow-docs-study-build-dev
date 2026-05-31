@@ -24,9 +24,9 @@ interface LogicLabState {
   components: Component[];
   connections: Connection[];
   selectedId: string | null;
-  /** Pin selected for "wiring mode" — null when not wiring */
+  /** Pin selected for "wiring mode" - null when not wiring */
   wiringFrom: string | null;
-  /** Wire that hasn't landed yet — UI cursor position */
+  /** Wire that hasn't landed yet - UI cursor position */
   wireCursor: { x: number; y: number } | null;
 
   running: boolean;

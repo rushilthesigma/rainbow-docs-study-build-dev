@@ -12,7 +12,7 @@ export default function ChatContainer({
   onUserEditMessage = null,
   onAiInstruct = null,
   emptyState = null,
-  // When true, renders flush (no glass-card, no rounded corners) — use for full-page panels
+  // When true, renders flush (no glass-card, no rounded corners) - use for full-page panels
   flush = false,
 }) {
   const scrollRef = useRef(null);

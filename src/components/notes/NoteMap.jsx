@@ -23,7 +23,7 @@ function randPaletteColor() {
   return NODE_PALETTE[Math.floor(Math.random() * NODE_PALETTE.length)];
 }
 
-// Cheap UUID — we don't need cryptographic randomness here, just unique
+// Cheap UUID - we don't need cryptographic randomness here, just unique
 // ids the server can accept.
 function newId() {
   return `n_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
@@ -110,19 +110,19 @@ export default function NoteMap({ onOpenNote, mapId }) {
   const [focusedNodeId, setFocusedNodeId] = useState(null);
   const [creatingNoteFromId, setCreatingNoteFromId] = useState(null);
   // AI note-generation modal. Lives next to the "Topic" / "Note" buttons
-  // — student types a topic, AI drafts title + body, we create the note,
+  // - student types a topic, AI drafts title + body, we create the note,
   // drop a node on the canvas, and seed an edge from the focused node
   // (if any) just like createNewNoteOnMap does.
   const [aiOpen, setAiOpen] = useState(false);
   const [aiTopic, setAiTopic] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState(null);
-  // Inline note editor state — loaded when the selected node is a real
+  // Inline note editor state - loaded when the selected node is a real
   // note. Lets the user write into the note without leaving the map.
   const [activeNote, setActiveNote] = useState(null);
   const [noteLoading, setNoteLoading] = useState(false);
   const [noteSaving, setNoteSaving] = useState(false);
-  // "Pull from notes" picker. Maps no longer auto-mirror every note —
+  // "Pull from notes" picker. Maps no longer auto-mirror every note -
   // the user explicitly picks which notes to add to the current map.
   const [pullOpen, setPullOpen] = useState(false);
   const [pullNotes, setPullNotes] = useState([]);
@@ -138,7 +138,7 @@ export default function NoteMap({ onOpenNote, mapId }) {
 
   // Track the SVG's actual pixel size so we can center the graph in
   // pixels (SVG transforms don't accept % values on <g>). Watches the
-  // SVG itself, its parent, AND window resize — needed because the
+  // SVG itself, its parent, AND window resize - needed because the
   // desktop window-manager swaps fullscreen via CSS, which sometimes
   // doesn't trip a ResizeObserver on the SVG node before the next
   // paint. The window-resize listener catches both browser fullscreen
@@ -217,7 +217,7 @@ export default function NoteMap({ onOpenNote, mapId }) {
 
   // In focus mode, override positions: the focused node sits at the
   // origin and its neighbors arrange themselves in a clean ring. This is
-  // purely a render-time override — node.x / node.y are untouched so
+  // purely a render-time override - node.x / node.y are untouched so
   // exiting focus returns to the original layout.
   const renderPositions = useMemo(() => {
     const map = new Map();
@@ -277,7 +277,7 @@ export default function NoteMap({ onOpenNote, mapId }) {
       setLinkingFrom(null);
       return;
     }
-    // In focus mode positions are derived — dragging would silently
+    // In focus mode positions are derived - dragging would silently
     // mutate node.x/y without any visible change. Just select instead.
     if (focusedNodeId) {
       setSelectedId(node.id);
@@ -487,7 +487,7 @@ export default function NoteMap({ onOpenNote, mapId }) {
   }
 
   // Ask the AI to draft a note for a given topic, then drop it on the
-  // map (same anchor logic as createNewNoteOnMap — if the user has
+  // map (same anchor logic as createNewNoteOnMap - if the user has
   // drilled in, the new node is wired up to the focused one).
   async function generateNoteWithAI() {
     const topic = aiTopic.trim();
@@ -495,7 +495,7 @@ export default function NoteMap({ onOpenNote, mapId }) {
     setAiBusy(true);
     setAiError(null);
     try {
-      const system = `You are a study-note generator. Output ONLY valid JSON, no markdown fences, no prose. Shape: {"title": "...", "mainNotes": "..."}. Write mainNotes as plain text only — no markdown, no asterisks, no hashes, no bullet dashes. Use line breaks and indentation for structure. The note should be organized, dense, and useful for studying — not a paragraph of fluff.`;
+      const system = `You are a study-note generator. Output ONLY valid JSON, no markdown fences, no prose. Shape: {"title": "...", "mainNotes": "..."}. Write mainNotes as plain text only - no markdown, no asterisks, no hashes, no bullet dashes. Use line breaks and indentation for structure. The note should be organized, dense, and useful for studying - not a paragraph of fluff.`;
       const result = await apiFetch('/api/chat', {
         method: 'POST',
         body: JSON.stringify({
@@ -550,7 +550,7 @@ export default function NoteMap({ onOpenNote, mapId }) {
 
   // Inline note editor: when the selected node is a real note, fetch
   // its content and let the user edit title + body right in the side
-  // panel. Saves are debounced — same pattern as NoteEditorPage.
+  // panel. Saves are debounced - same pattern as NoteEditorPage.
   useEffect(() => {
     if (noteSaveTimerRef.current) { clearTimeout(noteSaveTimerRef.current); noteSaveTimerRef.current = null; }
     if (!selectedNode || selectedNode.source !== 'note' || !selectedNode.noteId) {
@@ -691,7 +691,7 @@ export default function NoteMap({ onOpenNote, mapId }) {
         </div>
       </Modal>
 
-      {/* AI note generator. Topic in, note out — drops on the map and
+      {/* AI note generator. Topic in, note out - drops on the map and
           wires to the focused node (if any). */}
       <Modal
         open={aiOpen}
@@ -783,7 +783,7 @@ export default function NoteMap({ onOpenNote, mapId }) {
                 const isLinkSource = node.id === linkingFrom;
                 const isNeighbor = selectedId && adjacency.get(selectedId)?.has(node.id);
                 const dimmed = !focusedNodeId && selectedId && !isSelected && !isNeighbor;
-                // Smaller radii in focus mode — the satellites should
+                // Smaller radii in focus mode - the satellites should
                 // read as supporting nodes around the centered topic.
                 const baseR = node.source === 'note' ? 16 : 13;
                 const focusR = isFocused ? 14 : 9;
@@ -864,9 +864,9 @@ export default function NoteMap({ onOpenNote, mapId }) {
           })()}
         </div>
 
-        {/* Side panel — selected-node editor takes the full height. */}
+        {/* Side panel - selected-node editor takes the full height. */}
         <div className="w-[300px] flex-shrink-0 flex flex-col gap-3">
-          {/* Selected node panel — fills the column */}
+          {/* Selected node panel - fills the column */}
           <div className="bg-white/[0.03] rounded-2xl border border-white/[0.07] flex-1 min-h-[260px] flex flex-col overflow-hidden">
             {selectedNode ? (
               <div className="flex flex-col flex-1 min-h-0">
@@ -885,7 +885,7 @@ export default function NoteMap({ onOpenNote, mapId }) {
                   )}
                 </div>
 
-                {/* Title — editable for notes, static for topics */}
+                {/* Title - editable for notes, static for topics */}
                 <div className="px-3 pt-2 flex-shrink-0">
                   {selectedNode.source === 'note' && activeNote ? (
                     <input
@@ -936,7 +936,7 @@ export default function NoteMap({ onOpenNote, mapId }) {
                   )}
                 </div>
 
-                {/* Body — for notes: live editor that auto-saves. For
+                {/* Body - for notes: live editor that auto-saves. For
                     non-notes: shows the rationale and connections list. */}
                 {selectedNode.source === 'note' ? (
                   <div className="flex-1 min-h-0 flex flex-col px-3 pb-3">

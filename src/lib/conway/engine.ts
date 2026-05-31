@@ -1,5 +1,5 @@
 /**
- * Conway's Game of Life — minimal kernel + a pattern library.
+ * Conway's Game of Life - minimal kernel + a pattern library.
  *
  * The grid is a flat Uint8Array of length W*H. step() walks every cell once,
  * counting its 8 neighbours and applying B3/S23. Toroidal wrap is optional.

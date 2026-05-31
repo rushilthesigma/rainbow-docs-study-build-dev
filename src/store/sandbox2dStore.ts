@@ -44,7 +44,7 @@ export interface TracerData {
   color: string;
   /** stroke width in world meters (~ pixels at zoom = 1 / BASE_SCALE) */
   width: number;
-  /** max points to keep — older points fall off the tail */
+  /** max points to keep - older points fall off the tail */
   maxPoints: number;
 }
 

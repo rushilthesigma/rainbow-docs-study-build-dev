@@ -173,7 +173,7 @@ export default function ChatInput({
   function handleSubmit(e) {
     e.preventDefault();
     const trimmed = text.trim();
-    // Block submit while any doc is still extracting — otherwise we'd
+    // Block submit while any doc is still extracting - otherwise we'd
     // send the message with empty doc text.
     const stillExtracting = docs.some(d => d.status === 'extracting');
     if (stillExtracting) return;
@@ -192,7 +192,7 @@ export default function ChatInput({
     setText('');
     setImages([]);
     setDocs([]);
-    // Reset the textarea's auto-grown height back to its default — the
+    // Reset the textarea's auto-grown height back to its default - the
     // onInput auto-grow only fires on USER input, so without this the
     // textarea would stay at the size it grew to during a long paste.
     if (inputRef.current) {
@@ -211,7 +211,7 @@ export default function ChatInput({
   const readyDocs = docs.filter(d => d.status === 'ready');
   const canSend = !disabled && !stillExtracting && (text.trim().length > 0 || images.length > 0 || readyDocs.length > 0);
 
-  // Composer redesign — DELIBERATELY not the ChatGPT rounded-pill input.
+  // Composer redesign - DELIBERATELY not the ChatGPT rounded-pill input.
   // Layout: a card-style composer with a top "intent" rail (paperclip,
   // source-mode toggle, char count) and the textarea below. Send button is
   // a square corner-accent on the bottom-right with an arrow, not a circle.
@@ -235,7 +235,7 @@ export default function ChatInput({
         onChange={e => { handleFiles(e.target.files); e.target.value = ''; }}
       />
 
-      {/* Drag overlay — full-card highlight while user drags a file in. */}
+      {/* Drag overlay - full-card highlight while user drags a file in. */}
       {dragOver && (
         <div className="absolute inset-x-3 top-2 bottom-3 z-20 rounded-xl border-2 border-dashed border-white/40 bg-black/40 dark:bg-black/60 flex items-center justify-center pointer-events-none">
           <div className="text-center">
@@ -255,7 +255,7 @@ export default function ChatInput({
             : 'ring-1 ring-white/20 dark:ring-transparent focus-within:ring-2 focus-within:ring-blue-400/80 dark:focus-within:ring-blue-400/85'
         }`}
       >
-        {/* TOP RAIL — tools + mode toggle + char count */}
+        {/* TOP RAIL - tools + mode toggle + char count */}
         <div className="flex items-center gap-1 px-2 pt-1.5 pb-1 bg-white/20 dark:bg-transparent">
           <button
             type="button"
@@ -307,7 +307,7 @@ export default function ChatInput({
           </div>
         )}
 
-        {/* DOC STRIP — PDFs + text files. Each chip shows a status (extracting / ready / error). */}
+        {/* DOC STRIP - PDFs + text files. Each chip shows a status (extracting / ready / error). */}
         {docs.length > 0 && (
           <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">
             {docs.map((d, i) => {
@@ -352,7 +352,7 @@ export default function ChatInput({
             onChange={e => setText(e.target.value)}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            placeholder={sourceMode ? 'Ask anything — I\'ll search and cite…' : placeholder}
+            placeholder={sourceMode ? 'Ask anything - I\'ll search and cite…' : placeholder}
             disabled={disabled}
             rows={1}
             className="flex-1 resize-none px-3 py-2.5 bg-transparent text-[14px] text-gray-900 dark:text-blue-50 placeholder-gray-400 dark:placeholder-blue-200/35 focus:outline-none max-h-40 overflow-y-auto"

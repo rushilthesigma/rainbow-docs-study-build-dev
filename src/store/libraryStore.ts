@@ -58,7 +58,7 @@ function persist(models: LibraryModel[]) {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(models));
     } catch {
-      /* quota — geometry can be large; drop oldest on failure */
+      /* quota - geometry can be large; drop oldest on failure */
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(models.slice(-12)));
       } catch {

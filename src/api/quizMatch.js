@@ -18,7 +18,7 @@ export const nextMatchQuestion = (code) => apiFetch(`/api/quizbowl/match/${code}
 export const endMatch = (code) => apiFetch(`/api/quizbowl/match/${code}/end`, { method: 'POST' });
 export const leaveMatch = (code) => apiFetch(`/api/quizbowl/match/${code}/leave`, { method: 'POST' });
 
-// Solo "Past QB questions" mode — pulls real tossups from QBReader by
+// Solo "Past QB questions" mode - pulls real tossups from QBReader by
 // category + difficulty. Returns { tossups, source: 'qbreader' }.
 export const fetchQBReaderTossups = ({ count = 10, category = 'Mixed', difficulty = 'Medium' } = {}) => {
   const params = new URLSearchParams({ count: String(count), category, difficulty });
@@ -44,7 +44,7 @@ export const fetchQuizBowlRecommendations = () => apiFetch('/api/quizbowl/recomm
 // categoryPatterns, trend, optimalZone, recentBuzzes } }
 export const fetchQuizBowlPatterns = () => apiFetch('/api/quizbowl/patterns');
 
-// Returns { niches: [{ topic, reason }] } — Gemini-suggested niche sub-topics
+// Returns { niches: [{ topic, reason }] } - Gemini-suggested niche sub-topics
 // within a category for targeted AI drilling.
 export const fetchQuizBowlNiches = ({ category, difficulty = 'Medium' } = {}) => {
   const params = new URLSearchParams({ category, difficulty });

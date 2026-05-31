@@ -53,9 +53,9 @@ interface CircuitSimStore {
   duration: number;
   dt: number;
   rev: number;
-  /** Undo history — each entry is a components snapshot before a mutation */
+  /** Undo history - each entry is a components snapshot before a mutation */
   _snapshots: CircuitComp[][];
-  /** Redo stack — states that were undone */
+  /** Redo stack - states that were undone */
   _undone: CircuitComp[][];
 
   addComponent: (type: CompType, x: number, y: number) => string;

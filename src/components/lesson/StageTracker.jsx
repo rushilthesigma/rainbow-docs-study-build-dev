@@ -36,7 +36,7 @@ export default function StageTracker({ blocks = [], activeIdx = 0, onJump }) {
 
   return (
     <div className="mb-8">
-      {/* Segmented progress bars — one per stage, clickable */}
+      {/* Segmented progress bars - one per stage, clickable */}
       <div className="flex gap-1 mb-3">
         {blocks.map((b, i) => {
           const done = !!b.completedAt;
@@ -67,13 +67,13 @@ export default function StageTracker({ blocks = [], activeIdx = 0, onJump }) {
           {(() => {
             // Strip the stage-name prefix from the block title if the
             // server already prepended it (e.g. label="Reading",
-            // title="Reading 1 — The Father of Modern Philosophy"
+            // title="Reading 1 - The Father of Modern Philosophy"
             // collapses to just "The Father of Modern Philosophy").
             const raw = (active?.title || '').trim();
             if (!raw) return null;
             const stripped = raw
-              .replace(new RegExp(`^${stageName}\\s*[—\\-:·]\\s*`, 'i'), '')
-              .replace(/^(Reading|Quiz|Example|Recap|Application|Challenge)\s+\d*\s*[—\-:·]\s*/i, '');
+              .replace(new RegExp(`^${stageName}\\s*[-\\-:·]\\s*`, 'i'), '')
+              .replace(/^(Reading|Quiz|Example|Recap|Application|Challenge)\s+\d*\s*[-\-:·]\s*/i, '');
             const display = stripped || raw;
             if (display === stageName) return null;
             return (

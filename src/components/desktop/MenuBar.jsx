@@ -5,6 +5,8 @@ import { getApp } from './appRegistry';
 import { useAuth } from '../../context/AuthContext';
 import { exitChild } from '../../api/parent';
 import { Z } from '../../styles/tokens';
+import ReferralChip from './ReferralChip';
+import UpgradeChip from '../billing/UpgradeChip';
 
 export default function MenuBar({ onSpotlight }) {
   const { state } = useWindowManager();
@@ -12,7 +14,7 @@ export default function MenuBar({ onSpotlight }) {
   const dark = true; // theme is always dark
   const [time, setTime] = useState(new Date());
   const [showUserMenu, setShowUserMenu] = useState(false);
-  // 'menu' | 'pin' — which view is inside the dropdown
+  // 'menu' | 'pin' - which view is inside the dropdown
   const [menuView, setMenuView] = useState('menu');
   const [pinValue, setPinValue] = useState('');
   const [pinError, setPinError] = useState('');
@@ -68,7 +70,7 @@ export default function MenuBar({ onSpotlight }) {
   async function submitPin(e) {
     e?.preventDefault?.();
     if (!/^[0-9]{4,6}$/.test(pinValue)) {
-      setPinError('PIN must be 4–6 digits.');
+      setPinError('PIN must be 4-6 digits.');
       return;
     }
     setPinBusy(true);
@@ -122,6 +124,8 @@ export default function MenuBar({ onSpotlight }) {
 
       {/* Right */}
       <div className="flex items-center gap-3">
+        <UpgradeChip />
+        <ReferralChip />
         <button
           onClick={onSpotlight}
           className={`p-1 rounded ${dark ? 'text-white/50 hover:text-white/80' : 'text-gray-500 hover:text-gray-800'} transition-colors`}
@@ -164,7 +168,7 @@ export default function MenuBar({ onSpotlight }) {
                     </p>
                   </div>
 
-                  {/* Home screen — child needs PIN first */}
+                  {/* Home screen - child needs PIN first */}
                   {activeChild && (
                     <button
                       onClick={startPinEntry}
@@ -174,7 +178,7 @@ export default function MenuBar({ onSpotlight }) {
                     </button>
                   )}
 
-                  {/* Home screen — family manager, no PIN */}
+                  {/* Home screen - family manager, no PIN */}
                   {parent?.enabled && !activeChild && (parent.students?.length || 0) > 0 && (
                     <button
                       onClick={() => { closeMenu(); setProfilePicked(false); }}

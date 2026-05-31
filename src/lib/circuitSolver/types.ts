@@ -21,7 +21,7 @@ export type CompType =
 export interface CircuitComp {
   id: string;
   type: CompType;
-  /** Component pins — pinName → nodeId (resolved by wiring). Wires don't have nodes. */
+  /** Component pins - pinName → nodeId (resolved by wiring). Wires don't have nodes. */
   pins: Record<string, string>;
   /** UI position */
   x: number;
@@ -34,7 +34,7 @@ export interface CircuitComp {
   freq?: number;
   /** initial state for dynamic components */
   initial?: number;
-  /** Manhattan routing waypoints (wire type only — locked bend points) */
+  /** Manhattan routing waypoints (wire type only - locked bend points) */
   waypoints?: { x: number; y: number }[];
 }
 

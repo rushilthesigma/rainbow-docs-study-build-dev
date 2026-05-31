@@ -28,7 +28,7 @@ import {
 // When the surrounding window is maximized or the browser is in
 // fullscreen, the lesson swaps to a side-by-side layout: the current
 // reading sits on the left, its paired quiz on the right. The student
-// can read and answer concurrently — the next pair loads after the
+// can read and answer concurrently - the next pair loads after the
 // quiz is submitted.
 export default function BlockLessonView({ curriculumId, lesson, onBack, api: apiProp, backLabel = 'Back to curriculum' }) {
   const api = useMemo(() => {
@@ -126,7 +126,7 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
     api.completeBlock(blocks[idx].id).catch(() => {});
 
     // Kick the final-quiz generation as soon as the student is deep
-    // enough into the lesson. The endpoint is idempotent — calling it
+    // enough into the lesson. The endpoint is idempotent - calling it
     // more than once just returns the cached block.
     maybeKickFinalQuiz(idx);
 
@@ -143,8 +143,8 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
   // Width container: in side-by-side mode we let the lesson breathe to
   // ~7xl so two columns actually fit. The single-block layout keeps
   // its tighter reading-width column.
-  // Reading and quiz are independent sequential blocks — same width
-  // as every other variety block (example, recap, etc.) — so the
+  // Reading and quiz are independent sequential blocks - same width
+  // as every other variety block (example, recap, etc.) - so the
   // student advances through them one at a time, the way they walk
   // through any other lesson step.
   const wrapWidth = 'max-w-3xl';
@@ -160,7 +160,7 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
         {backLabel}
       </button>
 
-      {/* Lesson title — pill tag + headline + subtitle */}
+      {/* Lesson title - pill tag + headline + subtitle */}
       <header className="mb-8">
         <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-blue-300/85 bg-blue-500/[0.10] border border-blue-400/[0.22] rounded-full px-2.5 py-0.5 mb-4">
           <Lightbulb size={11} strokeWidth={2.4} /> Lesson
@@ -181,7 +181,7 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
           <ProgressBar
             active
             label="Building your lesson"
-            hint="4 readings + 4 quizzes · 15–30 seconds"
+            hint="4 readings + 4 quizzes · 15-30 seconds"
             duration={20000}
           />
           <div className="mt-6 space-y-3 opacity-40">

@@ -39,7 +39,7 @@ export default function Spotlight({ open, onClose }) {
   }, [open, onClose]);
 
   // Keep the selected item in view as it moves.
-  // IMPORTANT: every hook must run on every render — do NOT place hooks after
+  // IMPORTANT: every hook must run on every render - do NOT place hooks after
   // the `if (!open) return null` early-return below, or React will throw
   // "change in the order of Hooks" and crash the subtree.
   useEffect(() => {

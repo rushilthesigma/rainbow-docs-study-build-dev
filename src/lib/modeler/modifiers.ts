@@ -2,10 +2,10 @@
  * Non-destructive modifiers applied at render time. Each modifier produces a
  * geometry from the input geometry + the object's local transform.
  *
- *   Mirror   — duplicates geometry mirrored across an axis plane in local space
- *   Array    — duplicates geometry N times with a per-copy offset
- *   Solidify — extrudes faces outward along their normals to add wall thickness
- *   SubSurf  — Loop-style subdivision via repeated tessellation + normal smoothing
+ *   Mirror   - duplicates geometry mirrored across an axis plane in local space
+ *   Array    - duplicates geometry N times with a per-copy offset
+ *   Solidify - extrudes faces outward along their normals to add wall thickness
+ *   SubSurf  - Loop-style subdivision via repeated tessellation + normal smoothing
  *
  * Modifiers stack: each operates on the previous modifier's output.
  */

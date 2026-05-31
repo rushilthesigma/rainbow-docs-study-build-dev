@@ -153,7 +153,7 @@ export default function QuizBowlApp() {
   const savedSetIdRef = useRef(null);       // guard so we save each set exactly once
 
   async function loadHub() {
-    // Only show the skeleton if we have NOTHING to render — otherwise
+    // Only show the skeleton if we have NOTHING to render - otherwise
     // refresh in the background and keep the stale data on screen.
     if (!peek('qb:history')) setHubLoading(true);
     try {
@@ -198,7 +198,7 @@ export default function QuizBowlApp() {
     savedSetIdRef.current = null;
   }
 
-  // Launch a set with explicit category/difficulty/source — used by the
+  // Launch a set with explicit category/difficulty/source - used by the
   // hub's "Train weakness" / "Recommended" / "Replay last" CTAs so the
   // user can skip the setup form when the choice is already implied.
   // Pass `customInstructions` to focus AI-generated questions on a niche topic.
@@ -664,7 +664,7 @@ export default function QuizBowlApp() {
     );
   }
 
-  // ===== CUSTOM SETUP (legacy form — opened from hub) =====
+  // ===== CUSTOM SETUP (legacy form - opened from hub) =====
   if (view === 'custom') {
     return (
       <div className="h-full overflow-y-auto bg-transparent">
@@ -735,7 +735,7 @@ export default function QuizBowlApp() {
   // ===== LOADING (between hub launch and 'playing') =====
   // Gemini generation typically takes 10-20s; qbreader is faster but
   // can stall. A simulated progress bar reads better than a bare
-  // spinner — the user sees forward motion and knows roughly how
+  // spinner - the user sees forward motion and knows roughly how
   // close they are.
   if (view === 'hub' && generating) {
     const isFetch = questionSource === 'qbreader';
@@ -755,7 +755,7 @@ export default function QuizBowlApp() {
     );
   }
 
-  // ===== HUB (default) — stats, recommendations, history =====
+  // ===== HUB (default) - stats, recommendations, history =====
   return (
     <ViewFade viewKey="hub" className="h-full flex flex-col">
     <QuizBowlHub
@@ -804,10 +804,10 @@ function QuizBowlHub({ hubLoading, history, recs, patterns, error, generating, o
 
         {error && <p className="text-[11px] text-rose-400 px-3 py-2 rounded-xl bg-rose-500/10 border border-rose-500/20 text-center">{error}</p>}
 
-        {/* Buzz patterns — shows when there's enough data */}
+        {/* Buzz patterns - shows when there's enough data */}
         {patterns && <BuzzPatterns patterns={patterns} />}
 
-        {/* Train weaknesses CTA — only when we have enough data */}
+        {/* Train weaknesses CTA - only when we have enough data */}
         {weaknesses.length > 0 && (
           <button
             onClick={() => onLaunch({ category: weaknesses[0].cat, difficulty: 'Medium', source: 'qbreader' })}
@@ -986,7 +986,7 @@ function HubStat({ icon, label, value, accent }) {
 }
 
 // ============================================================
-// BUZZ PATTERNS — analytics about when/how the user buzzes.
+// BUZZ PATTERNS - analytics about when/how the user buzzes.
 // Shows a visual sparkline of recent buzz positions, accuracy
 // by buzz timing (early/mid/late), per-category buzz habits,
 // optimal zone, and trend.
@@ -1011,7 +1011,7 @@ function BuzzPatterns({ patterns }) {
     insights.push({ tone: 'amber', text: `Recent buzzes are ${Math.abs(p.trend)}% later than your average. Might be tougher categories.` });
   }
   if (p.optimalZone) {
-    insights.push({ tone: 'blue', text: `Your sweet spot is ${p.optimalZone.start}–${p.optimalZone.end}% through the question (${p.optimalZone.accuracy}% accuracy there).` });
+    insights.push({ tone: 'blue', text: `Your sweet spot is ${p.optimalZone.start}-${p.optimalZone.end}% through the question (${p.optimalZone.accuracy}% accuracy there).` });
   }
 
   return (
@@ -1026,7 +1026,7 @@ function BuzzPatterns({ patterns }) {
         <span className="text-[10px] text-white/30 tabular-nums">{p.totalBuzzes} buzzes</span>
       </div>
 
-      {/* Sparkline — recent 20 buzzes as dots on a timeline */}
+      {/* Sparkline - recent 20 buzzes as dots on a timeline */}
       {p.recentBuzzes?.length > 3 && (
         <div className="px-4 py-2">
           <div className="relative h-8 rounded-lg bg-white/[0.03] border border-white/[0.04] overflow-hidden">
@@ -1049,7 +1049,7 @@ function BuzzPatterns({ patterns }) {
                   top: `${4 + (i % 3) * 8}px`,
                   opacity: 0.5 + (i / p.recentBuzzes.length) * 0.5,
                 }}
-                title={`${b.category}: ${b.position}% — ${b.correct ? 'correct' : 'wrong'}`}
+                title={`${b.category}: ${b.position}% - ${b.correct ? 'correct' : 'wrong'}`}
               />
             ))}
           </div>
@@ -1058,9 +1058,9 @@ function BuzzPatterns({ patterns }) {
 
       {/* Timing breakdown: early / mid / late */}
       <div className="grid grid-cols-3 gap-px bg-white/[0.04] mx-4 rounded-lg overflow-hidden mb-3">
-        <TimingCell label="Early" sub="0–33%" count={p.early.count} accuracy={p.early.accuracy} tone="emerald" />
-        <TimingCell label="Mid" sub="33–66%" count={p.mid.count} accuracy={p.mid.accuracy} tone="blue" />
-        <TimingCell label="Late" sub="66–100%" count={p.late.count} accuracy={p.late.accuracy} tone="amber" />
+        <TimingCell label="Early" sub="0-33%" count={p.early.count} accuracy={p.early.accuracy} tone="emerald" />
+        <TimingCell label="Mid" sub="33-66%" count={p.mid.count} accuracy={p.mid.accuracy} tone="blue" />
+        <TimingCell label="Late" sub="66-100%" count={p.late.count} accuracy={p.late.accuracy} tone="amber" />
       </div>
 
       {/* Avg buzz position + timeout rate */}
@@ -1222,9 +1222,9 @@ function sliderToThink(v) { return Math.round(THINK_MIN + (v / 100) * (THINK_MAX
 function thinkToSlider(ms) { return Math.round(((ms - THINK_MIN) / (THINK_MAX - THINK_MIN)) * 100); }
 
 // ============================================================
-// AI LOBBY — compete against AI bots in a lobby of 8 or 1v1
+// AI LOBBY - compete against AI bots in a lobby of 8 or 1v1
 // ============================================================
-// Scoring formats — mirrors TrialPage / TrialSession definitions. Kept
+// Scoring formats - mirrors TrialPage / TrialSession definitions. Kept
 // in sync so both AI play entry points feel identical. Values for IAC
 // Prelim/Playoff are from the official IAC rules PDFs (Bee Preliminary
 // & Playoff Rounds Scoring System) on iacompetitions.com.
@@ -1315,7 +1315,7 @@ function AILobbyView({ onExit }) {
         const nicheHint = topic
           ? `Focus specifically on: "${topic}". Use niche, specific clues.`
           : category.includes('History')
-            ? `Focus on very specific, niche sub-topics and events within ${category} — obscure battles, treaties, minor figures, turning points.`
+            ? `Focus on very specific, niche sub-topics and events within ${category} - obscure battles, treaties, minor figures, turning points.`
             : `Focus on specific niche sub-topics within ${category}.`;
         const combinedInstr = [nicheHint, lobbyCustomInstr].filter(Boolean).join('\n');
         const result = await apiFetch('/api/chat', {
@@ -1431,7 +1431,7 @@ function AILobbyView({ onExit }) {
                 </button>
               ))}
             </div>
-            {/* Player roster — draggable per-bot sliders */}
+            {/* Player roster - draggable per-bot sliders */}
             <div className="space-y-2.5 pt-1">
               {effectiveLobbyBots.map((bot) => {
                 const buzzSl = buzzAtToSlider(bot.buzzAt);

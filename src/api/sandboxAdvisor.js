@@ -1,6 +1,6 @@
 import { getToken } from './client';
 
-// Streams a sandbox advisor turn. Stateless server-side — client owns history.
+// Streams a sandbox advisor turn. Stateless server-side - client owns history.
 // body = { messages, sceneContext }
 // handlers = { onChunk, onDone, onError }
 export function sendSandboxAdvisorMessage(body, { onChunk, onDone, onError }) {

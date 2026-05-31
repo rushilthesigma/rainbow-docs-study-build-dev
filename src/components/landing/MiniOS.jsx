@@ -28,7 +28,7 @@ import { InlineProgress } from '../shared/ProgressBar';
 // token is overwritten when the user signs in for real.
 // =========================================================
 
-// Dock apps — Flashcards deliberately omitted per product direction.
+// Dock apps - Flashcards deliberately omitted per product direction.
 const DOCK = [
   { id: 'curricula', label: 'Curricula',  icon: BookOpen,       color: 'text-blue-500 bg-blue-50 dark:bg-blue-900/30' },
   { id: 'lessons',   label: 'Lessons',    icon: Lightbulb,      color: 'text-amber-500 bg-amber-50 dark:bg-amber-900/30' },
@@ -54,7 +54,7 @@ function DemoAuthProvider({ children }) {
   useEffect(() => {
     // Landing-page guest demo was wired to the now-removed
     // /api/auth/dev-login endpoint. The mini-OS still renders so the
-    // page composes — actual backend-driven apps will 401 until a
+    // page composes - actual backend-driven apps will 401 until a
     // proper guest-session endpoint is added.
     setLoading(false);
   }, []);
@@ -75,7 +75,7 @@ function DemoAuthProvider({ children }) {
 }
 
 // ============================================================
-// Top-level mini OS layout — menu bar, viewport (real AppWindow),
+// Top-level mini OS layout - menu bar, viewport (real AppWindow),
 // dock below.
 // ============================================================
 export default function MiniOS() {
@@ -108,7 +108,7 @@ export default function MiniOS() {
         </div>
       </div>
 
-      {/* ========== App viewport — the REAL AppWindow runs here ========== */}
+      {/* ========== App viewport - the REAL AppWindow runs here ========== */}
       <DemoAuthProvider>
       <DemoModeProvider>
         <WindowManagerProvider>
@@ -129,7 +129,7 @@ export default function MiniOS() {
       </DemoModeProvider>
       </DemoAuthProvider>
 
-      {/* ========== Dock — spans full width below the app ========== */}
+      {/* ========== Dock - spans full width below the app ========== */}
       <div className="border-t border-gray-200 dark:border-[#2A2A40] bg-gray-50 dark:bg-[#0b0b12] px-4 py-4">
         <div className="flex items-center justify-center gap-3 md:gap-4">
           {DOCK.map(app => {
@@ -168,7 +168,7 @@ export default function MiniOS() {
 
 // ============================================================
 // Waits for the demo auth bootstrap to finish before rendering the
-// real app — otherwise apiFetch fires with a null token on first paint
+// real app - otherwise apiFetch fires with a null token on first paint
 // and half the apps briefly flash an error.
 // ============================================================
 function DemoBootGate({ children }) {
@@ -189,7 +189,7 @@ function DemoBootGate({ children }) {
   );
 }
 
-// Thin wrapper because useAuth throws if there's no provider — we want
+// Thin wrapper because useAuth throws if there's no provider - we want
 // a render-prop style consumer that gracefully handles the brief window
 // where the DemoAuthProvider hasn't finished mounting.
 function AuthContextConsumer({ children }) {

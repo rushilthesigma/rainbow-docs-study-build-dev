@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react';
 // `onBack()` instead of navigating away from the SPA.
 //
 // How it works: when `active` flips to true, we push a throwaway history
-// entry. When the user hits Back, popstate fires — we handle it and push
+// entry. When the user hits Back, popstate fires - we handle it and push
 // another entry so the next Back still works. When `active` flips back to
 // false (or the component unmounts), we silently consume our own entry.
 export default function useBrowserBack(active, onBack) {
@@ -47,7 +47,7 @@ export default function useBrowserBack(active, onBack) {
       window.removeEventListener('popstate', onPop);
       // If we pushed an entry and we're unmounting without the user hitting
       // Back, silently go back one entry to keep history clean. Do NOT call
-      // onBack — this cleanup happens when the parent already closed the
+      // onBack - this cleanup happens when the parent already closed the
       // drilled-in view, so we'd loop.
       if (pushedRef.current && !handlingRef.current) {
         handlingRef.current = true;

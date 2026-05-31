@@ -110,7 +110,7 @@ export default function NewCurriculumPage() {
             <Sparkles size={14} className="text-emerald-600 dark:text-emerald-400 mt-0.5 flex-shrink-0" />
             <div className="text-[12px] text-emerald-900 dark:text-emerald-200/90 leading-relaxed">
               <span className="font-semibold">{seedSources.length} source{seedSources.length === 1 ? '' : 's'} attached</span>
-              <span className="text-emerald-700/80 dark:text-emerald-200/55"> — the AI will ground this curriculum in </span>
+              <span className="text-emerald-700/80 dark:text-emerald-200/55"> - the AI will ground this curriculum in </span>
               <span className="text-emerald-900 dark:text-emerald-200/85">"{seedSources[0].title || 'your note'}"</span>
               {seedSources.length > 1 && <span className="text-emerald-700/80 dark:text-emerald-200/55"> and {seedSources.length - 1} more.</span>}
             </div>
@@ -129,7 +129,7 @@ export default function NewCurriculumPage() {
             <Toggle label="Include exercises" checked={settings.includeExercises} onChange={v => update('includeExercises', v)} />
             <Toggle
               label="Graded mode"
-              description="Each lesson gets an AI-assigned task with a rubric. Submissions are graded and roll up to a course grade — visible to parents."
+              description="Each lesson gets an AI-assigned task with a rubric. Submissions are graded and roll up to a course grade - visible to parents."
               checked={settings.graded}
               onChange={v => update('graded', v)}
             />
@@ -151,7 +151,7 @@ export default function NewCurriculumPage() {
           This will create a full curriculum on <span className="font-semibold text-white/85">"{settings.topic}"</span> with units, lessons, and assessments.
         </p>
         <p className="text-[12px] text-white/35 mb-5">
-          Generation happens in the background — you can keep browsing while it works. You'll see a notification when it's ready.
+          Generation happens in the background - you can keep browsing while it works. You'll see a notification when it's ready.
         </p>
         <div className="flex gap-2">
           <Button onClick={handleConfirmGenerate} className="flex-1">Yes, Generate</Button>

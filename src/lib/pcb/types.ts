@@ -1,5 +1,5 @@
 /**
- * PCBForge data model — a deliberately small, fully-custom PCB representation
+ * PCBForge data model - a deliberately small, fully-custom PCB representation
  * inspired by KiCad's concepts (footprints, pads, nets, copper layers) but
  * built from scratch for the web platform.
  */

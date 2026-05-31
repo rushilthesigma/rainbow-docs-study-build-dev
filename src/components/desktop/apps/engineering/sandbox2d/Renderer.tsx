@@ -456,7 +456,7 @@ export default function Renderer() {
       const dy = target.y - grabWy;
 
       // Static ("stiff") bodies and paused-sim bodies always move directly so
-      // you can rearrange the scene freely — just like Algodoo's grab tool.
+      // you can rearrange the scene freely - just like Algodoo's grab tool.
       // Dynamic bodies in a running sim get a velocity impulse so collisions
       // stay smooth. Hold Alt while dragging a running dynamic body to force-move it.
       const running = useSandbox2DStore.getState().running;
@@ -1067,7 +1067,7 @@ export default function Renderer() {
       ctx.beginPath();
       ctx.arc(cur.x, cur.y, 4 / scale, 0, Math.PI * 2);
       ctx.fill();
-      // Angle label — draw in screen space
+      // Angle label - draw in screen space
       const screenX = tx + b.pos.x * scale;
       const screenY = ty + b.pos.y * scale;
       const degStr = `${(curAng * 180 / Math.PI).toFixed(1)}°`;

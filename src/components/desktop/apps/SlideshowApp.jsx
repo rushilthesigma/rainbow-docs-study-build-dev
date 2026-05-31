@@ -22,14 +22,14 @@ import { useWindowManager } from '../../../context/WindowManagerContext';
 import { Z } from '../../../styles/tokens';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// THEMES  (only the slide canvas uses these — UI chrome stays glass)
+// THEMES  (only the slide canvas uses these - UI chrome stays glass)
 //
 // Each theme is a full design token set: surface stack (bg → surface → border),
 // text stack (text → muted → faint), and a TWO-color accent pair so layouts
 // that want a secondary highlight (numbered chips, compare panels) can lean on
-// it. Font pairs are passed through so headlines vs body get distinct fonts —
+// it. Font pairs are passed through so headlines vs body get distinct fonts -
 // the editorial pairing (Playfair display + Inter body) is what gives a slide
-// the "Google Slides — Streamline template" feel.
+// the "Google Slides - Streamline template" feel.
 // ─────────────────────────────────────────────────────────────────────────────
 const FONT_PAIRS = {
   editorial: { head: '"Fraunces", "Playfair Display", Georgia, serif',     body: '"Inter", system-ui, sans-serif',           letter: '-0.02em' },
@@ -39,7 +39,7 @@ const FONT_PAIRS = {
 };
 
 const THEMES = {
-  // ── Light (Google Slides defaults are light — these match that energy) ──
+  // ── Light (Google Slides defaults are light - these match that energy) ──
   newsprint: { name: 'Newsprint', mode: 'light', bg: '#fbf7f0', surface: '#f3ece0', border: '#d8cbb1', text: '#1a1a1a', muted: '#5b5443', faint: '#a8a08c', accent: '#9b1c1c', accent2: '#1a3a5c', font: 'editorial' },
   ink:       { name: 'Ink',       mode: 'light', bg: '#ffffff', surface: '#f4f4f5', border: '#e4e4e7', text: '#0a0a0a', muted: '#52525b', faint: '#a1a1aa', accent: '#2563eb', accent2: '#0f172a', font: 'modern'    },
   mono:      { name: 'Mono',      mode: 'light', bg: '#f5f5f4', surface: '#e7e5e4', border: '#d6d3d1', text: '#1c1917', muted: '#57534e', faint: '#a8a29e', accent: '#1c1917', accent2: '#78716c', font: 'geometric' },
@@ -47,7 +47,7 @@ const THEMES = {
   sage:      { name: 'Sage',      mode: 'light', bg: '#f3f7f2', surface: '#e0ebe0', border: '#a7c4a3', text: '#0e1f0e', muted: '#3f5b3d', faint: '#6b8e69', accent: '#15803d', accent2: '#0e3d20', font: 'humanist'  },
   rose:      { name: 'Rose',      mode: 'light', bg: '#fdf2f8', surface: '#fce7f3', border: '#f9a8d4', text: '#3a0e2c', muted: '#831843', faint: '#be185d', accent: '#be185d', accent2: '#831843', font: 'editorial' },
 
-  // ── Dark (still high-contrast — text is white, not muted) ───────────────
+  // ── Dark (still high-contrast - text is white, not muted) ───────────────
   midnight:  { name: 'Midnight',  mode: 'dark',  bg: '#0a0a16', surface: '#13132a', border: '#2a2a4a', text: '#ffffff', muted: '#a5b4fc', faint: '#6b7280', accent: '#a78bfa', accent2: '#7c3aed', font: 'modern'    },
   slate:     { name: 'Slate',     mode: 'dark',  bg: '#0f172a', surface: '#1e293b', border: '#334155', text: '#f8fafc', muted: '#cbd5e1', faint: '#64748b', accent: '#38bdf8', accent2: '#0ea5e9', font: 'geometric' },
   ocean:     { name: 'Ocean',     mode: 'dark',  bg: '#02132f', surface: '#0a2547', border: '#1e3a5f', text: '#f0f9ff', muted: '#7dd3fc', faint: '#38bdf8', accent: '#22d3ee', accent2: '#0891b2', font: 'modern'    },
@@ -63,7 +63,7 @@ const PALETTE_TO_THEME = {
   rose:'rose', sage:'sage',
 };
 
-// Resolve the font pair for a theme — falls back to editorial if a deck has
+// Resolve the font pair for a theme - falls back to editorial if a deck has
 // stored a custom font hint that overrides the theme default.
 function fontFor(themeKey, fontHint) {
   const t = THEMES[themeKey] || THEMES.ink;
@@ -85,7 +85,7 @@ function ensureFontsLoaded() {
 }
 
 // ── Font auto-scaler: shrinks font proportionally for long text ──────────
-// Used for hero titles that might span 4 to 14 words — we want big when short
+// Used for hero titles that might span 4 to 14 words - we want big when short
 // and merely large when long. Aggressive floor of 44% so an outlier doesn't
 // produce an unreadable 8pt slide.
 function fitFontSize(text = '', base, threshold = 20) {
@@ -154,7 +154,7 @@ function styledTitle(text, accent, baseColor, accentColor) {
 // LAYOUT → ELEMENTS converter  (14 layout archetypes)
 //
 // Each layout returns an array of absolute-positioned `text` and `shape`
-// elements (% coordinates 0–100). The renderer is dumb on purpose — all the
+// elements (% coordinates 0-100). The renderer is dumb on purpose - all the
 // design IQ lives here. New layouts: agenda, bullets, cards, numbered,
 // compare, bigText. Existing ones rewritten with proper editorial typography
 // (display font for titles, body font for prose), generous whitespace, and a
@@ -201,14 +201,14 @@ function slideToElements(slide, themeKey, fontHint, image) {
       italic: opts.italic ?? false, fontFamily: opts.fontFamily ?? f.body,
       letterSpacing: opts.letterSpacing, lineHeight: opts.lineHeight, parts };
   };
-  // Image element — renders an <img> with object-fit:cover by default. Used by
+  // Image element - renders an <img> with object-fit:cover by default. Used by
   // image-forward layouts (imageHero/imageRight/imageLeft/imageFull) and as an
   // optional accent on title/section slides.
   const I = (sid, x, y, w, h, src, opts = {}) =>
     ({ id: id(sid), kind: 'image', x, y, w, h, src,
        fit: opts.fit || 'cover', radius: opts.radius, opacity: opts.opacity });
 
-  // Display headline preset — display font, tight letter-spacing.
+  // Display headline preset - display font, tight letter-spacing.
   const HEAD = { fontFamily: f.head, fontWeight: '700', letterSpacing: f.letter, lineHeight: 1.05, color: t.text };
   const SUB  = { fontFamily: f.body, fontWeight: '400', color: t.muted, lineHeight: 1.45 };
   const EYEBROW_TEXT = (slide.eyebrow || '').toUpperCase();
@@ -225,9 +225,9 @@ function slideToElements(slide, themeKey, fontHint, image) {
     case 'title': {
       const els = [];
       // Decorative geometry: a giant numeric "01" lives in the bottom-right
-      // as faded accent — a magazine-style anchor that fills empty space.
+      // as faded accent - a magazine-style anchor that fills empty space.
       const decoColor = isLight ? t.accent + '14' : t.accent + '22';
-      // Base background structure — accent bar + side surface band.
+      // Base background structure - accent bar + side surface band.
       els.push(R('topBar', 0, 0, 100, 0.5, t.accent));
       if (image) {
         // Image lives across the top half as a hero strip.
@@ -236,12 +236,12 @@ function slideToElements(slide, themeKey, fontHint, image) {
         els.push(R('fade', 0, 32, 100, 12, 'transparent',
           { gradient: `linear-gradient(to bottom, transparent 0%, ${t.bg} 100%)` }));
       }
-      // Eyebrow ALWAYS shows — fall back to "PRESENTATION" so the slide
+      // Eyebrow ALWAYS shows - fall back to "PRESENTATION" so the slide
       // never feels nameless.
       els.push(T('eye', 7, image ? 49 : 14, 60, 5,
         EYEBROW_TEXT || 'PRESENTATION',
         { fontSize: 12, fontWeight: '700', color: t.accent, align: 'left', letterSpacing: '0.28em' }));
-      // Title — anchored at the BOTTOM-LEFT of the slide, big serif/display.
+      // Title - anchored at the BOTTOM-LEFT of the slide, big serif/display.
       // Fills 80% of the width with a generous size that auto-shrinks.
       els.push(T('title', 7, image ? 54 : 22, 86, image ? 34 : 38,
         slide.title || 'Untitled',
@@ -249,20 +249,20 @@ function slideToElements(slide, themeKey, fontHint, image) {
           align: 'left', parts: titleStyled.parts, lineHeight: 1.02 }));
       // Accent rule directly under the title.
       els.push(R('rule', 7, image ? 88 : 64, 7, 0.5, t.accent));
-      // Subtitle right under the rule — no big gap.
+      // Subtitle right under the rule - no big gap.
       if (slide.subtitle) {
         els.push(T('sub', 7, image ? 91 : 67, 70, image ? 7 : 12,
           slide.subtitle,
           { ...SUB, fontSize: 19, color: t.text, align: 'left', lineHeight: 1.4, fontWeight: '400' }));
       }
-      // Bottom-right decorative numeral — only on text-only covers,
+      // Bottom-right decorative numeral - only on text-only covers,
       // and only when there's enough room (no image).
       if (!image) {
         els.push(T('decoNum', 70, 50, 28, 50, '01',
           { fontFamily: f.head, fontSize: 280, fontWeight: '900', color: decoColor,
             align: 'right', lineHeight: 0.85, letterSpacing: '-0.05em' }));
       }
-      // Bottom-left meta line — small, monospace-feeling, like a colophon.
+      // Bottom-left meta line - small, monospace-feeling, like a colophon.
       const meta = (slide.meta || 'A presentation deck').toUpperCase();
       if (!image) {
         els.push(T('meta', 7, 92, 60, 4, meta,
@@ -293,7 +293,7 @@ function slideToElements(slide, themeKey, fontHint, image) {
         }
         return els;
       }
-      // No image — keep the original centered cover.
+      // No image - keep the original centered cover.
       if (isLight) {
         els.push(R('side', 86, 0, 14, 100, t.surface));
         els.push(R('sideBar', 86, 0, 0.6, 100, t.accent));
@@ -333,7 +333,7 @@ function slideToElements(slide, themeKey, fontHint, image) {
       els.push(T('title', 6, 13, 88, 14, slide.title || 'What we will cover',
         { ...HEAD, fontSize: 48, align: 'left' }));
       els.push(R('rule', 6, 30, 88, 0.4, t.border));
-      // Compute row geometry — spread items between y=33 and y=92.
+      // Compute row geometry - spread items between y=33 and y=92.
       const rowTop = 34;
       const rowBot = 93;
       const n = Math.max(1, items.length);
@@ -364,7 +364,7 @@ function slideToElements(slide, themeKey, fontHint, image) {
       // Accent color slab fills the left third.
       els.push(R('slab', 0, 0, 38, 100, t.accent));
       els.push(R('mid',  38, 0, 1, 100, t.accent2 || t.accent));
-      // Eyebrow on slab — high contrast against accent
+      // Eyebrow on slab - high contrast against accent
       const slabText = isLight ? '#ffffff' : '#0a0a0a';
       els.push(T('eye', 4, 12, 30, 6, EYEBROW_TEXT || 'SECTION',
         { fontSize: 13, fontWeight: '700', color: slabText, align: 'left', letterSpacing: '0.22em' }));
@@ -391,13 +391,13 @@ function slideToElements(slide, themeKey, fontHint, image) {
     case 'hero': {
       const els = [];
       els.push(R('topBar', 0, 0, 100, 0.4, t.accent));
-      // Decorative oversized symbol in the corner — only on dark themes,
+      // Decorative oversized symbol in the corner - only on dark themes,
       // looks too noisy on light surfaces.
       if (!isLight) {
         els.push(T('mark', 4, -2, 18, 30, '"',
           { fontFamily: f.head, fontSize: 200, fontWeight: '900', color: t.accent + '22', align: 'left' }));
       }
-      // Hero text gets a much higher floor and a less aggressive shrink — a
+      // Hero text gets a much higher floor and a less aggressive shrink - a
       // 40-char declaration deserves to FILL the slide, not look polite.
       els.push(T('title', 6, 28, 88, 48,
         slide.title || '',
@@ -407,9 +407,9 @@ function slideToElements(slide, themeKey, fontHint, image) {
     }
 
     // ─── 5. CONTENT ────────────────────────────────────────────────────────
-    // Workhorse: title + 2–3 prose sentences. Title left-aligned with an
+    // Workhorse: title + 2-3 prose sentences. Title left-aligned with an
     // accent underbar. Body in the body font at full readable contrast (NOT
-    // muted — that was the readability problem in the previous version).
+    // muted - that was the readability problem in the previous version).
     case 'content': {
       const els = [];
       if (EYEBROW_TEXT) {
@@ -442,10 +442,10 @@ function slideToElements(slide, themeKey, fontHint, image) {
       const rowH = (bot - top) / n;
       items.forEach((b, i) => {
         const y = top + i * rowH;
-        // Accent dot — left side for left/center, right side for right-align.
+        // Accent dot - left side for left/center, right side for right-align.
         const dotX = bulletsAlign === 'right' ? 91.5 : 7;
         els.push(R(`dot-${i}`, dotX, y + rowH * 0.32, 1.2, 1.2, t.accent, { shape: 'circle', sharp: false }));
-        // Text takes the area inside the dot — left-padded, right-padded, or full.
+        // Text takes the area inside the dot - left-padded, right-padded, or full.
         const textX = bulletsAlign === 'right' ? 5 : 11;
         const textW = bulletsAlign === 'right' ? 84 : 84;
         els.push(T(`b-${i}`, textX, y, textW, rowH * 0.9, b,
@@ -465,7 +465,7 @@ function slideToElements(slide, themeKey, fontHint, image) {
       els.push(T('title', 6, 9, 88, 16, slide.title || '',
         { ...HEAD, fontSize: 40, align: 'left' }));
       els.push(R('bar', 6, 28, 9, 0.6, t.accent));
-      // Card geometry — 6% gutter on each side of the row, 3% between cards.
+      // Card geometry - 6% gutter on each side of the row, 3% between cards.
       const gutter = 6;
       const innerGap = 2.5;
       const cardsTop = 36;
@@ -476,7 +476,7 @@ function slideToElements(slide, themeKey, fontHint, image) {
         const x = gutter + i * (cardW + innerGap);
         // Card surface
         els.push(R(`card-${i}`, x, cardsTop, cardW, cardsH, t.surface, { sharp: false, radius: '12px' }));
-        // Top accent stripe — radius matches card corners so it doesn't bleed past the rounded top.
+        // Top accent stripe - radius matches card corners so it doesn't bleed past the rounded top.
         els.push(R(`stripe-${i}`, x, cardsTop, cardW, 0.7, t.accent, { sharp: false, radius: '12px 12px 0 0' }));
         // Number badge
         els.push(T(`num-${i}`, x + 3, cardsTop + 4, cardW - 6, 6, String(i + 1).padStart(2, '0'),
@@ -509,7 +509,7 @@ function slideToElements(slide, themeKey, fontHint, image) {
       items.forEach((it, i) => {
         const y = top + i * rowH;
         const cy = y + rowH * 0.18;
-        // Numbered chip — circle in accent color
+        // Numbered chip - circle in accent color
         els.push(R(`chip-${i}`, 7, cy, 4.5, 8, t.accent, { shape: 'circle', sharp: false }));
         const chipText = isLight ? '#ffffff' : '#0a0a0a';
         els.push(T(`chipN-${i}`, 7, cy, 4.5, 8, String(i + 1),
@@ -534,20 +534,20 @@ function slideToElements(slide, themeKey, fontHint, image) {
       els.push(T('title', 6, 8, 88, 14, slide.title || '',
         { ...HEAD, fontSize: 40, align: 'left' }));
       els.push(R('bar', 6, 26, 9, 0.6, t.accent));
-      // Two panels — left in muted surface, right in accent-tinted surface.
+      // Two panels - left in muted surface, right in accent-tinted surface.
       const top = 32;
       const h = 62;
       const gutter = 6;
       const gap = 4;
       const w = (100 - gutter * 2 - gap) / 2;
-      // Left card — neutral surface, dimmer label color.
+      // Left card - neutral surface, dimmer label color.
       els.push(R('lcard', gutter, top, w, h, t.surface, { sharp: false, radius: '12px' }));
       els.push(R('lstripe', gutter, top, w, 0.5, t.faint));
       els.push(T('llabel', gutter + 3, top + 5, w - 6, 8, (items[0]?.label || 'Before').toUpperCase(),
         { fontFamily: f.head, fontSize: 14, fontWeight: '700', color: t.faint, align: 'left', letterSpacing: '0.18em' }));
       els.push(T('lbody', gutter + 3, top + 16, w - 6, h - 20, items[0]?.body || '',
         { fontFamily: f.body, fontSize: fitBodyFontSize(items[0]?.body, w - 6, h - 20, { base: 22, min: 13, lineHeight: 1.4 }), fontWeight: '500', color: t.text, align: 'left', lineHeight: 1.4 }));
-      // Right card — accent-tinted bg so it reads as distinct from the left.
+      // Right card - accent-tinted bg so it reads as distinct from the left.
       const rx = gutter + w + gap;
       const rCardGradient = `linear-gradient(135deg, ${t.surface} 0%, ${t.accent + (t.mode === 'light' ? '18' : '22')} 100%)`;
       els.push(R('rcard', rx, top, w, h, t.surface, { sharp: false, radius: '12px', gradient: rCardGradient }));
@@ -564,7 +564,7 @@ function slideToElements(slide, themeKey, fontHint, image) {
     // itself uses the display font and the accent color; everything else
     // recedes.
     case 'stat': {
-      const figure = slide.body || slide.title || '—';
+      const figure = slide.body || slide.title || '-';
       const els = [];
       els.push(T('label', 8, 14, 84, 8,
         (slide.title || 'Statistic').toUpperCase(),
@@ -595,7 +595,7 @@ function slideToElements(slide, themeKey, fontHint, image) {
         { fontFamily: f.head, fontSize: fitFontSize(q, 36, 70), fontWeight: '500',
           color: t.text, align: 'left', italic: true, lineHeight: 1.25 }));
       if (slide.subtitle) {
-        els.push(T('attr', 12, 84, 80, 8, `— ${slide.subtitle}`,
+        els.push(T('attr', 12, 84, 80, 8, `- ${slide.subtitle}`,
           { fontFamily: f.body, fontSize: 16, fontWeight: '600', color: t.accent, align: 'left', letterSpacing: '0.06em' }));
       }
       return els;
@@ -603,11 +603,11 @@ function slideToElements(slide, themeKey, fontHint, image) {
 
     // ─── 12. SPLIT ─────────────────────────────────────────────────────────
     // Text on the left, accent panel on the right. The right panel has the
-    // accent color as a tinted surface with a single eyebrow word — works
+    // accent color as a tinted surface with a single eyebrow word - works
     // well as a "this is the new concept" slide.
     case 'split': {
       const els = [];
-      // Right panel — accent-tinted surface
+      // Right panel - accent-tinted surface
       els.push(R('rp', 56, 0, 44, 100, t.surface));
       els.push(R('rt', 56, 0, 44, 0.6, t.accent));
       // Big number/symbol on the right panel
@@ -650,7 +650,7 @@ function slideToElements(slide, themeKey, fontHint, image) {
       const els = [];
       if (image) {
         els.push(I('bg', 0, 0, 100, 100, image, { fit: 'cover' }));
-        // Bottom dark gradient — keeps the title legible regardless of
+        // Bottom dark gradient - keeps the title legible regardless of
         // the underlying image's tonality.
         els.push(R('veil', 0, 40, 100, 60, 'transparent',
           { gradient: 'linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,0.7) 80%, rgba(0,0,0,0.85) 100%)' }));
@@ -738,7 +738,7 @@ function slideToElements(slide, themeKey, fontHint, image) {
       } else {
         els.push(R('bg', 0, 0, 100, 100, t.surface));
       }
-      // Caption block — pill-shaped surface in the corner. Colors adapt to image presence.
+      // Caption block - pill-shaped surface in the corner. Colors adapt to image presence.
       const capBg    = image ? 'rgba(0,0,0,0.55)' : t.surface;
       const capLabel = image ? '#cbd5e1' : t.muted;
       const capText  = image ? '#ffffff' : t.text;
@@ -771,7 +771,7 @@ function slideToElements(slide, themeKey, fontHint, image) {
     // ─── 15. SUMMARY ───────────────────────────────────────────────────────
     case 'summary':
     default: {
-      // Treat any unknown layout the same way — a clean title + bullet/prose
+      // Treat any unknown layout the same way - a clean title + bullet/prose
       // recap. Better than a black canvas.
       const items = slide.bullets && slide.bullets.length ? slide.bullets : null;
       const els = [];
@@ -807,7 +807,7 @@ function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 // ─────────────────────────────────────────────────────────────────────────────
 // AUDIO NARRATION
 // NotebookLM-style: each slide has a `notes` field that doubles as a
-// spoken narration script. The hook owns the SpeechSynthesis lifecycle —
+// spoken narration script. The hook owns the SpeechSynthesis lifecycle -
 // canceling on slide change, restarting fresh, and auto-advancing on end.
 // We pick the highest-quality voice available (system "Premium"/"Enhanced"
 // English voices are way better than the default robot) and tune rate +
@@ -863,7 +863,7 @@ function stripMarks(s = '') {
 
 // Hook: manages a single SpeechSynthesisUtterance for the current slide.
 // Cancels speech whenever slide changes or audio is toggled off. Triggers
-// onEnd when the narration finishes — the consumer can use that to auto-
+// onEnd when the narration finishes - the consumer can use that to auto-
 // advance the deck for a NotebookLM-style listen-through.
 function useSlideNarration({ enabled, slide, onEnd }) {
   const utterRef = useRef(null);
@@ -873,7 +873,7 @@ function useSlideNarration({ enabled, slide, onEnd }) {
   useEffect(() => {
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
     const synth = window.speechSynthesis;
-    // Always cancel — clears stale queue regardless of enabled state.
+    // Always cancel - clears stale queue regardless of enabled state.
     synth.cancel();
     setSpeaking(false);
     if (!enabled || !slide) return;
@@ -889,7 +889,7 @@ function useSlideNarration({ enabled, slide, onEnd }) {
     u.onend = () => { setSpeaking(false); onEnd?.(); };
     u.onerror = () => { setSpeaking(false); };
     utterRef.current = u;
-    // Some browsers (Chrome) need voices to load asynchronously — try
+    // Some browsers (Chrome) need voices to load asynchronously - try
     // immediately, but also retry if voices weren't ready yet.
     const start = () => synth.speak(u);
     if (synth.getVoices().length === 0) {
@@ -902,7 +902,7 @@ function useSlideNarration({ enabled, slide, onEnd }) {
     }
     return () => { synth.cancel(); };
   }, [enabled, slide?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Cleanup on unmount — important if the user closes play mode mid-speech.
+  // Cleanup on unmount - important if the user closes play mode mid-speech.
   useEffect(() => () => { try { window.speechSynthesis?.cancel(); } catch {} }, []);
   return { speaking };
 }
@@ -1156,7 +1156,7 @@ export default function SlideshowApp() {
           onManual={() => setView('manual')}
         />
 
-        {/* Full-screen beta notice — shown every time the app opens */}
+        {/* Full-screen beta notice - shown every time the app opens */}
         {!betaAcknowledged && (
           <div className="absolute inset-0 z-50 flex items-end justify-center pb-10 bg-black/70 backdrop-blur-md">
             <div className="mx-4 w-full max-w-sm bg-[#1c1c1e] border border-white/[0.10] rounded-2xl overflow-hidden shadow-2xl">
@@ -1364,7 +1364,7 @@ function hexToRgb(hex) {
 
 // Build an off-screen DOM tree that mirrors the canvas renderer, then snap it
 // to a PNG via html-to-image. This makes PDF/PPTX exports pixel-faithful to
-// what the user sees in the editor — same fonts, layouts, images, and colors.
+// what the user sees in the editor - same fonts, layouts, images, and colors.
 async function captureSlidePng(slide, themeKey, fontHint, image, w = 1600, h = 900) {
   const { toPng } = await import('html-to-image');
   const t = THEMES[themeKey] || THEMES.ink;
@@ -1374,14 +1374,14 @@ async function captureSlidePng(slide, themeKey, fontHint, image, w = 1600, h = 9
 
   const host = document.createElement('div');
   // Keep the host visible to the browser's renderer but shift it off the
-  // viewport via `transform` — `opacity:0` got copied onto the cloned
+  // viewport via `transform` - `opacity:0` got copied onto the cloned
   // element by html-to-image and produced all-black frames; the old
   // `left:-99999px` trick made some Chromium builds skip the paint.
   // Transform moves the element at paint time only, so the cloned copy
   // still renders with full opacity.
   host.style.cssText = `position:fixed;left:0;top:0;width:${w}px;height:${h}px;background:${t.bg};overflow:hidden;z-index:-2147483647;pointer-events:none;transform:translate3d(-200vw,0,0);`;
 
-  // PDF/PPTX export always uses the template path — matches the edit and
+  // PDF/PPTX export always uses the template path - matches the edit and
   // present views 1:1. The AI's bespoke HTML in slide.html is intentionally
   // skipped here: it routinely shipped black-on-dark or white-on-light
   // body text because the model assumes default browser colors, while the
@@ -1419,7 +1419,7 @@ async function captureSlidePng(slide, themeKey, fontHint, image, w = 1600, h = 9
       } else {
         const div = document.createElement('div');
         const ls = el.letterSpacing ? `letter-spacing:${el.letterSpacing};` : '';
-        // Fall back to the theme's text color, NOT plain white — light
+        // Fall back to the theme's text color, NOT plain white - light
         // themes (ink, mono, newsprint, sun, sage, rose) have white-ish
         // backgrounds, so a hard-coded `#fff` fallback was rendering
         // text invisibly on those themes and producing all-white PDFs.
@@ -1458,7 +1458,7 @@ async function captureSlidePng(slide, themeKey, fontHint, image, w = 1600, h = 9
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     // `style` is applied to the cloned node before rasterization, which
     // means our hiding trick (transform off-screen) doesn't follow into
-    // the SVG — the clone renders at its natural position with full
+    // the SVG - the clone renders at its natural position with full
     // opacity. This is what the debate-tournament snapshot relies on.
     const dataUrl = await toPng(host, {
       width: w,
@@ -1688,7 +1688,7 @@ function KeynoteWorkspace(props) {
       if (format === 'pdf') await exportToPdf(deck, getImage);
       else await exportToPptx(deck, getImage);
     } catch (e) {
-      // Surface the real reason — silent failure here was the #1 cause of
+      // Surface the real reason - silent failure here was the #1 cause of
       // "export doesn't work" reports. Most common: tainted-canvas from a
       // cross-origin image, or a malformed slide element.
       console.error('Export error:', e);
@@ -1723,7 +1723,7 @@ function KeynoteWorkspace(props) {
     setImproving(false);
   }
 
-  // Keyboard shortcuts — listen for both window key events (Esc, Space in
+  // Keyboard shortcuts - listen for both window key events (Esc, Space in
   // play mode) and the custom events dispatched by the app-level handler.
   useEffect(() => {
     function onPlayKey(e) {
@@ -1778,7 +1778,7 @@ function KeynoteWorkspace(props) {
         exporting={exporting}
       />
 
-      {/* Export error banner — surfaces the real reason an export failed
+      {/* Export error banner - surfaces the real reason an export failed
           (most common: tainted-canvas from a cross-origin image). */}
       {exportError && (
         <div className="flex-shrink-0 px-4 py-2 flex items-center gap-3 border-b border-rose-500/30 bg-rose-500/10">
@@ -1794,7 +1794,7 @@ function KeynoteWorkspace(props) {
         </div>
       )}
 
-      {/* Image generation progress strip — slim, glanceable. */}
+      {/* Image generation progress strip - slim, glanceable. */}
       {imgProgress.active && (
         <div className="flex-shrink-0 px-4 py-1.5 flex items-center gap-3 border-b border-white/[0.06] bg-[#1a1a1a]">
           <Loader2 size={11} className="animate-spin flex-shrink-0 text-indigo-400" />
@@ -1852,7 +1852,7 @@ function KeynoteWorkspace(props) {
               onGenImage={onGenerateImageForCurrent}
             />
           )}
-          {/* Speaker notes — directly under the canvas. */}
+          {/* Speaker notes - directly under the canvas. */}
           {slide?.notes && (
             <div className="w-full max-w-[1100px] mt-4 px-1">
               <p className="text-[10px] uppercase tracking-[0.14em] mb-0.5 text-white/25">Presenter Notes</p>
@@ -1898,7 +1898,7 @@ function KeynoteWorkspace(props) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// KEYNOTE TOP BAR — labelled icon buttons in groups separated by dividers.
+// KEYNOTE TOP BAR - labelled icon buttons in groups separated by dividers.
 // ─────────────────────────────────────────────────────────────────────────────
 function KeynoteTopBar(props) {
   const {
@@ -2059,7 +2059,7 @@ function KeynoteTopBar(props) {
           )}
         </div>
 
-        {/* Centre title — flexes to fill remaining space. */}
+        {/* Centre title - flexes to fill remaining space. */}
         <div className="flex-1 flex items-center justify-center px-4 min-w-0">
           <span className="text-[13px] font-semibold text-white/85 truncate">{deckTitle || 'Untitled'}</span>
         </div>
@@ -2192,7 +2192,7 @@ function ToolbarButton({ icon, label, onClick, active, disabled }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SLIDE THUMBNAIL RAIL — vertical numbered list, Keynote style.
+// SLIDE THUMBNAIL RAIL - vertical numbered list, Keynote style.
 // ─────────────────────────────────────────────────────────────────────────────
 function SlideThumbnailRail({ deck, slideIdx, onGoto, onDelete, onDeleteAt, onReorder, slideImages, generatingImages, theme, slideElementsMap }) {
   const t = THEMES[theme] || THEMES.midnight;
@@ -2274,7 +2274,7 @@ function SlideThumbnailRail({ deck, slideIdx, onGoto, onDelete, onDeleteAt, onRe
   );
 }
 
-// Scaled-down faithful render of a slide — same element pipeline as the main canvas.
+// Scaled-down faithful render of a slide - same element pipeline as the main canvas.
 function ThumbnailPreview({ elements, image, t }) {
   const containerRef = useRef(null);
   const [scale, setScale] = useState(0.14);
@@ -2306,7 +2306,7 @@ function ThumbnailPreview({ elements, image, t }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FORMAT PANEL — Keynote-style right inspector. Slide layout · appearance ·
+// FORMAT PANEL - Keynote-style right inspector. Slide layout · appearance ·
 // background · theme. Edits apply to the current slide.
 // ─────────────────────────────────────────────────────────────────────────────
 function FormatPanel({ slide, theme, setTheme, fontHint, setFontHint, changeLayout, updateSlideField, t, imageGenEnabled, onToggleImageGen }) {
@@ -2316,7 +2316,7 @@ function FormatPanel({ slide, theme, setTheme, fontHint, setFontHint, changeLayo
         <span className="text-[11px] font-semibold text-white/85">Slide</span>
       </div>
 
-      {/* Slide Layout (templates) — visual grid of all available layouts. */}
+      {/* Slide Layout (templates) - visual grid of all available layouts. */}
       <div className="p-3 border-b border-white/[0.06]">
         <label className="block text-[10px] uppercase tracking-[0.14em] text-white/40 mb-2">Templates</label>
         <div className="grid grid-cols-3 gap-1.5">
@@ -2349,7 +2349,7 @@ function FormatPanel({ slide, theme, setTheme, fontHint, setFontHint, changeLayo
         </div>
       </div>
 
-      {/* Content — text fields for the slide's structured content */}
+      {/* Content - text fields for the slide's structured content */}
       <div className="p-3 border-b border-white/[0.06]">
         <label className="block text-[10px] uppercase tracking-[0.14em] text-white/40 mb-2.5">Content</label>
         <div className="space-y-2.5">
@@ -2421,7 +2421,7 @@ function FormatPanel({ slide, theme, setTheme, fontHint, setFontHint, changeLayo
         </div>
       </div>
 
-      {/* Theme — color palette swatches */}
+      {/* Theme - color palette swatches */}
       <div className="p-3 border-b border-white/[0.06]">
         <label className="block text-[10px] uppercase tracking-[0.14em] text-white/40 mb-2">Color Theme</label>
         <div className="grid grid-cols-6 gap-1.5">
@@ -2441,7 +2441,7 @@ function FormatPanel({ slide, theme, setTheme, fontHint, setFontHint, changeLayo
         <div className="mt-2 text-[10px] text-white/55 text-center">{THEMES[theme]?.name}</div>
       </div>
 
-      {/* Font — pick the typeface pair */}
+      {/* Font - pick the typeface pair */}
       <div className="p-3 border-b border-white/[0.06]">
         <label className="block text-[10px] uppercase tracking-[0.14em] text-white/40 mb-2">Font</label>
         <div className="space-y-1">
@@ -2494,7 +2494,7 @@ function FormatPanel({ slide, theme, setTheme, fontHint, setFontHint, changeLayo
 }
 
 // Tiny abstract preview of a layout for the templates grid. Just blocks +
-// strips that approximate the layout's visual shape — too small for full
+// strips that approximate the layout's visual shape - too small for full
 // rendering but enough to recognise.
 function LayoutMiniPreview({ layout, t }) {
   const accent = t.accent || '#888';
@@ -2528,7 +2528,7 @@ function LayoutMiniPreview({ layout, t }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PLAY MODE — fullscreen presentation overlay with slide-only chrome.
+// PLAY MODE - fullscreen presentation overlay with slide-only chrome.
 // ─────────────────────────────────────────────────────────────────────────────
 function PlayMode({ slide, slideIdx, totalSlides, elements, image, t, deckTitle, onExit, onNav, slideKey, navDir }) {
   const [listen, setListen] = useState(false);
@@ -2560,7 +2560,7 @@ function PlayMode({ slide, slideIdx, totalSlides, elements, image, t, deckTitle,
           navDir={navDir}
         />
       </div>
-      {/* Top-right Listen pill — NotebookLM-style "Audio Overview" affordance. */}
+      {/* Top-right Listen pill - NotebookLM-style "Audio Overview" affordance. */}
       <div className="absolute top-6 right-6 flex items-center gap-2">
         {listen && (
           <button
@@ -2590,7 +2590,7 @@ function PlayMode({ slide, slideIdx, totalSlides, elements, image, t, deckTitle,
           }
         </button>
       </div>
-      {/* Floating controls — fade up on hover. */}
+      {/* Floating controls - fade up on hover. */}
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-2 rounded-full bg-black/70 backdrop-blur border border-white/10">
         <button onClick={() => onNav(-1)} disabled={slideIdx === 0}
           className="p-2 rounded-full text-white/70 hover:text-white hover:bg-white/10 disabled:opacity-25">
@@ -2611,20 +2611,20 @@ function PlayMode({ slide, slideIdx, totalSlides, elements, image, t, deckTitle,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SLIDE VIEW (presentation mode — read-only, uses theme colors)
+// SLIDE VIEW (presentation mode - read-only, uses theme colors)
 //
 // Adds three things over the previous version:
-// (1) Fade + slight-rise transition when the visible slide changes — driven
+// (1) Fade + slight-rise transition when the visible slide changes - driven
 //     by re-mounting the component via a `key` prop in the parent.
 // (2) Slide-number HUD in the bottom-right corner, Google-Slides-style.
-// (3) Light-theme-correct image overlay — the previous overlay used the
+// (3) Light-theme-correct image overlay - the previous overlay used the
 //     theme's bg color which on a light theme produced a washed-out white
 //     wall. We pick a gradient direction that works for both modes.
 // ─────────────────────────────────────────────────────────────────────────────
 // Scaled bespoke HTML renderer. The server hands us a self-contained
 // HTML+CSS fragment designed at 1280×720 reference; we drop it into a
 // fixed-size box and scale-transform it to fit the parent. This is the
-// premium render path — each slide is hand-designed by the LLM rather
+// premium render path - each slide is hand-designed by the LLM rather
 // than assembled from templates.
 function BespokeHtmlSlide({ html, image, containerW, t }) {
   // Substitute the {{IMAGE}} placeholder with the actual image URL. If no
@@ -2635,7 +2635,7 @@ function BespokeHtmlSlide({ html, image, containerW, t }) {
     return String(html).replace(/\{\{IMAGE\}\}/g, image || TRANSPARENT_PIXEL);
   }, [html, image]);
   const hostRef = useRef(null);
-  // Auto-fit: the model often writes content that overflows — either the
+  // Auto-fit: the model often writes content that overflows - either the
   // whole slide is too tall, or individual cards inside the slide clip
   // their body text. We handle both: lift internal overflow constraints
   // so content can flow naturally, then shrink the whole slide uniformly
@@ -2651,7 +2651,7 @@ function BespokeHtmlSlide({ html, image, containerW, t }) {
       if (!slide) return;
       // Pass 1: walk every element with overflow:hidden and a height
       // constraint that's clipping its content. Lift the height so the
-      // child text can flow naturally — the whole slide will then grow
+      // child text can flow naturally - the whole slide will then grow
       // vertically past 720, and the outer scale brings it back.
       const touched = [];
       const all = [slide, ...slide.querySelectorAll('*')];
@@ -2690,7 +2690,7 @@ function BespokeHtmlSlide({ html, image, containerW, t }) {
         naturalW > 1280 ? 1280 / naturalW : 1,
         1,
       );
-      // Clamp shrink to 55% — past that the model wrote a wildly wrong
+      // Clamp shrink to 55% - past that the model wrote a wildly wrong
       // layout and shrinking further would be illegible. Above 99%, snap
       // to 1 to avoid sub-pixel jitter.
       const clamped = ratio >= 0.99 ? 1 : Math.max(0.55, ratio);
@@ -2783,7 +2783,7 @@ function SlideView({ slide, elements, image, isGenImg, t, slideIdx, totalSlides,
   };
   return (
     <div ref={wrapRef} className="relative rounded-2xl overflow-hidden w-full" style={wrapperStyle}>
-      {/* Background image — matched 1:1 with SlideEditor so the slide looks
+      {/* Background image - matched 1:1 with SlideEditor so the slide looks
           identical between edit and present. Opacity, angle, and gradient
           stops are intentionally the same as the editor canvas. */}
       {image && !layoutHasImage && (
@@ -2798,7 +2798,7 @@ function SlideView({ slide, elements, image, isGenImg, t, slideIdx, totalSlides,
       {/* Always render via the template path so the presentation is a
           pixel-faithful copy of what the user sees while editing. The
           bespoke AI-designed HTML (slide.html) is intentionally ignored
-          here — the editor can't show it, so the presenter shouldn't
+          here - the editor can't show it, so the presenter shouldn't
           either. */}
       <div className="absolute inset-0 overflow-hidden">
         <div style={{ width: '1000px', height: `${Math.round(1000 * 9 / 16)}px`, transform: `scale(${containerW / 1000})`, transformOrigin: 'top left' }}>
@@ -2832,7 +2832,7 @@ function SlideView({ slide, elements, image, isGenImg, t, slideIdx, totalSlides,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SLIDE EDITOR (edit mode — canvas uses theme colors, toolbar is glass)
+// SLIDE EDITOR (edit mode - canvas uses theme colors, toolbar is glass)
 // ─────────────────────────────────────────────────────────────────────────────
 function SlideEditor({ slide, elements, image, isGenImg, t, imageGenEnabled, onChange, onFieldChange, onGenImage, zoom = 100 }) {
   // Determines if an element id corresponds to a structured slide field.
@@ -3091,7 +3091,7 @@ function SlideEditor({ slide, elements, image, isGenImg, t, imageGenEnabled, onC
           const pEnd = pos + p.text.length;
           const pSize = p.fontSize || baseSize;
           if (pEnd <= start || pStart >= end) {
-            // Completely outside selection — keep as is
+            // Completely outside selection - keep as is
             parts.push({ ...p });
           } else {
             // Overlaps with selection
@@ -3129,11 +3129,11 @@ function SlideEditor({ slide, elements, image, isGenImg, t, imageGenEnabled, onC
 
   return (
     <div className="flex flex-col items-center gap-2 m-auto">
-      {/* Contextual selection toolbar — only appears when an element is selected. */}
+      {/* Contextual selection toolbar - only appears when an element is selected. */}
       <div className="flex items-center gap-2 flex-shrink-0 h-7 px-1" style={{ width: `${targetW}px`, maxWidth: '100%' }}>
         {selected && selEl?.kind === 'text' && (
           <div className="flex items-center gap-2 px-2 py-1 rounded-lg bg-white/[0.06] border border-white/[0.10]">
-            {/* Font size — onMouseDown with preventDefault keeps textarea focused so
+            {/* Font size - onMouseDown with preventDefault keeps textarea focused so
                 we can read selectionStart/End for partial-text font size changes. */}
             <div className="flex items-center gap-1">
               <button
@@ -3151,7 +3151,7 @@ function SlideEditor({ slide, elements, image, isGenImg, t, imageGenEnabled, onC
               </button>
             </div>
             <div className="h-3 w-px bg-white/[0.15]" />
-            {/* Font family — custom dropdown */}
+            {/* Font family - custom dropdown */}
             {(() => {
               const FONTS = [
                 { label: 'Inter',        value: '"Inter", system-ui, sans-serif' },
@@ -3261,7 +3261,7 @@ function SlideEditor({ slide, elements, image, isGenImg, t, imageGenEnabled, onC
         )}
       </div>
 
-      {/* Canvas — theme colors apply here. Zoom drives an explicit pixel
+      {/* Canvas - theme colors apply here. Zoom drives an explicit pixel
           size so the parent can scroll when the canvas exceeds the viewport. */}
       <div
         ref={canvasRef}
@@ -3282,7 +3282,7 @@ function SlideEditor({ slide, elements, image, isGenImg, t, imageGenEnabled, onC
           </>
         )}
 
-        {/* Smart-alignment guides — drawn above the slide content while the
+        {/* Smart-alignment guides - drawn above the slide content while the
             user is dragging or resizing an element. Cyan to read against any
             theme. They disappear the instant the pointer is released. */}
         {snapGuides.vx !== null && (
@@ -3503,7 +3503,7 @@ function ResizeHandle({ handle, color, onPointerDown }) {
 // Supports: text (with fontFamily, letterSpacing, lineHeight, optional `parts`
 // array for multi-color title spans), shape (rect / circle / pill, custom
 // radius). Sizing uses percentage units so the entire slide scales with its
-// container — no fixed-pixel layout math.
+// container - no fixed-pixel layout math.
 // ─────────────────────────────────────────────────────────────────────────────
 function RenderElement({ el, theme }) {
   if (el.kind === 'image') {
@@ -3542,7 +3542,7 @@ function RenderElement({ el, theme }) {
       }} />
     );
   }
-  // Text — supports multi-color spans via `parts`.
+  // Text - supports multi-color spans via `parts`.
   const baseStyle = {
     position: 'absolute',
     left: `${el.x}%`, top: `${el.y}%`,
@@ -3551,7 +3551,7 @@ function RenderElement({ el, theme }) {
     fontSize: `${el.fontSize || 24}px`,
     fontWeight: el.fontWeight || '400',
     fontStyle: el.italic ? 'italic' : 'normal',
-    // Fall back to the theme's text color, not bare white — light
+    // Fall back to the theme's text color, not bare white - light
     // themes were rendering uncolored text as white-on-white in both
     // the editor and the export.
     color: el.color || theme?.text || '#ffffff',
@@ -3580,7 +3580,7 @@ function RenderElement({ el, theme }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MINI SLIDE  — renders a real scaled-down version of the first slide
+// MINI SLIDE  - renders a real scaled-down version of the first slide
 // ─────────────────────────────────────────────────────────────────────────────
 function MiniSlide({ deck }) {
   const wrapRef = useRef(null);
@@ -3598,7 +3598,7 @@ function MiniSlide({ deck }) {
   const t = THEMES[themeKey] || THEMES.midnight;
   const slide = deck.firstSlide ?? { id: deck.id + '-ph', layout: 'title', title: deck.title };
   const img = slide.imageDataUrl || null;
-  // Always use the template renderer — bespoke HTML is designed at 1280×720
+  // Always use the template renderer - bespoke HTML is designed at 1280×720
   // and looks broken at gallery thumbnail scale (~22%). Template elements
   // scale cleanly like the slide rail thumbnails.
   const elements = useMemo(
@@ -3617,7 +3617,7 @@ function MiniSlide({ deck }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GALLERY CARD  — Keynote-style thumbnail card
+// GALLERY CARD  - Keynote-style thumbnail card
 // ─────────────────────────────────────────────────────────────────────────────
 function GalleryCard({ deck, onOpen, onDelete }) {
   const cardRef = useRef(null);
@@ -3647,7 +3647,7 @@ function GalleryCard({ deck, onOpen, onDelete }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GALLERY  — Keynote-style presentation library
+// GALLERY  - Keynote-style presentation library
 // ─────────────────────────────────────────────────────────────────────────────
 function Gallery({ decks, loading, onOpen, onDelete, onNew, onManual }) {
   return (
@@ -3717,7 +3717,7 @@ function Gallery({ decks, loading, onOpen, onDelete, onNew, onManual }) {
 // MANUAL CREATE FORM  (start from a template, no AI)
 // ─────────────────────────────────────────────────────────────────────────────
 const TEMPLATES = [
-  { id: 'blank',      label: 'Blank',       desc: 'Empty deck — start from scratch',          icon: '□' },
+  { id: 'blank',      label: 'Blank',       desc: 'Empty deck - start from scratch',          icon: '□' },
   { id: 'pitch',      label: 'Pitch Deck',  desc: 'Problem, solution, market, traction',      icon: '◈' },
   { id: 'lesson',     label: 'Lesson',      desc: 'Objective, vocabulary, activity, quiz',    icon: '◇' },
   { id: 'bookreport', label: 'Book Report', desc: 'Summary, themes, characters, opinion',     icon: '◉' },
@@ -3836,7 +3836,7 @@ const GEN_TEMPLATES = [
   { id: 'how-to',     label: 'How-To',      desc: 'Goal → prerequisites → steps → recap' },
 ];
 
-// Theme swatches for the generation screen picker — bg, title color, accent, muted
+// Theme swatches for the generation screen picker - bg, title color, accent, muted
 const GEN_THEMES = [
   { id: 'midnight', name: 'Midnight',  bg: '#0a0a16', title: '#ffffff', accent: '#a78bfa', muted: '#6b7280' },
   { id: 'slate',    name: 'Slate',     bg: '#0f172a', title: '#f8fafc', accent: '#38bdf8', muted: '#64748b' },
@@ -3882,7 +3882,7 @@ function ThemeSwatch({ theme, selected, onClick, disabled }) {
 }
 
 function GenerateForm({ onBack, onCreate }) {
-  // Flash mode is gone — advanced is the only path. `mode` stays in the
+  // Flash mode is gone - advanced is the only path. `mode` stays in the
   // payload so the existing server contract still works (it just always
   // sees 'advanced' now).
   const mode = 'advanced';
@@ -3905,7 +3905,7 @@ function GenerateForm({ onBack, onCreate }) {
   const [uploadError, setUploadError] = useState('');
 
   // Render's proxy buffers SSE so progress events arrive all at once at the
-  // end — run a smooth fake animation instead, capped at 90 so the final
+  // end - run a smooth fake animation instead, capped at 90 so the final
   // snap to 100 is visible when onDone fires.
   useEffect(() => {
     if (!loading) return;
@@ -3928,7 +3928,7 @@ function GenerateForm({ onBack, onCreate }) {
   }
 
   // Accept text files (.txt/.md/.csv) plus PDFs. PDFs go through the
-  // server-side `/api/files/extract` endpoint which uses pdf-parse — same
+  // server-side `/api/files/extract` endpoint which uses pdf-parse - same
   // path the Curricula app uses. Per-file upload state drives the
   // "uploading…" pill so users see PDF extraction in flight.
   async function handleFiles(files) {
@@ -3969,7 +3969,7 @@ function GenerateForm({ onBack, onCreate }) {
       } catch (e) {
         setUploadError(e.message || 'PDF upload failed');
       } finally {
-        // Drop staged entries — by-name dedupe; if two PDFs share a name
+        // Drop staged entries - by-name dedupe; if two PDFs share a name
         // this collapses them, which is fine because the result merge
         // above is also lossy on duplicates.
         setUploadingFiles(prev => prev.filter(u => !staged.some(s => s.name === u.name)));
@@ -4027,7 +4027,7 @@ function GenerateForm({ onBack, onCreate }) {
             <input
               value={topic} onChange={e => setTopic(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleGenerate()}
-              placeholder="Topic — e.g., French Revolution, Q3 Sales"
+              placeholder="Topic - e.g., French Revolution, Q3 Sales"
               disabled={loading} autoFocus
               className="w-full px-4 py-3 rounded-xl border border-white/[0.10] bg-white/[0.05] text-white/90 placeholder:text-white/20 text-[15px] outline-none focus:border-white/[0.25] focus:bg-white/[0.07] transition-all disabled:opacity-40"
             />
@@ -4077,7 +4077,7 @@ function GenerateForm({ onBack, onCreate }) {
           {/* 4. Source material */}
           <div>
             <label className="block text-[11px] font-semibold text-white/35 uppercase tracking-[0.14em] mb-2">
-              Source Material <span className="normal-case font-normal tracking-normal text-white/20">— optional · .pdf .txt .md .csv</span>
+              Source Material <span className="normal-case font-normal tracking-normal text-white/20">- optional · .pdf .txt .md .csv</span>
             </label>
             <input ref={fileInputRef} type="file" multiple accept=".pdf,.txt,.md,.csv,application/pdf,text/plain"
               className="hidden" onChange={e => { handleFiles(e.target.files); e.target.value = ''; }} />
@@ -4089,7 +4089,7 @@ function GenerateForm({ onBack, onCreate }) {
               className={`rounded-xl border border-dashed transition-colors cursor-pointer px-4 py-4 text-center ${dragOver ? 'border-white/40 bg-white/[0.07]' : 'border-white/[0.12] bg-white/[0.02] hover:bg-white/[0.04] hover:border-white/[0.20]'}`}
             >
               <p className="text-[12px] text-white/35">Drop files here or <span className="text-white/55 underline underline-offset-2">browse</span></p>
-              <p className="text-[10px] text-white/20 mt-0.5">PDFs and text files — AI uses them as the primary source of facts</p>
+              <p className="text-[10px] text-white/20 mt-0.5">PDFs and text files - AI uses them as the primary source of facts</p>
             </div>
             {(sourceFiles.length > 0 || uploadingFiles.length > 0) && (
               <div className="mt-2 flex flex-wrap gap-1.5">
@@ -4134,7 +4134,7 @@ function GenerateForm({ onBack, onCreate }) {
           {/* 6. Additional context */}
           <div>
             <label className="block text-[11px] font-semibold text-white/35 uppercase tracking-[0.14em] mb-2">
-              Notes <span className="normal-case font-normal tracking-normal text-white/20">— optional</span>
+              Notes <span className="normal-case font-normal tracking-normal text-white/20">- optional</span>
             </label>
             <textarea
               value={customInfo} onChange={e => setCustomInfo(e.target.value)}

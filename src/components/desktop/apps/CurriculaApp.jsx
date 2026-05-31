@@ -3,6 +3,7 @@ import { ArrowLeft, Plus, Sparkles, Loader2, BookOpen, ChevronDown, ChevronRight
 import { listCurricula, generateCurriculum, getCurriculum, sendLessonMessage, getLessonHistory, editCurriculumWithAI, extractSourceUrl, extractFiles, refineCurriculum } from '../../../api/curriculum';
 import { peek, fetchOnce, bust } from '../../../api/cache';
 import ViewFade from '../../shared/ViewFade';
+import { useToast } from '../../shared/Toast';
 import { apiFetch } from '../../../api/client';
 import { useWindowManager } from '../../../context/WindowManagerContext';
 import { useDemoMode } from '../../../context/DemoModeContext';
@@ -37,8 +38,9 @@ const TYPE_COLORS = { lesson: 'text-white/50', math_tutor: 'text-white/50', prac
 // / `seedSources` to pre-fill the topic field and attached sources.
 export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) {
   const { user } = useAuth();
+  const toast = useToast();
   const isBeta = !!user?.data?.isBeta;
-  // Trail view (BETA) — gamifies the curriculum into a Duolingo-style
+  // Trail view (BETA) - gamifies the curriculum into a Duolingo-style
   // zigzag path. Persists per-curriculum in localStorage so toggling
   // back to list view is a one-click thing.
   const [trailMode, setTrailMode] = useState(() => {
@@ -52,7 +54,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
     });
   }
   // Seed the view from `seedView` prop (passed via window meta when another
-  // app — e.g. NotesApp — opens this one with "Build Curriculum from this
+  // app - e.g. NotesApp - opens this one with "Build Curriculum from this
   // note"). Safe to use directly as the initial state now that useBrowserBack
   // below skips 'new'/'pausd' (see comment there).
   const [view, setView] = useState(seedView || 'list');
@@ -61,7 +63,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
   const [curricula, setCurricula] = useState(() => cachedCurricula?.curricula || []);
   const [loading, setLoading] = useState(!cachedCurricula);
   const [selectedCurriculum, setSelectedCurriculum] = useState(null);
-  // WindowManager is optional — the desktop shell provides it, but if this
+  // WindowManager is optional - the desktop shell provides it, but if this
   // component is ever rendered outside of one (mobile, for instance) we
   // just skip the math-tutor handoff rather than crashing.
   let wm = null;
@@ -70,7 +72,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
 
   // Browser Back navigates up one level inside the curriculum stack instead
   // of leaving the SPA. lesson / math_tutor / assessment → detail → list.
-  // Excludes 'new' and 'pausd' — those are top-level sibling views to
+  // Excludes 'new' and 'pausd' - those are top-level sibling views to
   // 'list', not drill-downs, and intercepting Back for them caused a
   // StrictMode race that flipped a seeded 'new' view back to 'list'.
   useBrowserBack(view !== 'list' && view !== 'new' && view !== 'pausd', () => {
@@ -93,7 +95,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
   const abortRef = useRef(null);
   const autoStarted = useRef(false);
 
-  // New curriculum — seeded topic (e.g. a note title) goes into the
+  // New curriculum - seeded topic (e.g. a note title) goes into the
   // settings on first mount.
   const [settings, setSettings] = useState(() => (
     seedTopic ? { ...DEFAULT_SETTINGS, topic: seedTopic } : DEFAULT_SETTINGS
@@ -175,7 +177,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
       setView('detail');
     } catch (e) {
       console.error('Enroll failed:', e);
-      alert('Failed to enroll: ' + (e?.message || 'unknown error'));
+      toast.error('Failed to enroll: ' + (e?.message || 'unknown error'));
     }
     setEnrollingSlug(null);
   }
@@ -184,7 +186,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
     if (!settings.topic.trim() || generating) return;
     setGenerating(true); setGenError(null);
 
-    // Always pause to ask clarifying questions before building — keeps the
+    // Always pause to ask clarifying questions before building - keeps the
     // curriculum aligned with the student's actual ask, not just the bare
     // topic string. If they already pre-answered some via the Refine panel
     // (refineQuestions populated), skip the fetch and jump straight to build.
@@ -195,12 +197,12 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
         const list = Array.isArray(questions) ? questions : [];
         setRefineQuestions(list);
         if (list.length === 0) {
-          // API returned no questions — nothing to ask, build immediately.
+          // API returned no questions - nothing to ask, build immediately.
           await runBuild();
         }
         // Otherwise wait for the user to answer + click "Build curriculum".
       } catch (err) {
-        // Couldn't fetch questions — surface a soft warning and build anyway
+        // Couldn't fetch questions - surface a soft warning and build anyway
         // so the user isn't stuck.
         setGenError(`Couldn't fetch clarifying questions: ${err?.message || 'unknown error'}. Building with your settings…`);
         await runBuild();
@@ -215,7 +217,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
     setGenPhase('building');
     try {
       // Strip the local id (used only for React keys + remove-button) before
-      // sending — server doesn't care about it.
+      // sending - server doesn't care about it.
       const cleanSources = sources.map(({ id, ...rest }) => rest); // eslint-disable-line no-unused-vars
       // Fold the Q&A from the refine step into settings so the prompt can
       // anchor the curriculum to the student's actual ask.
@@ -307,7 +309,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
       setView('math_tutor');
       return;
     }
-    // Practice lessons (math canvas) — also embed inline for now via the
+    // Practice lessons (math canvas) - also embed inline for now via the
     // same math-tutor flow seeded with a "give me practice problems" prompt.
     if (lesson.type === 'practice') {
       setView('math_tutor');
@@ -374,7 +376,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
     doSendLesson(text, null, null, { images });
   }, [streaming, currentLesson]);
 
-  // ===== Assessment (unit_test / essay) — real quiz, not a chat tutor =====
+  // ===== Assessment (unit_test / essay) - real quiz, not a chat tutor =====
   if (view === 'assessment' && currentLesson) {
     return (
       <ViewFade viewKey={`assessment:${currentLesson.id}`} className="h-full flex flex-col">
@@ -387,7 +389,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
     );
   }
 
-  // ===== Math Tutor — embedded inline. The MathTutorApp component is
+  // ===== Math Tutor - embedded inline. The MathTutorApp component is
   // re-used here with a seedTopic prop so it auto-starts on this lesson's
   // topic without going through its own setup view. Both 'math_tutor' and
   // 'practice' lesson types route here; the seed prompt is slightly
@@ -408,7 +410,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
         </div>
         <div className="flex-1 min-h-0">
           <MathTutorApp
-            seedTopic={isPractice ? `Practice problems on ${seed}. Give me one problem at a time on the canvas — start at moderate difficulty and escalate.` : seed}
+            seedTopic={isPractice ? `Practice problems on ${seed}. Give me one problem at a time on the canvas - start at moderate difficulty and escalate.` : seed}
             onBack={() => setView('detail')}
           />
         </div>
@@ -456,7 +458,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
       const userMsgSnapshot = lessonMessages[userIdx];
       if (abortRef.current) try { abortRef.current(); } catch {}
       setLessonMessages(prev => [...prev.slice(0, userIdx), userMsgSnapshot]);
-      const hidden = `${prevUserText}\n\n[SYSTEM NOTE: Regenerate your previous answer — this time ${instruction.trim()}. Do NOT acknowledge this instruction. Just output the revised answer directly.]`;
+      const hidden = `${prevUserText}\n\n[SYSTEM NOTE: Regenerate your previous answer - this time ${instruction.trim()}. Do NOT acknowledge this instruction. Just output the revised answer directly.]`;
       setTimeout(() => doSendLessonRegenerate(hidden), 30);
     }
 
@@ -534,7 +536,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
                     ? 'border-white/25 bg-white/15 text-white'
                     : 'border-white/10 text-white/50 hover:border-white/25 hover:text-white/80'
                 }`}
-                title="Trail view (BETA) — gamified curriculum path"
+                title="Trail view (BETA) - gamified curriculum path"
               >
                 {trailMode ? <List size={12} /> : <MapIcon size={12} />}
                 {trailMode ? 'List view' : 'Trail'}
@@ -612,7 +614,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
                 <h3 className="text-sm font-semibold text-white">A few quick questions</h3>
               </div>
               <p className="text-[12px] text-blue-100/55 mb-4 pl-9">
-                So the curriculum for <span className="text-blue-100/85 font-medium">{settings.topic}</span> matches what you actually want — pick the option that fits, or skip the ones you don't have an opinion on.
+                So the curriculum for <span className="text-blue-100/85 font-medium">{settings.topic}</span> matches what you actually want - pick the option that fits, or skip the ones you don't have an opinion on.
               </p>
               {genError && (
                 <div className="px-3 py-2 mb-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-300">
@@ -671,7 +673,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
                   })}
                   <div className="flex items-center justify-between pt-2">
                     <p className="text-[10px] text-blue-200/45">
-                      {Object.values(refineAnswers).filter(a => a && String(a).trim()).length}/{refineQuestions.length} answered — unanswered questions are skipped.
+                      {Object.values(refineAnswers).filter(a => a && String(a).trim()).length}/{refineQuestions.length} answered - unanswered questions are skipped.
                     </p>
                     <div className="flex items-center gap-2">
                       <button
@@ -702,7 +704,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
             </div>
             {isDemo && (
               <div className="mt-6 max-w-sm mx-auto text-center rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-4 py-3">
-                <p className="text-[12px] font-semibold text-amber-800 dark:text-amber-300">Don&apos;t leave or close — request will cancel.</p>
+                <p className="text-[12px] font-semibold text-amber-800 dark:text-amber-300">Don&apos;t leave or close - request will cancel.</p>
               </div>
             )}
           </div>
@@ -805,7 +807,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
     );
   }
 
-  // PAUSD catalog view — browse and enroll in pre-built courses
+  // PAUSD catalog view - browse and enroll in pre-built courses
   if (view === 'pausd') {
     return (
       <ViewFade viewKey="pausd" className="h-full flex flex-col">
@@ -936,7 +938,7 @@ function UnitSection({ unit, onOpenLesson }) {
   );
 }
 
-// ============= Real assessment UI — handles both quiz and essay =============
+// ============= Real assessment UI - handles both quiz and essay =============
 //
 // Quiz path now uses the same `<QuizBlock>` component the in-lesson
 // quizzes use, so the look + feel is consistent across the entire
@@ -1190,7 +1192,7 @@ function AssessmentView({ lesson, curriculum, onBack }) {
           </div>
         )}
 
-        {/* ===== QUIZ — same UI as in-lesson QuizBlock ===== */}
+        {/* ===== QUIZ - same UI as in-lesson QuizBlock ===== */}
         {!loading && !error && assessment && !result && !isEssay && block && (
           <QuizBlock
             block={block}
@@ -1199,7 +1201,7 @@ function AssessmentView({ lesson, curriculum, onBack }) {
           />
         )}
 
-        {/* ===== RESULT — ESSAY ===== */}
+        {/* ===== RESULT - ESSAY ===== */}
         {result && isEssay && (
           <div className="space-y-4">
             {/* Score hero */}
@@ -1449,7 +1451,7 @@ function EditCurriculumModal({ curriculum, onClose, onUpdated }) {
 }
 
 // =============================================================
-// PAUSD Catalog browser — grid of pre-built courses, grouped by
+// PAUSD Catalog browser - grid of pre-built courses, grouped by
 // subject. Tap a course → enroll → opens the cloned curriculum
 // in detail view (handled by parent).
 // =============================================================
@@ -1483,7 +1485,7 @@ function PausdCatalogView({ catalog, loading, enrollingSlug, onBack, onEnroll })
           <h2 className="text-lg font-bold text-white">PAUSD Common Core Catalog</h2>
         </div>
         <p className="text-xs text-white/45">
-          Pre-built courses tuned to PAUSD rigor — significantly above the standard Common Core label.
+          Pre-built courses tuned to PAUSD rigor - significantly above the standard Common Core label.
           Lessons are taught one-on-one by the AI tutor with built-in quizzes, progress tracking, and per-unit assessments.
           Tap a course to enroll.
         </p>
@@ -1530,7 +1532,7 @@ function PausdCatalogView({ catalog, loading, enrollingSlug, onBack, onEnroll })
 }
 
 function PausdCourseCard({ course, enrolling, onEnroll, tourAnchor }) {
-  // Uniform card style — every PAUSD course is honors-tier so no special
+  // Uniform card style - every PAUSD course is honors-tier so no special
   // accent is needed. Subtle gray border with a blue hover state.
   return (
     <button

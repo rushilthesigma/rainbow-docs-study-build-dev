@@ -1,6 +1,6 @@
 /**
  * Hand-written dense linear-algebra primitives. Used by the MNA solver in
- * `solver.ts` — we LU-decompose the system matrix in place and back-substitute.
+ * `solver.ts` - we LU-decompose the system matrix in place and back-substitute.
  *
  * Matrices are row-major Float64Arrays of length n*n.
  */
@@ -32,7 +32,7 @@ export function solve(A: Matrix, b: Vector, n: number): Vector {
   for (let i = 0; i < n; i++) piv[i] = i;
 
   for (let k = 0; k < n; k++) {
-    // Partial pivot — find row r ≥ k with max |M[r,k]|
+    // Partial pivot - find row r ≥ k with max |M[r,k]|
     let maxR = k;
     let maxV = Math.abs(M[k * n + k]);
     for (let r = k + 1; r < n; r++) {

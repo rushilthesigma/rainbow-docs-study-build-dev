@@ -1,4 +1,4 @@
-# PRD — Covalent AI UI Bug Fixes & Hardening
+# PRD - Covalent AI UI Bug Fixes & Hardening
 
 **Status:** Draft
 **Date:** 2026-05-16
@@ -42,7 +42,7 @@ An audit surfaced consistent issues across accessibility, error handling, compon
 
 Each section lists concrete items. Priority: **P0** (ship first; user-visible or safety), **P1** (next; quality + maintainability), **P2** (nice-to-have).
 
-### 5.1 Error Handling & Failure Visibility — P0
+### 5.1 Error Handling & Failure Visibility - P0
 
 **Problem:** 37 empty `catch {}` blocks across `MiniOS.jsx`, `StudyModePanel.jsx`, `DebatePanel.jsx`. Failures (API errors, clipboard, file extract) disappear; users see a stuck spinner or no feedback.
 
@@ -55,20 +55,20 @@ Each section lists concrete items. Priority: **P0** (ship first; user-visible or
 
 **Acceptance:** grep `catch\s*\{\s*\}` returns 0. Forcing a fetch to fail in dev surfaces a toast on every affected flow.
 
-### 5.2 Accessibility — P0
+### 5.2 Accessibility - P0
 
 **Problem:** 32 aria attributes across 125+ interactive controls; `Modal.jsx` is not a real dialog; icon-only buttons unlabeled; form labels not linked.
 
 **Requirements:**
-- `Modal.jsx`: add `role="dialog"`, `aria-modal="true"`, focus trap on open, restore focus on close, `Esc` to close, close button `aria-label="Close"`. Restore `document.body.overflow` on unmount, not just close (current code leaks if unmounted while open — [Modal.jsx:8-10](src/components/shared/Modal.jsx)).
+- `Modal.jsx`: add `role="dialog"`, `aria-modal="true"`, focus trap on open, restore focus on close, `Esc` to close, close button `aria-label="Close"`. Restore `document.body.overflow` on unmount, not just close (current code leaks if unmounted while open - [Modal.jsx:8-10](src/components/shared/Modal.jsx)).
 - `Input.jsx` + `Textarea`: associate `<label htmlFor>` with input `id`; accept `error` prop and render it with `aria-describedby`; pass through `required`, `pattern`, `min`, `max`. ([Input.jsx:1-23](src/components/shared/Input.jsx))
 - Every icon-only button in `Dock`, `MenuBar`, `Spotlight`, `ChatInput`, `Window` controls: add `aria-label`.
-- `Spotlight.jsx`: `role="combobox"` on input, `role="listbox"` on results, `aria-selected` on the active item, arrow-key navigation already exists — wire it to `aria-activedescendant`.
+- `Spotlight.jsx`: `role="combobox"` on input, `role="listbox"` on results, `aria-selected` on the active item, arrow-key navigation already exists - wire it to `aria-activedescendant`.
 - `ChatMessage.jsx`: alt text on inline images; ensure math (KaTeX) blocks have textual fallback via `aria-label` derived from source LaTeX.
 
 **Acceptance:** axe-core run on each page reports 0 critical issues. Tabbing through a modal stays inside the modal.
 
-### 5.3 Z-Index Layer System — P0
+### 5.3 Z-Index Layer System - P0
 
 **Problem:** 12+ ad-hoc values (`z-[60]` mobile sheets behind `z-[100]` desktop; two components both at `z-[2000]`). `ContextMenu.jsx` uses brittle string matching `[class*="z-[1100]"]`.
 
@@ -84,19 +84,19 @@ Each section lists concrete items. Priority: **P0** (ship first; user-visible or
 
 **Acceptance:** grep `z-\[\d` returns only the constants file. Opening a modal from inside a maximized window never lands behind the window.
 
-### 5.4 Component Splitting — P1
+### 5.4 Component Splitting - P1
 
 **Problem:** `SlideshowApp.jsx` 4176 LOC, `DebatePanel.jsx` 2526 LOC, `CurriculaApp.jsx` 1377 LOC, `AdminApp.jsx` 915 LOC. Hard to debug; rendering bugs hide in long switch statements.
 
 **Requirements:**
-- **SlideshowApp** → split into: `themes/` (theme objects, currently hex literals lines 40–100), `layouts/` (one file per slide layout from lines 200–300), `useSlideshowState` hook, `SlideRenderer.jsx`, `SlideshowToolbar.jsx`, `SlideshowControls.jsx`.
+- **SlideshowApp** → split into: `themes/` (theme objects, currently hex literals lines 40-100), `layouts/` (one file per slide layout from lines 200-300), `useSlideshowState` hook, `SlideRenderer.jsx`, `SlideshowToolbar.jsx`, `SlideshowControls.jsx`.
 - **DebatePanel** → `useDebateMachine` hook (state machine), `TournamentBracket.jsx`, `DebateTurn.jsx`, presentational subcomponents.
 - **CurriculaApp**, **AdminApp**, **StudyModePanel**: extract data fetching into hooks, lift inline modals to siblings, keep top-level component < 400 LOC.
 - No behavior change. Visual regression check by hand on the golden path of each app before/after.
 
 **Acceptance:** no source file > 800 LOC. SlideshowApp split into ≥6 files.
 
-### 5.5 Styling Discipline & Design Tokens — P1
+### 5.5 Styling Discipline & Design Tokens - P1
 
 **Problem:** 176 inline `style={…}` usages mixed with Tailwind; hex colors hardcoded in themes; magic numbers (`MOBILE_BREAKPOINT = 768`, animation delays `0.15s`, `0.3s`, modal heights `560`).
 
@@ -108,7 +108,7 @@ Each section lists concrete items. Priority: **P0** (ship first; user-visible or
 
 **Acceptance:** inline-style usage < 40. No raw `#rrggbb` literals in components (only in `themes.js` / Tailwind config).
 
-### 5.6 Responsive & Overflow Fixes — P1
+### 5.6 Responsive & Overflow Fixes - P1
 
 **Problem:** Fixed pixel heights (`MiniOS.jsx:105` height 560), maximized window math doesn't account for variable menu bar heights ([Window.jsx:48-52](src/components/desktop/Window.jsx)), modal `max-w-md` cramps on mobile, `SplitView` child panels don't manage their own overflow.
 
@@ -116,12 +116,12 @@ Each section lists concrete items. Priority: **P0** (ship first; user-visible or
 - `Window.jsx`: read actual menu bar height from a ref or context; clamp drag position to viewport on `window.resize`.
 - `MiniOS.jsx`: use `aspect-ratio` + max-height instead of fixed `560`.
 - `Modal.jsx`: `max-w-md` on `sm+` only; full-bleed minus 16px on mobile; max-height with internal scroll.
-- `SplitView.jsx`: enforce min/max ratio (e.g., 20–80%) with visual snap; add `overflow:auto` on child wrappers.
-- Tablet pass: walk each page at 768–1024px and fix overflow / wrap issues.
+- `SplitView.jsx`: enforce min/max ratio (e.g., 20-80%) with visual snap; add `overflow:auto` on child wrappers.
+- Tablet pass: walk each page at 768-1024px and fix overflow / wrap issues.
 
 **Acceptance:** Manual sweep at 360 / 768 / 1024 / 1440 widths, no clipped or overlapping elements on golden paths.
 
-### 5.7 Loading, Empty, and Validation States — P1
+### 5.7 Loading, Empty, and Validation States - P1
 
 **Problem:** Skeleton loaders absent; empty deck/note/goal lists show nothing; quiz submission allows incomplete answers; debate topic fetch has no "no results" branch.
 
@@ -133,18 +133,18 @@ Each section lists concrete items. Priority: **P0** (ship first; user-visible or
 
 **Acceptance:** Every list screen renders meaningfully when the data array is empty or still loading.
 
-### 5.8 Dead Code Cleanup — P2
+### 5.8 Dead Code Cleanup - P2
 
 - Remove `MathPracticePage` import in [App.jsx:16](src/App.jsx) referenced in comment as already folded into `MathTutorApp`.
 - Sweep unused `lucide-react` imports across components (`SlideshowApp.jsx` named several).
 - Audit `LandingPage.jsx` (668 LOC) for abandoned MiniOS demo branches.
 
-### 5.9 Streaming State Hygiene — P2
+### 5.9 Streaming State Hygiene - P2
 
-- `ChatContainer.jsx` / `StudyModePanel.jsx`: pick one — either a ref accumulator with periodic `flushSync` to state, or pure state. Current dual-source (`streamRef.current` + `setStreamContent(streamRef.current)`) is flaky.
+- `ChatContainer.jsx` / `StudyModePanel.jsx`: pick one - either a ref accumulator with periodic `flushSync` to state, or pure state. Current dual-source (`streamRef.current` + `setStreamContent(streamRef.current)`) is flaky.
 - Add an `AbortController` to every SSE/fetch so unmount cancels in-flight requests.
 
-### 5.10 Dependency Hygiene — P2
+### 5.10 Dependency Hygiene - P2
 
 - Verify `@google/generative-ai ^0.24.1` is still current; bump if breaking changes affect chat.
 - Confirm `stripe ^22.0.2` is intentional (no billing UI shipped yet; remove if unused).
@@ -161,9 +161,9 @@ Each section lists concrete items. Priority: **P0** (ship first; user-visible or
 
 | Phase | Contents | Rough size |
 | --- | --- | --- |
-| **Phase 1 — Safety net (P0)** | 5.1 error handling, 5.2 accessibility on shared primitives (`Modal`, `Input`, icon buttons), 5.3 z-index tokens, add `ErrorBoundary` | 1 focused week |
-| **Phase 2 — Splits & primitives (P1)** | 5.4 split `SlideshowApp` and `DebatePanel`, 5.5 design tokens & inline-style cleanup, 5.7 empty/loading/validation states | 2 weeks |
-| **Phase 3 — Polish (P1/P2)** | 5.6 responsive sweep, 5.8 dead code, 5.9 streaming hygiene, 5.10 deps | 1 week |
+| **Phase 1 - Safety net (P0)** | 5.1 error handling, 5.2 accessibility on shared primitives (`Modal`, `Input`, icon buttons), 5.3 z-index tokens, add `ErrorBoundary` | 1 focused week |
+| **Phase 2 - Splits & primitives (P1)** | 5.4 split `SlideshowApp` and `DebatePanel`, 5.5 design tokens & inline-style cleanup, 5.7 empty/loading/validation states | 2 weeks |
+| **Phase 3 - Polish (P1/P2)** | 5.6 responsive sweep, 5.8 dead code, 5.9 streaming hygiene, 5.10 deps | 1 week |
 
 Each phase ends with a manual walkthrough on the golden paths (Dashboard → Study → Slideshow → Debate → Flashcards) at three viewport widths.
 
@@ -172,7 +172,7 @@ Each phase ends with a manual walkthrough on the golden paths (Dashboard → Stu
 - **Splitting `SlideshowApp` (4176 LOC) risks behavior drift.** Mitigate by extracting one layout/theme at a time, smoke-testing each slide layout after each move.
 - **Modal/focus-trap changes can break existing flows** (Spotlight, ContextMenu interact with overlays). Verify keyboard nav on every modal-bearing screen.
 - **Error toasts may surface failures that were previously silent and "fine".** Expect a short bump in reported "new bugs" that are actually pre-existing.
-- **Tailwind v4 + design tokens:** v4's CSS-first config differs from v3 — confirm `@theme` block is where tokens live before scattering them.
+- **Tailwind v4 + design tokens:** v4's CSS-first config differs from v3 - confirm `@theme` block is where tokens live before scattering them.
 
 ## 9. Open Questions
 
@@ -180,20 +180,20 @@ Each phase ends with a manual walkthrough on the golden paths (Dashboard → Stu
 - Are mobile users a first-class audience or a fallback? Drives how much budget Phase 3 mobile pass gets.
 - Should `ErrorBoundary` report to a telemetry endpoint, or just render a friendly fallback locally?
 
-## 10. Appendix — Concrete File References
+## 10. Appendix - Concrete File References
 
 | Area | File | Lines |
 | --- | --- | --- |
 | Silent catches | [src/components/study/DebatePanel.jsx](src/components/study/DebatePanel.jsx) | 1858 |
 | Silent catches | [src/components/study/StudyModePanel.jsx](src/components/study/StudyModePanel.jsx) | 127, 277, 291 |
-| Modal a11y | [src/components/shared/Modal.jsx](src/components/shared/Modal.jsx) | 8–10, 24–28 |
-| Input a11y | [src/components/shared/Input.jsx](src/components/shared/Input.jsx) | 1–23 |
+| Modal a11y | [src/components/shared/Modal.jsx](src/components/shared/Modal.jsx) | 8-10, 24-28 |
+| Input a11y | [src/components/shared/Input.jsx](src/components/shared/Input.jsx) | 1-23 |
 | Inline styles | [src/components/chat/ChatInput.jsx](src/components/chat/ChatInput.jsx) | 150 |
-| Inline styles | [src/components/chat/ChatMessage.jsx](src/components/chat/ChatMessage.jsx) | 114–120 |
+| Inline styles | [src/components/chat/ChatMessage.jsx](src/components/chat/ChatMessage.jsx) | 114-120 |
 | Inline styles | [src/components/layout/SplitView.jsx](src/components/layout/SplitView.jsx) | 46 |
-| Window sizing | [src/components/desktop/Window.jsx](src/components/desktop/Window.jsx) | 48–52, 84–85 |
+| Window sizing | [src/components/desktop/Window.jsx](src/components/desktop/Window.jsx) | 48-52, 84-85 |
 | MiniOS fixed height | [src/components/landing/MiniOS.jsx](src/components/landing/MiniOS.jsx) | 105 (560 px) |
-| Monolithic component | [src/components/desktop/apps/SlideshowApp.jsx](src/components/desktop/apps/SlideshowApp.jsx) | themes 40–100, layouts 200–300 |
+| Monolithic component | [src/components/desktop/apps/SlideshowApp.jsx](src/components/desktop/apps/SlideshowApp.jsx) | themes 40-100, layouts 200-300 |
 | Monolithic component | [src/components/study/DebatePanel.jsx](src/components/study/DebatePanel.jsx) | full file 2526 LOC |
 | Stale import | [src/App.jsx](src/App.jsx) | 16 |
-| Server error shape | [server.js](server.js) | 52, 94–97 |
+| Server error shape | [server.js](server.js) | 52, 94-97 |

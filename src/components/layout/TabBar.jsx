@@ -23,7 +23,7 @@ export default function TabBar({ onToggleSidebar, showHamburger = false }) {
         </button>
       )}
 
-      {/* Tabs area — scrollable */}
+      {/* Tabs area - scrollable */}
       <div className="flex items-end gap-0 flex-1 min-w-0 overflow-x-auto scrollbar-hide pt-1">
         {tabs.map(tab => {
           const isActive = tab.id === activeTabId;
