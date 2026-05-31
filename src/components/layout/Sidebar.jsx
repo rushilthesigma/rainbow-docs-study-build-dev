@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Plus, MessageSquare, Target, Layers, FileText,
-  Settings, LogOut, BookOpen, Swords, Network,
+  Settings, LogOut, BookOpen, Scale, Network,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -13,7 +13,7 @@ const navItems = [
   { to: '/flashcards', icon: Layers, label: 'Flashcards' },
   { to: '/notes', icon: FileText, label: 'Notes' },
   { to: '/notes/map', icon: Network, label: 'Note Map' },
-  { to: '/debate', icon: Swords, label: 'Debate' },
+  { to: '/debate', icon: Scale, label: 'Debate' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 

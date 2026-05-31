@@ -519,7 +519,7 @@ export default function QuizBowlApp() {
   if (view === 'playing' && q) {
     const isInfinite = playingSource === 'qbreader';
     return (
-      <div className="flex flex-col h-full bg-transparent">
+      <ViewFade viewKey={`playing:${currentQ}`} className="flex flex-col h-full bg-transparent">
         <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/[0.04] flex-shrink-0 relative">
           <Zap size={14} className="text-white/50" />
           <span className="text-[13px] font-bold text-white tabular-nums">
@@ -642,7 +642,7 @@ export default function QuizBowlApp() {
             </>
           )}
         </div>
-      </div>
+      </ViewFade>
     );
   }
 

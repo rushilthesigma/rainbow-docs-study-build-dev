@@ -8,6 +8,22 @@ import ChatContainer from '../chat/ChatContainer';
 import { errorChatMessage } from '../../utils/aiErrors';
 import { InlineProgress } from '../shared/ProgressBar';
 import { useToast } from '../shared/Toast';
+import ViewFade from '../shared/ViewFade';
+
+// Group sub-modes by which top-level component owns them. Switching
+// between groups (e.g. menu → single-setup) triggers a fade + remount;
+// switching within a group (single-setup → single-debate) keeps the
+// owning component mounted so its in-flight state (messages, verdict,
+// streaming buffers) survives, and the inner phase fade lives inside
+// the owner instead.
+function modeGroup(mode) {
+  if (mode === 'menu') return 'menu';
+  if (mode === 'history') return 'history';
+  if (mode.startsWith('tour-')) return 'tour';
+  if (mode.startsWith('single-')) return 'single';
+  if (mode.startsWith('mp-')) return 'mp';
+  return mode;
+}
 
 // =========================================================
 // DEBATE PANEL — embedded inside Study Mode (no longer a top-level app).
@@ -201,9 +217,6 @@ export default function DebatePanel({ onBack }) {
       ) : (
         <span className="w-[22px]" aria-hidden="true" />
       )}
-      <div className="w-7 h-7 rounded-xl bg-white/20 dark:bg-white/10 border border-white/40 dark:border-white/15 flex items-center justify-center text-white/80 flex-shrink-0">
-        <Swords size={13} />
-      </div>
       <span className="text-[13px] font-bold text-white">Debate</span>
       <span className="text-[10px] font-semibold uppercase tracking-wider text-white/50">
         {mode === 'menu' && 'Pick a mode'}
@@ -224,6 +237,7 @@ export default function DebatePanel({ onBack }) {
     <div className="h-full flex flex-col">
       {header}
       <div className="flex-1 min-h-0 overflow-y-auto">
+        <ViewFade viewKey={modeGroup(mode)}>
         {mode === 'menu' && (
           <ModeMenu
             onSelect={selectMode}
@@ -257,6 +271,7 @@ export default function DebatePanel({ onBack }) {
             forceTimed={forceTimed}
           />
         )}
+        </ViewFade>
       </div>
     </div>
   );
@@ -1540,7 +1555,7 @@ function Singleplayer({ mode, setMode, onExit }) {
   // SETUP
   if (mode === 'single-setup') {
     return (
-      <div className="p-6 md:p-10 max-w-md md:max-w-2xl mx-auto">
+      <ViewFade viewKey="single-setup" className="p-6 md:p-10 max-w-md md:max-w-2xl mx-auto">
         <button onClick={onExit} className="text-xs text-blue-300/60 hover:text-blue-200 mb-3 inline-flex items-center gap-1 transition-colors">
           <ArrowLeft size={12} /> Back
         </button>
@@ -1568,7 +1583,7 @@ function Singleplayer({ mode, setMode, onExit }) {
           </>
         )}
         {error && <p className="mt-3 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/25 rounded-lg px-3 py-2">{error}</p>}
-      </div>
+      </ViewFade>
     );
   }
 
@@ -1577,7 +1592,7 @@ function Singleplayer({ mode, setMode, onExit }) {
     const won = verdict.winner === 'student';
     const tie = verdict.winner === 'tie';
     return (
-      <div className="p-6 md:p-10 max-w-lg md:max-w-3xl mx-auto">
+      <ViewFade viewKey="single-verdict" className="p-6 md:p-10 max-w-lg md:max-w-3xl mx-auto">
         <div className="rounded-2xl p-5 mb-4 text-center bg-blue-500/10 border border-blue-500/30">
           <Trophy size={32} className="mx-auto mb-2 text-blue-300" />
           <p className="text-2xl font-black text-gray-900 dark:text-white uppercase tracking-wider">
@@ -1612,7 +1627,7 @@ function Singleplayer({ mode, setMode, onExit }) {
         <button onClick={onExit} className="w-full py-2.5 rounded-xl bg-blue-500 text-white text-sm font-semibold border border-blue-400/40 hover:bg-blue-400 transition-all inline-flex items-center justify-center gap-2">
           <ArrowLeft size={14} /> Back to menu
         </button>
-      </div>
+      </ViewFade>
     );
   }
 
@@ -1634,7 +1649,7 @@ function Singleplayer({ mode, setMode, onExit }) {
   );
 
   return (
-    <div className="h-full flex flex-col">
+    <ViewFade viewKey="single-debate" className="h-full flex flex-col">
       {error && <p className="px-4 py-2 text-xs text-rose-300 bg-rose-500/10 border-b border-rose-500/20">{error}</p>}
       <ChatContainer
         messages={messages}
@@ -1646,7 +1661,7 @@ function Singleplayer({ mode, setMode, onExit }) {
         className="h-full"
         flush
       />
-    </div>
+    </ViewFade>
   );
 }
 
@@ -1980,7 +1995,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
   // ===== MENU (Create / Join) =====
   if (mode === 'mp-menu') {
     return (
-      <div className="p-6 md:p-10 max-w-md md:max-w-2xl mx-auto">
+      <ViewFade viewKey="mp-menu" className="p-6 md:p-10 max-w-md md:max-w-2xl mx-auto">
         <button onClick={onExit} className="text-xs text-blue-300/60 hover:text-blue-200 mb-3 inline-flex items-center gap-1 transition-colors">
           <ArrowLeft size={12} /> Back
         </button>
@@ -2018,7 +2033,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
           </button>
         </div>
         {error && <p className="mt-3 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/25 rounded-lg px-3 py-2">{error}</p>}
-      </div>
+      </ViewFade>
     );
   }
 
@@ -2031,7 +2046,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
     const iAmReady = readySet.has(myId);
     const allReady = opponentJoined && match.players.every(p => readySet.has(p.userId));
     return (
-      <div className="p-6 md:p-10 max-w-md md:max-w-2xl mx-auto">
+      <ViewFade viewKey="mp-lobby" className="p-6 md:p-10 max-w-md md:max-w-2xl mx-auto">
         <p className="text-[11px] uppercase tracking-[0.18em] text-blue-400/70 mb-1.5">Match code</p>
         <button
           onClick={copyCode}
@@ -2192,7 +2207,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
         )}
 
         {error && <p className="mt-3 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/25 rounded-lg px-3 py-2">{error}</p>}
-      </div>
+      </ViewFade>
     );
   }
 
@@ -2232,7 +2247,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
       : `${Math.max(myTurnsUsed, oppTurnsUsed)} · ∞`;
 
     return (
-      <div className="h-full flex flex-col relative">
+      <ViewFade viewKey="mp-game" className="h-full flex flex-col relative">
         {/* Topic + scoreboard */}
         <div className="px-4 py-2 bg-transparent">
           <p className="text-xs text-white/80 font-medium truncate">{match.topic}</p>
@@ -2591,7 +2606,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
             </div>
           </div>
         )}
-      </div>
+      </ViewFade>
     );
   }
 
@@ -2602,7 +2617,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
     const won = v.winner === me?.side;
     const tie = v.winner === 'tie';
     return (
-      <div className="p-6 max-w-lg mx-auto">
+      <ViewFade viewKey="mp-verdict" className="p-6 max-w-lg mx-auto">
         <div className="rounded-2xl p-5 mb-4 text-center bg-blue-500/10 border border-blue-500/30">
           <Trophy size={32} className="mx-auto mb-2 text-blue-300" />
           <p className="text-2xl font-black uppercase tracking-wider text-gray-900 dark:text-white">
@@ -2631,7 +2646,7 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
         <button onClick={onExit} className="w-full py-2.5 rounded-xl bg-blue-500 text-white text-sm font-semibold border border-blue-400/40 hover:bg-blue-400 transition-all inline-flex items-center justify-center gap-2">
           <ArrowLeft size={14} /> {tournamentCode ? 'Back to bracket' : 'Back to menu'}
         </button>
-      </div>
+      </ViewFade>
     );
   }
 

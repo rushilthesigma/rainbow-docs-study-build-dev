@@ -58,47 +58,82 @@ export default function Onboarding({ onComplete }) {
 
   return (
     <div
-      className="fixed inset-0 flex flex-col transition-[background] duration-700 ease-out"
+      className="fixed inset-0 flex items-center justify-center p-6 transition-[background] duration-700 ease-out"
       style={{ zIndex: Z.tour, background: bg }}
     >
-      <ProgressDots count={STEPS.length} active={step} dark={dark} />
+      {/* macOS-style floating setup panel — matches the desktop's
+          regular Window chrome (traffic lights + translucent titlebar)
+          so the onboarding visually rhymes with the desktop the user is
+          about to land on. Traffic lights are inert during onboarding —
+          there's no closing it without finishing. */}
+      <div
+        className={`relative w-full max-w-3xl rounded-xl overflow-hidden flex flex-col backdrop-blur-2xl shadow-[0_30px_80px_rgba(0,0,0,0.55),0_0_0_1px_rgba(255,255,255,0.08)] animate-modal-in ${
+          dark ? 'bg-[#1a1a26]/92 ring-1 ring-white/[0.10]' : 'bg-white/95 ring-1 ring-black/[0.08]'
+        }`}
+        style={{ maxHeight: 'min(720px, calc(100vh - 48px))' }}
+      >
+        <TrafficLightBar title="Setup Assistant" dark={dark} />
 
-      <main className="flex-1 min-h-0 flex items-center justify-center px-6">
-        <div className="w-full max-w-xl">
-          {STEPS[step] === 'welcome' && (
-            <Welcome name={firstName} dark={dark} />
-          )}
-          {STEPS[step] === 'wallpaper' && (
-            <WallpaperPick wallpaper={wallpaper} setWallpaper={setWallpaper} picks={PICKS} dark={dark} />
-          )}
-          {STEPS[step] === 'tour' && (
-            <Tour onSkip={() => finish(false)} onTour={() => finish(true)} dark={dark} />
+        <ProgressDots count={STEPS.length} active={step} dark={dark} />
+
+        <main className="flex-1 min-h-0 overflow-y-auto flex items-center justify-center px-8 py-6">
+          <div className="w-full max-w-xl">
+            {STEPS[step] === 'welcome' && (
+              <Welcome name={firstName} dark={dark} />
+            )}
+            {STEPS[step] === 'wallpaper' && (
+              <WallpaperPick wallpaper={wallpaper} setWallpaper={setWallpaper} picks={PICKS} dark={dark} />
+            )}
+            {STEPS[step] === 'tour' && (
+              <Tour onSkip={() => finish(false)} onTour={() => finish(true)} dark={dark} />
+            )}
+          </div>
+        </main>
+
+        {/* Bottom chrome — Back / Continue, anchored inside the panel */}
+        <div className={`flex items-center justify-between px-6 py-4 border-t ${dark ? 'border-white/[0.07]' : 'border-black/[0.08]'}`}>
+          {step > 0 ? (
+            <button
+              onClick={back}
+              className={`inline-flex items-center gap-1 px-4 py-2 rounded-md text-[13px] font-medium ${
+                dark ? 'text-white/70 hover:bg-white/[0.08]' : 'text-gray-600 hover:bg-black/[0.04]'
+              } transition-colors`}
+            >
+              <ChevronLeft size={14} /> Back
+            </button>
+          ) : <span />}
+
+          {STEPS[step] !== 'tour' && (
+            <button
+              onClick={next}
+              className="inline-flex items-center gap-2 px-6 py-2.5 rounded-md bg-blue-500 hover:bg-blue-400 active:scale-[0.98] text-white text-[13.5px] font-semibold transition-colors"
+            >
+              Continue <ChevronRight size={14} />
+            </button>
           )}
         </div>
-      </main>
-
-      {/* Bottom chrome — Back / Continue */}
-      <div className="flex items-center justify-between px-8 py-6">
-        {step > 0 ? (
-          <button
-            onClick={back}
-            className={`inline-flex items-center gap-1 px-4 py-2 rounded-md text-[13px] font-medium ${
-              dark ? 'text-white/70 hover:bg-white/[0.08]' : 'text-gray-600 hover:bg-black/[0.04]'
-            } transition-colors`}
-          >
-            <ChevronLeft size={14} /> Back
-          </button>
-        ) : <span />}
-
-        {STEPS[step] !== 'tour' && (
-          <button
-            onClick={next}
-            className="inline-flex items-center gap-2 px-6 py-2.5 rounded-md bg-blue-500 hover:bg-blue-400 active:scale-[0.98] text-white text-[13.5px] font-semibold transition-colors"
-          >
-            Continue <ChevronRight size={14} />
-          </button>
-        )}
       </div>
+    </div>
+  );
+}
+
+// macOS-style title bar: three traffic-light circles + centered title.
+// During onboarding the dots are inert — the user has to finish setup,
+// so we don't wire close/min/max here. Slightly dimmed dots make that
+// clear without a tooltip.
+function TrafficLightBar({ title, dark }) {
+  return (
+    <div
+      className={`h-8 flex items-center flex-shrink-0 select-none ${
+        dark ? 'bg-[rgba(36,36,40,0.92)] border-b border-white/[0.06]' : 'bg-[rgba(232,232,234,0.92)] border-b border-black/[0.06]'
+      }`}
+    >
+      <div className="flex items-center gap-[7px] px-3" aria-hidden="true">
+        <span className="w-3 h-3 rounded-full bg-[#FF5F57] opacity-70" />
+        <span className="w-3 h-3 rounded-full bg-[#FEBC2E] opacity-70" />
+        <span className="w-3 h-3 rounded-full bg-[#28C840] opacity-70" />
+      </div>
+      <div className={`flex-1 text-center text-xs font-medium pr-12 pointer-events-none ${dark ? 'text-white/65' : 'text-gray-600'}`}>{title}</div>
     </div>
   );
 }
@@ -106,7 +141,7 @@ export default function Onboarding({ onComplete }) {
 // ===== Progress dots =====
 function ProgressDots({ count, active, dark }) {
   return (
-    <div className="pt-7 flex justify-center gap-1.5">
+    <div className="pt-4 pb-1 flex justify-center gap-1.5">
       {Array.from({ length: count }).map((_, i) => (
         <span
           key={i}
