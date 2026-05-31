@@ -1231,8 +1231,8 @@ function thinkToSlider(ms) { return Math.round(((ms - THINK_MIN) / (THINK_MAX - 
 const AI_LOBBY_SCORING_FORMATS = [
   { id: 'standard',    label: 'Standard',    desc: 'Continuous · earlier = more',
     powerThreshold: null, powerPts: null, getPts: 10, negPts: -5, target: null },
-  { id: 'iac-prelim',  label: 'IAC Prelim',  desc: '1 pt · race to 8',
-    powerThreshold: null, powerPts: null, getPts: 1, negPts: -1, target: 8 },
+  { id: 'iac-prelim',  label: 'IAC Prelim',  desc: '1 pt · no neg · race to 8',
+    powerThreshold: null, powerPts: null, getPts: 1, negPts: 0, target: 8 },
   { id: 'iac-playoff', label: 'IAC Playoff', desc: '6/5/4/3 · −2 / −1 neg',
     tiers: [{ upTo: 0.33, pts: 6 }, { upTo: 0.66, pts: 5 }, { upTo: 1.0, pts: 4 }],
     afterEndPts: 3, negDuring: -2, negAfter: -1,

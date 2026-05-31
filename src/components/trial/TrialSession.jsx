@@ -524,10 +524,13 @@ export default function TrialSession({
               </>
             )}
 
-            {/* Waiting - bot already got it */}
+            {/* Opponent got it right - reveal the answer */}
             {phase === 'reading' && botAnsweredCorrectly && (
-              <div className="py-3 rounded-xl bg-white/[0.03] text-center text-[12px] text-white/30 border border-white/[0.05]">
-                Next question loading…
+              <div className="p-4 rounded-2xl text-center border-2 bg-white/[0.04] border-white/[0.12]">
+                <p className="text-[15px] font-bold text-white/70">{q.answer}</p>
+                <p className="text-[11px] text-white/30 mt-1">
+                  {(botNames?.[activeBotBuzz.id] || activeBotBuzz.name)} got it
+                </p>
               </div>
             )}
 

@@ -532,16 +532,17 @@ CONTEXT: This is assistant turn #${turnCount + 1} of the conversation. On turn 1
 // snapshot of their canvas, and for a final grade at the end.
 export function buildMathTutorPrompt(topic, customInstructions, _profile, _prefs, _assessmentHistory = [], phase = 'lesson') {
   const phaseGuide = {
-    lesson: `You are in LESSON mode. Teach the topic in a TIGHT, MINIMAL lesson - aim for under 120 words total. Format:
+    lesson: `You are in LESSON mode. Actually TEACH the student how to do this - explain the method clearly so they know exactly what to do. Format:
 1. A one-sentence definition.
-2. ONE worked example in KaTeX (no extra commentary around it).
-3. A single line inviting the student to try a problem on the canvas (e.g. "Try $3x^2 + 5x - 2 = 0$ - draw your work and tap Get feedback.").
-Do NOT include "why it matters" sections, motivation paragraphs, history, recaps, or multiple examples. Skip headings unless absolutely needed.`,
-    practice: `You are in PRACTICE mode. The student is working on a problem using the handwriting canvas. They may send a snapshot of their work as an attached image. Give STEP-BY-STEP FEEDBACK:
-- If their work is correct so far, confirm the specific step and point to the next one.
-- If there's an error, identify the EXACT step where it went wrong, explain why it's wrong, and hint at the correct approach (do NOT solve it for them unless they ask).
-- Use KaTeX for every equation.
-- Keep it under 100 words. The student is mid-solve, not reading a textbook.`,
+2. The METHOD: a short numbered list of the steps to solve this kind of problem, in order, each step stating what to do.
+3. ONE fully worked example in KaTeX that walks through every step (show the work, not just the final answer).
+4. A single line inviting the student to try a problem on the canvas (e.g. "Try $3x^2 + 5x - 2 = 0$ - draw your work and tap Get feedback.").
+Favor clarity over brevity: explain each step so the student understands what to do and why. Skip motivation, history, and "why it matters" padding. Aim for roughly 200 words.`,
+    practice: `You are in PRACTICE mode. The student is mid-solve on the handwriting canvas and may attach a snapshot of their work. EXPLAIN WHAT TO DO - don't just drop a vague hint:
+- If their work is correct so far, confirm the step, then say concretely what the NEXT step is and how to carry it out (the actual operation), with the math in KaTeX.
+- If there's an error, point to the EXACT step that's wrong, explain why, then show how to do that step correctly.
+- Walk them through the method one step at a time. Demonstrating the current step's work is encouraged; just don't dump the entire final answer unless they ask for the full solution.
+- Use KaTeX for every equation. Aim for roughly 180 words - clear and actionable over terse.`,
     grade: `You are in GRADE mode. The student is asking for a final grade on their work. Evaluate their solution:
 - Final answer correctness (most important).
 - Work quality: did they show clear steps?
@@ -567,7 +568,7 @@ CURRENT PHASE: ${phase.toUpperCase()}
 ${phaseGuide}
 
 GLOBAL RULES:
-- Be brief. Short chunks, no lectures, no padding.
+- Be clear and concrete. Prefer short chunks over walls of text, but always explain the steps - never be so terse that the student is left unsure what to do.
 - All math must use KaTeX. Inline: $x^2 + 2x + 1$. Block: $$\\int_0^1 x\\,dx$$. NEVER use \\( \\) or \\[ \\].
 - If the student's image is unreadable, say so plainly and ask them to clarify a specific step.
 - Stay on the topic "${topic}" unless the student explicitly switches.`;

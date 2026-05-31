@@ -177,10 +177,10 @@ const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 // "Paid" via isPro() = anything above plus-lite (so the referral bonus
 // gates the same way free does - better limits but still rate-capped).
 const LIMITS = {
-  free:        { dailyMessages: 50,       dailyQB: 2,        weeklyCurricula: 1,        weeklyDebates: 1,        noteMaps: 1 },
-  'plus-lite': { dailyMessages: 120,      dailyQB: 5,        weeklyCurricula: 2,        weeklyDebates: 2,        noteMaps: 3 },
-  plus:        { dailyMessages: 250,      dailyQB: 10,       weeklyCurricula: 5,        weeklyDebates: 5,        noteMaps: 10 },
-  lifetime:    { dailyMessages: 600,      dailyQB: 25,       weeklyCurricula: 12,       weeklyDebates: 15,       noteMaps: 25 },
+  free:        { dailyMessages: 30,       dailyQB: 1,        weeklyCurricula: 1,        weeklyDebates: 1,        noteMaps: 1 },
+  'plus-lite': { dailyMessages: 75,       dailyQB: 3,        weeklyCurricula: 2,        weeklyDebates: 2,        noteMaps: 2 },
+  plus:        { dailyMessages: 150,      dailyQB: 6,        weeklyCurricula: 3,        weeklyDebates: 4,        noteMaps: 6 },
+  lifetime:    { dailyMessages: 350,      dailyQB: 15,       weeklyCurricula: 8,        weeklyDebates: 10,       noteMaps: 15 },
   pro:         { dailyMessages: Infinity, dailyQB: Infinity, weeklyCurricula: Infinity, weeklyDebates: Infinity, noteMaps: Infinity },
 };
 const PAID_TIERS = new Set(['plus', 'lifetime', 'pro']);
@@ -287,16 +287,25 @@ function modelForUser(user, email) {
   return GEMINI_FLASH_LITE;
 }
 
-// Reset daily counters when the day rolls over, weekly counters on ISO week change
+// Daily limits are a ROLLING 24h window. Instead of a midnight reset,
+// every message + QB game gets timestamped and we count entries inside
+// the trailing window. Weekly limits (curricula / debates) still reset
+// on ISO week change. `usage.day` is kept around for backward compat
+// with anything that still reads it; the bucketed daily counters are
+// no longer authoritative.
+const ROLLING_WINDOW_MS = 24 * 60 * 60 * 1000;  // 24h
 function ensureUsageBucket(user) {
-  const today = todayKey();
   const week = weekKey();
-  if (!user.data.usage) user.data.usage = { day: null, messages: 0, quizBowlGames: 0 };
-  if (user.data.usage.day !== today) {
-    user.data.usage.day = today;
-    user.data.usage.messages = 0;
-    user.data.usage.quizBowlGames = 0;
-  }
+  if (!user.data.usage) user.data.usage = { day: null, messages: 0, quizBowlGames: 0, week: null, curricula: 0, debates: 0 };
+  // Migrate any old daily counters to the rolling timestamp arrays on
+  // first touch. Old numeric counts are dropped (we can't reconstruct
+  // timestamps for them) so the user effectively gets a fresh 24h
+  // window.
+  if (!Array.isArray(user.data.usage.msgWindow)) user.data.usage.msgWindow = [];
+  if (!Array.isArray(user.data.usage.qbWindow)) user.data.usage.qbWindow = [];
+  const cutoff = Date.now() - ROLLING_WINDOW_MS;
+  user.data.usage.msgWindow = user.data.usage.msgWindow.filter(e => (e?.ts || 0) > cutoff);
+  user.data.usage.qbWindow = user.data.usage.qbWindow.filter(ts => ts > cutoff);
   if (user.data.usage.week !== week) {
     user.data.usage.week = week;
     user.data.usage.curricula = 0;
@@ -304,10 +313,13 @@ function ensureUsageBucket(user) {
   }
 }
 
+// Sum the costs of every message logged inside the rolling window.
+function rollingMsgUsage(user) {
+  return (user.data.usage.msgWindow || []).reduce((n, e) => n + (e?.cost || 1), 0);
+}
+
 // Returns { allowed, remaining, limit, plan }. Mutates usage on allowed=true.
-// Limits come from the LIMITS table keyed by the user's current tier.
-// Infinity limits short-circuit before touching the usage bucket so Pro
-// users don't accidentally count usage.
+// `cost` is how many message-units the request counts as (2 for sourced).
 function consumeMessage(users, email, cost = 1) {
   const u = users[email];
   if (!u) return { allowed: false, remaining: 0, limit: 0, plan: 'free' };
@@ -315,11 +327,12 @@ function consumeMessage(users, email, cost = 1) {
   const cap = LIMITS[plan]?.dailyMessages ?? LIMITS.free.dailyMessages;
   if (cap === Infinity) return { allowed: true, remaining: Infinity, limit: Infinity, plan };
   ensureUsageBucket(u);
-  if (u.data.usage.messages + cost > cap) {
-    return { allowed: false, remaining: Math.max(0, cap - u.data.usage.messages), limit: cap, plan };
+  const used = rollingMsgUsage(u);
+  if (used + cost > cap) {
+    return { allowed: false, remaining: Math.max(0, cap - used), limit: cap, plan };
   }
-  u.data.usage.messages += cost;
-  return { allowed: true, remaining: Math.max(0, cap - u.data.usage.messages), limit: cap, plan, cost };
+  u.data.usage.msgWindow.push({ ts: Date.now(), cost });
+  return { allowed: true, remaining: Math.max(0, cap - (used + cost)), limit: cap, plan, cost };
 }
 function consumeQuizBowlGame(users, email) {
   const u = users[email];
@@ -328,11 +341,12 @@ function consumeQuizBowlGame(users, email) {
   const cap = LIMITS[plan]?.dailyQB ?? LIMITS.free.dailyQB;
   if (cap === Infinity) return { allowed: true, remaining: Infinity, limit: Infinity, plan };
   ensureUsageBucket(u);
-  if (u.data.usage.quizBowlGames >= cap) {
+  const used = u.data.usage.qbWindow.length;
+  if (used >= cap) {
     return { allowed: false, remaining: 0, limit: cap, plan };
   }
-  u.data.usage.quizBowlGames++;
-  return { allowed: true, remaining: Math.max(0, cap - u.data.usage.quizBowlGames), limit: cap, plan };
+  u.data.usage.qbWindow.push(Date.now());
+  return { allowed: true, remaining: Math.max(0, cap - (used + 1)), limit: cap, plan };
 }
 // Weekly buckets - curricula / debates
 function consumeCurriculumGeneration(users, email) {
@@ -8510,16 +8524,21 @@ app.get('/api/billing/status', authMiddleware, (req, res) => {
         curriculaPerWeek: FREE_WEEKLY_CURRICULA,
         debatesPerWeek: FREE_WEEKLY_DEBATES,
       },
-      usage: {
-        messages: users[email].data.usage.messages,
-        quizBowlGames: users[email].data.usage.quizBowlGames,
-        curricula: users[email].data.usage.curricula || 0,
-        debates: users[email].data.usage.debates || 0,
-        remainingMessages: pro ? null : Math.max(0, FREE_DAILY_MESSAGE_LIMIT - users[email].data.usage.messages),
-        remainingQuizBowl: pro ? null : Math.max(0, FREE_DAILY_QUIZBOWL_GAMES - users[email].data.usage.quizBowlGames),
-        remainingCurricula: pro ? null : Math.max(0, FREE_WEEKLY_CURRICULA - (users[email].data.usage.curricula || 0)),
-        remainingDebates: pro ? null : Math.max(0, FREE_WEEKLY_DEBATES - (users[email].data.usage.debates || 0)),
-      },
+      usage: (() => {
+        const d = users[email].data;
+        const msgs = (d.usage?.msgWindow || []).reduce((n, e) => n + (e?.cost || 1), 0);
+        const qb = (d.usage?.qbWindow || []).length;
+        return {
+          messages: msgs,
+          quizBowlGames: qb,
+          curricula: d.usage?.curricula || 0,
+          debates: d.usage?.debates || 0,
+          remainingMessages: pro ? null : Math.max(0, FREE_DAILY_MESSAGE_LIMIT - msgs),
+          remainingQuizBowl: pro ? null : Math.max(0, FREE_DAILY_QUIZBOWL_GAMES - qb),
+          remainingCurricula: pro ? null : Math.max(0, FREE_WEEKLY_CURRICULA - (d.usage?.curricula || 0)),
+          remainingDebates: pro ? null : Math.max(0, FREE_WEEKLY_DEBATES - (d.usage?.debates || 0)),
+        };
+      })(),
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -8540,12 +8559,16 @@ app.get('/api/billing/usage', authMiddleware, (req, res) => {
   const plan = getPlan(users[email], email);
   const limits = LIMITS[plan] || LIMITS.free;
   const u = users[email].data;
+  // Daily counters report the rolling 24h window.
+  const msgUsed = (u.usage?.msgWindow || []).reduce((n, e) => n + (e?.cost || 1), 0);
+  const qbUsed = (u.usage?.qbWindow || []).length;
   res.json({
     plan,
     limits,
+    windowHours: 24,
     used: {
-      dailyMessages: u.usage?.messages || 0,
-      dailyQB: u.usage?.quizBowlGames || 0,
+      dailyMessages: msgUsed,
+      dailyQB: qbUsed,
       weeklyCurricula: u.usage?.curricula || 0,
       weeklyDebates: u.usage?.debates || 0,
       noteMaps: (u.noteMaps || []).length,
@@ -10283,7 +10306,7 @@ const QUIZBOWL_MAX_PLAYERS = 8;
 //     `negDuring`, `negAfter` - needed for real IAC Playoff (6/5/4/3).
 const QUIZBOWL_FORMATS = {
   standard:     { naqt: true, powerPts: 15, getPts: 10, afterEndPts: 10, negDuring: -5, negAfter: 0 },
-  'iac-prelim': { powerThreshold: null, powerPts: null, getPts: 1,  negPts: -1 },
+  'iac-prelim': { powerThreshold: null, powerPts: null, getPts: 1,  negPts: 0 },
   'iac-playoff':{
     tiers: [{ upTo: 0.33, pts: 6 }, { upTo: 0.66, pts: 5 }, { upTo: 1.0, pts: 4 }],
     afterEndPts: 3, negDuring: -2, negAfter: -1,

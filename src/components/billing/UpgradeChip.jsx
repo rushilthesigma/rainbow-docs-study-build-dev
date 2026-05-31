@@ -6,14 +6,17 @@ import { getTiers, createCheckoutSession, getMyUsage } from '../../api/billing';
 import { getMyReferralCode } from '../../api/referral';
 import FALLBACK_TIERS from './tiersCatalog';
 
-// Compact "Upgrade" pill in the MenuBar. Click → popover listing every
-// tier with its price + limits + a buy button. Hidden when the user is
-// already on a paid tier.
+// Compact pill in the MenuBar. Reads as "Upgrade" (blue) for Free /
+// Plus-Lite users and "Plan" (gray) for Plus / Lifetime / Pro - same
+// popover either way so paid users can still see their usage + their
+// current tier (with a checkmark).
 export default function UpgradeChip() {
   const { user } = useAuth();
-  const plan = user?.data?.plan || 'free';
-  const isPaid = ['plus', 'pro', 'lifetime'].includes(plan) || !!user?.data?.lifetimePurchasedAt;
-  if (isPaid) return null;
+  // Server is the source of truth for plan. The AuthContext user can be
+  // stale (admin grant/revoke doesn't push to the client), so we prefer
+  // the live usage payload once it's loaded and only fall back to the
+  // cached AuthContext while waiting.
+  const cachedPlan = user?.data?.plan || 'free';
 
   const [open, setOpen] = useState(false);
   const [tiers, setTiers] = useState(FALLBACK_TIERS);
@@ -53,6 +56,11 @@ export default function UpgradeChip() {
     }
   }
 
+  // Server-resolved plan (lifetime override, referral unlock, etc.)
+  // takes precedence; falls back to the cached AuthContext value before
+  // /api/billing/usage resolves.
+  const plan = usage?.plan || cachedPlan;
+  const isPaid = ['plus', 'pro', 'lifetime'].includes(plan) || !!user?.data?.lifetimePurchasedAt;
   const order = ['free', 'plus-lite', 'plus', 'lifetime', 'pro'];
   const refsUsed = referral?.referralsUsed ?? 0;
   const refsNeeded = referral?.referralsRequired ?? 2;
@@ -62,9 +70,13 @@ export default function UpgradeChip() {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(o => !o)}
-        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-500 hover:bg-blue-400 text-white text-[11px] font-semibold transition-colors"
+        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold transition-colors ${
+          isPaid
+            ? 'bg-white/[0.08] hover:bg-white/[0.14] text-white/70 hover:text-white/95 border border-white/[0.10]'
+            : 'bg-blue-500 hover:bg-blue-400 text-white'
+        }`}
       >
-        <Crown size={11} /> Upgrade
+        <Crown size={11} /> {isPaid ? 'Plan' : 'Upgrade'}
       </button>
 
       {open && (
@@ -190,11 +202,11 @@ function UsageBlock({ usage }) {
   const L = usage.limits || {};
   const U = usage.used || {};
   const rows = [
-    { label: 'Messages sent today',          used: U.dailyMessages,    cap: L.dailyMessages },
-    { label: 'Quiz Bowl games played today', used: U.dailyQB,          cap: L.dailyQB },
-    { label: 'Curricula generated this week',used: U.weeklyCurricula,  cap: L.weeklyCurricula },
-    { label: 'Debates started this week',    used: U.weeklyDebates,    cap: L.weeklyDebates },
-    { label: 'Note maps created',            used: U.noteMaps,         cap: L.noteMaps },
+    { label: 'Messages sent (last 24h)',        used: U.dailyMessages,    cap: L.dailyMessages },
+    { label: 'Quiz Bowl games (last 24h)',      used: U.dailyQB,          cap: L.dailyQB },
+    { label: 'Curricula generated this week',   used: U.weeklyCurricula,  cap: L.weeklyCurricula },
+    { label: 'Debates started this week',       used: U.weeklyDebates,    cap: L.weeklyDebates },
+    { label: 'Note maps created',               used: U.noteMaps,         cap: L.noteMaps },
   ];
   return (
     <div className="px-3 py-2.5 border-b border-white/[0.06] bg-white/[0.02]">
