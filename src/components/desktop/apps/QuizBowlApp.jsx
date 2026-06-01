@@ -1217,16 +1217,17 @@ function GlassPill({ active, onClick, children }) {
 // "Varsity" room is 7 roughly-Varsity bots, an "Elite" room is 7
 // roughly-Elite bots, etc.
 const ROOM_LEVELS = [
-  { id: 'casual',  label: 'Casual',  accuracy: 0.52, buzzAt: 0.78, thinkMs: 2300 },
-  { id: 'club',    label: 'Club',    accuracy: 0.68, buzzAt: 0.62, thinkMs: 1500 },
-  { id: 'varsity', label: 'Varsity', accuracy: 0.78, buzzAt: 0.48, thinkMs: 950  },
-  { id: 'elite',   label: 'Elite',   accuracy: 0.88, buzzAt: 0.30, thinkMs: 500  },
+  { id: 'casual',  label: 'Casual',  stars: 1, accuracy: 0.52, buzzAt: 0.78, thinkMs: 2300 },
+  { id: 'club',    label: 'Club',    stars: 2, accuracy: 0.68, buzzAt: 0.62, thinkMs: 1500 },
+  { id: 'varsity', label: 'Varsity', stars: 3, accuracy: 0.78, buzzAt: 0.48, thinkMs: 950  },
+  { id: 'elite',   label: 'Elite',   stars: 5, accuracy: 0.88, buzzAt: 0.30, thinkMs: 500  },
 ];
 // Build a roster of N bots all sitting near the level's target with
 // small per-bot variance so the room feels alive but not stacked. We
-// keep each bot's identity (id, name, label, color, stars) from the
-// original ROSTER so display chrome stays consistent, and only override
-// the skill stats.
+// keep each bot's identity (id, name, color) from the original ROSTER
+// so display chrome stays consistent, but override the skill stats AND
+// the label/stars to match the room level - the old per-bot
+// "Newbie/Pro" labels were misleading once we equalized.
 function scaleRoster(bots, levelId) {
   const m = ROOM_LEVELS.find(l => l.id === levelId) || ROOM_LEVELS[2];
   // Symmetric jitter so the average ends up at the target. Index 0 gets
@@ -1236,6 +1237,8 @@ function scaleRoster(bots, levelId) {
     const t = arr.length === 1 ? 0 : (i / (arr.length - 1)) - 0.5;  // -0.5..+0.5
     return {
       ...b,
+      label:    m.label,
+      stars:    m.stars,
       accuracy: Math.max(0.10, Math.min(0.98, m.accuracy + t * 0.12)),
       buzzAt:   Math.max(0.05, Math.min(0.95, m.buzzAt   + t * 0.14)),
       thinkMs:  Math.max(120,  Math.round(m.thinkMs * (1 + t * 0.30))),
