@@ -3929,55 +3929,27 @@ app.post('/api/curriculum/:id/lesson/:lessonId/blocks/generate', authMiddleware,
     const difficulty = curriculum.difficulty || 'intermediate';
     const blockCount = LESSON_BLOCK_COUNT[difficulty] || LESSON_BLOCK_COUNT.intermediate;
     const middleCount = blockCount - 2;
-    const sys = `You generate one complete lesson as ${blockCount} blocks. You pick the right MIX of block types for the topic - see the schema. Output ONLY valid JSON - no markdown, no fences, no commentary.`;
+    const sys = `You generate one complete lesson as ${blockCount} blocks of two types only: "reading" and "quiz". Output ONLY valid JSON - no markdown, no fences, no commentary.`;
     const prompt = `Build the lesson "${lesson.title}" from the unit "${unit.title}" of the course "${curriculum.title}".
 ${lesson.description ? `Lesson goal: ${lesson.description}\n` : ''}${curriculum.description ? `Course context: ${curriculum.description}\n` : ''}
 Difficulty: ${difficulty}.
 
-EXACTLY ${blockCount} blocks total (this length is set by the course difficulty - do not deviate). You decide the type of each MIDDLE block based on what best serves this topic. Pick a varied, motivated mix - not all the same type.
+EXACTLY ${blockCount} blocks total. Use ONLY the two types below - do NOT emit example/recap/application/challenge/open/discussion/matching/fill-blank.
 
-FIXED slots:
-  Slot 1:  "reading"  - Core definition + framing of the topic. The simplest correct mental model. 350-500 words of markdown.
-  Slot ${blockCount}: "reading"  - Synthesis + edge cases. Tie the lesson to the surrounding course; surface 1-2 lingering subtleties. 350-500 words.
+SLOT PATTERN:
+  Block 1:            "reading" - Core definition + framing. The simplest correct mental model. 350-500 words of markdown.
+  Block ${blockCount}: "reading" - Synthesis + edge cases. Tie the lesson to the surrounding course; surface lingering subtleties; preview what builds on this. 350-500 words.
+  Middle (blocks 2 - ${blockCount - 1}): ALTERNATE reading and quiz so each quiz tests the immediately-preceding reading. Start the middle with a reading (so the second slot is a reading), then quiz, reading, quiz, etc. Result: ~half the middle slots are readings, ~half are quizzes, with reading always before its quiz.
 
-MIDDLE slots (slots 2 through ${blockCount - 1}, ${middleCount} blocks total) - pick from these types:
-  • "reading"     - A second teaching pass (mechanics, examples). 350-500 words of markdown.
-  • "quiz"        - 3 multiple-choice questions on what's been read so far.
-  • "example"     - A WORKED EXAMPLE. One concrete problem the student would actually face, broken into 3-5 numbered solution steps the student can reveal one at a time, then a short "now you try" prompt.
-  • "recap"       - A CONCEPT RECAP. 4-6 tight bullet points summarising what's been covered so far. Used after dense material to reinforce.
-  • "application" - A REAL-WORLD APPLICATION. 200-300 words of markdown showing where this concept shows up - a product, an event, a phenomenon the student has likely encountered.
-  • "challenge"   - A STRETCH PROBLEM. A harder, non-obvious question with a hint and a full solution. Inserts difficulty when the lesson gets too smooth.
-  • "open"        - An OPEN-ANSWER prompt. A short question the student must answer in their own words (40-150 words). MUST include a 2-3 item rubric - each item is { label, criterion (one sentence describing what an A-grade response shows), weight (1-3) }.
-  • "discussion"  - AN AI DISCUSSION. The student chats back-and-forth with an AI tutor about what they just learned. Give a thoughtful opening question + 3-5 specific talking points the AI should hit across the conversation.
-  • "matching"    - A MATCHING MINIGAME. 5-7 pairs of terms and their definitions/examples the student matches by clicking. Great for vocabulary, formula↔meaning, or cause↔effect drills.
-  • "fill-blank"  - A FILL-IN-THE-BLANK exercise. 4-6 sentences with one key word/phrase omitted. The student types the missing piece. Good for keyword recall after a reading.
+CONTENT RULES:
+  - reading: 350-500 words of markdown teaching a distinct angle (mechanics, worked example in prose, common pitfalls, real-world application). No two readings cover the same ground.
+  - quiz: EXACTLY 3 multiple-choice questions on the material from the readings that came before this quiz. Each wrong choice must encode a real misconception named in the explanation.
 
-RULES for the middle ${middleCount} blocks:
-  • Include AT LEAST 2 "quiz" blocks (the lesson needs graded checkpoints).
-  • Include AT LEAST ${middleCount >= 5 ? 3 : 2} NON-quiz, NON-reading types - mix freely from {example, recap, application, challenge, open, discussion, matching, fill-blank}. Variety is the point.
-  • Include AT LEAST 1 "open" OR "discussion" block somewhere in the middle so the student has to express their understanding in their own words.
-  • For lessons of ${middleCount >= 4 ? '4+' : 'any'} middle blocks, include AT LEAST 1 INTERACTIVE type - pick from {matching, fill-blank, discussion} - so the lesson isn't just read-and-quiz.
-  • A "quiz" or "open" block should follow material it can test - never put a checkpoint before the relevant teaching content.
-  • A "recap" should come AFTER at least one reading or example.
-  • A "challenge" should come AFTER the relevant teaching content.
-  • A "discussion" should usually be near the end - it's most useful when the student has something to discuss.
-  • "matching" and "fill-blank" work best right after the reading that introduces the terms they test.
-  • Sequence the blocks so the lesson flows naturally for a student new to the topic.
+SHAPES:
+  reading: {"type":"reading","title":"...","content":"<markdown>"}
+  quiz:    {"type":"quiz","title":"...","questions":[{"prompt":"...","choices":["...","...","...","..."],"answer":"<exact text of correct choice>","explanation":"<1-2 sentences>"}, ...3 total...]}
 
-SHAPES - each block's fields by type:
-  reading:     {"type":"reading","title":"...","content":"<markdown>"}
-  quiz:        {"type":"quiz","title":"...","questions":[{"prompt":"...","choices":["...","...","...","..."],"answer":"<exact text of correct choice>","explanation":"<1-2 sentences>"}, ...3 total...]}
-  example:     {"type":"example","title":"...","problem":"<markdown problem statement>","steps":[{"label":"Step name","text":"<markdown>"}, ...3-5 total...],"tryThis":"<short prompt for student to try a variant>"}
-  recap:       {"type":"recap","title":"...","bullets":["...","...","...","..."]}
-  application: {"type":"application","title":"...","content":"<200-300 words of markdown>"}
-  challenge:   {"type":"challenge","title":"...","prompt":"<markdown problem>","hint":"<1-2 sentences nudging without solving>","solution":"<markdown explanation>"}
-  open:        {"type":"open","title":"...","prompt":"<markdown question, 1-3 sentences>","minWords":<40-80>,"rubric":[{"label":"...","criterion":"...","weight":<1-3>}, ...2-3 total...]}
-  discussion:  {"type":"discussion","title":"...","prompt":"<the AI's opening question to the student, 1-2 sentences>","talkingPoints":["<concept the AI should make sure gets discussed>", ...3-5 total...]}
-  matching:    {"type":"matching","title":"...","instructions":"<one-line how-to>","pairs":[{"term":"<short term>","definition":"<definition or example, 1 sentence>"}, ...5-7 pairs...]}
-  fill-blank:  {"type":"fill-blank","title":"...","instructions":"<one-line how-to>","sentences":[{"before":"<text before the blank>","answer":"<single word or short phrase>","after":"<text after the blank>","hint":"<optional short hint>"}, ...4-6 sentences...]}
-
-Markdown inside content/problem/prompt/solution: ## sub-headings, **bold**, lists, fenced code where useful, math via $...$ or $$...$$ if it fits.
-Distractors in quizzes must be plausible - each wrong option encodes a real misconception named in the explanation.
+Markdown inside content: ## sub-headings, **bold**, lists, fenced code where useful, math via $...$ or $$...$$ if it fits.
 
 Return JSON in this shape:
 { "blocks": [ <block 1>, <block 2>, ... <block ${blockCount}> ] }`;

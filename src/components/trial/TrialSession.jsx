@@ -344,7 +344,9 @@ export default function TrialSession({
     const ptsGained= scoreForBuzz({ correct, ratio: buzzRatio, format: FORMAT });
     const newScore = userScore + ptsGained;
 
-    setAnswerResult({ correct, xpGained, ptsGained });
+    // Stash the typed answer so the QBReader-style result panel can
+    // surface "Your answer: X" alongside the correct answer line.
+    setAnswerResult({ correct, xpGained, ptsGained, userAnswer: answer.trim() });
     setSessionResults(prev => [...prev, { questionId: q.id, question: q, quality, correct, buzzRatio }]);
 
     if (correct) {
@@ -513,8 +515,11 @@ export default function TrialSession({
               </div>
             )}
 
-            {/* Buzz button */}
-            {phase === 'reading' && !botAnsweredCorrectly && (
+            {/* Buzz button - hidden once the user has negged on this
+                question. They're locked out until the bots resolve it,
+                so we drop the button instead of leaving a tempting but
+                disabled control sitting there. */}
+            {phase === 'reading' && !botAnsweredCorrectly && !userNegged && (
               <>
                 <button onClick={handleBuzz}
                   className="w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white text-[15px] font-bold uppercase tracking-[0.15em] active:scale-[0.98] transition-all">
@@ -557,34 +562,32 @@ export default function TrialSession({
               </div>
             )}
 
-            {/* Result - answer revealed here, not in question text */}
+            {/* Result - QBReader-style answer reveal. Wrong answers show
+                both the student's submission and the canonical answer on
+                their own labeled rows so you can see what you typed vs.
+                what was looked-for. */}
             {phase === 'result' && answerResult && (
-              <div className={`p-4 rounded-2xl text-center border-2 ${
-                answerResult.correct
-                  ? 'bg-emerald-500/10 border-emerald-500/40'
-                  : 'bg-rose-500/10 border-rose-500/40'
-              }`}>
-                <p className={`text-[15px] font-bold ${answerResult.correct ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {answerResult.correct ? '✓' : '✗'} {q.answer}
-                </p>
-                <p className="text-[11px] text-white/35 mt-1">
-                  {answerResult.correct
-                    ? `+${answerResult.xpGained} XP · +${answerResult.ptsGained} pts${
-                        FORMAT.powerThreshold != null && buzzRatio < FORMAT.powerThreshold
-                          ? ' · POWER!'
-                          : (FORMAT.id === 'standard' && buzzRatio < 0.5 ? ' · Early buzz!' : '')
-                      }`
-                    : `Incorrect${FORMAT.negPts ? ` · ${FORMAT.negPts} pts` : ''}`}
-                </p>
-              </div>
+              <AnswerResultPanel
+                correct={answerResult.correct}
+                userAnswer={answerResult.userAnswer}
+                officialAnswer={q.answer}
+                meta={answerResult.correct
+                  ? `+${answerResult.xpGained} XP · +${answerResult.ptsGained} pts${
+                      FORMAT.powerThreshold != null && buzzRatio < FORMAT.powerThreshold
+                        ? ' · POWER'
+                        : (FORMAT.id === 'standard' && buzzRatio < 0.5 ? ' · Early buzz' : '')
+                    }`
+                  : `Incorrect${FORMAT.negPts ? ` · ${FORMAT.negPts} pts` : ''}`}
+              />
             )}
 
             {/* Result - bot got it right */}
             {phase === 'result' && !answerResult && (
-              <div className="p-4 rounded-2xl text-center border-2 bg-white/[0.04] border-white/[0.12]">
-                <p className="text-[15px] font-bold text-white/60">{q.answer}</p>
-                <p className="text-[11px] text-white/30 mt-1">Bot answered correctly</p>
-              </div>
+              <AnswerResultPanel
+                correct={null}
+                officialAnswer={q.answer}
+                meta="Bot answered correctly"
+              />
             )}
           </div>
         </div>
@@ -700,6 +703,39 @@ function SessionComplete({ xp, userScore, results, onDone }) {
           Done
         </button>
       </div>
+    </div>
+  );
+}
+
+// QBReader-style result panel. Left-aligned, two rows: one for the
+// student's submission, one for the canonical answer line. Heads up at
+// the top with a verb (✓ Correct / ✗ Incorrect / Answer) and a meta
+// footer (+pts / −pts / "Bot answered correctly"). `correct=null` is
+// the spectator / opponent-got-it case.
+export function AnswerResultPanel({ correct, userAnswer, officialAnswer, meta }) {
+  const tone = correct === true
+    ? { ring: 'border-emerald-500/40 bg-emerald-500/10', text: 'text-emerald-300', icon: '✓', label: 'Correct' }
+    : correct === false
+    ? { ring: 'border-rose-500/40 bg-rose-500/10',       text: 'text-rose-300',    icon: '✗', label: 'Incorrect' }
+    : { ring: 'border-white/[0.12] bg-white/[0.04]',     text: 'text-white/70',    icon: '·', label: 'Answer' };
+  return (
+    <div className={`p-3.5 rounded-2xl border-2 text-left ${tone.ring}`}>
+      <p className={`text-[12px] font-bold uppercase tracking-[0.14em] ${tone.text} mb-2`}>
+        <span className="mr-1">{tone.icon}</span>{tone.label}
+      </p>
+      {correct === false && userAnswer && (
+        <div className="flex items-baseline gap-2 mb-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-white/40 w-20 flex-shrink-0">Your answer</span>
+          <span className="text-[13px] text-rose-200/85 line-through decoration-rose-400/50">{userAnswer}</span>
+        </div>
+      )}
+      <div className="flex items-baseline gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-white/40 w-20 flex-shrink-0">Answer</span>
+        <span className="text-[14px] font-bold text-white">{officialAnswer}</span>
+      </div>
+      {meta && (
+        <p className="text-[10.5px] text-white/45 mt-2 tabular-nums">{meta}</p>
+      )}
     </div>
   );
 }

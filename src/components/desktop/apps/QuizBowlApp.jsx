@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Zap, Play, Check, X, Loader2, Lightbulb, Users, BookOpen, Sparkles, Settings, ArrowRight, Target, TrendingDown, Clock, History, Flame, ChevronRight, Trophy, Swords, RefreshCw } from 'lucide-react';
-import TrialSession from '../../trial/TrialSession';
+import TrialSession, { AnswerResultPanel } from '../../trial/TrialSession';
 import { apiFetch } from '../../../api/client';
 import { fetchQBReaderTossups, saveQuizBowlSet, fetchQuizBowlHistory, fetchQuizBowlRecommendations, fetchQuizBowlPatterns } from '../../../api/quizMatch';
 import { peek, fetchOnce, bustPrefix } from '../../../api/cache';
@@ -624,12 +624,18 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
           )}
           {showResult && (
             <>
-              <div className={`p-4 rounded-2xl text-center border-2 ${correct ? 'bg-emerald-500/10 border-emerald-500/40' : 'bg-rose-500/10 border-rose-500/40'}`}>
-                <p className={`text-[15px] font-bold ${correct ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {correct ? '✓' : '✗'} {q.answer}
-                </p>
-                {!correct && answer && <p className="text-[11px] text-white/30 mt-1">{answer}</p>}
-              </div>
+              <AnswerResultPanel
+                correct={correct}
+                userAnswer={answer}
+                officialAnswer={q.answer}
+                meta={(() => {
+                  const pts = naqtPointsFor(correct, wordIndex, q.powerWordIndex, totalWords);
+                  if (correct) {
+                    return pts === 15 ? `+15 · POWER` : `+${pts}`;
+                  }
+                  return pts ? `${pts}` : 'Incorrect';
+                })()}
+              />
               <div className="flex gap-2">
                 <button onClick={() => openLessonFor(q.answer)}
                   className="flex-1 py-3 rounded-2xl border border-white/[0.10] bg-white/[0.04] text-white/55 text-[12px] font-semibold hover:bg-white/[0.08] hover:text-white/75 inline-flex items-center justify-center gap-1.5 transition-colors">
@@ -1202,21 +1208,39 @@ function GlassPill({ active, onClick, children }) {
   );
 }
 
-// ── Room-strength scaling for the 8-player lobby ─────────────────────────
+// ── Room-strength target stats for the 8-player lobby ────────────────────
+// Each level sets an absolute target (accuracy, buzz timing, think delay)
+// that every bot in the room clusters around with small ±jitter. This is
+// a deliberate replacement of the old "preserve the Newbie→Pro spread and
+// multiply" approach - that made every preset stack a Pro-level Player 8
+// against six weaker bots, which felt unfair regardless of level. Now a
+// "Varsity" room is 7 roughly-Varsity bots, an "Elite" room is 7
+// roughly-Elite bots, etc.
 const ROOM_LEVELS = [
-  { id: 'casual',  label: 'Casual',  accMul: 0.58, buzzShift: +0.18, thinkMul: 1.55 },
-  { id: 'club',    label: 'Club',    accMul: 0.80, buzzShift: +0.09, thinkMul: 1.20 },
-  { id: 'varsity', label: 'Varsity', accMul: 1.00, buzzShift:  0.00, thinkMul: 1.00 },
-  { id: 'elite',   label: 'Elite',   accMul: 1.06, buzzShift: -0.10, thinkMul: 0.62 },
+  { id: 'casual',  label: 'Casual',  accuracy: 0.52, buzzAt: 0.78, thinkMs: 2300 },
+  { id: 'club',    label: 'Club',    accuracy: 0.68, buzzAt: 0.62, thinkMs: 1500 },
+  { id: 'varsity', label: 'Varsity', accuracy: 0.78, buzzAt: 0.48, thinkMs: 950  },
+  { id: 'elite',   label: 'Elite',   accuracy: 0.88, buzzAt: 0.30, thinkMs: 500  },
 ];
+// Build a roster of N bots all sitting near the level's target with
+// small per-bot variance so the room feels alive but not stacked. We
+// keep each bot's identity (id, name, label, color, stars) from the
+// original ROSTER so display chrome stays consistent, and only override
+// the skill stats.
 function scaleRoster(bots, levelId) {
   const m = ROOM_LEVELS.find(l => l.id === levelId) || ROOM_LEVELS[2];
-  return bots.map(b => ({
-    ...b,
-    accuracy: Math.max(0.08, Math.min(0.99, b.accuracy * m.accMul)),
-    buzzAt:   Math.max(0.05, Math.min(0.96, b.buzzAt + m.buzzShift)),
-    thinkMs:  Math.round(b.thinkMs * m.thinkMul),
-  }));
+  // Symmetric jitter so the average ends up at the target. Index 0 gets
+  // the smallest offset and the spread grows linearly, capped so even
+  // the strongest bot in the room stays within ~12% of the target.
+  return bots.map((b, i, arr) => {
+    const t = arr.length === 1 ? 0 : (i / (arr.length - 1)) - 0.5;  // -0.5..+0.5
+    return {
+      ...b,
+      accuracy: Math.max(0.10, Math.min(0.98, m.accuracy + t * 0.12)),
+      buzzAt:   Math.max(0.05, Math.min(0.95, m.buzzAt   + t * 0.14)),
+      thinkMs:  Math.max(120,  Math.round(m.thinkMs * (1 + t * 0.30))),
+    };
+  });
 }
 
 // Map slider (0-100) ↔ buzzAt (0.05-0.95)

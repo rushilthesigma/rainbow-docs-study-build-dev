@@ -212,13 +212,11 @@ export default function DebatePanel({ onBack, initialTopic = null, initialSide =
   const headerBackTarget = onMenu ? (onBack || null) : (isActiveGame ? null : () => selectMode('menu'));
 
   const header = (
-    <div className="flex items-center gap-2 px-4 py-2.5 bg-transparent">
-      {headerBackTarget ? (
+    <div className="flex items-center gap-2 pl-2 pr-4 py-2.5 bg-transparent">
+      {headerBackTarget && (
         <button onClick={headerBackTarget} className="p-1 rounded text-white/70 hover:text-white transition-colors">
           <ArrowLeft size={14} />
         </button>
-      ) : (
-        <span className="w-[22px]" aria-hidden="true" />
       )}
       <span className="text-[13px] font-bold text-white">Debate</span>
       <span className="text-[10px] font-semibold uppercase tracking-wider text-white/50">
@@ -236,11 +234,18 @@ export default function DebatePanel({ onBack, initialTopic = null, initialSide =
     </div>
   );
 
+  // Active-chat modes need to fill the parent and let their internal
+  // ChatContainer handle scrolling. Other modes (menu, setup, history,
+  // verdicts, lobby) are scrollable lists where the outer wrapper should
+  // scroll. Picking the right wrapper avoids the bug where the chat
+  // input scrolled with the messages instead of staying pinned to the
+  // bottom of the debate window.
+  const isLiveChatMode = mode === 'single-debate' || mode === 'mp-game';
   return (
     <div className="h-full flex flex-col">
       {header}
-      <div className="flex-1 min-h-0 overflow-y-auto">
-        <ViewFade viewKey={modeGroup(mode)}>
+      <div className={`flex-1 min-h-0 ${isLiveChatMode ? 'flex flex-col' : 'overflow-y-auto'}`}>
+        <ViewFade viewKey={modeGroup(mode)} className={isLiveChatMode ? 'flex-1 min-h-0 flex flex-col' : ''}>
         {mode === 'menu' && (
           <ModeMenu
             onSelect={selectMode}
@@ -1507,18 +1512,32 @@ function Singleplayer({ mode, setMode, onExit, initialTopic = null, initialSide 
     try { await apiFetch('/api/debate/start', { method: 'POST' }); }
     catch (err) {
       if (err.code === 'debate_limit_reached') { setError(err.message || 'Weekly debate limit reached.'); return; }
+      // Surface other start-up failures instead of silently entering a
+      // debate the server didn't authorize.
+      setError(err.message || 'Could not start debate. Try again.');
+      return;
     }
     setSide(s);
     setTopic(t);
     setMode('single-debate');
     systemRef.current = buildAdversarialSystem(s);
-    doSend(`Topic: "${t}". I'm arguing ${s === 'for' ? 'FOR' : 'AGAINST'} this. Open with your counter - give me your strongest argument first.`);
+    // Bootstrap turn: instructs the AI to open with its strongest counter.
+    // Hidden from the visible transcript - the student didn't type it and
+    // showing a system-style prompt as a "you" bubble was confusing.
+    doSend(
+      `Topic: "${t}". I'm arguing ${s === 'for' ? 'FOR' : 'AGAINST'} this. Open with your counter - give me your strongest argument first.`,
+      { hideFromTranscript: true },
+    );
   }
 
-  async function doSend(text) {
+  async function doSend(text, { hideFromTranscript = false } = {}) {
     const userMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
-    setMessages(prev => [...prev, userMsg]);
+    if (!hideFromTranscript) setMessages(prev => [...prev, userMsg]);
     setStreaming(true);
+    // Force a streaming bubble with ThinkingDots even though /api/chat is
+    // non-streaming. Without this the chat sits empty for 10-30s while
+    // Gemini runs web search + composes the counter.
+    setStreamingContent(' ');
     try {
       const allMessages = [...messages, userMsg].map(m => ({ role: m.role, content: m.content }));
       const result = await apiFetch('/api/chat', {

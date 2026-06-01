@@ -3,14 +3,6 @@ import { ArrowLeft, Trophy, Lightbulb } from 'lucide-react';
 import StageTracker from './StageTracker';
 import ReadingBlock from './ReadingBlock';
 import QuizBlock from './QuizBlock';
-import ExampleBlock from './ExampleBlock';
-import RecapBlock from './RecapBlock';
-import ApplicationBlock from './ApplicationBlock';
-import ChallengeBlock from './ChallengeBlock';
-import OpenAnswerBlock from './OpenAnswerBlock';
-import DiscussionBlock from './DiscussionBlock';
-import MatchingBlock from './MatchingBlock';
-import FillBlankBlock from './FillBlankBlock';
 import ProgressBar from '../shared/ProgressBar';
 import { SkeletonProse } from '../shared/Skeleton';
 import ViewFade from '../shared/ViewFade';
@@ -229,8 +221,6 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
                 <ArrowLeft size={14} /> {backLabel}
               </button>
             </div>
-          ) : active?.type === 'reading' ? (
-            <ReadingBlock key={active.id} block={active} onComplete={handleReadingComplete} />
           ) : active?.type === 'quiz' ? (
             <QuizBlock
               key={active.id}
@@ -238,31 +228,55 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
               onComplete={handleQuizSubmit}
               gradeFn={(blockId, responses) => api.gradeBlock(blockId, responses)}
             />
-          ) : active?.type === 'example' ? (
-            <ExampleBlock key={active.id} block={active} onComplete={handleReadingComplete} />
-          ) : active?.type === 'recap' ? (
-            <RecapBlock key={active.id} block={active} onComplete={handleReadingComplete} />
-          ) : active?.type === 'application' ? (
-            <ApplicationBlock key={active.id} block={active} onComplete={handleReadingComplete} />
-          ) : active?.type === 'challenge' ? (
-            <ChallengeBlock key={active.id} block={active} onComplete={handleReadingComplete} />
-          ) : active?.type === 'open' ? (
-            <OpenAnswerBlock
-              key={active.id}
-              block={active}
-              gradeFn={handleOpenSubmit}
-              onComplete={handleReadingComplete}
-            />
-          ) : active?.type === 'discussion' ? (
-            <DiscussionBlock key={active.id} block={active} onComplete={handleReadingComplete} />
-          ) : active?.type === 'matching' ? (
-            <MatchingBlock key={active.id} block={active} onComplete={handleReadingComplete} />
-          ) : active?.type === 'fill-blank' ? (
-            <FillBlankBlock key={active.id} block={active} onComplete={handleReadingComplete} />
+          ) : active ? (
+            // Lessons are now reading-only. Any block type other than
+            // `quiz` (legacy lessons may still have example / recap /
+            // application / challenge / open / discussion / matching /
+            // fill-blank) renders as a ReadingBlock with a synthesized
+            // markdown body so existing user data doesn't render blank.
+            <ReadingBlock key={active.id} block={normalizeToReading(active)} onComplete={handleReadingComplete} />
           ) : null}
           </ViewFade>
         </>
       )}
     </div>
   );
+}
+
+// Lessons are reading-only. The AI now generates only `reading` blocks
+// (plus a final quiz at the end), but lessons saved before this change
+// still have the variety types in user data. Rather than break those,
+// flatten any non-reading block into a reading-shaped block by
+// stitching together whatever text content the block carried.
+function normalizeToReading(block) {
+  if (!block) return block;
+  if (block.type === 'reading' && block.content) return block;
+  if (block.content) return { ...block, type: 'reading' };
+
+  const parts = [];
+  if (block.prompt) parts.push(block.prompt);
+  if (block.problem) parts.push(block.problem);
+  if (Array.isArray(block.bullets) && block.bullets.length) {
+    parts.push(block.bullets.map((b) => `- ${b}`).join('\n'));
+  }
+  if (Array.isArray(block.steps) && block.steps.length) {
+    parts.push(block.steps.map((s, i) => `### Step ${i + 1}${s.label ? `: ${s.label}` : ''}\n\n${s.text || ''}`).join('\n\n'));
+  }
+  if (Array.isArray(block.pairs) && block.pairs.length) {
+    parts.push('### Key terms\n\n' + block.pairs.map((p) => `- **${p.term}** — ${p.definition}`).join('\n'));
+  }
+  if (Array.isArray(block.sentences) && block.sentences.length) {
+    parts.push('### Examples\n\n' + block.sentences.map((s) => `- ${s.before || ''}**${s.answer || '___'}**${s.after || ''}`).join('\n'));
+  }
+  if (Array.isArray(block.talkingPoints) && block.talkingPoints.length) {
+    parts.push('### Points to consider\n\n' + block.talkingPoints.map((p) => `- ${p}`).join('\n'));
+  }
+  if (block.solution) parts.push(`### Solution\n\n${block.solution}`);
+  if (block.tryThis) parts.push(`### Try it\n\n${block.tryThis}`);
+
+  return {
+    ...block,
+    type: 'reading',
+    content: parts.join('\n\n') || block.title || '',
+  };
 }
