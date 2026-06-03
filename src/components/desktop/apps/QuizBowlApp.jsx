@@ -125,6 +125,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   // When deep-linked from study mode with a topic, jump straight to the
   // custom form so the student can hit Start without hunting.
   const [view, setView] = useState(initialTopic ? 'custom' : 'hub');
+  const [aiLobbyInitial, setAiLobbyInitial] = useState('lobby');
   useBrowserBack(view !== 'hub', () => setView(view === 'custom' ? 'hub' : 'hub'));
   const { user } = useAuth();
   const [questions, setQuestions] = useState([]);
@@ -197,6 +198,15 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
 
   const q = questions[currentQ];
   const { revealed, done, stop, wordIndex, totalWords } = useWordReveal(q?.text || '', revealSpeedMs, reading && !buzzed && view === 'playing');
+
+  // Refs so the keydown handler (registered once per view change) always
+  // reads the latest state without needing a stale-closure re-registration.
+  const _buzzedRef    = useRef(buzzed);    _buzzedRef.current    = buzzed;
+  const _readingRef   = useRef(reading);   _readingRef.current   = reading;
+  const _showResultRef= useRef(showResult);_showResultRef.current= showResult;
+  const _stopRef      = useRef(stop);      _stopRef.current      = stop;
+  const _submitRef    = useRef(null);
+  const _nextQRef     = useRef(null);
 
   // Reset the per-set tracker each time a fresh round kicks off so the
   // save effect below doesn't think the previous set is still active.
@@ -435,22 +445,27 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
 
   function endRound() { setView('review'); }
 
-  const justSubmitted = useRef(false);
+  // Keep function refs current so the single keydown listener (registered
+  // only when view changes) always calls the latest version.
+  _submitRef.current   = handleSubmit;
+  _nextQRef.current    = nextQuestion;
+
   useEffect(() => {
     if (view !== 'playing') return;
-    function handleKey(e) {
+    function onKey(e) {
+      const buzzed     = _buzzedRef.current;
+      const reading    = _readingRef.current;
+      const showResult = _showResultRef.current;
       if (e.key === ' ' && !buzzed && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
-        e.preventDefault(); handleBuzz();
+        e.preventDefault();
+        if (!buzzed && reading) { setBuzzed(true); setReading(false); _stopRef.current?.(); }
       }
-      if (e.key === 'Enter' && buzzed && !showResult) { e.preventDefault(); handleSubmit(); justSubmitted.current = true; }
-      else if (e.key === 'Enter' && showResult) {
-        if (justSubmitted.current) { justSubmitted.current = false; return; }
-        e.preventDefault(); nextQuestion();
-      }
+      if (e.key === 'Enter' && buzzed && !showResult) { e.preventDefault(); _submitRef.current?.(); }
+      else if (e.key === 'Enter' && showResult) { e.preventDefault(); _nextQRef.current?.(); }
     }
-    window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
-  }, [view, buzzed, showResult, answer]);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [view]);
 
   // ===== REVIEW =====
   if (view === 'review') {
@@ -663,7 +678,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   if (view === 'ai-lobby') {
     return (
       <ViewFade viewKey="ai-lobby" className="h-full flex flex-col">
-        <AILobbyView onExit={() => { setView('hub'); bustHubCache(); loadHub(); }} />
+        <AILobbyView user={user} initialLobbyType={aiLobbyInitial} onExit={() => { setView('hub'); setAiLobbyInitial('lobby'); bustHubCache(); loadHub(); }} />
       </ViewFade>
     );
   }
@@ -781,7 +796,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
       onLaunch={launchSet}
       onMultiplayer={() => setView('multiplayer')}
       onCustom={() => setView('custom')}
-      onAILobby={() => setView('ai-lobby')}
+      onAILobby={() => { setAiLobbyInitial('lobby'); setView('ai-lobby'); }}
     />
     </ViewFade>
   );
@@ -1255,6 +1270,16 @@ const THINK_MIN = 100, THINK_MAX = 3200;
 function sliderToThink(v) { return Math.round(THINK_MIN + (v / 100) * (THINK_MAX - THINK_MIN)); }
 function thinkToSlider(ms) { return Math.round(((ms - THINK_MIN) / (THINK_MAX - THINK_MIN)) * 100); }
 
+// ── Bot-config preset storage (localStorage) ─────────────────────────
+const QB_PRESETS_KEY = 'qb-bot-presets-v1';
+function loadBotPresets() {
+  try { return JSON.parse(localStorage.getItem(QB_PRESETS_KEY)) || []; }
+  catch { return []; }
+}
+function saveBotPresets(list) {
+  try { localStorage.setItem(QB_PRESETS_KEY, JSON.stringify(list)); } catch {}
+}
+
 // ============================================================
 // AI LOBBY - compete against AI bots in a lobby of 8 or 1v1
 // ============================================================
@@ -1275,9 +1300,12 @@ const AI_LOBBY_SCORING_FORMATS = [
     powerThreshold: null, powerPts: null, getPts: 10, negPts: 0, target: 40 },
 ];
 
-function AILobbyView({ onExit }) {
+function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
   const [screen, setScreen]             = useState('setup');
-  const [lobbyType, setLobbyType]       = useState('lobby');
+  // lobbyType can be 'lobby' | 'head-to-head'
+  const [lobbyType, setLobbyType]       = useState(initialLobbyType);
+  // within head-to-head: 'ai' | 'real'
+  const [h2hOpponent, setH2hOpponent]   = useState('ai');
   const [category, setCategory]         = useState('History');
   const [difficulty, setDifficulty]     = useState('medium');
   const [source, setSource]             = useState('qbreader');
@@ -1291,6 +1319,11 @@ function AILobbyView({ onExit }) {
   const [lobbyCustomInstr, setLobbyCustomInstr] = useState('');
   const [botOverrides, setBotOverrides] = useState({});
   const [botNames, setBotNames] = useState(DEFAULT_BOT_NAMES);
+
+  // ── Presets ──
+  const [presets, setPresets]           = useState(() => loadBotPresets());
+  const [savingPreset, setSavingPreset] = useState(false);
+  const [presetName, setPresetName]     = useState('');
 
   // Lobby of 8: room competition level
   const [roomLevel, setRoomLevel]       = useState('varsity');
@@ -1334,6 +1367,49 @@ function AILobbyView({ onExit }) {
     accuracy: accSlider / 100,
     thinkMs:  sliderToThink(thinkSlider),
   }), [selectedPreset, buzzSlider, accSlider, thinkSlider]);
+
+  function handleSavePreset() {
+    const name = presetName.trim() || `Preset ${presets.length + 1}`;
+    const p = {
+      id: Date.now().toString(),
+      name,
+      lobbyType,
+      h2hOpponent: lobbyType === 'head-to-head' ? h2hOpponent : undefined,
+      botNames: { ...botNames },
+      // lobby-of-8 config
+      roomLevel,
+      botOverrides: { ...botOverrides },
+      // 1v1 config
+      selectedBotIdx,
+      buzzSlider,
+      accSlider,
+      thinkSlider,
+    };
+    const next = [p, ...presets].slice(0, 12);
+    setPresets(next);
+    saveBotPresets(next);
+    setPresetName('');
+    setSavingPreset(false);
+  }
+
+  function handleLoadPreset(p) {
+    setLobbyType(p.lobbyType === '1v1' ? 'head-to-head' : (p.lobbyType || 'lobby'));
+    if (p.h2hOpponent) setH2hOpponent(p.h2hOpponent);
+    else if (p.lobbyType === '1v1') setH2hOpponent('ai');
+    if (p.botNames) setBotNames(p.botNames);
+    if (p.roomLevel) setRoomLevel(p.roomLevel);
+    if (p.botOverrides) setBotOverrides(p.botOverrides);
+    if (p.selectedBotIdx != null) setSelectedBotIdx(p.selectedBotIdx);
+    if (p.buzzSlider  != null) setBuzzSlider(p.buzzSlider);
+    if (p.accSlider   != null) setAccSlider(p.accSlider);
+    if (p.thinkSlider != null) setThinkSlider(p.thinkSlider);
+  }
+
+  function handleDeletePreset(id) {
+    const next = presets.filter(p => p.id !== id);
+    setPresets(next);
+    saveBotPresets(next);
+  }
 
   async function startSession() {
     setError(null);
@@ -1424,6 +1500,14 @@ function AILobbyView({ onExit }) {
     );
   }
 
+  if (screen === 'real') {
+    return (
+      <div className="h-full flex flex-col min-h-0">
+        <QuizBowlMatch user={user} onExit={() => setScreen('setup')} />
+      </div>
+    );
+  }
+
   return (
     <div className="h-full overflow-y-auto bg-transparent">
       <div className="p-5 pb-8 space-y-4">
@@ -1434,18 +1518,55 @@ function AILobbyView({ onExit }) {
         {/* ── Mode ── */}
         <div className="grid grid-cols-2 gap-2">
           <button onClick={() => setLobbyType('lobby')}
-            className={`rounded-2xl border p-4 text-left transition-all ${lobbyType === 'lobby' ? 'border-blue-500/40 bg-blue-500/15 ring-1 ring-white/10' : 'border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06]'}`}>
-            <Users size={16} className={`mb-2 ${lobbyType === 'lobby' ? 'text-blue-400' : 'text-white/30'}`} />
-            <div className={`font-semibold text-[13px] ${lobbyType === 'lobby' ? 'text-blue-300' : 'text-white/60'}`}>Lobby of 8</div>
-            <div className="text-[11px] text-white/35 mt-0.5">8 players · tournament room</div>
+            className={`rounded-2xl border p-3 text-left transition-all ${lobbyType === 'lobby' ? 'border-blue-500/40 bg-blue-500/15 ring-1 ring-white/10' : 'border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06]'}`}>
+            <Users size={15} className={`mb-1.5 ${lobbyType === 'lobby' ? 'text-blue-400' : 'text-white/30'}`} />
+            <div className={`font-semibold text-[12px] ${lobbyType === 'lobby' ? 'text-blue-300' : 'text-white/60'}`}>vs AI Lobby</div>
+            <div className="text-[10px] text-white/35 mt-0.5">8 bots · tournament</div>
           </button>
-          <button onClick={() => setLobbyType('1v1')}
-            className={`rounded-2xl border p-4 text-left transition-all ${lobbyType === '1v1' ? 'border-rose-500/40 bg-rose-500/15 ring-1 ring-white/10' : 'border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06]'}`}>
-            <Swords size={16} className={`mb-2 ${lobbyType === '1v1' ? 'text-rose-400' : 'text-white/30'}`} />
-            <div className={`font-semibold text-[13px] ${lobbyType === '1v1' ? 'text-rose-300' : 'text-white/60'}`}>1v1 Match</div>
-            <div className="text-[11px] text-white/35 mt-0.5">Head-to-head · first to 10</div>
+          <button onClick={() => setLobbyType('head-to-head')}
+            className={`rounded-2xl border p-3 text-left transition-all ${lobbyType === 'head-to-head' ? 'border-blue-500/40 bg-blue-500/15 ring-1 ring-white/10' : 'border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06]'}`}>
+            <Swords size={15} className={`mb-1.5 ${lobbyType === 'head-to-head' ? 'text-blue-400' : 'text-white/30'}`} />
+            <div className={`font-semibold text-[12px] ${lobbyType === 'head-to-head' ? 'text-blue-300' : 'text-white/60'}`}>Head to Head</div>
+            <div className="text-[10px] text-white/35 mt-0.5">1v1 · AI or real player</div>
           </button>
         </div>
+
+        {/* ── Head to Head: sub-toggle for AI Bot vs Real Player ── */}
+        {lobbyType === 'head-to-head' && (
+          <div className="rounded-2xl border border-blue-500/20 bg-blue-500/[0.04] p-4 space-y-3">
+            <div className="grid grid-cols-2 gap-1.5">
+              <button onClick={() => setH2hOpponent('ai')}
+                className={`py-2 rounded-xl text-[11px] font-semibold border transition-all ${
+                  h2hOpponent === 'ai'
+                    ? 'bg-blue-500/20 text-blue-200 border-blue-400/50'
+                    : 'bg-white/[0.03] text-white/50 border-white/[0.08] hover:text-white/70 hover:border-white/[0.15]'
+                }`}>
+                vs AI Bot
+              </button>
+              <button onClick={() => setH2hOpponent('real')}
+                className={`py-2 rounded-xl text-[11px] font-semibold border transition-all ${
+                  h2hOpponent === 'real'
+                    ? 'bg-blue-500/20 text-blue-200 border-blue-400/50'
+                    : 'bg-white/[0.03] text-white/50 border-white/[0.08] hover:text-white/70 hover:border-white/[0.15]'
+                }`}>
+                vs Real Player
+              </button>
+            </div>
+
+            {h2hOpponent === 'real' && (
+              <div className="text-center space-y-2 pt-1">
+                <p className="text-[12px] text-white/60">
+                  Create a room and share the code. Up to 8 real players can join and compete head-to-head.
+                </p>
+                <button
+                  onClick={() => setScreen('real')}
+                  className="w-full py-3 rounded-2xl bg-blue-500 hover:bg-blue-400 text-white text-[13px] font-bold inline-flex items-center justify-center gap-2 transition-all border border-blue-400/40">
+                  <Users size={14} /> Enter Lobby
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── Lobby: room level + player preview ── */}
         {lobbyType === 'lobby' && (
@@ -1518,8 +1639,8 @@ function AILobbyView({ onExit }) {
           </div>
         )}
 
-        {/* ── 1v1: opponent picker + fine-tune ── */}
-        {lobbyType === '1v1' && (
+        {/* ── Head to Head AI Bot: opponent picker + fine-tune ── */}
+        {lobbyType === 'head-to-head' && h2hOpponent === 'ai' && (
           <div className="space-y-3">
             {/* Preset picker */}
             <div>
@@ -1527,7 +1648,7 @@ function AILobbyView({ onExit }) {
               <div className="grid grid-cols-2 gap-1.5">
                 {BOT_ROSTER.map((bot, i) => (
                   <button key={bot.id} onClick={() => setSelectedBotIdx(i)}
-                    className={`rounded-xl border p-2.5 text-left transition-all ${selectedBotIdx === i ? 'border-rose-400/40 bg-rose-500/10 ring-1 ring-white/10' : 'border-white/[0.07] bg-white/[0.02] hover:border-white/[0.14]'}`}>
+                    className={`rounded-xl border p-2.5 text-left transition-all ${selectedBotIdx === i ? 'border-blue-400/40 bg-blue-500/10 ring-1 ring-white/10' : 'border-white/[0.07] bg-white/[0.02] hover:border-white/[0.14]'}`}>
                     <div className="flex items-center justify-between">
                       <span className="text-[12px] font-semibold text-white/80">{bot.label}</span>
                       <span className="text-[9px] text-white/25">{'★'.repeat(bot.stars)}</span>
@@ -1555,7 +1676,7 @@ function AILobbyView({ onExit }) {
                 </div>
                 <input type="range" min="5" max="95" step="1" value={buzzSlider}
                   onChange={e => setBuzzSlider(Number(e.target.value))}
-                  className="w-full accent-rose-400 h-1 rounded-full" />
+                  className="w-full accent-blue-400 h-1 rounded-full" />
                 <div className="flex justify-between text-[9px] text-white/20 mt-1">
                   <span>Buzzes early</span><span>Buzzes late</span>
                 </div>
@@ -1569,7 +1690,7 @@ function AILobbyView({ onExit }) {
                 </div>
                 <input type="range" min="10" max="99" step="1" value={accSlider}
                   onChange={e => setAccSlider(Number(e.target.value))}
-                  className="w-full accent-rose-400 h-1 rounded-full" />
+                  className="w-full accent-blue-400 h-1 rounded-full" />
                 <div className="flex justify-between text-[9px] text-white/20 mt-1">
                   <span>Low</span><span>High</span>
                 </div>
@@ -1583,7 +1704,7 @@ function AILobbyView({ onExit }) {
                 </div>
                 <input type="range" min="0" max="100" step="1" value={thinkSlider}
                   onChange={e => setThinkSlider(Number(e.target.value))}
-                  className="w-full accent-rose-400 h-1 rounded-full" />
+                  className="w-full accent-blue-400 h-1 rounded-full" />
                 <div className="flex justify-between text-[9px] text-white/20 mt-1">
                   <span>Instant</span><span>Slow</span>
                 </div>
@@ -1603,88 +1724,128 @@ function AILobbyView({ onExit }) {
           </div>
         )}
 
-        {/* ── Source ── */}
-        <div className="grid grid-cols-2 gap-2">
-          <GlassTile active={source === 'qbreader'} icon={<BookOpen size={14} />} label="Past QB" sub="qbreader.org" onClick={() => setSource('qbreader')} />
-          <GlassTile active={source === 'ai'} icon={<Sparkles size={14} />} label="AI" sub="Gemini · niche topics" onClick={() => setSource('ai')} />
-        </div>
-
-        {/* ── Category ── */}
-        <div className="flex flex-wrap gap-1.5">
-          {QB_LOBBY_CATEGORIES.map(c => <GlassPill key={c} active={category === c} onClick={() => setCategory(c)}>{c}</GlassPill>)}
-        </div>
-
-        {/* ── Question difficulty ── */}
-        <div>
-          <p className="text-[10px] text-white/35 uppercase tracking-widest mb-2 font-medium">Question difficulty</p>
-          <div className="grid grid-cols-3 gap-1.5">
-            {[['easy', 'Easy'], ['medium', 'Medium'], ['hard', 'Hard']].map(([id, label]) => (
-              <GlassPill key={id} active={difficulty === id} onClick={() => setDifficulty(id)}>{label}</GlassPill>
-            ))}
+        {/* ── Source / Category / Difficulty / Scoring / Topic (AI modes only) ── */}
+        {!(lobbyType === 'head-to-head' && h2hOpponent === 'real') && <>
+          <div className="grid grid-cols-2 gap-2">
+            <GlassTile active={source === 'qbreader'} icon={<BookOpen size={14} />} label="Past QB" sub="qbreader.org" onClick={() => setSource('qbreader')} />
+            <GlassTile active={source === 'ai'} icon={<Sparkles size={14} />} label="AI" sub="Gemini · niche topics" onClick={() => setSource('ai')} />
           </div>
-        </div>
 
-        {/* ── Scoring format ── */}
-        <div>
-          <p className="text-[10px] text-white/35 uppercase tracking-widest mb-2 font-medium">Scoring format</p>
-          <div className="grid grid-cols-2 gap-1.5">
-            {AI_LOBBY_SCORING_FORMATS.map(f => {
-              const sel = scoringFormat.id === f.id;
-              return (
-                <button key={f.id} onClick={() => setScoringFormat(f)}
-                  className={`rounded-xl border p-2.5 text-left transition-all focus:outline-none ${
-                    sel
-                      ? 'bg-amber-500/12 border-amber-500/40 ring-1 ring-amber-500/25'
-                      : 'bg-white/[0.02] border-white/[0.06] hover:border-white/[0.14]'
-                  }`}>
-                  <div className={`text-[12px] font-semibold ${sel ? 'text-amber-200' : 'text-white/80'}`}>{f.label}</div>
-                  <div className="text-[10px] text-white/35 mt-0.5">{f.desc}</div>
-                </button>
-              );
-            })}
+          <div className="flex flex-wrap gap-1.5">
+            {QB_LOBBY_CATEGORIES.map(c => <GlassPill key={c} active={category === c} onClick={() => setCategory(c)}>{c}</GlassPill>)}
           </div>
-        </div>
 
-        {/* ── Topic ── */}
-        <div>
-          <p className="text-[10px] text-white/35 uppercase tracking-widest mb-1.5 font-medium">
-            Topic <span className="normal-case tracking-normal text-white/20 font-normal">(optional)</span>
-          </p>
-          <input
-            type="text"
-            value={topic}
-            onChange={e => setTopic(e.target.value)}
-            placeholder="e.g. French Revolution, Thermodynamics, Shakespeare…"
-            className="w-full px-3 py-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-[12px] text-white/80 placeholder-white/20 outline-none focus:border-white/[0.15] transition-colors"
-          />
-        </div>
+          <div>
+            <p className="text-[10px] text-white/35 uppercase tracking-widest mb-2 font-medium">Question difficulty</p>
+            <div className="grid grid-cols-3 gap-1.5">
+              {[['easy', 'Easy'], ['medium', 'Medium'], ['hard', 'Hard']].map(([id, label]) => (
+                <GlassPill key={id} active={difficulty === id} onClick={() => setDifficulty(id)}>{label}</GlassPill>
+              ))}
+            </div>
+          </div>
 
-        {/* ── Custom instructions ── (AI only) */}
-        {source === 'ai' && (
+          <div>
+            <p className="text-[10px] text-white/35 uppercase tracking-widest mb-2 font-medium">Scoring format</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              {AI_LOBBY_SCORING_FORMATS.map(f => {
+                const sel = scoringFormat.id === f.id;
+                return (
+                  <button key={f.id} onClick={() => setScoringFormat(f)}
+                    className={`rounded-xl border p-2.5 text-left transition-all focus:outline-none ${
+                      sel
+                        ? 'bg-amber-500/12 border-amber-500/40 ring-1 ring-amber-500/25'
+                        : 'bg-white/[0.02] border-white/[0.06] hover:border-white/[0.14]'
+                    }`}>
+                    <div className={`text-[12px] font-semibold ${sel ? 'text-amber-200' : 'text-white/80'}`}>{f.label}</div>
+                    <div className="text-[10px] text-white/35 mt-0.5">{f.desc}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div>
             <p className="text-[10px] text-white/35 uppercase tracking-widest mb-1.5 font-medium">
-              Custom instructions <span className="normal-case tracking-normal text-white/20 font-normal">(optional)</span>
+              Topic <span className="normal-case tracking-normal text-white/20 font-normal">(optional)</span>
             </p>
-            <textarea
-              value={lobbyCustomInstr}
-              onChange={e => setLobbyCustomInstr(e.target.value)}
-              placeholder="e.g. Focus on 20th century events, avoid questions about leaders…"
-              rows={2}
-              className="w-full px-3 py-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-[12px] text-white/80 placeholder-white/20 resize-none outline-none focus:border-white/[0.15] transition-colors"
+            <input type="text" value={topic} onChange={e => setTopic(e.target.value)}
+              placeholder="e.g. French Revolution, Thermodynamics, Shakespeare…"
+              className="w-full px-3 py-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-[12px] text-white/80 placeholder-white/20 outline-none focus:border-white/[0.15] transition-colors"
             />
           </div>
-        )}
+
+          {source === 'ai' && (
+            <div>
+              <p className="text-[10px] text-white/35 uppercase tracking-widest mb-1.5 font-medium">
+                Custom instructions <span className="normal-case tracking-normal text-white/20 font-normal">(optional)</span>
+              </p>
+              <textarea value={lobbyCustomInstr} onChange={e => setLobbyCustomInstr(e.target.value)}
+                placeholder="e.g. Focus on 20th century events, avoid questions about leaders…"
+                rows={2}
+                className="w-full px-3 py-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-[12px] text-white/80 placeholder-white/20 resize-none outline-none focus:border-white/[0.15] transition-colors"
+              />
+            </div>
+          )}
+        </>}
 
         {error && <p className="text-[11px] text-rose-400 px-3 py-2 rounded-xl bg-rose-500/10 border border-rose-500/20 text-center">{error}</p>}
 
-        <button onClick={startSession}
-          className={`w-full py-3.5 rounded-2xl text-white text-[14px] font-bold inline-flex items-center justify-center gap-2 transition-all border ${
-            lobbyType === 'lobby'
-              ? 'bg-blue-500 hover:bg-blue-400 border-blue-400/40'
-              : 'bg-gradient-to-b from-rose-500 to-rose-600 hover:from-rose-400 hover:to-rose-500 border-rose-400/40'
-          }`}>
-          {lobbyType === 'lobby' ? <><Users size={15} /> Enter Lobby</> : <><Swords size={15} /> Start Match</>}
-        </button>
+        {/* ── Presets panel (AI modes only) ── */}
+        {!(lobbyType === 'head-to-head' && h2hOpponent === 'real') && (
+          <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/35">Presets</span>
+              {!savingPreset && (
+                <button
+                  onClick={() => setSavingPreset(true)}
+                  className="text-[10px] text-white/40 hover:text-white/70 transition-colors px-2 py-0.5 rounded-md border border-white/[0.08] hover:border-white/[0.18]">
+                  Save current
+                </button>
+              )}
+            </div>
+
+            {savingPreset && (
+              <div className="flex gap-2">
+                <input
+                  autoFocus
+                  value={presetName}
+                  onChange={e => setPresetName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleSavePreset(); if (e.key === 'Escape') setSavingPreset(false); }}
+                  placeholder="Preset name…"
+                  className="flex-1 px-2.5 py-1.5 rounded-lg border border-white/[0.10] bg-white/[0.05] text-[11px] text-white/80 placeholder-white/25 outline-none focus:border-white/[0.20] transition-colors"
+                />
+                <button onClick={handleSavePreset} className="px-3 py-1.5 rounded-lg bg-white/[0.08] hover:bg-white/[0.13] text-[11px] text-white/70 font-semibold transition-colors">Save</button>
+                <button onClick={() => setSavingPreset(false)} className="px-2 py-1.5 rounded-lg text-white/35 hover:text-white/60 transition-colors"><X size={12} /></button>
+              </div>
+            )}
+
+            {presets.length === 0 && !savingPreset && (
+              <p className="text-[10px] text-white/25 text-center py-1">No saved presets yet</p>
+            )}
+
+            {presets.length > 0 && (
+              <div className="space-y-1">
+                {presets.map(p => (
+                  <div key={p.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white/[0.03] border border-white/[0.05] hover:border-white/[0.10] transition-colors group">
+                    <div className="flex-1 min-w-0">
+                      <span className="text-[11px] font-medium text-white/75 truncate block">{p.name}</span>
+                      <span className="text-[9px] text-white/30">{p.lobbyType === 'head-to-head' || p.lobbyType === '1v1' ? '1v1' : '8-player'} preset</span>
+                    </div>
+                    <button onClick={() => handleLoadPreset(p)} className="text-[10px] text-white/40 hover:text-white/75 px-2 py-0.5 rounded border border-white/[0.08] hover:border-white/[0.20] transition-colors">Load</button>
+                    <button onClick={() => handleDeletePreset(p.id)} className="text-white/20 hover:text-rose-400/70 transition-colors opacity-0 group-hover:opacity-100"><X size={11} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {!(lobbyType === 'head-to-head' && h2hOpponent === 'real') && (
+          <button onClick={startSession}
+            className="w-full py-3.5 rounded-2xl text-white text-[14px] font-bold inline-flex items-center justify-center gap-2 transition-all border bg-blue-500 hover:bg-blue-400 border-blue-400/40">
+            {lobbyType === 'lobby' ? <><Users size={15} /> Enter Lobby</> : <><Swords size={15} /> Start Match</>}
+          </button>
+        )}
       </div>
     </div>
   );

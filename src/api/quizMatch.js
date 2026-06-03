@@ -51,6 +51,16 @@ export const fetchQuizBowlNiches = ({ category, difficulty = 'Medium' } = {}) =>
   return apiFetch(`/api/quizbowl/niche-recommendations?${params.toString()}`);
 };
 
+// Host-only: buzz and answer on behalf of a bot player.
+export const botBuzz = (code, botUserId) => apiFetch(`/api/quizbowl/match/${code}/bot-buzz`, {
+  method: 'POST',
+  body: JSON.stringify({ botId: botUserId }),
+});
+export const botAnswer = (code, botUserId, correct) => apiFetch(`/api/quizbowl/match/${code}/bot-answer`, {
+  method: 'POST',
+  body: JSON.stringify({ botId: botUserId, correct }),
+});
+
 // Subscribe to an SSE stream of match events.
 // handlers: { onSnapshot, onPlayerJoined, onQuestionStart, onBuzz, onAnswerResult, onMatchEnd, onPlayerLeft, onError }
 export function streamMatch(code, handlers) {

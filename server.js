@@ -584,6 +584,9 @@ function createDefaultData() {
     // Newest-first, capped at 200.
     missedQuestions: [],
     notes: [],
+    // Topics are lightweight folders for notes. Folder model: a note has at
+    // most one topicId. Each topic: { id, name, color, createdAt }.
+    topics: [],
     // Obsidian-style knowledge graph(s) over the user's notes. Each map
     // has its own nodes+edges. The first map is the "default" - note
     // mirroring (auto-add a node for every note) only happens on it.
@@ -5068,6 +5071,7 @@ app.get('/api/notes', authMiddleware, (req, res) => {
     if (!email) return res.status(404).json({ error: 'User not found' });
     const notes = (users[email].data?.notes || []).map(n => ({
       id: n.id, title: n.title, type: n.type || 'regular', createdAt: n.createdAt, updatedAt: n.updatedAt,
+      topicId: n.topicId ?? null,
       preview: (n.mainNotes || '').slice(0, 100),
     }));
     res.json({ notes });
@@ -5076,15 +5080,17 @@ app.get('/api/notes', authMiddleware, (req, res) => {
 
 app.post('/api/notes', authMiddleware, (req, res) => {
   try {
-    const { title, type } = req.body;
+    const { title, type, topicId } = req.body;
     const users = loadUsers();
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
     users[email].data = migrateUserData(users[email].data);
+    // Only honor topicId if it points at a real topic.
+    const validTopic = topicId && (users[email].data.topics || []).some(t => t.id === topicId) ? topicId : null;
     const note = {
       id: crypto.randomUUID(), title: title || 'Untitled Note', type: type || 'regular',
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-      cues: [], mainNotes: '', summary: '',
+      cues: [], mainNotes: '', summary: '', topicId: validTopic,
       linkedCurriculumId: null, linkedLessonId: null,
     };
     users[email].data.notes.unshift(note);
@@ -5106,7 +5112,7 @@ app.get('/api/notes/:nid', authMiddleware, (req, res) => {
 
 app.put('/api/notes/:nid', authMiddleware, (req, res) => {
   try {
-    const { title, cues, mainNotes, summary } = req.body;
+    const { title, cues, mainNotes, summary, topicId } = req.body;
     const users = loadUsers();
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
@@ -5116,6 +5122,10 @@ app.put('/api/notes/:nid', authMiddleware, (req, res) => {
     if (cues !== undefined) note.cues = cues;
     if (mainNotes !== undefined) note.mainNotes = mainNotes;
     if (summary !== undefined) note.summary = summary;
+    if (topicId !== undefined) {
+      // null clears the topic; otherwise must reference a real topic.
+      note.topicId = topicId && (users[email].data.topics || []).some(t => t.id === topicId) ? topicId : null;
+    }
     note.updatedAt = new Date().toISOString();
     saveUsers(users);
     res.json({ note });
@@ -5130,6 +5140,74 @@ app.delete('/api/notes/:nid', authMiddleware, (req, res) => {
     users[email].data.notes = (users[email].data.notes || []).filter(n => n.id !== req.params.nid);
     saveUsers(users);
     res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== TOPICS (folders for notes; one topic per note) =====
+const TOPIC_PALETTE = ['#a78bfa', '#60a5fa', '#34d399', '#fbbf24', '#f472b6', '#22d3ee', '#fb7185', '#c084fc'];
+
+// GET /api/topics → topics with note counts, plus an "unfiled" count.
+app.get('/api/topics', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const notes = users[email].data.notes || [];
+    const counts = {};
+    for (const n of notes) if (n.topicId) counts[n.topicId] = (counts[n.topicId] || 0) + 1;
+    const topics = (users[email].data.topics || []).map(t => ({ ...t, noteCount: counts[t.id] || 0 }));
+    res.json({ topics, unfiled: notes.filter(n => !n.topicId).length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/topics', authMiddleware, (req, res) => {
+  try {
+    const { name, color } = req.body || {};
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    if (!Array.isArray(users[email].data.topics)) users[email].data.topics = [];
+    const topic = {
+      id: crypto.randomUUID(),
+      name: String(name || 'New Topic').slice(0, 80) || 'New Topic',
+      color: typeof color === 'string' ? color.slice(0, 24) : TOPIC_PALETTE[users[email].data.topics.length % TOPIC_PALETTE.length],
+      createdAt: new Date().toISOString(),
+    };
+    users[email].data.topics.push(topic);
+    saveUsers(users);
+    res.json({ topic });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/topics/:id', authMiddleware, (req, res) => {
+  try {
+    const { name, color } = req.body || {};
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const topic = (users[email].data.topics || []).find(t => t.id === req.params.id);
+    if (!topic) return res.status(404).json({ error: 'Topic not found' });
+    if (typeof name === 'string' && name.trim()) topic.name = name.slice(0, 80);
+    if (typeof color === 'string') topic.color = color.slice(0, 24);
+    saveUsers(users);
+    res.json({ topic });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/topics/:id → remove the topic and unfile its notes.
+app.delete('/api/topics/:id', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    users[email].data.topics = (users[email].data.topics || []).filter(t => t.id !== req.params.id);
+    for (const n of users[email].data.notes || []) if (n.topicId === req.params.id) n.topicId = null;
+    saveUsers(users);
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -5282,6 +5360,35 @@ app.delete('/api/notes/:id/flashcards/:cardId', authMiddleware, (req, res) => {
     note.flashcards = (note.flashcards || []).filter(c => c.id !== req.params.cardId);
     saveUsers(users);
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/review/recommended → the single best note to review next (the one
+// with the most due flashcards). Empty states tell the widget what to say.
+//   { state: 'due' | 'caught_up' | 'no_cards' | 'no_notes', note: {id,title,due,total}|null }
+app.get('/api/review/recommended', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const notes = users[email].data.notes || [];
+    const now = Date.now();
+    let best = null;
+    let anyCards = false;
+    for (const n of notes) {
+      const cards = Array.isArray(n.flashcards) ? n.flashcards : [];
+      if (cards.length) anyCards = true;
+      const due = cards.filter(c => cardIsDue(c, now)).length;
+      if (due > 0 && (!best || due > best.due)) {
+        best = { id: n.id, title: n.title || 'Untitled Note', due, total: cards.length };
+      }
+    }
+    let state = 'caught_up';
+    if (best) state = 'due';
+    else if (!notes.length) state = 'no_notes';
+    else if (!anyCards) state = 'no_cards';
+    res.json({ state, note: best });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -10891,7 +10998,7 @@ function publicMatchState(match) {
   return {
     code: match.code,
     state: match.state,
-    players: match.players.map(p => ({ userId: p.userId, name: p.name, score: match.scores[p.userId] || 0 })),
+    players: match.players.map(p => ({ userId: p.userId, name: p.name, score: match.scores[p.userId] || 0, isBot: p.isBot || false })),
     currentIdx: match.currentIdx,
     totalQuestions: match.questions.length,
     currentQuestion: match.state === 'playing' && match.questions[match.currentIdx]
@@ -11080,7 +11187,6 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
   const match = matches.get(req.params.code);
   if (!match) return res.status(404).json({ error: 'Match not found' });
   if (match.hostId !== req.userId) return res.status(403).json({ error: 'Only the host can start' });
-  if (match.players.length < 2) return res.status(409).json({ error: 'Waiting for more players' });
   if (match.state === 'generating' || match.state === 'playing') {
     return res.status(409).json({ error: 'Match already starting' });
   }
@@ -11091,7 +11197,23 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
     questionCount = 10,
     revealSpeedMs = match.revealSpeedMs || 140,
     scoringFormat = match.scoringFormat || 'standard',
+    bots,
   } = req.body || {};
+
+  // Inject bots BEFORE player-count check so the host can start solo with bot fill.
+  // Passing bots:[] clears any existing bots; passing undefined leaves the roster alone.
+  if (Array.isArray(bots)) {
+    const realCount = match.players.filter(p => !p.isBot).length;
+    match.players = match.players.filter(p => !p.isBot);
+    for (const k of Object.keys(match.scores)) { if (k.startsWith('bot:')) delete match.scores[k]; }
+    for (const bot of bots.slice(0, QUIZBOWL_MAX_PLAYERS - realCount)) {
+      const botId = `bot:${match.code}:${bot.id}`;
+      match.players.push({ userId: botId, name: bot.name || 'Bot', isBot: true, stream: null });
+      match.scores[botId] = 0;
+    }
+  }
+
+  if (match.players.length < 2) return res.status(409).json({ error: 'Need at least 2 players (add bots or invite a friend)' });
 
   // Persist settings + flip to "generating" so the opponent sees a spinner.
   match.category = category;
@@ -11146,6 +11268,9 @@ Exact format:
     scheduleQuestionTimeout(match);
   } catch (e) {
     console.error('match start/generate failed', e);
+    // Remove any bots injected this attempt so the lobby doesn't show them.
+    match.players = match.players.filter(p => !p.isBot);
+    for (const k of Object.keys(match.scores)) { if (k.startsWith('bot:')) delete match.scores[k]; }
     match.state = 'waiting';
     match.lastActivity = Date.now();
     pushMatchEvent(match, 'start_failed', { error: e.message, match: publicMatchState(match) });
@@ -11369,6 +11494,91 @@ app.post('/api/quizbowl/match/:code/leave', authMiddleware, (req, res) => {
     pushMatchEvent(match, 'player_left', { userId: req.userId, match: publicMatchState(match) });
   }
   res.json({ ok: true });
+});
+
+// POST /api/quizbowl/match/:code/bot-buzz
+// Host client buzzes on behalf of a bot. Server applies the same atomic
+// buzz logic used for real players - first-in wins, locked-out bots are
+// silently rejected.
+app.post('/api/quizbowl/match/:code/bot-buzz', authMiddleware, (req, res) => {
+  const match = matches.get(req.params.code);
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+  if (match.hostId !== req.userId) return res.status(403).json({ error: 'Host only' });
+  if (match.state !== 'playing') return res.json({ ok: false, reason: 'not_playing' });
+  if (match.buzzWinner) return res.json({ ok: false, reason: 'already_buzzed' });
+
+  const { botId } = req.body || {};
+  if (!botId || !String(botId).startsWith('bot:')) return res.status(400).json({ error: 'Invalid botId' });
+  if (!match.players.some(p => p.userId === botId)) return res.status(404).json({ error: 'Bot not in match' });
+  if (match.lockedOutForQ?.[botId]) return res.json({ ok: false, reason: 'locked_out' });
+
+  match.buzzWinner = botId;
+  match.buzzAt = Date.now();
+  match.lastActivity = Date.now();
+  if (match.questionTimeoutId) { clearTimeout(match.questionTimeoutId); match.questionTimeoutId = null; }
+  pushMatchEvent(match, 'buzz', { userId: botId, buzzAt: match.buzzAt });
+  res.json({ ok: true });
+});
+
+// POST /api/quizbowl/match/:code/bot-answer
+// Host client submits bot answer. `correct` is a boolean the client
+// computed by rolling accuracy dice - server just applies scoring.
+app.post('/api/quizbowl/match/:code/bot-answer', authMiddleware, (req, res) => {
+  const match = matches.get(req.params.code);
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+  if (match.hostId !== req.userId) return res.status(403).json({ error: 'Host only' });
+  if (match.state !== 'playing') return res.json({ ok: false, reason: 'not_playing' });
+
+  const { botId, correct } = req.body || {};
+  if (!botId || !String(botId).startsWith('bot:')) return res.status(400).json({ error: 'Invalid botId' });
+  if (!match.players.some(p => p.userId === botId)) return res.status(404).json({ error: 'Bot not in match' });
+  if (match.buzzWinner !== botId) return res.json({ ok: false, reason: 'not_the_buzzer' });
+
+  const pts = quizbowlScoreForBuzz(match, { correct: !!correct });
+  match.scores[botId] = (match.scores[botId] || 0) + pts;
+  match.lastActivity = Date.now();
+
+  const scores = { ...match.scores };
+  const q = match.questions[match.currentIdx];
+  const correctAnswer = q ? q.answer : '';
+
+  if (correct) {
+    match.state = 'reveal';
+    pushMatchEvent(match, 'answer_result', {
+      userId: botId, correct: true,
+      answer: correctAnswer, correctAnswer,
+      scores, autoAdvanceInMs: 5000, ptsGained: pts,
+    });
+    scheduleAutoAdvance(match, 5000);
+  } else {
+    const negPts = pts; // already negative (or 0)
+    if (!match.lockedOutForQ) match.lockedOutForQ = {};
+    match.lockedOutForQ[botId] = true;
+    const pausedMs = Date.now() - (match.buzzAt || Date.now());
+    match.questionStartedAt = (match.questionStartedAt || Date.now()) + pausedMs;
+    match.buzzWinner = null;
+    match.buzzAt = null;
+    match.state = 'playing';
+    const stillPlaying = match.players.filter(p => !match.lockedOutForQ[p.userId]);
+    if (stillPlaying.length === 0) {
+      match.state = 'reveal';
+      pushMatchEvent(match, 'answer_result', {
+        userId: botId, correct: false,
+        answer: '[Bot]', correctAnswer,
+        scores, finalMiss: true, autoAdvanceInMs: 5000, ptsGained: negPts,
+      });
+      scheduleAutoAdvance(match, 5000);
+    } else {
+      pushMatchEvent(match, 'wrong_answer', {
+        userId: botId, answer: '[Bot]', correctAnswer,
+        lockedOut: Object.keys(match.lockedOutForQ),
+        questionStartedAt: match.questionStartedAt,
+        scores, ptsGained: negPts,
+      });
+      scheduleQuestionTimeout(match);
+    }
+  }
+  res.json({ ok: true, pts, scores });
 });
 
 // =========================================================
