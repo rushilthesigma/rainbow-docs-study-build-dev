@@ -73,3 +73,62 @@ export async function suggestNoteMapNodes(mapId, { focus, focusNodeId, count } =
     body: JSON.stringify({ focus, focusNodeId, count }),
   });
 }
+
+// ── Note-map spaced repetition (SM-2 flashcards) ──────────────────────
+// The review queue + recommendations (due cards, new nodes to quiz,
+// struggling cards) for a map.
+export async function getMapSrs(mapId) {
+  return apiFetch(`/api/note-maps/${mapId}/srs`);
+}
+
+// AI-generate flashcards for a single node (folds in variants of missed quiz
+// questions that match the node's topic).
+export async function generateNodeFlashcards(mapId, nodeId, { count, difficulty } = {}) {
+  return apiFetch(`/api/note-maps/${mapId}/nodes/${nodeId}/flashcards`, {
+    method: 'POST',
+    body: JSON.stringify({ count, difficulty }),
+  });
+}
+
+// Add hand-written cards to a node.
+export async function addNodeFlashcards(mapId, nodeId, cards) {
+  return apiFetch(`/api/note-maps/${mapId}/nodes/${nodeId}/flashcards`, {
+    method: 'POST',
+    body: JSON.stringify({ cards }),
+  });
+}
+
+// Grade a card during review. quality 0-5 (Again=1, Hard=3, Good=4, Easy=5).
+export async function reviewMapCard(mapId, cardId, quality) {
+  return apiFetch(`/api/note-maps/${mapId}/review`, {
+    method: 'POST',
+    body: JSON.stringify({ cardId, quality }),
+  });
+}
+
+export async function deleteMapCard(mapId, cardId) {
+  return apiFetch(`/api/note-maps/${mapId}/cards/${cardId}`, { method: 'DELETE' });
+}
+
+// ── Per-note flashcards (SM-2) ────────────────────────────────────────
+export async function getNoteFlashcards(noteId) {
+  return apiFetch(`/api/notes/${noteId}/flashcards`);
+}
+
+export async function generateNoteFlashcards(noteId, { count, difficulty } = {}) {
+  return apiFetch(`/api/notes/${noteId}/flashcards`, {
+    method: 'POST',
+    body: JSON.stringify({ count, difficulty }),
+  });
+}
+
+export async function reviewNoteCard(noteId, cardId, quality) {
+  return apiFetch(`/api/notes/${noteId}/flashcards/review`, {
+    method: 'POST',
+    body: JSON.stringify({ cardId, quality }),
+  });
+}
+
+export async function deleteNoteCard(noteId, cardId) {
+  return apiFetch(`/api/notes/${noteId}/flashcards/${cardId}`, { method: 'DELETE' });
+}

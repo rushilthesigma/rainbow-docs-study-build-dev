@@ -4,8 +4,9 @@ import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 
 export default function ChatContainer({
-  messages, streamingContent, streamingSources, streamingArtifacts, onSend, disabled, placeholder,
+  messages, streamingContent, streamingThinking, streamingSources, streamingArtifacts, onSend, disabled, placeholder,
   header, className = '', sourceMode, onToggleSource, searchStatus,
+  showThinking = false, thinkingMode = true, thinkingLocked = false, onToggleThinking,
   hideInput = false,
   editableIndices = null,
   onEditMessage = null,
@@ -43,10 +44,11 @@ export default function ChatContainer({
 
   // Build display messages + streaming message (show live sources while streaming)
   const displayMessages = [...messages];
-  if (streamingContent || (streamingSources && streamingSources.length) || (streamingArtifacts && streamingArtifacts.length)) {
+  if (streamingContent || streamingThinking || (streamingSources && streamingSources.length) || (streamingArtifacts && streamingArtifacts.length)) {
     displayMessages.push({
       role: 'assistant',
       content: streamingContent || '',
+      thinking: streamingThinking || '',
       sources: streamingSources || [],
       artifacts: streamingArtifacts || [],
       _streaming: true,
@@ -111,6 +113,10 @@ export default function ChatContainer({
           placeholder={placeholder}
           sourceMode={sourceMode}
           onToggleSource={onToggleSource}
+          showThinking={showThinking}
+          thinkingMode={thinkingMode}
+          thinkingLocked={thinkingLocked}
+          onToggleThinking={onToggleThinking}
           flush={flush}
         />
       )}

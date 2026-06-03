@@ -7,6 +7,8 @@ import { errorChatMessage } from '../../utils/aiErrors';
 import { InlineProgress } from '../shared/ProgressBar';
 import { Z } from '../../styles/tokens';
 import { useToast } from '../shared/Toast';
+import { useAuth } from '../../context/AuthContext';
+import { planFromUser, resolveModelTier, modelSupportsThinking, thinkingAlwaysOn } from '../billing/modelAccess';
 
 // Quick-start prompts shown in the empty state. Replaces the bland
 // "Start the conversation..." default with concrete suggestions tied to
@@ -21,8 +23,21 @@ const QUICK_PROMPTS = [
 
 export default function StudyModePanel({ className = '', flush = false, initialMessage, initialSources }) {
   const toast = useToast();
+  // Thinking toggle: only models that support thinking show the Brain button.
+  // Pro always thinks (locked on); Flash / Flash-Lite default off for snappy
+  // study answers and let the user opt in. A ref mirrors the value so doSend
+  // reads the latest state even through memoized callbacks.
+  const { user } = useAuth();
+  const effectiveTier = resolveModelTier(user?.data?.preferences?.modelTier, planFromUser(user));
+  const supportsThinking = modelSupportsThinking(effectiveTier);
+  const thinkingLocked = thinkingAlwaysOn(effectiveTier);
+  const [thinkingPref, setThinkingPref] = useState(false);
+  const thinkingOn = thinkingLocked ? true : thinkingPref;
+  const thinkingOnRef = useRef(thinkingOn);
+  thinkingOnRef.current = thinkingOn;
   const [messages, setMessages] = useState([]);
   const [streamingContent, setStreamingContent] = useState('');
+  const [streamingThinking, setStreamingThinking] = useState('');
   const [streamingSources, setStreamingSources] = useState([]);
   const [streamingArtifacts, setStreamingArtifacts] = useState([]);
   const [searchStatus, setSearchStatus] = useState(null);
@@ -40,6 +55,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   const [showSourcesSheet, setShowSourcesSheet] = useState(false);
   const abortRef = useRef(null);
   const streamContentRef = useRef('');
+  const streamThinkingRef = useRef('');
   const streamSourcesRef = useRef([]);
   const streamArtifactsRef = useRef([]);
   const initialSent = useRef(false);
@@ -59,10 +75,12 @@ export default function StudyModePanel({ className = '', flush = false, initialM
     if (!opts.hideUserInDisplay) setMessages(prev => [...prev, userMsg]);
     setStreaming(true);
     setStreamingContent('');
+    setStreamingThinking('');
     setStreamingSources([]);
     setStreamingArtifacts([]);
     setSearchStatus(wasSourced ? 'searching' : null);
     streamContentRef.current = '';
+    streamThinkingRef.current = '';
     streamSourcesRef.current = [];
     streamArtifactsRef.current = [];
 
@@ -85,6 +103,10 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         setStreamingContent(streamContentRef.current);
         if (searchStatus) setSearchStatus(null);
       },
+      onThinking: (t) => {
+        streamThinkingRef.current += t;
+        setStreamingThinking(streamThinkingRef.current);
+      },
       onMeta: (data) => { if (data.sessionId) setSessionId(data.sessionId); },
       onSource: (src) => {
         streamSourcesRef.current = [...streamSourcesRef.current, src];
@@ -100,22 +122,26 @@ export default function StudyModePanel({ className = '', flush = false, initialM
       onStatus: (s) => setSearchStatus(s),
       onDone: () => {
         const fullContent = streamContentRef.current;
+        const think = streamThinkingRef.current;
         const sources = streamSourcesRef.current;
         const artifacts = streamArtifactsRef.current;
         if (fullContent) {
           setMessages(m => [...m, {
             role: 'assistant',
             content: fullContent,
+            thinking: think || undefined,
             sources: sources.length ? sources : undefined,
             artifacts: artifacts.length ? artifacts : undefined,
             timestamp: new Date().toISOString(),
           }]);
         }
         setStreamingContent('');
+        setStreamingThinking('');
         setStreamingSources([]);
         setStreamingArtifacts([]);
         setSearchStatus(null);
         streamContentRef.current = '';
+        streamThinkingRef.current = '';
         streamSourcesRef.current = [];
         streamArtifactsRef.current = [];
         setStreaming(false);
@@ -124,15 +150,17 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         // eslint-disable-next-line no-use-before-define
         setMessages(m => [...m, errorChatMessage(err)]);
         setStreamingContent('');
+        setStreamingThinking('');
         setStreamingSources([]);
         setStreamingArtifacts([]);
         setSearchStatus(null);
         streamContentRef.current = '';
+        streamThinkingRef.current = '';
         streamSourcesRef.current = [];
         streamArtifactsRef.current = [];
         setStreaming(false);
       },
-    }, wasSourced);
+    }, wasSourced, !thinkingOnRef.current);
     abortRef.current = abort;
   }
 
@@ -366,6 +394,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
       <ChatContainer
         messages={messages}
         streamingContent={streamingContent}
+        streamingThinking={streamingThinking}
         streamingSources={streamingSources}
         streamingArtifacts={streamingArtifacts}
         searchStatus={searchStatus}
@@ -376,6 +405,10 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         className={className}
         sourceMode={sourceMode}
         onToggleSource={setSourceMode}
+        showThinking={supportsThinking}
+        thinkingMode={thinkingOn}
+        thinkingLocked={thinkingLocked}
+        onToggleThinking={setThinkingPref}
         onUserEditMessage={handleUserEdit}
         onAiInstruct={handleAiInstruct}
         emptyState={emptyState}

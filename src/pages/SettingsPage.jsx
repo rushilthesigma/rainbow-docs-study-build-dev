@@ -112,9 +112,12 @@ function OpacitySlider({ label, value, onChange, leftHint, rightHint }) {
 }
 
 function Section({ title, children }) {
+  // Sections are plain dividers, not frosted cards. The old card layered
+  // a white tint + backdrop-blur on top of the already-frosted window,
+  // which is what made Settings look washed-out grey vs every other app.
   return (
-    <div className="rounded-2xl border border-white/[0.07] bg-white/[0.03] backdrop-blur-sm p-6 space-y-5">
-      <h3 className="text-[10px] font-black uppercase tracking-[0.22em] text-white/40">{title}</h3>
+    <div className="py-6 space-y-5">
+      <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">{title}</h3>
       {children}
     </div>
   );
@@ -241,15 +244,19 @@ export default function SettingsPage() {
   const profile = user?.data?.profile;
 
   return (
-    <div className="max-w-2xl mx-auto space-y-3 px-1">
+    <div className="max-w-2xl mx-auto px-1">
 
       {/* Header */}
-      <div className="flex items-center gap-3 mb-7 pt-1">
+      <div className="flex items-center gap-3 mb-2 pt-1">
         <div className="w-11 h-11 rounded-2xl bg-white/[0.08] border border-white/[0.10] flex items-center justify-center text-white/55">
           <Settings size={20} />
         </div>
         <h1 className="text-[20px] font-bold text-white/90 tracking-tight">Settings</h1>
       </div>
+
+      {/* Groups are separated by hairline dividers rather than boxed in
+          cards - keeps the page on the window glass like every other app. */}
+      <div className="divide-y divide-white/[0.06]">
 
       {/* Desktop / Interface */}
       <InterfaceSection />
@@ -270,9 +277,9 @@ export default function SettingsPage() {
             } catch (err) { console.error('Failed to save model tier:', err); }
           }
           const options = [
-            { value: 'pro',        label: 'Pro',        description: '· smartest' },
-            { value: 'flash',      label: 'Flash',      description: '· faster' },
-            { value: 'flash-lite', label: 'Flash Lite', description: '· fastest' },
+            { value: 'pro',        label: '3.1 Pro',        description: '· advanced math & code' },
+            { value: 'flash',      label: '3.5 Flash',      description: '· all-around help' },
+            { value: 'flash-lite', label: '3.1 Flash-Lite', description: '· fastest answers' },
           ].map((o) => {
             if (canUseModel(o.value, plan)) return o;
             return { ...o, locked: true, lockLabel: requiredPlanFor(o.value)?.label };
@@ -290,7 +297,7 @@ export default function SettingsPage() {
                 onChange={setTier}
               />
               <p className="text-[10px] text-white/25 mt-2 leading-relaxed">
-                All share 1M context. Pro for proofs, Flash for default, Flash Lite for short Q&amp;A.
+                All Gemini 3. 3.1 Pro for proofs, 3.5 Flash for default, 3.1 Flash-Lite for short Q&amp;A.
               </p>
             </div>
           );
@@ -324,7 +331,7 @@ export default function SettingsPage() {
       </Section>
 
       {/* Save */}
-      <div className="pt-1">
+      <div className="py-6">
         <Button onClick={handleSave} loading={saving}>
           <Save size={15} />
           {saved ? 'Saved!' : 'Save Settings'}
@@ -405,6 +412,7 @@ export default function SettingsPage() {
           </button>
         </div>
       </Section>
+      </div>
 
     </div>
   );

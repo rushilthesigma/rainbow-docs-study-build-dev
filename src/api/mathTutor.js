@@ -1,10 +1,15 @@
-import { getToken } from './client';
+import { getToken, apiFetch } from './client';
+
+// Generate a set of escalating practice problems for a topic.
+// body = { topic, count?, difficulty? } → { problems: [{ id, prompt, answer }] }
+export const generateProblemSet = (body) =>
+  apiFetch('/api/math-tutor/problem-set', { method: 'POST', body: JSON.stringify(body) });
 
 // Streams a math-tutor turn. Stateless server-side - client owns the history.
 // body = { topic, customInstructions, messages, phase, images? }
 // phase: 'lesson' | 'practice' | 'grade'
 // handlers = { onChunk, onDone, onError, onStatus }
-export function sendMathTutorMessage(body, { onChunk, onDone, onError, onStatus }) {
+export function sendMathTutorMessage(body, { onChunk, onDone, onError, onStatus, onThinking }) {
   const token = getToken();
   const controller = new AbortController();
 
@@ -36,6 +41,7 @@ export function sendMathTutorMessage(body, { onChunk, onDone, onError, onStatus 
             const data = JSON.parse(line.slice(6));
             if (data.done) { if (!finished) { finished = true; onDone?.(data); } return; }
             else if (data.error) { if (!finished) { finished = true; onError?.(data.error); } return; }
+            else if (data.thinking) onThinking?.(data.thinking);
             else if (data.content) onChunk?.(data.content);
             else if (data.status) onStatus?.(data.status);
           } catch {}

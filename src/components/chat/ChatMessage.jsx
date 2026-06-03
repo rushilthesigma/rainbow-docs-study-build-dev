@@ -4,9 +4,40 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import { Check, X, Copy, Pencil, FileText, ExternalLink, FileText as NoteIcon, Zap, Swords } from 'lucide-react';
+import { Check, X, Copy, Pencil, FileText, ExternalLink, FileText as NoteIcon, Zap, Swords, Brain, ChevronRight } from 'lucide-react';
 import MathText from '../shared/MathText';
 import { useWindowManager } from '../../context/WindowManagerContext';
+
+// Collapsible "Thinking" panel — shows the model's reasoning summary.
+// Auto-expanded while thoughts stream in, collapsible afterward.
+function ThinkingPanel({ text, streaming }) {
+  const [open, setOpen] = useState(!!streaming);
+  if (!text) return null;
+  return (
+    <div className="mb-2 rounded-xl border border-white/10 bg-black/10 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold text-white/45 hover:text-white/70 transition-colors"
+      >
+        <Brain size={12} className={streaming ? 'animate-pulse' : ''} />
+        {streaming ? 'Thinking…' : 'Thinking'}
+        <ChevronRight size={12} className={`ml-auto transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
+      </button>
+      <div className={`grid transition-all duration-200 ease-in-out ${open ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
+        <div className="overflow-hidden">
+          <div className="px-3 pb-2.5 pt-0.5 max-h-60 overflow-y-auto border-t border-white/[0.06]">
+            <div className="prose prose-sm prose-invert max-w-none prose-p:my-1 prose-headings:my-1.5 prose-ul:my-1 prose-li:my-0 text-[12px] text-white/55 leading-relaxed">
+              <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+                {text}
+              </ReactMarkdown>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // Parse out --- FILE: name --- blocks that were prepended by ChatInput
 // when the user attached a PDF or text file. Returns the extracted
@@ -341,7 +372,8 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
           : 'bg-white/50 dark:bg-white/[0.08]'
       }`}>
         <div className={isError ? 'text-rose-700 dark:text-rose-200 text-sm' : 'text-gray-900 dark:text-white'}>
-        {isStreaming && !displayContent && <ThinkingDots />}
+        {message.thinking && !isError && <ThinkingPanel text={message.thinking} streaming={isStreaming} />}
+        {isStreaming && !displayContent && !message.thinking && <ThinkingDots />}
         {displayContent && (
           <div ref={markdownRef} className="prose prose-sm dark:prose-invert max-w-none prose-p:my-2 prose-headings:my-3 prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-code:bg-gray-200 dark:prose-code:bg-white/[0.08] prose-code:px-1 prose-code:rounded prose-pre:bg-gray-900 dark:prose-pre:bg-black/60 prose-pre:rounded-lg">
             <ReactMarkdown

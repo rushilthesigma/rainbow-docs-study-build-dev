@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { FileText, Plus, ChevronRight, ArrowLeft, Save, Trash2 } from 'lucide-react';
 import { listNotes, createNote, getNote, updateNote, deleteNote } from '../../api/notes';
 import MobilePage from './MobilePage';
+import MarkdownNoteEditor from '../notes/MarkdownNoteEditor';
 
 // Mobile-native notes flow: list → create-or-edit. Tapping "New note"
 // creates a note immediately and drops the user into the editor. List
@@ -93,18 +94,18 @@ export default function MobileNotes() {
           </button>
         </header>
 
-        <div className="flex-1 min-h-0 flex flex-col px-4 py-3 overflow-y-auto">
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Note title"
-            className="text-[22px] font-bold tracking-[-0.02em] text-white/80 bg-transparent outline-none mb-2"
+            className="text-[22px] font-bold tracking-[-0.02em] text-white/80 bg-transparent outline-none mx-4 mt-3 mb-1 flex-shrink-0"
           />
-          <textarea
+          <MarkdownNoteEditor
             value={mainNotes}
-            onChange={(e) => setMainNotes(e.target.value)}
-            placeholder="Start writing…"
-            className="flex-1 min-h-[60vh] resize-none text-[14px] leading-relaxed text-white/88 placeholder-white/30 bg-transparent outline-none"
+            onChange={setMainNotes}
+            className="flex-1 min-h-0"
+            placeholder="Start writing… markdown supported"
           />
         </div>
       </div>

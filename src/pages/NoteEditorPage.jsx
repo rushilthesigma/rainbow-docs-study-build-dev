@@ -5,6 +5,7 @@ import { getNote, updateNote, generateCues, generateSummary } from '../api/notes
 import Button from '../components/shared/Button';
 import LoadingSpinner from '../components/shared/LoadingSpinner';
 import NoteActions from '../components/notes/NoteActions';
+import MarkdownNoteEditor from '../components/notes/MarkdownNoteEditor';
 
 export default function NoteEditorPage() {
   const { id } = useParams();
@@ -103,12 +104,11 @@ export default function NoteEditorPage() {
             </div>
 
             {/* Main notes */}
-            <textarea
+            <MarkdownNoteEditor
               value={note.mainNotes}
-              onChange={e => handleChange('mainNotes', e.target.value)}
-              data-bare
-              className="w-full h-full p-4 bg-transparent text-sm text-gray-800 dark:text-gray-200 placeholder-gray-400 resize-none outline-none"
-              placeholder="Write your notes here..."
+              onChange={v => handleChange('mainNotes', v)}
+              className="h-full"
+              placeholder="Write your notes here… markdown supported"
             />
           </div>
 
@@ -130,14 +130,13 @@ export default function NoteEditorPage() {
           </div>
         </div>
       ) : (
-        /* Regular note - simple editor */
+        /* Regular note - markdown editor */
         <div className="flex-1 min-h-0 bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] overflow-hidden">
-          <textarea
+          <MarkdownNoteEditor
             value={note.mainNotes}
-            onChange={e => handleChange('mainNotes', e.target.value)}
-            data-bare
-            className="w-full h-full p-5 bg-transparent text-sm text-gray-800 dark:text-gray-200 placeholder-gray-400 resize-none outline-none leading-relaxed"
-            placeholder="Start writing..."
+            onChange={v => handleChange('mainNotes', v)}
+            className="h-full"
+            placeholder="Start writing… markdown supported"
           />
         </div>
       )}

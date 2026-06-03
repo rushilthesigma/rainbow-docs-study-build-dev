@@ -8,6 +8,7 @@ import {
   Loader2 as Loader, Sparkles, ArrowRight, X, Check, ChevronDown,
   BookOpen, Brain, Zap, PenTool, Cpu, Repeat,
   Lightbulb, Calculator, MessageSquare, Target, ClipboardCheck,
+  Scale, Link2,
 } from 'lucide-react';
 
 // Two scroll-snap sections, Apple-homepage style:
@@ -111,7 +112,8 @@ export default function LandingPage() {
         <HowItWorksSection />
         <FeaturesGridSection />
         <NumbersStrip />
-        <SubjectsSpotlight />
+        <NoteMapSection />
+        <QuizBowlAISection />
         <SignInSection
           loading={loading}
           onSignIn={triggerGoogle}
@@ -152,7 +154,7 @@ function HeroSection({ onNext }) {
           </span>
         </h1>
         <p className="mt-6 text-[16px] sm:text-[19px] leading-relaxed text-white/85 max-w-2xl mx-auto">
-          Make a fully featured curriculum in a single click (well, maybe a few).
+          Units, lessons, quizzes, a midterm, and a final, all built around whatever you want to learn.
         </p>
 
         <button
@@ -185,20 +187,20 @@ function HowItWorksSection() {
     {
       n: '01',
       icon: Sparkles,
-      title: 'Type a topic',
-      body: 'Calculus BC, AP Bio, Roman history, anything. The engine drafts a real syllabus with units, lessons, a midterm, and a final.',
+      title: 'Builds the course',
+      body: 'Name a topic like Calculus BC, AP Bio, or Roman history. You get back a real syllabus with units, lessons, a midterm, and a final.',
     },
     {
       n: '02',
       icon: ClipboardCheck,
-      title: 'Take quizzes',
-      body: 'Every lesson ends in a short quiz. Wrong answers get logged by topic so the engine learns where you actually need work.',
+      title: 'Writes the quizzes',
+      body: 'Every lesson comes with a short quiz already written. Miss something and it gets logged by topic, so the next round knows where you need work.',
     },
     {
       n: '03',
       icon: Target,
-      title: 'Train your gaps',
-      body: 'Final quizzes are built from your weak spots, not a generic pool. Quiz Bowl can also generate a "train on weaknesses" round on demand.',
+      title: 'Targets your gaps',
+      body: 'Finals pull from your weak spots instead of a generic pool, and Quiz Bowl can spin up a weakness round any time.',
     },
   ];
   return (
@@ -207,9 +209,9 @@ function HowItWorksSection() {
       <div className="relative z-10 max-w-6xl w-full animate-fade-up">
         <p className="text-center text-[11px] font-bold uppercase tracking-[0.22em] text-white/55 mb-3">How it works</p>
         <h2 className="text-center text-[34px] sm:text-[44px] md:text-[56px] leading-[1.05] font-bold tracking-[-0.025em] text-white mb-12">
-          Three steps,{' '}
+          One click,{' '}
           <span className="text-blue-300 italic">
-            no busywork.
+            that&apos;s it.
           </span>
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -245,48 +247,42 @@ function FeaturesGridSection() {
       <div className="relative z-10 max-w-6xl w-full animate-fade-up">
         <p className="text-center text-[11px] font-bold uppercase tracking-[0.22em] text-white/55 mb-3">What&apos;s inside</p>
         <h2 className="text-center text-[34px] sm:text-[44px] md:text-[56px] leading-[1.05] font-bold tracking-[-0.025em] text-white mb-10">
-          One app,{' '}
+          Everything{' '}
           <span className="text-blue-300 italic">
-            every learning surface.
+            in one place.
           </span>
         </h2>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 grid-rows-3 md:grid-rows-2 gap-3 h-[440px]">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <FeatureTile
-            className="col-span-2 row-span-2 md:col-span-2 md:row-span-2"
             icon={BookOpen}
-            tone="from-blue-500/30 to-indigo-500/15"
             title="Curricula"
-            body="Type a topic, get a real course. Units, lessons, a midterm, and a final. All generated, all editable."
-            big
+            body="Type any topic and get a full course with units, lessons, a midterm, and a final. Everything stays editable."
           />
           <FeatureTile
-            className="col-span-2 md:col-span-1"
             icon={Lightbulb}
-            tone="from-amber-400/30 to-orange-500/15"
             title="Lessons"
-            body="Eight-block format with built-in spaced-repetition quizzes."
+            body="Each lesson walks through the material and ends with a short quiz. Whatever you miss comes back later."
           />
           <FeatureTile
-            className="col-span-2 md:col-span-1"
-            icon={Calculator}
-            tone="from-indigo-400/30 to-violet-500/15"
-            title="Math Tutor"
-            body="Solve on a real canvas. The tutor reads each line."
-          />
-          <FeatureTile
-            className="col-span-1"
-            icon={Zap}
-            tone="from-amber-400/30 to-rose-500/15"
-            title="Quiz Bowl"
-            body="Pyramidal tossups, real packets, head-to-head."
-          />
-          <FeatureTile
-            className="col-span-1"
             icon={MessageSquare}
-            tone="from-sky-400/30 to-blue-500/15"
             title="Study Mode"
-            body="Free-form chat with optional curriculum and sources."
+            body="Chat through anything you're studying. Attach a curriculum or sources so the answers stay on topic."
+          />
+          <FeatureTile
+            icon={Calculator}
+            title="Math Tutor"
+            body="Work through problems step by step on a canvas while the tutor checks your reasoning."
+          />
+          <FeatureTile
+            icon={Zap}
+            title="Quiz Bowl"
+            body="Pyramidal tossups from a pool of 500+ questions. Practice solo or go head-to-head."
+          />
+          <FeatureTile
+            icon={Scale}
+            title="Debate"
+            body="Pick a side against the AI or a friend, then get a scored verdict when you finish."
           />
         </div>
       </div>
@@ -320,20 +316,20 @@ function NumbersStrip() {
     { n: '8',   label: 'apps in one workspace' },
     { n: '<5s', label: 'to draft a full curriculum' },
     { n: '500+', label: 'tossups in the Quiz Bowl pool' },
-    { prefix: 'Up to', n: '1M', label: 'context limit', highlight: true },
+    { prefix: 'Up to', n: '1,048,576', label: 'tokens of context', highlight: true },
   ];
   return (
     <section data-section="numbers" className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative">
       <div className="absolute inset-0 bg-black/35" />
       <div className="relative z-10 max-w-5xl w-full animate-fade-up">
         <h2 className="text-center text-[28px] sm:text-[36px] md:text-[44px] leading-[1.05] font-bold tracking-[-0.025em] text-white mb-3">
-          Built thin,{' '}
+          By the{' '}
           <span className="italic text-blue-300">
-            runs heavy.
+            numbers.
           </span>
         </h2>
         <p className="text-center text-[13px] sm:text-[15px] text-white/65 max-w-xl mx-auto mb-10">
-          One workspace, every learning surface, the smartest model under the hood.
+          Every app runs on the latest Gemini models. Pro for the hard problems, Flash for everyday work.
         </p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {STATS.map((s) => (
@@ -370,100 +366,181 @@ function NumbersStrip() {
   );
 }
 
-// ===== Section 5: Subjects spotlight =====
+// ===== Section 5: Note Map =====
 //
-// Four sample-curriculum cards showing what RushilAI generates. Each
-// one is a mini-syllabus preview with unit/lesson counts and the
-// first four unit titles.
-function SubjectsSpotlight() {
-  const SAMPLES = [
-    {
-      title: 'AP Calculus BC',
-      tag: 'High school',
-      tone: 'from-blue-500/30 to-indigo-500/15',
-      units: 8,
-      lessons: 64,
-      preview: ['Limits & continuity', 'Derivatives & applications', 'Integrals & FTC', 'Series & convergence'],
-    },
-    {
-      title: 'Organic Chemistry',
-      tag: 'College',
-      tone: 'from-emerald-400/25 to-teal-500/15',
-      units: 10,
-      lessons: 72,
-      preview: ['Hybridization & VSEPR', 'Stereochemistry', 'SN1 / SN2 mechanisms', 'Carbonyl chemistry'],
-    },
-    {
-      title: 'Roman Republic',
-      tag: 'Self-study',
-      tone: 'from-amber-400/25 to-orange-500/15',
-      units: 6,
-      lessons: 38,
-      preview: ['Founding myths & monarchy', 'Patrician vs plebeian', 'Punic Wars', 'Fall of the Republic'],
-    },
-    {
-      title: 'MCAT Bio + Biochem',
-      tag: 'Test prep',
-      tone: 'from-rose-400/25 to-fuchsia-500/15',
-      units: 9,
-      lessons: 58,
-      preview: ['Cellular respiration', 'Genetics & gene expression', 'Enzyme kinetics', 'Metabolism integration'],
-    },
+// Repurposed from the old sample-curricula grid. Shows off Note Map, the
+// Obsidian-style graph that lives inside the Notes app: each note is a
+// node you can drag and link, the AI can suggest related nodes, and you
+// can run spaced-repetition review over a map. Left side is a small
+// static graph illustration, right side is three plain feature rows
+// (no nested cards, to keep the chrome low). Copy avoids em dashes per
+// user spec.
+function NoteMapSection() {
+  // Illustration only. Positions are percentages of the panel; the SVG
+  // edges below use the same numbers (x * 3.6, y * 2.8) so the lines land
+  // under the node dots in the 360x280 viewBox.
+  const NODES = [
+    { id: 'photo',   label: 'Photosynthesis', x: 46, y: 48, color: '#34d399', big: true },
+    { id: 'light',   label: 'Light reactions', x: 22, y: 20, color: '#60a5fa' },
+    { id: 'calvin',  label: 'Calvin cycle',    x: 80, y: 24, color: '#22d3ee', flip: true },
+    { id: 'atp',     label: 'ATP & NADPH',     x: 82, y: 74, color: '#a78bfa', flip: true },
+    { id: 'chloro',  label: 'Chlorophyll',     x: 18, y: 80, color: '#fbbf24' },
+    { id: 'stomata', label: 'Stomata',         x: 48, y: 90, color: '#f472b6' },
   ];
+  const EDGES = [
+    ['photo', 'light'], ['photo', 'calvin'], ['photo', 'atp'],
+    ['photo', 'chloro'], ['photo', 'stomata'], ['light', 'calvin'], ['calvin', 'atp'],
+  ];
+  const pos = Object.fromEntries(NODES.map((n) => [n.id, n]));
+
+  const POINTS = [
+    { icon: Link2, title: 'Link your notes', body: 'Every note becomes a node. Drag them around and connect the ones that belong together.' },
+    { icon: Sparkles, title: 'Let the AI fill gaps', body: 'Ask for related topics and it drops in new nodes, already wired to what you have.' },
+    { icon: Repeat, title: 'Review what slips', body: 'Run spaced-repetition review over a map, or turn any node into flashcards.' },
+  ];
+
   return (
-    <section data-section="subjects" className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative">
+    <section data-section="notemap" className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative">
       <div className="absolute inset-0 bg-black/35" />
       <div className="relative z-10 w-full max-w-6xl animate-fade-up">
-        <p className="text-center text-[11px] font-bold uppercase tracking-[0.22em] text-white/55 mb-3">Built for</p>
-        <h2 className="text-center text-[32px] sm:text-[40px] md:text-[50px] leading-[1.05] font-bold tracking-[-0.025em] text-white mb-10">
-          Whatever you&apos;re{' '}
-          <span className="italic text-blue-300">
-            studying.
-          </span>
+        <p className="text-center text-[11px] font-bold uppercase tracking-[0.22em] text-white/55 mb-3">Inside Notes</p>
+        <h2 className="text-center text-[32px] sm:text-[40px] md:text-[50px] leading-[1.05] font-bold tracking-[-0.025em] text-white mb-3">
+          Your notes,{' '}
+          <span className="italic text-blue-300">on a map.</span>
         </h2>
+        <p className="text-center text-[13px] sm:text-[15px] text-white/65 max-w-xl mx-auto mb-10">
+          Note Map turns your notes into a graph. Related ideas sit next to each other instead of getting buried in a long list.
+        </p>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {SAMPLES.map((s) => (
-            <div
-              key={s.title}
-              // Soft inner ring instead of a hard 15%-white border -
-              // the previous 1px white outline lit up against the
-              // night-sky wallpaper and read as a hard, jarring edge.
-              className="relative rounded-lg p-5 ring-1 ring-white/[0.10] bg-white/[0.05] backdrop-blur-md overflow-hidden flex flex-col"
-            >
-              <div className="relative z-10 flex flex-col h-full">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-[10px] font-mono uppercase tracking-[0.16em] text-white/55">{s.tag}</span>
-                  <BookOpen size={13} className="text-white/45" />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 items-center">
+          {/* Graph illustration: one panel holding the SVG, no boxes inside it */}
+          <div className="relative w-full max-w-[460px] mx-auto lg:mx-0 aspect-[360/280] rounded-xl ring-1 ring-white/[0.10] bg-white/[0.04] backdrop-blur-md overflow-hidden">
+            <svg viewBox="0 0 360 280" preserveAspectRatio="xMidYMid meet" className="absolute inset-0 w-full h-full">
+              {EDGES.map(([a, b], i) => (
+                <line
+                  key={i}
+                  x1={pos[a].x * 3.6} y1={pos[a].y * 2.8}
+                  x2={pos[b].x * 3.6} y2={pos[b].y * 2.8}
+                  stroke="rgba(255,255,255,0.16)" strokeWidth="1.5"
+                />
+              ))}
+            </svg>
+            {/* node dots */}
+            {NODES.map((n) => (
+              <span
+                key={`dot-${n.id}`}
+                className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-white/15"
+                style={{
+                  left: `${n.x}%`, top: `${n.y}%`,
+                  width: n.big ? 15 : 11, height: n.big ? 15 : 11,
+                  background: n.color, boxShadow: `0 0 14px ${n.color}66`,
+                }}
+              />
+            ))}
+            {/* node labels, flipped to the inside edge for right-side nodes */}
+            {NODES.map((n) => (
+              <span
+                key={`label-${n.id}`}
+                className={`absolute whitespace-nowrap font-medium ${n.big ? 'text-[12px] text-white' : 'text-[11px] text-white/75'}`}
+                style={
+                  n.flip
+                    ? { right: `${100 - n.x}%`, top: `${n.y}%`, transform: 'translate(-12px, -50%)' }
+                    : { left: `${n.x}%`, top: `${n.y}%`, transform: 'translate(12px, -50%)' }
+                }
+              >
+                {n.label}
+              </span>
+            ))}
+          </div>
+
+          {/* Feature rows: plain rows split by hairlines, not nested cards */}
+          <div className="divide-y divide-white/10 max-w-md mx-auto lg:mx-0 w-full">
+            {POINTS.map((p) => {
+              const Icon = p.icon;
+              return (
+                <div key={p.title} className="flex gap-4 py-4 first:pt-0 last:pb-0">
+                  <span className="shrink-0 grid place-items-center w-9 h-9 rounded-xl bg-white/10 ring-1 ring-white/15">
+                    <Icon size={16} className="text-white" strokeWidth={2} />
+                  </span>
+                  <div>
+                    <h3 className="text-[15px] font-bold tracking-tight text-white">{p.title}</h3>
+                    <p className="text-[13px] text-white/65 leading-relaxed mt-0.5">{p.body}</p>
+                  </div>
                 </div>
-                <h3 className="text-[17px] font-bold tracking-tight text-white leading-tight mb-3">{s.title}</h3>
-                <div className="flex items-center gap-3 mb-3 text-[11px] text-white/65 tabular-nums">
-                  <span><strong className="text-white">{s.units}</strong> units</span>
-                  <span className="w-1 h-1 rounded-full bg-white/30" />
-                  <span><strong className="text-white">{s.lessons}</strong> lessons</span>
-                </div>
-                <ul className="space-y-1 flex-1">
-                  {s.preview.map((p, i) => (
-                    <li key={i} className="flex items-center gap-1.5 text-[11.5px] text-white/70">
-                      <span className="text-[8px] font-mono text-white/40 tabular-nums w-3.5">{String(i + 1).padStart(2, '0')}</span>
-                      <span className="truncate">{p}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ===== Section 6: Quiz Bowl vs AI =====
+function QuizBowlAISection() {
+  return (
+    <section data-section="quizbowl" className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative">
+      <div className="absolute inset-0 bg-black/35" />
+      <div className="relative z-10 max-w-5xl w-full animate-fade-up">
+        <p className="text-center text-[11px] font-bold uppercase tracking-[0.22em] text-white/55 mb-3">Quiz Bowl</p>
+        <h2 className="text-center text-[34px] sm:text-[44px] md:text-[56px] leading-[1.05] font-bold tracking-[-0.025em] text-white mb-4">
+          Buzz in before{' '}
+          <span className="text-blue-300 italic">the AI does.</span>
+        </h2>
+        <p className="text-center text-[14px] sm:text-[16px] text-white/65 max-w-xl mx-auto mb-10">
+          Pyramidal tossups, a real buzzer, live scoreboard. Race an AI opponent that reads the same clues you do.
+        </p>
+
+        <div className="rounded-xl ring-1 ring-white/[0.10] bg-white/[0.05] backdrop-blur-md overflow-hidden max-w-2xl mx-auto">
+          {/* Scoreboard */}
+          <div className="grid grid-cols-3 border-b border-white/[0.08]">
+            <div className="flex flex-col items-center py-5">
+              <span className="text-[11px] font-mono uppercase tracking-wider text-white/50 mb-1">You</span>
+              <span className="text-[42px] font-bold tabular-nums text-white leading-none">10</span>
             </div>
-          ))}
+            <div className="flex flex-col items-center justify-center border-x border-white/[0.08] gap-1">
+              <Zap size={18} className="text-blue-300" strokeWidth={2.5} />
+              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/35">vs</span>
+            </div>
+            <div className="flex flex-col items-center py-5">
+              <span className="text-[11px] font-mono uppercase tracking-wider text-white/50 mb-1">AI</span>
+              <span className="text-[42px] font-bold tabular-nums text-blue-300 leading-none">15</span>
+            </div>
+          </div>
+
+          {/* Live tossup */}
+          <div className="p-5 border-b border-white/[0.08]">
+            <p className="text-[10px] font-mono uppercase tracking-wider text-white/35 mb-2.5">Tossup — Q4 of 20</p>
+            <p className="text-[13.5px] text-white/80 leading-relaxed">
+              This mathematician lends his name to a function defined as the integral of{' '}
+              <span className="font-mono text-blue-200">e&#8315;&#7511; t&#739;&#8315;&#185;</span>{' '}
+              from 0 to infinity, which generalizes the factorial to real and complex numbers.{' '}
+              <span className="text-white/35">For 10 points, name this mathematician...</span>
+            </p>
+          </div>
+
+          {/* Buzz row */}
+          <div className="px-5 py-3.5 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-[12px] text-white/50">Live match</span>
+            </div>
+            <button className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-blue-500/25 border border-blue-400/40 cursor-default">
+              <Zap size={12} className="text-blue-300" strokeWidth={2.5} />
+              <span className="text-[12px] font-semibold text-blue-200">BUZZ</span>
+            </button>
+          </div>
         </div>
 
-        <p className="text-center text-[12px] text-white/50 mt-6">
-          All four were generated in under 10 seconds each.
+        <p className="text-center text-[12px] text-white/40 mt-6">
+          Real packets. The AI buzzes from the same text you see, no shortcuts.
         </p>
       </div>
     </section>
   );
 }
 
-// ===== Section 6: Sign-in =====
+// ===== Section 7: Sign-in =====
 //
 // Google OAuth is the only sign-in path.
 function SignInSection({ loading, onSignIn, onWhyNotGpt }) {
@@ -483,12 +560,7 @@ function SignInSection({ loading, onSignIn, onWhyNotGpt }) {
       />
 
       <div className="relative z-10 flex flex-col items-center w-full max-w-sm animate-fade-up">
-        {/* Brand mark */}
-        <div className="relative w-16 h-16 rounded-xl bg-blue-500 grid place-items-center">
-          <Sparkles size={30} className="text-white" strokeWidth={2.2} />
-        </div>
-
-        <h1 className="mt-5 text-[32px] sm:text-[40px] leading-[1.05] font-semibold tracking-[-0.02em] text-white">
+        <h1 className="text-[32px] sm:text-[40px] leading-[1.05] font-semibold tracking-[-0.02em] text-white">
           Sign in
         </h1>
         <p className="mt-2 text-[14px] text-white/65">
@@ -544,10 +616,6 @@ function SignInSection({ loading, onSignIn, onWhyNotGpt }) {
 }
 
 // ===== Why not GPT? modal =====
-//
-// Full-screen glass overlay containing the RushilAI vs ChatGPT
-// comparison. Click the backdrop or X to close, Esc also closes,
-// background scroll is locked while open.
 function WhyNotGptModal({ onClose }) {
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -560,13 +628,48 @@ function WhyNotGptModal({ onClose }) {
     };
   }, [onClose]);
 
+  const ROWS = [
+    {
+      icon: BookOpen,
+      title: 'Course structure',
+      us: 'Type a topic and get a real course back. Units, lessons, quizzes, a midterm, and a final, in seconds.',
+      them: 'Spits out a wall of text. Organizing it into a course is on you.',
+    },
+    {
+      icon: Repeat,
+      title: 'Memory',
+      us: 'Wrong answers resurface on the next quiz. The final pulls directly from your weak spots.',
+      them: 'Forgets everything the moment the chat ends.',
+    },
+    {
+      icon: Brain,
+      title: 'Progress',
+      us: 'Courses, lessons, and streaks are all saved. Open it next week and pick up right where you left off.',
+      them: 'Every chat starts from scratch. You track where you are.',
+    },
+    {
+      icon: PenTool,
+      title: 'Math',
+      us: 'Solve on a real canvas. Each line gets read and you find out exactly where you slipped.',
+      them: 'Gives you the answer. Wrong number, no explanation.',
+    },
+    {
+      icon: Zap,
+      title: 'Quiz Bowl',
+      us: 'Head-to-head with a real buzzer. Pyramidal tossups, real packets, real scoreboard.',
+      them: 'Not possible. One person, one chat box.',
+    },
+    {
+      icon: Cpu,
+      title: 'Purpose',
+      us: 'Built for studying from the ground up. Uses whichever model fits the job.',
+      them: 'One model, one chat box. That\'s the whole app.',
+    },
+  ];
+
   return (
     <div className="fixed inset-0 flex items-start justify-center overflow-y-auto bg-black/65 backdrop-blur-lg animate-fade-in" style={{ zIndex: Z.modal }}>
-      <button
-        aria-label="Close"
-        onClick={onClose}
-        className="absolute inset-0 -z-0"
-      />
+      <button aria-label="Close" onClick={onClose} className="absolute inset-0 -z-0" />
       <div
         className="relative my-12 mx-4 w-full max-w-3xl rounded-2xl overflow-hidden border border-white/[0.10]"
         style={{
@@ -580,7 +683,7 @@ function WhyNotGptModal({ onClose }) {
             '0 1px 0 rgba(255,255,255,0.06) inset',
         }}
       >
-        {/* macOS-style window titlebar - traffic lights left, centered title */}
+        {/* macOS-style window titlebar */}
         <div className="relative h-9 flex items-center px-4 border-b border-white/[0.07] bg-white/[0.025]">
           <div className="flex items-center gap-1.5">
             <button
@@ -599,31 +702,55 @@ function WhyNotGptModal({ onClose }) {
         </div>
 
         {/* Header */}
-        <div className="relative px-7 pt-7 pb-5 border-b border-white/[0.07]">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-500 grid place-items-center">
-              <Sparkles size={18} className="text-white drop-shadow" />
-            </div>
-            <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-blue-300">RushilAI vs ChatGPT</span>
-          </div>
-          <h2 className="text-[28px] sm:text-[32px] font-semibold tracking-[-0.02em] text-white leading-tight">
+        <div className="px-7 pt-7 pb-6 border-b border-white/[0.07]">
+          <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-blue-300">RushilAI vs ChatGPT</span>
+          <h2 className="mt-3 text-[26px] sm:text-[30px] font-semibold tracking-[-0.02em] text-white leading-tight">
             ChatGPT answers questions.
             <br />
             <span className="text-blue-300">RushilAI actually teaches you.</span>
           </h2>
-          <p className="mt-3 text-[13.5px] text-white/60 leading-relaxed max-w-xl">
-            One&apos;s a chatbot. The other walks you through a real course. Here&apos;s what that looks like:
+          <p className="mt-3 text-[13px] text-white/55 leading-relaxed max-w-xl">
+            One&apos;s a chatbot. The other walks you through a real course.
           </p>
         </div>
 
-        {/* Comparison rows */}
-        <div className="px-3 sm:px-5 py-4 space-y-1">
-          <Row icon={<BookOpen size={15} />} title="It builds the course for you" us="Type a topic and get a real course back - units, lessons, quizzes, even a midterm and final. Takes a few seconds." them="Spits out a wall of text. You'd have to organize it into a course on your own." />
-          <Row icon={<Repeat size={15} />}   title="It remembers what you missed" us="When you get something wrong on a quiz, it shows up again on the next one. The final quiz hits all your weak spots." them="Forgets everything the second the chat ends." />
-          <Row icon={<Brain size={15} />}    title="It picks up where you left off" us="Your courses, lessons, streaks - all saved. Open it next week and just keep going." them="Every chat starts from scratch. You're the one keeping track of where you are." />
-          <Row icon={<PenTool size={15} />}  title="It grades your math, not just your answer" us="Solve on a real canvas. We read your work line by line and tell you where you slipped." them="Just gives you the answer. If you got the wrong number, you won't know why." />
-          <Row icon={<Zap size={15} />}      title="You can play your friends" us="Head-to-head Quiz Bowl with a real buzzer. Pyramidal tossups, real packets, real scoreboard." them="Can't do this. It's one person, one chat box." />
-          <Row icon={<Cpu size={15} />}      title="Built for school" us="Made for studying first. We use whichever AI is best right now - Gemini, Claude, GPT, whoever." them="One model, one chat box. That's the whole app." />
+        {/* Column labels */}
+        <div className="px-7 pt-5 pb-3 grid grid-cols-2 gap-3">
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-400/[0.07] ring-1 ring-emerald-400/[0.14]">
+            <Check size={10} className="text-emerald-400 shrink-0" strokeWidth={3} />
+            <span className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-emerald-300">RushilAI</span>
+          </div>
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.03] ring-1 ring-white/[0.07]">
+            <X size={10} className="text-white/25 shrink-0" strokeWidth={2.5} />
+            <span className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-white/30">ChatGPT</span>
+          </div>
+        </div>
+
+        {/* Comparison cards */}
+        <div className="px-5 sm:px-7 pb-5 space-y-2">
+          {ROWS.map((row) => {
+            const Icon = row.icon;
+            return (
+              <div key={row.title} className="rounded-lg ring-1 ring-white/[0.08] bg-white/[0.025] overflow-hidden">
+                <div className="flex items-center gap-2.5 px-4 py-2.5 border-b border-white/[0.06] bg-white/[0.02]">
+                  <span className="w-6 h-6 grid place-items-center rounded-md bg-white/[0.08] border border-white/[0.10]">
+                    <Icon size={13} className="text-blue-300" strokeWidth={2} />
+                  </span>
+                  <span className="text-[12.5px] font-semibold tracking-[-0.005em] text-white/85">{row.title}</span>
+                </div>
+                <div className="grid grid-cols-2">
+                  <div className="px-4 py-3 flex items-start gap-2 bg-emerald-400/[0.04] border-r border-white/[0.05]">
+                    <Check size={11} className="text-emerald-400 mt-[3px] shrink-0" strokeWidth={3} />
+                    <p className="text-[12px] leading-relaxed text-white/70">{row.us}</p>
+                  </div>
+                  <div className="px-4 py-3 flex items-start gap-2">
+                    <X size={11} className="text-white/20 mt-[3px] shrink-0" strokeWidth={2.5} />
+                    <p className="text-[12px] leading-relaxed text-white/35">{row.them}</p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         {/* Footer */}
@@ -631,39 +758,10 @@ function WhyNotGptModal({ onClose }) {
           <span className="text-[11.5px] text-white/40">Press <kbd className="px-1.5 py-0.5 rounded bg-white/[0.06] border border-white/[0.10] text-white/70 font-mono text-[10.5px]">Esc</kbd> to close</span>
           <button
             onClick={onClose}
-            className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-b from-blue-500 to-indigo-600 hover:bg-blue-400 active:scale-[0.98] text-white text-[13px] font-semibold tracking-[-0.005em] transition-all border border-blue-400/55"
+            className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-b from-blue-500 to-indigo-600 hover:brightness-110 active:scale-[0.98] text-white text-[13px] font-semibold tracking-[-0.005em] transition-all border border-blue-400/55"
           >
             Got it <ArrowRight size={13} />
           </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Row({ icon, title, us, them }) {
-  return (
-    <div className="rounded-xl px-4 py-3 transition-colors hover:bg-white/[0.025]">
-      <div className="flex items-center gap-2.5 mb-2.5">
-        <span className="w-7 h-7 rounded-lg bg-blue-500/15 text-blue-300 grid place-items-center ring-1 ring-blue-400/20">
-          {icon}
-        </span>
-        <span className="text-[14px] font-semibold tracking-[-0.005em] text-white">{title}</span>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 ml-9">
-        <div className="flex items-start gap-2 rounded-xl bg-emerald-500/[0.08] border border-emerald-400/[0.18] px-3 py-2">
-          <Check size={13} className="text-emerald-400 mt-0.5 shrink-0" strokeWidth={3} />
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-emerald-300/85 mb-0.5">RushilAI</p>
-            <p className="text-[12.5px] leading-relaxed text-white/85">{us}</p>
-          </div>
-        </div>
-        <div className="flex items-start gap-2 rounded-xl bg-white/[0.025] border border-white/[0.06] px-3 py-2">
-          <X size={13} className="text-white/40 mt-0.5 shrink-0" strokeWidth={3} />
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/40 mb-0.5">ChatGPT</p>
-            <p className="text-[12.5px] leading-relaxed text-white/55">{them}</p>
-          </div>
         </div>
       </div>
     </div>
@@ -693,7 +791,7 @@ function MenuBar() {
     >
       <div className="flex items-center gap-1.5">
         <div className="w-4 h-4 rounded-[5px] bg-blue-500 grid place-items-center">
-          <Sparkles size={9} className="text-white" strokeWidth={2.6} />
+          <Brain size={9} className="text-white" strokeWidth={2.2} />
         </div>
         <span className="text-[12.5px] font-semibold tracking-[-0.005em] text-white/95">RushilAI</span>
       </div>

@@ -13,6 +13,8 @@ import Modal from '../../shared/Modal';
 import useBrowserBack from '../../../hooks/useBrowserBack';
 import NoteActions from '../../notes/NoteActions';
 import NoteMap from '../../notes/NoteMap';
+import MarkdownNoteEditor from '../../notes/MarkdownNoteEditor';
+import NoteFlashcards from '../../notes/NoteFlashcards';
 import { useToast } from '../../shared/Toast';
 
 function NoteEditor({ noteId, onBack }) {
@@ -97,11 +99,11 @@ function NoteEditor({ noteId, onBack }) {
                 <p className="text-[10px] text-white/25 italic">Write notes, then click sparkle to generate cues</p>
               )}
             </div>
-            <textarea
+            <MarkdownNoteEditor
               value={note.mainNotes}
-              onChange={e => handleChange('mainNotes', e.target.value)}
-              className="w-full h-full p-3 bg-transparent text-sm text-white/88 placeholder-white/25 resize-none outline-none"
-              placeholder="Notes…"
+              onChange={v => handleChange('mainNotes', v)}
+              className="h-full"
+              placeholder="Notes… markdown supported"
             />
           </div>
           <div className="bg-white/[0.02] rounded-2xl border border-white/[0.06] p-3 flex-shrink-0">
@@ -121,14 +123,16 @@ function NoteEditor({ noteId, onBack }) {
         </div>
       ) : (
         <div className="flex-1 min-h-0 bg-white/[0.02] rounded-2xl border border-white/[0.06] overflow-hidden">
-          <textarea
+          <MarkdownNoteEditor
             value={note.mainNotes}
-            onChange={e => handleChange('mainNotes', e.target.value)}
-            className="w-full h-full p-4 bg-transparent text-sm text-white/88 placeholder-white/25 resize-none outline-none leading-relaxed"
-            placeholder="Notes…"
+            onChange={v => handleChange('mainNotes', v)}
+            className="h-full"
+            placeholder="Notes… markdown supported"
           />
         </div>
       )}
+
+      <NoteFlashcards noteId={noteId} />
     </div>
   );
 }
@@ -337,12 +341,21 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
     setAiBusy(true); setAiError(null);
     try {
       const isCornell = aiType === 'cornell';
-      const system = `You are a study-note generator. Output ONLY valid JSON, no markdown fences, no prose. ${
+      const mdGuide = `Write "mainNotes" as rich GitHub-Flavored Markdown — it renders in the app, so actually USE the formatting:
+- "# " / "## " / "### " headings to split the note into clearly labelled sections.
+- "**bold**" for every key term and definition the first time it appears; *italics* for emphasis or nuance.
+- "- " bullet lists for parallel points and "1. " numbered lists for ordered steps or processes.
+- Markdown tables to compare or contrast (term vs. meaning, pros vs. cons, before vs. after).
+- "> " blockquotes to set apart laws, theorems, or rules worth remembering.
+- Inline \`code\` for symbols, notation, or commands; fenced \`\`\` blocks for multi-line code.
+- KaTeX for ALL math: inline as $...$ and display as $$...$$. Never write ASCII math like x^2 — use $x^2$.`;
+      const quality = `Quality bar: organized, dense, and genuinely useful to study from — never filler. Open with a one-line overview, then break the topic into sections. Define each key term, add a concrete example or worked problem where it helps, and flag common misconceptions or "gotchas". Aim for 250–600 words scaled to how broad the topic is.`;
+      const system = `You are an expert study-note generator. Output ONLY valid JSON — a single object, no markdown code fences around the JSON, no prose before or after. ${
         isCornell
-          ? `Shape: {"title": "...", "mainNotes": "...", "cues": ["keyword 1", ...], "summary": "..."}. Write mainNotes as plain text only - no markdown, no asterisks, no hashes, no bullet dashes. Use line breaks and indentation for structure. Cues are 4-8 short keyword phrases. Summary is 2-3 plain sentences.`
-          : `Shape: {"title": "...", "mainNotes": "..."}. Write mainNotes as plain text only - no markdown, no asterisks, no hashes, no bullet dashes. Use line breaks and indentation for structure.`
-      } The note should be organized, dense, and useful for studying - not a paragraph of fluff.${
-        usingCurriculum ? ' When LESSON MATERIAL is provided, base the note on that material: pull definitions, examples, formulas, and key points directly from the lessons. Do not invent facts that the lessons don\'t support.' : ''
+          ? `Shape: {"title": string, "mainNotes": string, "cues": string[], "summary": string}. "cues" are 4–8 short keyword phrases or recall questions for the Cornell left column. "summary" is a 2–3 sentence plain-prose wrap-up (no markdown).`
+          : `Shape: {"title": string, "mainNotes": string}.`
+      } ${mdGuide} ${quality}${
+        usingCurriculum ? ' When LESSON MATERIAL is provided, base the note strictly on it: pull definitions, examples, formulas, and key points directly from the lessons, and do not invent facts the lessons don\'t support.' : ''
       }`;
       const result = await apiFetch('/api/chat', {
         method: 'POST',

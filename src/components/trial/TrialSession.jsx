@@ -289,6 +289,13 @@ export default function TrialSession({
     const botState = botStates.find(s => s.id === buzzedBy);
     if (!botState?.correct) {
       setTimeout(() => {
+        // Release the synchronous buzz lock, not just buzzedBy. Without
+        // clearing claimedRef, the reopened question still looks buzzable
+        // (the BUZZ button reappears) but handleBuzz() and every pending
+        // bot timer bail on `claimedRef.current != null`, so pressing buzz
+        // does nothing for the rest of the question. Mirrors the user-neg
+        // reopen in submitAnswer().
+        claimedRef.current = null;
         setBuzzedBy(null);
         if (revealedCount < words.current.length) startReveal();
       }, 1200);

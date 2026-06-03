@@ -183,7 +183,7 @@ export async function getCourseGrade(curriculumId) {
 }
 
 // Generic SSE streaming helper
-function streamSSE(url, body, { onChunk, onDone, onError, onMeta, onSource, onStatus, onArtifact }) {
+function streamSSE(url, body, { onChunk, onDone, onError, onMeta, onSource, onStatus, onArtifact, onThinking }) {
   const token = getToken();
   const controller = new AbortController();
 
@@ -218,6 +218,7 @@ function streamSSE(url, body, { onChunk, onDone, onError, onMeta, onSource, onSt
               const data = JSON.parse(line.slice(6));
               if (data.done) { if (!finished) { finished = true; onDone?.(data); } return; }
               else if (data.error) { if (!finished) { finished = true; onError?.(data.error); } return; }
+              else if (data.thinking) onThinking?.(data.thinking);
               else if (data.content) onChunk?.(data.content);
               else if (data.source) onSource?.(data.source);
               else if (data.status) onStatus?.(data.status);
@@ -260,7 +261,7 @@ export function sendLessonMessage(curriculumId, lessonId, message, handlersOrIma
 }
 
 // Study mode chat
-export function sendStudyMessage(message, sessionId, context, handlersOrImages, handlersOrSourced, maybeSourced) {
+export function sendStudyMessage(message, sessionId, context, handlersOrImages, handlersOrSourced, maybeSourced, disableThinking) {
   let images = [], handlers, sourced = false;
   if (Array.isArray(handlersOrImages)) {
     images = handlersOrImages;
@@ -272,7 +273,7 @@ export function sendStudyMessage(message, sessionId, context, handlersOrImages, 
   }
   return streamSSE(
     '/api/study/chat',
-    { message, sessionId, context, sourced, images: (images || []).map(i => ({ dataUrl: i.dataUrl, mimeType: i.mimeType })) },
+    { message, sessionId, context, sourced, disableThinking: !!disableThinking, images: (images || []).map(i => ({ dataUrl: i.dataUrl, mimeType: i.mimeType })) },
     handlers,
   );
 }

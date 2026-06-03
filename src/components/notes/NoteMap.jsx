@@ -1,15 +1,17 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Sparkles, Plus, Trash2, RotateCw, Wand2, Link2, X, FileText, Lightbulb, Pencil, ArrowLeft, Focus, StickyNote, Loader2 } from 'lucide-react';
+import { Sparkles, Plus, Trash2, RotateCw, Wand2, Link2, X, FileText, Lightbulb, Pencil, ArrowLeft, Focus, StickyNote, Loader2, Brain, Layers } from 'lucide-react';
 import {
   listNotes,
   getNoteGraph, saveNoteGraph,
   getNoteMap, updateNoteMap,
   createNote, updateNote, getNote,
+  getMapSrs, generateNodeFlashcards,
 } from '../../api/notes';
 import { apiFetch } from '../../api/client';
 import Button from '../shared/Button';
 import LoadingSpinner from '../shared/LoadingSpinner';
 import Modal from '../shared/Modal';
+import NoteMapReview from './NoteMapReview';
 
 // Obsidian-style note map. Each existing note becomes a graph node; the
 // user can drag nodes, link them with edges, add free-form topic nodes,
@@ -96,6 +98,10 @@ export default function NoteMap({ onOpenNote, mapId }) {
     ? (nodes, edges) => updateNoteMap(mapId, { nodes, edges })
     : (nodes, edges) => saveNoteGraph(nodes, edges);
 
+  // SRS endpoints are keyed by map id; the legacy default-map call-site
+  // passes no mapId, so fall back to the well-known 'default' map.
+  const srsMapId = mapId || 'default';
+
   const [loading, setLoading] = useState(true);
   const [nodes, setNodes] = useState([]);
   const [edges, setEdges] = useState([]);
@@ -129,6 +135,12 @@ export default function NoteMap({ onOpenNote, mapId }) {
   const [pullLoading, setPullLoading] = useState(false);
   const [pullSelected, setPullSelected] = useState(() => new Set());
   const [pullQuery, setPullQuery] = useState('');
+  // Spaced-repetition state. `srs` holds the review queue + per-node card
+  // counts; `reviewOpen` toggles the review modal; `genNodeId` tracks an
+  // in-flight per-node flashcard generation.
+  const [srs, setSrs] = useState(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [genNodeId, setGenNodeId] = useState(null);
 
   const svgRef = useRef(null);
   const draggingRef = useRef(null);
@@ -185,6 +197,15 @@ export default function NoteMap({ onOpenNote, mapId }) {
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapId]);
+
+  // Load the SRS summary (due counts + per-node card counts). Drives the
+  // "Review" badge and the side-panel flashcards strip; refreshed after a
+  // review session or generating cards.
+  const loadSrs = useCallback(() => {
+    getMapSrs(srsMapId).then(setSrs).catch(() => {});
+  }, [srsMapId]);
+
+  useEffect(() => { loadSrs(); }, [loadSrs]);
 
   // Debounced auto-save. Fires 800ms after the last change so dragging
   // doesn't hammer the server.
@@ -590,6 +611,25 @@ export default function NoteMap({ onOpenNote, mapId }) {
     }, 800);
   }
 
+  // Generate spaced-repetition flashcards for a single node. Persists the
+  // graph first so a freshly-added node exists server-side before we ask the
+  // AI for cards, then refreshes the SRS summary.
+  async function generateCardsForNode(node) {
+    if (!node || genNodeId) return;
+    setGenNodeId(node.id);
+    try {
+      try { await saveGraph(nodes, edges); } catch {}
+      await generateNodeFlashcards(srsMapId, node.id, {});
+      loadSrs();
+    } catch (e) {
+      console.error('Failed to generate flashcards', e);
+    }
+    setGenNodeId(null);
+  }
+
+  const dueCount = srs?.summary?.due || 0;
+  const nodeStats = selectedNode ? srs?.byNode?.[selectedNode.id] : null;
+
   // Render -----------------------------------------------------------------
 
   if (loading) return <div className="flex items-center justify-center h-64"><LoadingSpinner size={28} /></div>;
@@ -620,6 +660,12 @@ export default function NoteMap({ onOpenNote, mapId }) {
           </div>
         </div>
         <div className="flex items-center gap-1.5">
+          <Button size="sm" variant={dueCount > 0 ? 'secondary' : 'ghost'} onClick={() => setReviewOpen(true)}>
+            <Brain size={13} /> Review
+            {dueCount > 0 && (
+              <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-blue-500/30 text-blue-100 text-[10px] font-semibold leading-none">{dueCount}</span>
+            )}
+          </Button>
           <Button size="sm" variant="ghost" onClick={openPullNotes}>
             <FileText size={13} /> Pull from notes
           </Button>
@@ -728,7 +774,7 @@ export default function NoteMap({ onOpenNote, mapId }) {
         </form>
       </Modal>
 
-      <div className="flex flex-1 min-h-0 gap-3">
+      <div className="relative flex flex-1 min-h-0 gap-3">
         {/* Canvas */}
         <div className="flex-1 min-w-0 relative bg-white/[0.02] rounded-2xl border border-white/[0.07] overflow-hidden">
           <svg
@@ -936,6 +982,44 @@ export default function NoteMap({ onOpenNote, mapId }) {
                   )}
                 </div>
 
+                {/* Flashcards strip - spaced repetition for this concept.
+                    Works for any node type. */}
+                <div className="px-3 pb-2 flex-shrink-0">
+                  <div className="flex items-center gap-2 pt-2 border-t border-white/[0.06]">
+                    <Layers size={13} className="text-white/40 flex-shrink-0" />
+                    {nodeStats ? (
+                      <>
+                        <span className="text-[11px] text-white/70 flex-1 min-w-0">
+                          {nodeStats.total} card{nodeStats.total !== 1 ? 's' : ''}
+                          {nodeStats.due > 0 && <span className="text-blue-300"> · {nodeStats.due} due</span>}
+                        </span>
+                        <button
+                          onClick={() => generateCardsForNode(selectedNode)}
+                          disabled={genNodeId === selectedNode.id}
+                          className="text-[10px] px-2 py-1 rounded-md bg-white/[0.05] hover:bg-white/[0.1] text-white/70 flex items-center gap-1 disabled:opacity-50"
+                        >
+                          {genNodeId === selectedNode.id ? <><Loader2 size={10} className="animate-spin" /> …</> : <><Plus size={10} /> More</>}
+                        </button>
+                        <button
+                          onClick={() => setReviewOpen(true)}
+                          className="text-[10px] px-2 py-1 rounded-md bg-blue-500/15 hover:bg-blue-500/25 text-blue-200 flex items-center gap-1"
+                        ><Brain size={10} /> Review</button>
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-[11px] text-white/45 flex-1 min-w-0">No flashcards yet</span>
+                        <button
+                          onClick={() => generateCardsForNode(selectedNode)}
+                          disabled={genNodeId === selectedNode.id}
+                          className="text-[10px] px-2 py-1 rounded-md bg-white/[0.05] hover:bg-white/[0.1] text-white/70 flex items-center gap-1 disabled:opacity-50"
+                        >
+                          {genNodeId === selectedNode.id ? <><Loader2 size={10} className="animate-spin" /> Making…</> : <><Plus size={10} /> Make flashcards</>}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
                 {/* Body - for notes: live editor that auto-saves. For
                     non-notes: shows the rationale and connections list. */}
                 {selectedNode.source === 'note' ? (
@@ -1007,6 +1091,13 @@ export default function NoteMap({ onOpenNote, mapId }) {
           </div>
 
         </div>
+
+        <NoteMapReview
+          open={reviewOpen}
+          onClose={() => setReviewOpen(false)}
+          mapId={srsMapId}
+          onChange={loadSrs}
+        />
       </div>
     </div>
   );

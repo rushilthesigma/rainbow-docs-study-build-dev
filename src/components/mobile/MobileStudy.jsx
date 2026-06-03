@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Sparkles, History, Send, Calculator, Beaker, Lightbulb, Compass, Plus, X } from 'lucide-react';
+import { Sparkles, History, Send, Calculator, Beaker, Lightbulb, Compass, Plus, X, Brain, ChevronRight } from 'lucide-react';
 import { sendStudyMessage, listStudySessions, getStudySession, deleteStudySession } from '../../api/curriculum';
 import { errorChatMessage } from '../../utils/aiErrors';
 import { Z } from '../../styles/tokens';
@@ -18,6 +18,7 @@ const QUICK_PROMPTS = [
 export default function MobileStudy() {
   const [messages, setMessages] = useState([]);
   const [streamingContent, setStreamingContent] = useState('');
+  const [streamingThinking, setStreamingThinking] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [sessionId, setSessionId] = useState(null);
   const [input, setInput] = useState('');
@@ -26,6 +27,7 @@ export default function MobileStudy() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const abortRef = useRef(null);
   const streamRef = useRef('');
+  const thinkRef = useRef('');
   const scrollerRef = useRef(null);
 
   // Auto-scroll to bottom on new content
@@ -42,18 +44,22 @@ export default function MobileStudy() {
     setInput('');
     setStreaming(true);
     setStreamingContent('');
+    setStreamingThinking('');
     streamRef.current = '';
+    thinkRef.current = '';
     const abort = sendStudyMessage(text, sessionId, {}, [], {
       onChunk: (chunk) => { streamRef.current += chunk; setStreamingContent(streamRef.current); },
+      onThinking: (t) => { thinkRef.current += t; setStreamingThinking(thinkRef.current); },
       onMeta: (d) => { if (d.sessionId) setSessionId(d.sessionId); },
       onDone: () => {
         const full = streamRef.current;
-        if (full) setMessages((m) => [...m, { role: 'assistant', content: full, timestamp: new Date().toISOString() }]);
-        setStreamingContent(''); streamRef.current = ''; setStreaming(false);
+        const think = thinkRef.current;
+        if (full) setMessages((m) => [...m, { role: 'assistant', content: full, thinking: think || undefined, timestamp: new Date().toISOString() }]);
+        setStreamingContent(''); setStreamingThinking(''); streamRef.current = ''; thinkRef.current = ''; setStreaming(false);
       },
       onError: (err) => {
         setMessages((m) => [...m, errorChatMessage(err)]);
-        setStreamingContent(''); streamRef.current = ''; setStreaming(false);
+        setStreamingContent(''); setStreamingThinking(''); streamRef.current = ''; thinkRef.current = ''; setStreaming(false);
       },
     });
     abortRef.current = abort;
@@ -123,12 +129,12 @@ export default function MobileStudy() {
           <EmptyState onPick={(p) => doSend(p)} />
         ) : (
           <div className="px-3 py-3 space-y-2.5">
-            {messages.map((m, i) => <Bubble key={i} role={m.role} content={m.content} />)}
+            {messages.map((m, i) => <Bubble key={i} role={m.role} content={m.content} thinking={m.thinking} />)}
             {streaming && (
-              streamingContent
-                // Once any text has streamed in, render a normal bubble that
-                // grows token-by-token. No "..." filler.
-                ? <Bubble role="assistant" content={streamingContent} />
+              (streamingContent || streamingThinking)
+                // Once any text (or reasoning) has streamed in, render a normal
+                // bubble that grows token-by-token. No "..." filler.
+                ? <Bubble role="assistant" content={streamingContent} thinking={streamingThinking} streaming />
                 // Pre-first-token: show a subtle three-dot pulse so the user
                 // knows we're working without the literal "..." placeholder.
                 : <TypingBubble />
@@ -210,16 +216,35 @@ function EmptyState({ onPick }) {
 }
 
 // ===== Bubble =====
-function Bubble({ role, content }) {
+function Bubble({ role, content, thinking, streaming }) {
   const isUser = role === 'user';
+  const [showThink, setShowThink] = useState(!!streaming);
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-      <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap ${
+      <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-[13.5px] leading-relaxed ${
         isUser
           ? 'bg-blue-600 text-white'
           : 'bg-white dark:bg-[#13131f] border border-gray-200 dark:border-white/[0.06] text-gray-900 dark:text-gray-100'
       }`}>
-        {content}
+        {!isUser && thinking && (
+          <div className="mb-1.5 rounded-xl border border-gray-200 dark:border-white/[0.08] overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setShowThink(s => !s)}
+              className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold text-gray-500 dark:text-gray-400"
+            >
+              <Brain size={11} className={streaming ? 'animate-pulse' : ''} />
+              {streaming ? 'Thinking…' : 'Thinking'}
+              <ChevronRight size={11} className={`ml-auto transition-transform ${showThink ? 'rotate-90' : ''}`} />
+            </button>
+            {showThink && (
+              <div className="px-2.5 pb-2 pt-1.5 text-[12px] text-gray-500 dark:text-gray-400 whitespace-pre-wrap border-t border-gray-200 dark:border-white/[0.06] max-h-52 overflow-y-auto">
+                {thinking}
+              </div>
+            )}
+          </div>
+        )}
+        <div className="whitespace-pre-wrap">{content}</div>
       </div>
     </div>
   );

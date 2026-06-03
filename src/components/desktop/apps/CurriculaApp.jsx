@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, Plus, Sparkles, Loader2, BookOpen, ChevronDown, ChevronRight, CheckCircle2, Circle, Lock, ClipboardCheck, PenTool, FileText, Check, X, Trophy, Wand2, Paperclip, Upload, Calculator, GraduationCap, Atom, Sigma, Map as MapIcon, List } from 'lucide-react';
+import { ArrowLeft, Plus, Sparkles, Loader2, BookOpen, ChevronDown, ChevronRight, CheckCircle2, Circle, Lock, ClipboardCheck, PenTool, FileText, Check, X, Trophy, Wand2, Paperclip, Upload, Calculator, GraduationCap, Atom, Sigma, Map as MapIcon, List, ListChecks } from 'lucide-react';
 import { listCurricula, generateCurriculum, getCurriculum, sendLessonMessage, getLessonHistory, editCurriculumWithAI, extractSourceUrl, extractFiles, refineCurriculum } from '../../../api/curriculum';
 import { peek, fetchOnce, bust } from '../../../api/cache';
 import ViewFade from '../../shared/ViewFade';
@@ -29,8 +29,8 @@ import { errorChatMessage } from '../../../utils/aiErrors';
 import useBrowserBack from '../../../hooks/useBrowserBack';
 import { InlineProgress } from '../../shared/ProgressBar';
 
-const TYPE_ICONS = { lesson: BookOpen, math_tutor: Calculator, practice: PenTool, essay: FileText, unit_test: ClipboardCheck };
-const TYPE_COLORS = { lesson: 'text-white/50', math_tutor: 'text-white/50', practice: 'text-white/50', essay: 'text-amber-400', unit_test: 'text-rose-400' };
+const TYPE_ICONS = { lesson: BookOpen, math_tutor: Calculator, practice: PenTool, problem_set: ListChecks, essay: FileText, unit_test: ClipboardCheck };
+const TYPE_COLORS = { lesson: 'text-white/50', math_tutor: 'text-white/50', practice: 'text-white/50', problem_set: 'text-white/50', essay: 'text-amber-400', unit_test: 'text-rose-400' };
 
 // When opened from another app (e.g. NotesApp's "Build Curriculum from
 // note" action), the window-manager `meta` is spread as props. We use
@@ -315,6 +315,12 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
       setView('math_tutor');
       return;
     }
+    // Problem-set lessons launch the structured problem-set runner (a sequence
+    // of problems solved one at a time on the canvas) via the math-tutor view.
+    if (lesson.type === 'problem_set') {
+      setView('math_tutor');
+      return;
+    }
     setView('lesson');
     setLessonMessages([]);
     setSourceMode(false);
@@ -396,7 +402,9 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
   // different so practice sessions lead with problems instead of theory.
   if (view === 'math_tutor' && currentLesson) {
     const isPractice = currentLesson.type === 'practice';
+    const isProblemSet = currentLesson.type === 'problem_set';
     const seed = currentLesson.practiceTopic || currentLesson.title;
+    const label = isProblemSet ? 'Problem Set' : isPractice ? 'Practice' : 'Math Tutor';
     return (
       <ViewFade viewKey={`math_tutor:${currentLesson.id}`} className="h-full flex flex-col min-h-0">
         <div className="flex items-center gap-2 mb-3 flex-shrink-0">
@@ -404,13 +412,15 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
             <ArrowLeft size={16} /> Back to curriculum
           </button>
           <span className="text-xs text-gray-400">·</span>
-          <span className="text-xs font-semibold text-white/60 uppercase tracking-wider">{isPractice ? 'Practice' : 'Math Tutor'}</span>
+          <span className="text-xs font-semibold text-white/60 uppercase tracking-wider">{label}</span>
           <span className="text-xs text-gray-400">·</span>
           <span className="text-xs text-white/60 truncate">{currentLesson.title}</span>
         </div>
         <div className="flex-1 min-h-0">
           <MathTutorApp
-            seedTopic={isPractice ? `Practice problems on ${seed}. Give me one problem at a time on the canvas - start at moderate difficulty and escalate.` : seed}
+            {...(isProblemSet
+              ? { seedProblemSet: { topic: seed, count: currentLesson.problemCount || 5, problems: currentLesson.problems?.length ? currentLesson.problems : null } }
+              : { seedTopic: isPractice ? `Practice problems on ${seed}. Give me one problem at a time on the canvas - start at moderate difficulty and escalate.` : seed })}
             onBack={() => setView('detail')}
           />
         </div>
@@ -868,32 +878,51 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
             </Button>
           </div>
         </div>
-      ) : (
-        <div className="space-y-2">
-          {curricula.map(c => {
-            // The /api/curriculum LIST response strips `units` but supplies
-            // pre-computed counters. Prefer those; fall back to recomputing
-            // for full-curriculum objects just written into state after a
-            // generate/edit.
-            const total = typeof c.totalLessons === 'number'
-              ? c.totalLessons
-              : (c.units || []).reduce((s, u) => s + (u.lessons || []).length, 0);
-            const done = typeof c.completedLessons === 'number'
-              ? c.completedLessons
-              : (c.units || []).reduce((s, u) => s + (u.lessons || []).filter(l => l.isCompleted).length, 0);
-            const units = typeof c.unitCount === 'number' ? c.unitCount : (c.units?.length || 0);
-            return (
-              <div key={c.id} onClick={() => openCurriculum(c.id)} className="flex items-center gap-4 bg-white/[0.06] backdrop-blur-sm rounded-xl border border-white/10 px-4 py-3 cursor-pointer hover:border-white/25 hover:bg-white/10 transition-colors">
-                <div className="w-9 h-9 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0"><BookOpen size={16} className="text-white/60" /></div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-sm font-medium text-white truncate">{c.title}</h3>
-                  <p className="text-xs text-white/40 mt-0.5">{done}/{total} lessons · {units} unit{units === 1 ? '' : 's'}</p>
+      ) : (() => {
+        // Bucket curricula by AI-assigned subject category, in a fixed order.
+        // Anything off-list (or legacy/uncategorized) falls into "Other".
+        const CATEGORY_ORDER = ['Math', 'Science', 'Computer Science', 'History', 'Language & Literature', 'Arts', 'Social Science', 'Other'];
+        const groups = {};
+        for (const c of curricula) {
+          const cat = CATEGORY_ORDER.includes(c.category) ? c.category : 'Other';
+          (groups[cat] = groups[cat] || []).push(c);
+        }
+        const renderCard = (c) => {
+          // The LIST response strips `units` but supplies counters; prefer
+          // those, fall back to recomputing for full objects in state.
+          const total = typeof c.totalLessons === 'number'
+            ? c.totalLessons
+            : (c.units || []).reduce((s, u) => s + (u.lessons || []).length, 0);
+          const done = typeof c.completedLessons === 'number'
+            ? c.completedLessons
+            : (c.units || []).reduce((s, u) => s + (u.lessons || []).filter(l => l.isCompleted).length, 0);
+          const units = typeof c.unitCount === 'number' ? c.unitCount : (c.units?.length || 0);
+          return (
+            <div key={c.id} onClick={() => openCurriculum(c.id)} className="flex items-center gap-4 bg-white/[0.06] backdrop-blur-sm rounded-xl border border-white/10 px-4 py-3 cursor-pointer hover:border-white/25 hover:bg-white/10 transition-colors">
+              <div className="w-9 h-9 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0"><BookOpen size={16} className="text-white/60" /></div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-medium text-white truncate">{c.title}</h3>
+                <p className="text-xs text-white/40 mt-0.5">{done}/{total} lessons · {units} unit{units === 1 ? '' : 's'}</p>
+              </div>
+            </div>
+          );
+        };
+        return (
+          <div className="space-y-5">
+            {CATEGORY_ORDER.filter(cat => groups[cat]?.length).map(cat => (
+              <div key={cat}>
+                <div className="flex items-center gap-2 mb-2 px-1">
+                  <h2 className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">{cat}</h2>
+                  <span className="text-[10px] text-white/25 tabular-nums">{groups[cat].length}</span>
+                </div>
+                <div className="space-y-2">
+                  {groups[cat].map(renderCard)}
                 </div>
               </div>
-            );
-          })}
-        </div>
-      )}
+            ))}
+          </div>
+        );
+      })()}
     </ViewFade>
   );
 }

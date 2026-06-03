@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Globe, Paperclip, X, FileText, Loader2, Upload } from 'lucide-react';
+import { Send, Globe, Paperclip, X, FileText, Loader2, Upload, Brain } from 'lucide-react';
 import { getToken } from '../../api/client';
 import { InlineProgress } from '../shared/ProgressBar';
 
@@ -34,6 +34,12 @@ export default function ChatInput({
   placeholder = 'Type a message...',
   sourceMode = false,
   onToggleSource,
+  // Thinking toggle (Study Mode). showThinking renders the Brain button;
+  // thinkingLocked = always-on (Pro), so the button is shown active+disabled.
+  showThinking = false,
+  thinkingMode = true,
+  thinkingLocked = false,
+  onToggleThinking,
   flush = false,
 }) {
   const [text, setText] = useState('');
@@ -278,6 +284,25 @@ export default function ChatInput({
               }`}
             >
               <Globe size={13} />
+            </button>
+          )}
+          {showThinking && (
+            <button
+              type="button"
+              onClick={() => { if (!thinkingLocked) onToggleThinking?.(!thinkingMode); }}
+              disabled={disabled || thinkingLocked}
+              title={thinkingLocked
+                ? 'This model always thinks through problems'
+                : thinkingMode
+                  ? 'Thinking on — reasons step by step before answering (slower)'
+                  : 'Thinking off — faster, direct answers'}
+              className={`p-1.5 rounded-lg transition-colors ${
+                thinkingMode
+                  ? 'text-white bg-blue-500/30 ring-1 ring-blue-400/50'
+                  : 'text-gray-400 dark:text-blue-200/55 hover:text-gray-700 dark:hover:text-blue-100 hover:bg-white/40 dark:hover:bg-blue-500/[0.12]'
+              } ${thinkingLocked ? 'cursor-default' : ''}`}
+            >
+              <Brain size={13} />
             </button>
           )}
           <span className="flex-1" />

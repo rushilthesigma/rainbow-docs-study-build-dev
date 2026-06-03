@@ -10,12 +10,11 @@ import { Z } from '../../styles/tokens';
 // Mobile-native settings - plan banner removed (it's not actionable
 // from this screen anyway). Model preference is now a real picker
 // sheet. Theme toggle stays inline.
-// Only Pro has the 1M-token context window; Flash + Flash Lite ship
-// the standard short-context configuration.
+// Tiers map to Gemini 3 models: 3.1 Pro / 3.5 Flash / 3.1 Flash-Lite.
 const MODEL_OPTIONS = [
-  { value: 'pro',        label: 'Pro',        description: 'Smartest · 1M-token context · best on hard problems' },
-  { value: 'flash',      label: 'Flash',      description: 'Faster · solid for most lessons' },
-  { value: 'flash-lite', label: 'Flash Lite', description: 'Fastest + cheapest · light tasks' },
+  { value: 'pro',        label: '3.1 Pro',        description: 'Advanced math & code · deepest reasoning' },
+  { value: 'flash',      label: '3.5 Flash',      description: 'All-around help · solid for most lessons' },
+  { value: 'flash-lite', label: '3.1 Flash-Lite', description: 'Fastest answers · light tasks' },
 ];
 
 export default function MobileSettings() {

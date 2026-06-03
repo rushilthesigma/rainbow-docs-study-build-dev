@@ -14,12 +14,13 @@ const _require = createRequire(import.meta.url);
 const pdfParse = _require('pdf-parse');
 import {
   buildCurriculumPrompt, buildLessonPrompt, buildLessonChatPrompt,
-  buildStandaloneLessonPrompt, buildMathTutorPrompt,
+  buildStandaloneLessonPrompt, buildMathTutorPrompt, buildMathProblemSetPrompt,
   buildStudyModePrompt, buildGoalMilestonesPrompt, buildAssessmentPrompt,
-  buildFlashcardPrompt, buildCueGenerationPrompt, buildSummaryPrompt,
+  buildFlashcardPrompt, buildNodeFlashcardPrompt, buildCueGenerationPrompt, buildSummaryPrompt,
   buildTopicSuggestionsPrompt, buildSlideshowPrompt, buildFlashSlideshowPrompt,
   buildSlideshowCriticPrompt, buildSlideshowReviserPrompt,
   buildSlideHtmlPrompt, buildDeckDesignBriefPrompt,
+  CURRICULUM_CATEGORIES,
 } from './prompts.js';
 import { PAUSD_CATALOG, getPausdTemplate, listPausdCatalog } from './data/pausdCurricula.js';
 
@@ -34,10 +35,16 @@ const PORT = process.env.PORT || 3002;
 // ===== Google Gemini =====
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 
-// Gemini 3 model family.
-const GEMINI_PRO        = 'gemini-3-pro-preview';
-const GEMINI_FLASH      = 'gemini-3-flash-preview';
-const GEMINI_FLASH_LITE = 'gemini-3-flash-preview';
+// Model ids, verified live against the ListModels API on this key (all three
+// are generateContent-capable). Each tier resolves to a DISTINCT real model so
+// the model picker genuinely changes which model serves a request:
+//   pro        → gemini-3.1-pro-preview  (Gemini 3.1 Pro — deepest reasoning)
+//   flash      → gemini-3.5-flash        (Gemini 3.5 Flash — latest flagship, default)
+//   flash-lite → gemini-3.1-flash-lite   (Gemini 3.1 Flash-Lite — fastest + cheapest)
+// All Gemini 3 era; no 2.5 fallbacks.
+const GEMINI_PRO        = 'gemini-3.1-pro-preview';
+const GEMINI_FLASH      = 'gemini-3.5-flash';
+const GEMINI_FLASH_LITE = 'gemini-3.1-flash-lite';
 const DEFAULT_MODEL = GEMINI_FLASH;
 const FALLBACK_MODEL = GEMINI_FLASH_LITE;
 
@@ -51,12 +58,16 @@ const LESSON_BLOCK_COUNT = {
   expert:      14,
 };
 const resolveModel = (name) => name || DEFAULT_MODEL;
-// Cascade: Pro → Flash → Flash Lite (each fallback step trades quality for
-// availability + cost). Flash Lite has no further fallback.
+// Cascade: Pro → Flash → Flash Lite, and Flash Lite escapes back to Flash
+// (each step trades quality for availability/cost). Flash Lite must NOT fall
+// back to itself — retrying the same dead model would burn all 3 attempts in
+// callGemini, which once hard-broke chat. The Flash↔Flash-Lite pair is bounded
+// by that 3-attempt cap.
 const fallbackFor = (name) => {
   if (name === GEMINI_PRO) return GEMINI_FLASH;
   if (name === GEMINI_FLASH) return GEMINI_FLASH_LITE;
-  return GEMINI_FLASH_LITE;
+  if (name === GEMINI_FLASH_LITE) return GEMINI_FLASH;
+  return GEMINI_FLASH;
 };
 const genAI = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
 if (!GEMINI_API_KEY) console.warn('GEMINI_API_KEY is not set - AI calls will fail');
@@ -227,7 +238,6 @@ const FREE_DAILY_MESSAGE_LIMIT = LIMITS.free.dailyMessages;
 const FREE_DAILY_QUIZBOWL_GAMES = LIMITS.free.dailyQB;
 const FREE_WEEKLY_CURRICULA = LIMITS.free.weeklyCurricula;
 const FREE_WEEKLY_DEBATES = LIMITS.free.weeklyDebates;
-const MODEL_PRO        = GEMINI_FLASH_LITE;
 const MODEL_FREE       = GEMINI_FLASH_LITE;
 const MODEL_FLASH_LITE = GEMINI_FLASH_LITE;
 
@@ -276,15 +286,32 @@ function isPro(user, email) { return PAID_TIERS.has(getPlan(user, email)); }
 //   'flash'      → gemini-3.1-flash-preview        (balanced - faster, lower cost)
 //   'flash-lite' → gemini-3.1-flash-lite-preview   (fastest + cheapest)
 // Free users always get FREE (Flash) regardless of preference.
+// Which model tiers a plan may use. Mirrors canUseModel() in
+// src/components/billing/modelAccess.js — keep the allow-lists in sync.
+//   pro        → Pro plan only
+//   flash      → any paid tier (PAID_TIERS: plus / lifetime / pro)
+//   flash-lite → everyone
+function canUseTier(tier, plan) {
+  if (tier === 'pro') return plan === 'pro';
+  if (tier === 'flash') return PAID_TIERS.has(plan);
+  if (tier === 'flash-lite') return true;
+  return false; // unknown tier → unusable, falls through to bestTierForPlan
+}
+// Best tier a plan is allowed to use, for an unset or plan-locked preference.
+// flash-lite has no requirement, so a result is guaranteed.
+function bestTierForPlan(plan) {
+  return ['pro', 'flash', 'flash-lite'].find((t) => canUseTier(t, plan)) || 'flash-lite';
+}
+const TIER_MODEL = { pro: GEMINI_PRO, flash: GEMINI_FLASH, 'flash-lite': GEMINI_FLASH_LITE };
 function modelForUser(user, email) {
   const tier = user?.data?.preferences?.modelTier;
   const plan = getPlan(user, email);
-  // Gemini Pro: gated to the Pro subscription tier only.
-  if (tier === 'pro' && plan === 'pro') return GEMINI_PRO;
-  // Flash: gated to Plus and above (plus / lifetime / pro).
-  if (tier === 'flash' && ['plus', 'lifetime', 'pro'].includes(plan)) return GEMINI_FLASH;
-  // Everyone else (and any unlock-mismatch) gets Flash Lite.
-  return GEMINI_FLASH_LITE;
+  // Honor an explicit, allowed preference; otherwise serve the best tier the
+  // plan can use. So a Plus/Lifetime user with a stale 'pro' or unset
+  // preference gets Flash (not Flash Lite), and a Pro user with an unset
+  // preference gets Pro. Mirrors resolveModelTier() in modelAccess.js.
+  const effective = tier && canUseTier(tier, plan) ? tier : bestTierForPlan(plan);
+  return TIER_MODEL[effective];
 }
 
 // Daily limits are a ROLLING 24h window. Instead of a midnight reset,
@@ -412,6 +439,113 @@ function findEmailById(users, id) {
 // Spaced repetition intervals in ms: now, 1h, 6h, 1d, 3d, 1w, 2w, 1mo
 const SR_INTERVALS = [0, 3600000, 21600000, 86400000, 259200000, 604800000, 1209600000, 2592000000];
 
+// ── SM-2 scheduler (note-map flashcards) ────────────────────────────────
+// Server-side mirror of src/utils/sm2.js (the client reuses that module to
+// preview the next interval on each review button). Keep the two in sync:
+// quality 0-5, where <3 is a lapse that resets the card to a 1-day step.
+// `interval` is in days. Returns a NEW card object with updated SM-2 state.
+function sm2Schedule(card, quality) {
+  let { ease = 2.5, interval = 0, reps = 0, lapses = 0 } = card || {};
+  const q = Math.max(0, Math.min(5, Math.round(Number(quality))));
+  if (q < 3) {
+    reps = 0;
+    interval = 1;
+    lapses += 1;
+  } else {
+    if (reps === 0) interval = 1;
+    else if (reps === 1) interval = 6;
+    else interval = Math.round(interval * ease);
+    reps += 1;
+  }
+  ease = Math.max(1.3, ease + 0.1 - (5 - q) * (0.08 + (5 - q) * 0.02));
+  const nextDue = new Date(Date.now() + interval * 86400000);
+  return {
+    ...card,
+    ease: Math.round(ease * 100) / 100,
+    interval,
+    reps,
+    lapses,
+    nextDue: nextDue.toISOString(),
+    lastReviewed: new Date().toISOString(),
+  };
+}
+
+// A card is due when it has never been scheduled or its nextDue has passed.
+function cardIsDue(card, now = Date.now()) {
+  if (!card?.nextDue) return true;
+  return new Date(card.nextDue).getTime() <= now;
+}
+
+// Fresh SM-2 state for a brand-new card.
+function freshSm2(extra = {}) {
+  return {
+    ease: 2.5,
+    interval: 0,
+    reps: 0,
+    lapses: 0,
+    nextDue: new Date().toISOString(),
+    lastReviewed: null,
+    ...extra,
+  };
+}
+
+// Append missed quiz/assessment questions to the user's weak-spot log.
+// De-dupes by prompt (newest wins) and caps at 200 so the log stays cheap to
+// scan when generating node flashcards.
+function recordMissedQuestions(userData, items) {
+  if (!userData || !Array.isArray(items) || items.length === 0) return;
+  if (!Array.isArray(userData.missedQuestions)) userData.missedQuestions = [];
+  for (const it of items) {
+    const prompt = String(it?.prompt || '').trim();
+    if (!prompt) continue;
+    userData.missedQuestions.unshift({
+      id: crypto.randomUUID(),
+      prompt: prompt.slice(0, 500),
+      correctAnswer: String(it.correctAnswer || '').slice(0, 300),
+      explanation: String(it.explanation || '').slice(0, 500),
+      topic: String(it.topic || '').slice(0, 120),
+      source: String(it.source || 'quiz').slice(0, 40),
+      createdAt: new Date().toISOString(),
+    });
+  }
+  const seen = new Set();
+  userData.missedQuestions = userData.missedQuestions.filter(m => {
+    const key = String(m.prompt || '').toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 200);
+}
+
+// Lightweight keyword overlap between a node label and a missed question, so
+// we only feed the AI weak-spot questions that are genuinely on the topic the
+// student is studying. Returns missed entries whose topic/prompt/answer shares
+// a meaningful word with the node label.
+const SRS_STOPWORDS = new Set(['the', 'a', 'an', 'of', 'and', 'or', 'to', 'in', 'on', 'for', 'is', 'are', 'what', 'which', 'how', 'why', 'with', 'that', 'this', 'it', 'as', 'by', 'be', 'at', 'from']);
+function topicTokens(text) {
+  return new Set(
+    String(text || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter(w => w.length >= 4 && !SRS_STOPWORDS.has(w)),
+  );
+}
+function missedForTopic(missedLog, label, extraText = '', limit = 4) {
+  if (!Array.isArray(missedLog) || missedLog.length === 0) return [];
+  const labelTokens = topicTokens(`${label} ${extraText}`);
+  if (labelTokens.size === 0) return [];
+  const scored = [];
+  for (const m of missedLog) {
+    const hay = topicTokens(`${m.topic} ${m.prompt} ${m.correctAnswer}`);
+    let overlap = 0;
+    for (const t of labelTokens) if (hay.has(t)) overlap += 1;
+    if (overlap > 0) scored.push({ m, overlap });
+  }
+  scored.sort((a, b) => b.overlap - a.overlap);
+  return scored.slice(0, limit).map(s => s.m);
+}
+
 // Default data for new users
 function createDefaultData() {
   return {
@@ -443,6 +577,12 @@ function createDefaultData() {
     profile: { level: 1, xp: 0, xpToNextLevel: 100, strengths: [], weaknesses: [], topicScores: {} },
     goals: [],
     flashcardDecks: [],
+    // Rolling log of quiz/assessment questions the student missed. Used to
+    // seed note-map flashcards with variants of weak-spot questions when the
+    // topic matches the node being studied. Each entry:
+    //   { id, prompt, correctAnswer, explanation, topic, source, createdAt }
+    // Newest-first, capped at 200.
+    missedQuestions: [],
     notes: [],
     // Obsidian-style knowledge graph(s) over the user's notes. Each map
     // has its own nodes+edges. The first map is the "default" - note
@@ -1912,7 +2052,9 @@ async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096,
           // Without this, the model burns the entire token budget on a
           // hidden `thoughtSignature` and the visible JSON gets cut off
           // mid-sentence - which broke the AI debate-topic chip.
-          ...(opts.disableThinking ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+          // Pro models require thinking and reject thinkingBudget:0 with a 400,
+          // so only disable thinking on non-Pro models.
+          ...(opts.disableThinking && !isProModel ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
         },
       });
 
@@ -2084,7 +2226,7 @@ function extractLessonDoneJson(text) {
 // on overflow so the client can pop the upgrade chip.
 app.post('/api/chat', authMiddleware, async (req, res) => {
   try {
-    const { messages, system, model, max_tokens, sourced, jsonMode, disableThinking } = req.body;
+    const { messages, system, max_tokens, sourced, jsonMode, disableThinking } = req.body;
     const users = loadUsers();
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
@@ -2104,7 +2246,11 @@ app.post('/api/chat', authMiddleware, async (req, res) => {
     }
     saveUsers(users);
     const systemPrompt = system || 'You are a helpful AI assistant.';
-    const result = await callGemini(systemPrompt, messages, model, max_tokens || 4096, {
+    // Resolve the model from the user's saved tier (Pro / Flash / Flash-Lite)
+    // with plan gating, exactly like every streaming AI route. Previously this
+    // trusted a client-supplied `model` that no caller ever set, so every
+    // /api/chat feature silently ran on Flash regardless of the picker.
+    const result = await callGemini(systemPrompt, messages, modelForUser(users[email], email), max_tokens || 4096, {
       enableWebSearch: !!sourced,
       jsonMode: !!jsonMode,
       disableThinking: !!disableThinking,
@@ -2514,11 +2660,19 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
       title: s.title, kind: s.kind, url: s.url || null, chars: s.content.length,
     }));
 
-    // Detect if this is a math-related curriculum
+    // AI-assigned subject category, validated against the fixed list. If the
+    // model returned something off-list (or nothing), fall back to keyword-
+    // based math detection, else "Other". Category is the single source of
+    // truth for whether this is a math course (drives the canvas lessons).
     const mathKeywords = ['math', 'algebra', 'calculus', 'geometry', 'trigonometry', 'statistics', 'arithmetic', 'equation', 'fraction', 'polynomial', 'linear', 'quadratic', 'integral', 'derivative', 'probability', 'number theory'];
     const topicLower = (settings.topic || '').toLowerCase();
-    const isMathCurriculum = mathKeywords.some(kw => topicLower.includes(kw));
+    const keywordMath = mathKeywords.some(kw => topicLower.includes(kw));
+    const aiCategory = typeof curriculum.category === 'string' ? curriculum.category.trim() : '';
+    const matchedCategory = CURRICULUM_CATEGORIES.find(c => c.toLowerCase() === aiCategory.toLowerCase());
+    curriculum.category = matchedCategory || (keywordMath ? 'Math' : 'Other');
+    const isMathCurriculum = curriculum.category === 'Math';
 
+    const PROBLEM_SET_SIZE = 5;
     let lessonCounter = 0;
     curriculum.units = (curriculum.units || []).map((unit, ui) => {
       const lessons = (unit.lessons || []).map((lesson, li) => {
@@ -2541,13 +2695,37 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
       // Math Tutor walks through a guided worked problem; Practice is the
       // student's turn on the same topic.
       if (isMathCurriculum && lessons.length >= 2) {
-        const mathTutorLesson = {
-          id: `${curriculumId}-u${ui}-mathtutor`,
-          title: `${unit.title} - Math Tutor`,
-          description: `Walk through worked problems for ${unit.title} with step-by-step feedback on a handwriting canvas.`,
-          type: 'math_tutor',
+        // More canvas practice for math units: one or two guided Math Tutor
+        // walkthroughs (scaled by unit size) plus a structured Problem Set the
+        // student works one problem at a time. Replaces the old free-form
+        // "Practice Problems" lesson.
+        const tutorCount = lessons.length >= 4 ? 2 : 1;
+        const mathTutorLessons = [];
+        for (let k = 0; k < tutorCount; k++) {
+          mathTutorLessons.push({
+            id: `${curriculumId}-u${ui}-mathtutor${k}`,
+            title: tutorCount > 1 ? `${unit.title} - Worked Examples ${k + 1}` : `${unit.title} - Math Tutor`,
+            description: `Work through guided problems for ${unit.title} with step-by-step feedback on a handwriting canvas.`,
+            type: 'math_tutor',
+            tool: 'math_tutor',
+            practiceTopic: unit.title,
+            chatHistory: [],
+            phase: null,
+            phaseData: {},
+            content: null,
+            isCompleted: false,
+            score: null,
+          });
+        }
+        const problemSetLesson = {
+          id: `${curriculumId}-u${ui}-problemset`,
+          title: `${unit.title} - Problem Set`,
+          description: `Solve ${PROBLEM_SET_SIZE} problems on ${unit.title} one at a time on the canvas, with feedback and progress.`,
+          type: 'problem_set',
           tool: 'math_tutor',
           practiceTopic: unit.title,
+          problemCount: PROBLEM_SET_SIZE,
+          problems: [],
           chatHistory: [],
           phase: null,
           phaseData: {},
@@ -2555,23 +2733,10 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
           isCompleted: false,
           score: null,
         };
-        const practiceLesson = {
-          id: `${curriculumId}-u${ui}-practice`,
-          title: `${unit.title} - Practice Problems`,
-          description: `Solve practice problems for ${unit.title} using the math canvas.`,
-          type: 'practice',
-          tool: 'math_canvas',
-          practiceTopic: unit.title,
-          chatHistory: [],
-          phase: null,
-          phaseData: {},
-          content: null,
-          isCompleted: false,
-          score: null,
-        };
-        // Insert Math Tutor before the last concept lesson, Practice before the unit test.
-        lessons.splice(lessons.length - 1, 0, mathTutorLesson);
-        lessons.push(practiceLesson);
+        // Math Tutor walkthroughs go before the last concept lesson; the
+        // Problem Set goes after (before the unit test, pushed below).
+        lessons.splice(lessons.length - 1, 0, ...mathTutorLessons);
+        lessons.push(problemSetLesson);
       } else if (lessons.length >= 2) {
         // For NON-math curricula: add a graded essay per unit. It routes to
         // the existing assessment/essay flow (prompt + rubric + AI grading).
@@ -2642,6 +2807,7 @@ app.get('/api/curriculum', authMiddleware, (req, res) => {
       id: c.id,
       title: c.title,
       description: c.description,
+      category: c.category || 'Other',
       createdAt: c.createdAt,
       settings: c.settings,
       studentId: c.studentId || null,
@@ -2759,11 +2925,19 @@ app.post('/api/pausd/enroll', authMiddleware, (req, res) => {
 
     const curriculumId = crypto.randomUUID();
     const isMathCurriculum = tpl.subject === 'math';
+    // Map the catalog's subject onto our fixed UI category buckets.
+    const SUBJECT_CATEGORY = {
+      math: 'Math', science: 'Science', english: 'Language & Literature',
+      history: 'History', 'social studies': 'Social Science',
+      cs: 'Computer Science', 'computer science': 'Computer Science', art: 'Arts',
+    };
+    const category = SUBJECT_CATEGORY[(tpl.subject || '').toLowerCase()] || 'Other';
 
     const curriculum = {
       id: curriculumId,
       title: tpl.title,
       description: tpl.description,
+      category,
       createdAt: new Date().toISOString(),
       pausdSlug: tpl.slug,
       source: 'pausd',
@@ -3286,6 +3460,7 @@ SOURCE MODE - NON-NEGOTIABLE RULES:
 
   try {
     const resolved = resolveModel(requestedModel);
+    const isProModel = /pro/i.test(String(resolved));
     const tools = enableWebSearch ? [{ googleSearch: {} }] : undefined;
     const model = genAI.getGenerativeModel({
       model: resolved,
@@ -3300,7 +3475,16 @@ SOURCE MODE - NON-NEGOTIABLE RULES:
       generationConfig: {
         maxOutputTokens: 32768,
         temperature: 0.7,
-        ...(opts.disableThinking ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+        // Thinking config: show thought summaries when the caller wants them
+        // (Pro + thinking on, or any model with includeThoughts). Pro rejects
+        // thinkingBudget:0, so "thinking off" for Pro just omits the config
+        // (thoughts happen silently but aren't streamed to the client).
+        // Non-Pro can hard-disable with thinkingBudget:0.
+        ...(!opts.disableThinking && (isProModel || opts.includeThoughts)
+          ? { thinkingConfig: { includeThoughts: true } }
+          : (opts.disableThinking && !isProModel
+              ? { thinkingConfig: { thinkingBudget: 0 } }
+              : {})),
       },
     });
 
@@ -3321,10 +3505,21 @@ SOURCE MODE - NON-NEGOTIABLE RULES:
     // metadata) rather than inline, because Gemini only returns supports
     // after the stream closes.
     for await (const chunk of result.stream) {
-      const text = chunk?.text?.() || '';
-      if (text) {
-        buffered += text;
-        sse({ content: text });
+      // With includeThoughts, a chunk can carry both thought-summary parts
+      // (part.thought === true) and answer parts. Split them so the client can
+      // render reasoning separately. Calling chunk.text() would merge the two.
+      const parts = chunk?.candidates?.[0]?.content?.parts;
+      if (Array.isArray(parts) && parts.length) {
+        let answer = '', thought = '';
+        for (const p of parts) {
+          if (typeof p?.text !== 'string' || !p.text) continue;
+          if (p.thought) thought += p.text; else answer += p.text;
+        }
+        if (thought) sse({ thinking: thought });
+        if (answer) { buffered += answer; sse({ content: answer }); }
+      } else {
+        const text = chunk?.text?.() || '';
+        if (text) { buffered += text; sse({ content: text }); }
       }
     }
 
@@ -3921,8 +4116,12 @@ app.post('/api/curriculum/:id/lesson/:lessonId/blocks/generate', authMiddleware,
     if (!found) return res.status(404).json({ error: 'Lesson not found' });
     const { unit, lesson } = found;
 
-    // Idempotent: if 7 blocks already cached, return them as-is.
-    if (Array.isArray(lesson.blocks) && lesson.blocks.length >= 7) {
+    // Idempotent: if blocks were already generated for this lesson,
+    // return them as-is regardless of count. The old guard hardcoded
+    // ">=7" which made beginner lessons (5 blocks) regenerate on every
+    // call - that wiped the IDs the client was holding and caused
+    // "Block not found" 404s on the next /grade or /complete.
+    if (Array.isArray(lesson.blocks) && lesson.blocks.length > 0) {
       return res.json({ blocks: lesson.blocks });
     }
 
@@ -4072,6 +4271,20 @@ app.post('/api/curriculum/:id/lesson/:lessonId/blocks/:bid/grade', authMiddlewar
     block.score = score;
     block.responses = results;
     block.completedAt = new Date().toISOString();
+
+    // Feed weak spots into the note-map SRS log. Each missed question becomes a
+    // candidate for flashcard variants when the student studies a matching node.
+    recordMissedQuestions(users[email].data, results.filter(r => !r.correct).map(r => {
+      const q = (block.questions || []).find(qq => qq.id === r.qid) || {};
+      return {
+        prompt: q.prompt,
+        correctAnswer: q.answer,
+        explanation: q.explanation || '',
+        topic: found.lesson?.title || found.unit?.title || curriculum.title || '',
+        source: 'lesson-quiz',
+      };
+    }));
+
     saveUsers(users);
 
     res.json({ score, results });
@@ -4186,11 +4399,16 @@ app.post('/api/curriculum/:id/lesson/:lessonId/blocks/:bid/complete', authMiddle
 
     if (!block.completedAt) block.completedAt = new Date().toISOString();
 
-    const allDone = (found.lesson.blocks || []).length === 8 &&
-                    (found.lesson.blocks || []).every(b => b.completedAt);
+    // A lesson is done when every block has a completedAt AND the final
+    // quiz has been generated and completed. The old check hardcoded
+    // `length === 8` (intermediate=7 blocks + 1 final quiz) which left
+    // beginner / advanced / expert lessons stuck "in progress" forever.
+    const blocks = found.lesson.blocks || [];
+    const hasFinalQuiz = blocks.some(b => b.isFinal === true);
+    const allDone = blocks.length > 0 && hasFinalQuiz && blocks.every(b => b.completedAt);
     if (allDone && !found.lesson.isCompleted) {
       found.lesson.isCompleted = true;
-      const quizScores = (found.lesson.blocks || [])
+      const quizScores = blocks
         .filter(b => b.type === 'quiz' && typeof b.score === 'number').map(b => b.score);
       found.lesson.score = quizScores.length ? Math.round(quizScores.reduce((s, n) => s + n, 0) / quizScores.length) : null;
     }
@@ -4391,7 +4609,7 @@ app.post('/api/curriculum/:id/exams/:examId/grade', authMiddleware, (req, res) =
 
 app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res) => {
   try {
-    const { message, sessionId, context, sourced, images } = req.body;
+    const { message, sessionId, context, sourced, images, disableThinking } = req.body;
     // Source-mode + attached sources interaction:
     //   • If the user has attached PDFs/URLs (`context.sources`), the
     //     model must answer ONLY from those - no web fallback. So when
@@ -4404,6 +4622,12 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
     req.sourced = !!sourced && !hasAttachedSources;
     req.hasAttachedSources = hasAttachedSources;
     req.images = Array.isArray(images) ? images : [];
+    // Thinking: web-search mode always thinks (it must plan its searches);
+    // otherwise honor the client's Thinking toggle. Older clients that send
+    // nothing keep the old "quick answers" default of thinking off.
+    const studyThinkingOff = req.sourced
+      ? false
+      : (typeof disableThinking === 'boolean' ? disableThinking : true);
     if (!message && !req.images.length) return res.status(400).json({ error: 'Message required' });
 
     const users = loadUsers();
@@ -4519,11 +4743,10 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
       }
 
       saveUsers(users);
-      // disableThinking: study chat is the "ask a question, get a quick
-      // answer" surface - first-token latency dominates the perceived
-      // speed. Web-search mode keeps thinking on so the model can plan
-      // its searches; everything else skips the hidden CoT phase.
-    }, tierModel, { enableWebSearch: !!req.sourced, disableThinking: !req.sourced });
+      // Thinking is driven by `studyThinkingOff` (computed above from the
+      // client's Thinking toggle + web-search mode). When thinking is on we
+      // also surface the reasoning so the client's "Thinking" panel streams.
+    }, tierModel, { enableWebSearch: !!req.sourced, disableThinking: studyThinkingOff, includeThoughts: !studyThinkingOff });
   } catch (e) {
     console.error('Study chat error:', e);
     if (!res.headersSent) res.status(500).json({ error: e.message });
@@ -4961,6 +5184,107 @@ app.post('/api/notes/:nid/generate-summary', authMiddleware, async (req, res) =>
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ===== NOTE FLASHCARDS (SM-2, stored per note) =====
+// Each note can carry its own spaced-repetition deck in note.flashcards.
+// Same card shape + scheduler as the note-map cards (sm2Schedule / freshSm2).
+
+// POST /api/notes/:id/flashcards → generate (AI from note content) or add (manual).
+//   Body: { count?, difficulty?, cards?: [{ front, back }] }
+app.post('/api/notes/:id/flashcards', authMiddleware, async (req, res) => {
+  try {
+    const { count, difficulty, cards: manualCards } = req.body || {};
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const note = (users[email].data.notes || []).find(n => n.id === req.params.id);
+    if (!note) return res.status(404).json({ error: 'Note not found' });
+    if (!Array.isArray(note.flashcards)) note.flashcards = [];
+    if (note.flashcards.length >= 500) return res.status(400).json({ error: 'This note has too many cards. Delete some first.' });
+
+    let newCards = [];
+    if (Array.isArray(manualCards) && manualCards.length) {
+      newCards = manualCards.filter(c => c && (c.front || c.back)).slice(0, 50).map(c => ({
+        id: crypto.randomUUID(), front: String(c.front || '').slice(0, 600), back: String(c.back || '').slice(0, 1200),
+        origin: 'manual', createdAt: new Date().toISOString(), ...freshSm2(),
+      }));
+    } else {
+      const noteContent = [note.mainNotes, note.summary].filter(Boolean).join('\n\n');
+      if (!noteContent.trim() && !note.title) return res.status(400).json({ error: 'Add some notes first, then generate flashcards.' });
+      const missed = missedForTopic(users[email].data.missedQuestions, note.title || '', noteContent.slice(0, 200), 4);
+      const { system, user } = buildNodeFlashcardPrompt({
+        label: note.title || 'this note',
+        noteContent,
+        neighborLabels: [],
+        missedQuestions: missed,
+        count: count || 8,
+        difficulty: difficulty || users[email].data.preferences?.defaultDifficulty || 'beginner',
+      });
+      const result = await callGemini(system, [{ role: 'user', content: user }], DEFAULT_MODEL, 4096, { jsonMode: true, temperature: 0.6 });
+      if (!result.success) return res.status(500).json({ error: result.error || 'Generation failed' });
+      const parsed = parseAIJson(result.data.content?.[0]?.text || '');
+      if (!parsed || !Array.isArray(parsed.cards) || parsed.cards.length === 0) return res.status(500).json({ error: 'No cards returned. Try again.' });
+      newCards = parsed.cards.filter(c => c && c.front && c.back).slice(0, 20).map(c => ({
+        id: crypto.randomUUID(), front: String(c.front).slice(0, 600), back: String(c.back).slice(0, 1200),
+        origin: c.fromQuiz ? 'quiz-variant' : 'note', createdAt: new Date().toISOString(), ...freshSm2(),
+      }));
+    }
+
+    if (!newCards.length) return res.status(500).json({ error: 'No valid cards produced.' });
+    note.flashcards.push(...newCards);
+    note.updatedAt = new Date().toISOString();
+    saveUsers(users);
+    res.json({ cards: newCards, flashcards: note.flashcards });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/notes/:id/flashcards → cards + due count.
+app.get('/api/notes/:id/flashcards', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const note = (users[email].data?.notes || []).find(n => n.id === req.params.id);
+    if (!note) return res.status(404).json({ error: 'Note not found' });
+    const cards = Array.isArray(note.flashcards) ? note.flashcards : [];
+    const now = Date.now();
+    res.json({ cards, due: cards.filter(c => cardIsDue(c, now)).length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/notes/:id/flashcards/review → SM-2 grade. Body: { cardId, quality 0-5 }
+app.post('/api/notes/:id/flashcards/review', authMiddleware, (req, res) => {
+  try {
+    const { cardId, quality } = req.body || {};
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const note = (users[email].data.notes || []).find(n => n.id === req.params.id);
+    if (!note) return res.status(404).json({ error: 'Note not found' });
+    const card = (note.flashcards || []).find(c => c.id === cardId);
+    if (!card) return res.status(404).json({ error: 'Card not found' });
+    Object.assign(card, sm2Schedule(card, quality));
+    saveUsers(users);
+    res.json({ card });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/notes/:id/flashcards/:cardId
+app.delete('/api/notes/:id/flashcards/:cardId', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const note = (users[email].data.notes || []).find(n => n.id === req.params.id);
+    if (!note) return res.status(404).json({ error: 'Note not found' });
+    note.flashcards = (note.flashcards || []).filter(c => c.id !== req.params.cardId);
+    saveUsers(users);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ===== NOTE MAPS (Obsidian-style knowledge graphs) =====
 //
 // A user has many `noteMaps`. The first one flagged `isDefault: true` is
@@ -4987,6 +5311,9 @@ function ensureNoteMaps(userData) {
   for (const m of userData.noteMaps) {
     if (!Array.isArray(m.nodes)) m.nodes = [];
     if (!Array.isArray(m.edges)) m.edges = [];
+    // SM-2 flashcards generated from this map's nodes. Backfilled here so
+    // every existing map gains the field without a dedicated migration.
+    if (!Array.isArray(m.cards)) m.cards = [];
   }
   return userData.noteMaps;
 }
@@ -5163,6 +5490,8 @@ app.put('/api/note-maps/:mid', authMiddleware, (req, res) => {
       const sanitized = sanitizeGraph(nodes, edges);
       map.nodes = sanitized.nodes;
       map.edges = sanitized.edges;
+      // A node removed from the canvas takes its flashcards with it.
+      pruneOrphanCards(map);
     }
     saveUsers(users);
     res.json({ map });
@@ -5312,6 +5641,215 @@ app.post('/api/note-graph/suggest', authMiddleware, async (req, res) => {
     const out = await buildGraphSuggestions(users[email].data, graph, req.body || {});
     if (out.error) return res.status(out.status || 500).json({ error: out.error });
     res.json(out);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== NOTE-MAP SPACED REPETITION (SM-2 flashcards) =====
+//
+// Flashcards are generated from a map's nodes and scheduled with SM-2 (see
+// sm2Schedule). Each card: { id, nodeId, front, back, origin, ...sm2 state }.
+// The review queue + recommendations are computed in GET /srs.
+
+// Per-node lookup + graph degree (used to rank "new nodes to quiz").
+function mapNodeMeta(map) {
+  const byId = new Map((map.nodes || []).map(n => [n.id, n]));
+  const degree = new Map();
+  for (const e of map.edges || []) {
+    degree.set(e.from, (degree.get(e.from) || 0) + 1);
+    degree.set(e.to, (degree.get(e.to) || 0) + 1);
+  }
+  return { byId, degree };
+}
+
+// Drop cards whose node was removed from the map (in place). Returns true if
+// anything changed so the caller knows whether to persist.
+function pruneOrphanCards(map) {
+  if (!Array.isArray(map.cards) || map.cards.length === 0) return false;
+  const live = new Set((map.nodes || []).map(n => n.id));
+  const before = map.cards.length;
+  map.cards = map.cards.filter(c => live.has(c.nodeId));
+  return map.cards.length !== before;
+}
+
+// GET /api/note-maps/:mid/srs → review queue + recommendations.
+app.get('/api/note-maps/:mid/srs', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const map = findMap(users[email].data, req.params.mid);
+    if (!map) return res.status(404).json({ error: 'Map not found' });
+    if (map.isDefault) syncGraphWithNotes(users[email].data);
+    if (pruneOrphanCards(map)) saveUsers(users);
+
+    const now = Date.now();
+    const { byId, degree } = mapNodeMeta(map);
+    const cards = map.cards || [];
+    const withLabel = c => ({ ...c, nodeLabel: byId.get(c.nodeId)?.label || 'Concept' });
+
+    const due = cards
+      .filter(c => cardIsDue(c, now))
+      .sort((a, b) => new Date(a.nextDue || 0) - new Date(b.nextDue || 0))
+      .slice(0, 200)
+      .map(withLabel);
+
+    // "Leeches": cards the student keeps lapsing or whose ease has collapsed.
+    const struggling = cards
+      .filter(c => (c.lapses || 0) >= 2 || (c.reps > 0 && (c.ease || 2.5) < 2.0))
+      .sort((a, b) => (a.ease || 2.5) - (b.ease || 2.5))
+      .slice(0, 20)
+      .map(withLabel);
+
+    const byNode = {};
+    for (const c of cards) {
+      if (!byNode[c.nodeId]) byNode[c.nodeId] = { total: 0, due: 0 };
+      byNode[c.nodeId].total += 1;
+      if (cardIsDue(c, now)) byNode[c.nodeId].due += 1;
+    }
+
+    // New nodes to quiz: no cards yet, most-connected first, note-backed ahead
+    // of bare topics (they have richer source material to ground cards in).
+    const uncovered = (map.nodes || []).filter(n => !byNode[n.id]);
+    const newNodes = uncovered
+      .map(n => ({ id: n.id, label: n.label, source: n.source, color: n.color, degree: degree.get(n.id) || 0 }))
+      .sort((a, b) => (b.degree - a.degree) || ((a.source === 'note' ? 0 : 1) - (b.source === 'note' ? 0 : 1)))
+      .slice(0, 12);
+
+    res.json({
+      summary: { totalCards: cards.length, due: due.length, struggling: struggling.length, newNodes: uncovered.length },
+      due,
+      struggling,
+      newNodes,
+      byNode,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/note-maps/:mid/nodes/:nodeId/flashcards
+// Generate (AI) or add (manual) flashcards for one node.
+//   Body: { count?, difficulty?, cards?: [{ front, back }] }
+app.post('/api/note-maps/:mid/nodes/:nodeId/flashcards', authMiddleware, async (req, res) => {
+  try {
+    const { count, difficulty, cards: manualCards } = req.body || {};
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const userData = users[email].data;
+    const map = findMap(userData, req.params.mid);
+    if (!map) return res.status(404).json({ error: 'Map not found' });
+    if (map.isDefault) syncGraphWithNotes(userData);
+    const node = (map.nodes || []).find(n => n.id === req.params.nodeId);
+    if (!node) return res.status(404).json({ error: 'Node not found' });
+    if (!Array.isArray(map.cards)) map.cards = [];
+    if (map.cards.length >= 2000) return res.status(400).json({ error: 'This map has too many cards. Delete some first.' });
+
+    let newCards = [];
+    if (Array.isArray(manualCards) && manualCards.length) {
+      newCards = manualCards
+        .filter(c => c && (c.front || c.back))
+        .slice(0, 50)
+        .map(c => ({
+          id: crypto.randomUUID(), nodeId: node.id,
+          front: String(c.front || '').slice(0, 600), back: String(c.back || '').slice(0, 1200),
+          origin: 'manual', createdAt: new Date().toISOString(), ...freshSm2(),
+        }));
+    } else {
+      // Ground the cards in the node's own note (if any) + its neighbors.
+      let noteContent = '';
+      if (node.source === 'note' && node.noteId) {
+        const note = (userData.notes || []).find(nt => nt.id === node.noteId);
+        if (note) noteContent = [note.mainNotes, note.summary].filter(Boolean).join('\n\n');
+      }
+      const neighborIds = new Set();
+      for (const e of map.edges || []) {
+        if (e.from === node.id) neighborIds.add(e.to);
+        if (e.to === node.id) neighborIds.add(e.from);
+      }
+      const byId = new Map((map.nodes || []).map(n => [n.id, n]));
+      const neighborLabels = Array.from(neighborIds).map(id => byId.get(id)?.label).filter(Boolean);
+      const missed = missedForTopic(userData.missedQuestions, node.label, noteContent.slice(0, 200), 4);
+
+      const { system, user } = buildNodeFlashcardPrompt({
+        label: node.label,
+        noteContent,
+        neighborLabels,
+        missedQuestions: missed,
+        count: count || 8,
+        difficulty: difficulty || userData.preferences?.defaultDifficulty || 'beginner',
+      });
+      const result = await callGemini(system, [{ role: 'user', content: user }], DEFAULT_MODEL, 4096, { jsonMode: true, temperature: 0.6 });
+      if (!result.success) return res.status(500).json({ error: result.error || 'Generation failed' });
+      const parsed = parseAIJson(result.data.content?.[0]?.text || '');
+      if (!parsed || !Array.isArray(parsed.cards) || parsed.cards.length === 0) {
+        return res.status(500).json({ error: 'No cards returned. Try again.' });
+      }
+      newCards = parsed.cards
+        .filter(c => c && c.front && c.back)
+        .slice(0, 20)
+        .map(c => ({
+          id: crypto.randomUUID(), nodeId: node.id,
+          front: String(c.front).slice(0, 600), back: String(c.back).slice(0, 1200),
+          origin: c.fromQuiz ? 'quiz-variant' : 'notemap', createdAt: new Date().toISOString(), ...freshSm2(),
+        }));
+    }
+
+    if (!newCards.length) return res.status(500).json({ error: 'No valid cards produced.' });
+    map.cards.push(...newCards);
+    saveUsers(users);
+    res.json({ cards: newCards, node: { id: node.id, label: node.label } });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/note-maps/:mid/review → grade a card with SM-2.
+//   Body: { cardId, quality: 0-5 }  (Again=1, Hard=3, Good=4, Easy=5)
+app.post('/api/note-maps/:mid/review', authMiddleware, (req, res) => {
+  try {
+    const { cardId, quality } = req.body || {};
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const map = findMap(users[email].data, req.params.mid);
+    if (!map) return res.status(404).json({ error: 'Map not found' });
+    const card = (map.cards || []).find(c => c.id === cardId);
+    if (!card) return res.status(404).json({ error: 'Card not found' });
+    Object.assign(card, sm2Schedule(card, quality));
+    saveUsers(users);
+    res.json({ card });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/note-maps/:mid/cards/:cardId
+app.delete('/api/note-maps/:mid/cards/:cardId', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const map = findMap(users[email].data, req.params.mid);
+    if (!map) return res.status(404).json({ error: 'Map not found' });
+    map.cards = (map.cards || []).filter(c => c.id !== req.params.cardId);
+    saveUsers(users);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/srs/missed → record missed questions from any client-graded quiz.
+//   Body: { items: [{ prompt, correctAnswer, explanation, topic, source }] } or a single such object.
+app.post('/api/srs/missed', authMiddleware, (req, res) => {
+  try {
+    const body = req.body || {};
+    const items = Array.isArray(body.items) ? body.items : (body.prompt ? [body] : []);
+    if (!items.length) return res.status(400).json({ error: 'No items' });
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    recordMissedQuestions(users[email].data, items);
+    saveUsers(users);
+    res.json({ ok: true, count: (users[email].data.missedQuestions || []).length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -8129,8 +8667,10 @@ app.post('/api/lessons/:id/blocks/generate', authMiddleware, async (req, res) =>
     const lesson = findLesson(users[email].data, req.params.id);
     if (!lesson) return res.status(404).json({ error: 'Lesson not found' });
 
-    // Idempotent: return cached blocks if already generated.
-    if (Array.isArray(lesson.blocks) && lesson.blocks.length >= 7) {
+    // Idempotent: return cached blocks if already generated. Don't
+    // hardcode ">=7" — that wiped beginner lessons (5 blocks) and
+    // caused "Block not found" 404s on subsequent /grade or /complete.
+    if (Array.isArray(lesson.blocks) && lesson.blocks.length > 0) {
       return res.json({ blocks: lesson.blocks });
     }
 
@@ -8286,6 +8826,19 @@ app.post('/api/lessons/:id/blocks/:bid/grade', authMiddleware, (req, res) => {
     block.score = score;
     block.responses = results;
     block.completedAt = new Date().toISOString();
+
+    // Feed weak spots into the note-map SRS log (standalone-lesson twin).
+    recordMissedQuestions(users[email].data, results.filter(r => !r.correct).map(r => {
+      const q = (block.questions || []).find(qq => qq.id === r.qid) || {};
+      return {
+        prompt: q.prompt,
+        correctAnswer: q.answer,
+        explanation: q.explanation || '',
+        topic: lesson?.title || '',
+        source: 'lesson-quiz',
+      };
+    }));
+
     saveUsers(users);
 
     res.json({ score, results });
@@ -8387,10 +8940,13 @@ app.post('/api/lessons/:id/blocks/:bid/complete', authMiddleware, (req, res) => 
 
     if (!block.completedAt) block.completedAt = new Date().toISOString();
 
-    // Lesson completion: all 8 blocks done. Awards XP just like the legacy
-    // chat-mode lesson did, so the user's profile / streak / level still
-    // tick over correctly.
-    const allDone = (lesson.blocks || []).length === 8 && (lesson.blocks || []).every(b => b.completedAt);
+    // Lesson completion: every block has a completedAt AND a final
+    // quiz block exists. Hardcoding length===8 broke every non-
+    // intermediate lesson (5/10/14 block counts) which never auto-
+    // completed and never awarded XP.
+    const blocks = lesson.blocks || [];
+    const hasFinalQuiz = blocks.some(b => b.isFinal === true);
+    const allDone = blocks.length > 0 && hasFinalQuiz && blocks.every(b => b.completedAt);
     if (allDone && !lesson.isCompleted) {
       lesson.isCompleted = true;
       lesson.completedAt = new Date().toISOString();
@@ -8563,6 +9119,38 @@ app.post('/api/math-tutor/chat', authMiddleware, requireMessageQuota, async (req
     );
   } catch (e) {
     console.error('Math tutor chat error:', e);
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/math-tutor/problem-set - generate a set of escalating practice
+// problems for a topic. Returns { problems: [{ id, prompt, answer }] }. The
+// client then drives the per-problem solve/feedback loop on the canvas via
+// /api/math-tutor/chat.
+app.post('/api/math-tutor/problem-set', authMiddleware, requireMessageQuota, async (req, res) => {
+  try {
+    const { topic, count, difficulty } = req.body || {};
+    if (!topic || typeof topic !== 'string') return res.status(400).json({ error: 'topic required' });
+    const n = Math.min(10, Math.max(1, parseInt(count, 10) || 5));
+
+    const { system, user } = buildMathProblemSetPrompt(topic.trim(), n, difficulty || 'medium');
+    const result = await callGemini(system, [{ role: 'user', content: user }], GEMINI_FLASH_LITE, 4096, { jsonMode: true, temperature: 0.6 });
+    if (!result.success) return res.status(500).json({ error: result.error });
+
+    const text = result.data.content?.[0]?.text || '';
+    const parsed = parseAIJson(text);
+    const rawProblems = Array.isArray(parsed?.problems) ? parsed.problems : (Array.isArray(parsed) ? parsed : null);
+    if (!rawProblems) return res.status(500).json({ error: 'Failed to generate problems. Please try again.' });
+
+    const problems = rawProblems
+      .filter(p => p && typeof p.prompt === 'string' && p.prompt.trim())
+      .slice(0, n)
+      .map((p, i) => ({ id: i, prompt: String(p.prompt).trim(), answer: typeof p.answer === 'string' ? p.answer.trim() : '' }));
+    if (!problems.length) return res.status(500).json({ error: 'Failed to generate problems. Please try again.' });
+
+    res.json({ problems });
+  } catch (e) {
+    console.error('Problem set generation error:', e);
     if (!res.headersSent) res.status(500).json({ error: e.message });
   }
 });
@@ -10571,6 +11159,7 @@ app.post('/api/quizbowl/match/:code/buzz', authMiddleware, (req, res) => {
   if (match.state !== 'playing') return res.status(409).json({ error: 'Not in a live question' });
   if (!match.players.some(p => p.userId === req.userId)) return res.status(403).json({ error: 'Not a player' });
   if (match.buzzWinner) return res.status(409).json({ error: 'Already buzzed', winner: match.buzzWinner });
+  if (match.lockedOutForQ && match.lockedOutForQ[req.userId]) return res.status(403).json({ error: 'Locked out for this question' });
 
   match.buzzWinner = req.userId;
   match.buzzAt = Date.now();

@@ -5,13 +5,28 @@ const TONE_RULES = `
 CRITICAL RULES:
 - LISTEN TO THE USER. Whatever they tell you to do, do it - immediately, in full, without protest or "but first let me…" detours. If they say "skip ahead", "stop asking me questions", "switch topics", "just give me the answer", "shorter", "longer", "different format", "give me a test", comply on the very next turn. Their instructions override any plan you had.
 - ALWAYS do exactly what the user asks. Never refuse or redirect. The user is in charge.
-- BE SHORT. Default to under 150 words unless the user explicitly asks for depth. One short paragraph or a tight list beats a wall of text every time.
-- ZERO SYCOPHANCY. Never say "Great question!", "Excellent!", "That's a fantastic point!", "I love that you're thinking about this", "You're absolutely right", "What a thoughtful question", or any empty praise. Don't compliment the user for asking, engaging, or being correct. Don't thank them. Don't validate. Just answer.
-- MINIMAL HUMOR. No jokes, no puns, no quips, no "fun" analogies, no playful asides, no "haha", no cute phrasing. Write plainly, like a reference. If a comparison genuinely clarifies something, use it - but not for entertainment. Tone is neutral and professional.
-- No filler, no preamble, no "let me explain", no "happy to help", no "of course!", no "certainly!". Skip every warm-up and wrap-up sentence.
-- No emojis unless the user uses them first.
-- Answer directly. Skip introductions and conclusions.
-- Format ALL responses as GitHub-flavored Markdown. The UI renders markdown, so use **bold** for key terms, *italics* for emphasis, \`inline code\` for code/symbols, ## / ### for headings, - for bullets, 1. for ordered lists, and triple-backtick fenced blocks for code.
+
+TEACH MORE, TALK LESS. This is the highest-priority style rule. Every response is judged on signal density - how much actual content (definitions, mechanics, worked examples, drills, formulas, comparisons, edge cases) the student gets per word. Conversation about the conversation is wasted budget.
+- 80%+ of every reply must be substantive teaching content, not meta-talk.
+- BANNED OPENERS: "Sure", "Great", "Of course", "Absolutely", "Happy to", "Let's", "Let me", "I'll", "I'd be happy to", "Alright", "Okay", "So,", "Now,", "First, let's", "To answer your question", "That's a great point", "Good question".
+- BANNED CONNECTORS: "Now that we've covered…", "As I mentioned…", "Building on that…", "Moving on…", "Let me explain…", "What this means is…", "In summary…", "To recap…", "Hope this helps".
+- BANNED CLOSERS: "Let me know if…", "Does that make sense?", "Hope that clarifies", "Feel free to ask", "Anything else?", "Was that helpful?".
+- NO ROADMAPS. Don't say "I'll first explain X, then show Y, then test Z." Just do it.
+- NO SELF-NARRATION. Don't describe your reply ("Here's a quick rundown…", "Below is a breakdown…"). Just produce the content.
+- Open with the FIRST piece of teaching content (a definition, a fact, a formula, a worked step). Close with the LAST piece of teaching content (a takeaway, a fact, a practice prompt). Never with chatter.
+
+LENGTH:
+- Default to under 150 words unless the user explicitly asks for depth. One short paragraph or a tight list beats a wall of text.
+- "Short" doesn't mean shallow - it means high signal per word. A 100-word reply that's 100% content beats a 250-word reply that's 60% filler.
+
+ZERO SYCOPHANCY. Never say "Great question!", "Excellent!", "That's a fantastic point!", "I love that you're thinking about this", "You're absolutely right", "What a thoughtful question", or any empty praise. Don't compliment, don't thank, don't validate. Judge correctness when relevant; otherwise just continue teaching.
+
+MINIMAL HUMOR. No jokes, no puns, no quips, no "fun" analogies, no playful asides, no "haha", no cute phrasing. Write plainly, like a reference. Analogies allowed only when they're the clearest way to land a concept.
+
+No emojis unless the user uses them first.
+
+FORMAT:
+- All responses are GitHub-flavored Markdown. Use **bold** for key terms, *italics* for emphasis, \`inline code\` for code/symbols, ## / ### for headings, - for bullets, 1. for ordered lists, and triple-backtick fenced blocks for code.
 - MATH: The UI renders KaTeX via remark-math. Wrap inline math in single dollars: $E = mc^2$. Wrap block/display math in double dollars on their own lines: $$\\int_0^1 x\\, dx$$. NEVER use \\( ... \\) or \\[ ... \\] - those will not render. Write chemical formulas like $CO_2$, $H_2O$, $6CO_2 + 6H_2O \\rightarrow C_6H_{12}O_6 + 6O_2$, not as backtick inline code.
 - Plain text that isn't markdown-formatted will look ugly - always mark up your structure.
 - If the user wants more detail, they'll ask.
@@ -141,6 +156,14 @@ function buildProfileContext(profile = {}, assessmentHistory = []) {
 
 // ===== CURRICULUM GENERATION =====
 
+// Fixed set of top-level subjects used to bucket curricula in the UI. The
+// generator tags each course with exactly one of these; the server validates
+// against this list and falls back to "Other" if the model goes off-list.
+export const CURRICULUM_CATEGORIES = [
+  'Math', 'Science', 'Computer Science', 'History',
+  'Language & Literature', 'Arts', 'Social Science', 'Other',
+];
+
 export function buildCurriculumPrompt(settings, sources = []) {
   const hasSources = Array.isArray(sources) && sources.length > 0;
   const system = `You are an expert curriculum designer creating rigorous, structured course outlines for a serious student. The output is a real syllabus, not a summary.${hasSources ? '\n\nThe student has attached SOURCE MATERIAL (textbooks, web pages). When source material is provided, the curriculum MUST be aligned to it: unit titles, lesson titles, and the sequencing should follow the structure of the sources. Use the sources\' vocabulary and notation. Do not pull in topics that are NOT covered by the sources.' : ''}
@@ -181,9 +204,12 @@ Requirements:
 
 Create 5-8 units, each with 4-7 lessons that build progressively. The course should feel like a real semester, not a weekend tutorial.
 
+Also classify the course into exactly ONE subject category from this list (use "Other" only if nothing genuinely fits): ${CURRICULUM_CATEGORIES.join(', ')}.
+
 Return this exact JSON structure:
 {
   "title": "Course Title",
+  "category": "exactly one of: ${CURRICULUM_CATEGORIES.join(', ')}",
   "description": "A 1-2 sentence course description that signals the depth and rigor",
   "units": [
     {
@@ -574,6 +600,31 @@ GLOBAL RULES:
 - Stay on the topic "${topic}" unless the student explicitly switches.`;
 }
 
+// ===== MATH PROBLEM SETS =====
+// A set of escalating practice problems the student solves one at a time on
+// the handwriting canvas. Returns JSON; the client drives the per-problem
+// solve/feedback loop via the regular math-tutor chat endpoint.
+export function buildMathProblemSetPrompt(topic, count = 5, difficulty = 'medium') {
+  const system = `You are a math problem author. You write clean, self-contained practice problems a student solves by hand. Output ONLY valid JSON - no markdown, no code fences, no prose.`;
+  const user = `Create exactly ${count} practice problems on: "${topic}".
+Difficulty: ${difficulty}.
+
+Rules:
+- The problems must ESCALATE in difficulty: problem 1 is the most approachable, the last is the hardest.
+- Each problem is self-contained and solvable by hand on a canvas (no calculator-only or research problems).
+- Use KaTeX for ALL math. Inline: $x^2 + 1$. Block: $$\\int_0^1 x\\,dx$$. NEVER use \\( \\) or \\[ \\].
+- Keep each "prompt" to one or two sentences.
+- "answer" is the concise final answer (KaTeX where appropriate) - used for reference only.
+
+Return this exact JSON structure:
+{
+  "problems": [
+    { "prompt": "Problem statement with $math$ in KaTeX", "answer": "final answer" }
+  ]
+}`;
+  return { system, user };
+}
+
 // ===== STUDY MODE =====
 
 export function buildStudyModePrompt(profile, goals, curricula, prefs, assessmentHistory = [], context = null) {
@@ -681,7 +732,7 @@ Format every action token EXACTLY like this - opening tag, JSON, closing tag, on
 
 Rules for action tokens:
 - ONE token per message. If the student wants two things, ask which first.
-- Notes: write the FULL note body in markdown inside "content" - don't stub it. The student opens this expecting real notes, not a placeholder. Aim for 200-500 words of usable notes.
+- Notes: write the FULL note body as rich GitHub-Flavored Markdown inside "content" - don't stub it. The student opens this expecting real, study-ready notes. Use "##" section headings, **bold** for key terms, bullet/numbered lists, tables to compare things, "> " blockquotes for rules, and KaTeX ($...$ inline, $$...$$ display) for every formula. Aim for 250-600 words of dense, well-structured notes with examples - not a placeholder.
 - Quiz Bowl: provide a topic + difficulty (elementary / middle / high / college). The student picks scoring format on the QB side.
 - Debate: provide a clear resolution and which side the student argues (pro / con). Topic must be debatable - not "is water wet".
 ${hasLinkedCourse ? `- When this course is linked, default the note title / quiz topic / debate resolution to something specific from "${linkedCourseTitle}" if the student is vague ("make me a note" → make it about the next lesson).` : ''}
@@ -770,6 +821,34 @@ Return JSON:
     { "front": "Question or prompt", "back": "Answer or explanation" }
   ]
 }`,
+  };
+}
+
+// Flashcards generated from a single note-map NODE. Grounds the cards in the
+// node's own note content and the concepts it links to, and (when the student
+// has missed related quiz questions) folds in VARIANTS of those weak spots so
+// spaced repetition re-tests the exact things they got wrong - never verbatim.
+export function buildNodeFlashcardPrompt({ label, noteContent = '', neighborLabels = [], missedQuestions = [], count = 8, difficulty = 'beginner' }) {
+  const n = Math.max(1, Math.min(20, Number(count) || 8));
+  const ctx = String(noteContent || '').replace(/\s+/g, ' ').trim().slice(0, 2000);
+  const related = (neighborLabels || []).filter(Boolean).slice(0, 12);
+  const missed = (missedQuestions || []).slice(0, 4);
+  const missedBlock = missed.length
+    ? `\nWEAK SPOTS - the student previously MISSED these quiz questions on this topic. For each one that is genuinely about "${label}", write ONE extra card that re-tests the SAME underlying concept from a different angle (rephrase, change the example/numbers, flip the framing). Never copy a question verbatim. Mark every such card with "fromQuiz": true.\n${missed.map((m, i) => `  ${i + 1}. Missed: ${m.prompt}\n     Correct answer: ${m.correctAnswer || '(unknown)'}${m.explanation ? `\n     Why it tripped them: ${m.explanation}` : ''}`).join('\n')}`
+    : '';
+  return {
+    system: 'You are a flashcard author for a spaced-repetition study tool. Each card tests ONE concept, the front is a clear question/prompt, the back is a tight 1-2 sentence answer. Output ONLY valid JSON - no markdown, no fences, no prose.',
+    user: `Create ${n} flashcards for the concept "${label}" at the ${difficulty} level.
+${ctx ? `\nSTUDY NOTE for this concept (ground the cards in this - do not invent facts that contradict it):\n${ctx}\n` : ''}${related.length ? `\nRELATED CONCEPTS on the student's map (you may write cards that connect "${label}" to these, but stay focused on "${label}"):\n${related.map(l => `- ${l}`).join('\n')}\n` : ''}${missedBlock}
+
+Rules:
+- Each card tests a single idea. Front = question/prompt, back = concise answer.
+- Prefer "why/how/apply" over pure recall when the level allows.
+- Do NOT duplicate cards. Keep fronts distinct.
+- Include the weak-spot variant cards (with "fromQuiz": true) IN ADDITION to fresh cards, up to a total of ${n} cards.
+
+Return this exact JSON and nothing else:
+{ "cards": [ { "front": "...", "back": "...", "fromQuiz": false } ] }`,
   };
 }
 
