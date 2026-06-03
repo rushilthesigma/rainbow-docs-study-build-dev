@@ -1,9 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
-import { X, Flame, Play, Pause, RotateCcw, StickyNote, Calendar as CalendarIcon, Quote } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
+import { X, Flame, Play, Pause, RotateCcw, StickyNote, Calendar as CalendarIcon, Quote, Layers } from 'lucide-react';
 import { useWidgets } from '../../context/WidgetContext';
+import { useWindowManager } from '../../context/WindowManagerContext';
 import { useAuth } from '../../context/AuthContext';
 import { useUIPreference } from '../../context/UIPreferenceContext';
-import { createNote, updateNote, getNote } from '../../api/notes';
+import { createNote, updateNote, getNote, getRecommendedReview } from '../../api/notes';
 
 /* ── desktop grid ── */
 // Each cell is exactly one widget-column wide so the size picker maps 1:1 to grid cols.
@@ -200,8 +202,9 @@ function WidgetMenu({
   x, y,
   currentCols, currentRows,
   currentAccent = 'none', currentOpacity = 100, currentRadius = 'normal',
+  currentFreeMode = false,
   onResize, onAccentChange, onOpacityChange, onRadiusChange,
-  onRemove, onClose,
+  onToggleFreeMode, onStartResize, onRemove, onClose,
 }) {
   useEffect(() => {
     const close = () => onClose();
@@ -215,7 +218,7 @@ function WidgetMenu({
   }, [onClose]);
 
   const MENU_W = 244;
-  const MENU_H_EST = 440;
+  const MENU_H_EST = 490;
   const menuX = Math.min(x, window.innerWidth  - MENU_W - 8);
   const menuY = Math.min(y, window.innerHeight - MENU_H_EST - 8);
 
@@ -226,60 +229,63 @@ function WidgetMenu({
       onMouseDown={e => e.stopPropagation()}
       style={{
         position: 'fixed', left: menuX, top: menuY, zIndex: 9999, width: MENU_W,
+        maxHeight: 'calc(100vh - 24px)', overflowY: 'auto',
         background: '#131316', border: '1px solid rgba(255,255,255,0.10)',
         borderRadius: 14, padding: '10px 10px 8px',
         boxShadow: '0 24px 64px rgba(0,0,0,0.7)',
       }}
     >
       {/* ── Width ── */}
-      <MenuLabel>Width</MenuLabel>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
-        {GRID_SIZES.map(({ cols, label }) => {
-          const active = cols === currentCols;
-          return (
-            <button
-              key={cols} onClick={() => onResize({ cols })}
-              style={{
-                flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-                padding: '6px 2px 5px', borderRadius: 8,
-                border: `1.5px solid ${active ? 'rgba(96,165,250,0.60)' : 'rgba(255,255,255,0.08)'}`,
-                background: active ? 'rgba(59,130,246,0.14)' : 'rgba(255,255,255,0.03)',
-                cursor: 'pointer', transition: 'border-color 0.15s, background 0.15s',
-              }}
-            >
-              <GridIcon cols={cols} active={active} />
-              <span style={{ fontSize: 8.5, color: active ? 'rgba(147,210,255,0.90)' : 'rgba(255,255,255,0.36)', fontWeight: active ? 600 : 400 }}>
-                {label}
-              </span>
-            </button>
-          );
-        })}
-      </div>
+      {!currentFreeMode && <>
+        <MenuLabel>Width</MenuLabel>
+        <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+          {GRID_SIZES.map(({ cols, label }) => {
+            const active = cols === currentCols;
+            return (
+              <button
+                key={cols} onClick={() => onResize({ cols })}
+                style={{
+                  flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                  padding: '6px 2px 5px', borderRadius: 8,
+                  border: `1.5px solid ${active ? 'rgba(96,165,250,0.60)' : 'rgba(255,255,255,0.08)'}`,
+                  background: active ? 'rgba(59,130,246,0.14)' : 'rgba(255,255,255,0.03)',
+                  cursor: 'pointer', transition: 'border-color 0.15s, background 0.15s',
+                }}
+              >
+                <GridIcon cols={cols} active={active} />
+                <span style={{ fontSize: 8.5, color: active ? 'rgba(147,210,255,0.90)' : 'rgba(255,255,255,0.36)', fontWeight: active ? 600 : 400 }}>
+                  {label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
 
-      {/* ── Height ── */}
-      <MenuLabel>Height</MenuLabel>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
-        {ROW_SIZES.map(({ rows, label }) => {
-          const active = rows === currentRows;
-          return (
-            <button
-              key={rows} onClick={() => onResize({ rows })}
-              style={{
-                flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-                padding: '6px 2px 5px', borderRadius: 8,
-                border: `1.5px solid ${active ? 'rgba(96,165,250,0.60)' : 'rgba(255,255,255,0.08)'}`,
-                background: active ? 'rgba(59,130,246,0.14)' : 'rgba(255,255,255,0.03)',
-                cursor: 'pointer', transition: 'border-color 0.15s, background 0.15s',
-              }}
-            >
-              <RowIcon rows={rows} active={active} />
-              <span style={{ fontSize: 8.5, color: active ? 'rgba(147,210,255,0.90)' : 'rgba(255,255,255,0.36)', fontWeight: active ? 600 : 400 }}>
-                {label}
-              </span>
-            </button>
-          );
-        })}
-      </div>
+        {/* ── Height ── */}
+        <MenuLabel>Height</MenuLabel>
+        <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
+          {ROW_SIZES.map(({ rows, label }) => {
+            const active = rows === currentRows;
+            return (
+              <button
+                key={rows} onClick={() => onResize({ rows })}
+                style={{
+                  flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                  padding: '6px 2px 5px', borderRadius: 8,
+                  border: `1.5px solid ${active ? 'rgba(96,165,250,0.60)' : 'rgba(255,255,255,0.08)'}`,
+                  background: active ? 'rgba(59,130,246,0.14)' : 'rgba(255,255,255,0.03)',
+                  cursor: 'pointer', transition: 'border-color 0.15s, background 0.15s',
+                }}
+              >
+                <RowIcon rows={rows} active={active} />
+                <span style={{ fontSize: 8.5, color: active ? 'rgba(147,210,255,0.90)' : 'rgba(255,255,255,0.36)', fontWeight: active ? 600 : 400 }}>
+                  {label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </>}
 
       <Divider />
 
@@ -341,7 +347,6 @@ function WidgetMenu({
                 background: active ? 'rgba(59,130,246,0.12)' : 'rgba(255,255,255,0.02)',
                 color: active ? 'rgba(147,210,255,0.85)' : 'rgba(255,255,255,0.36)',
                 cursor: 'pointer', fontWeight: active ? 600 : 400,
-                // Chip mirrors the radius it represents, so the choice is previewable.
                 borderRadius: Math.min(px, 14),
                 transition: 'border-color 0.12s, background 0.12s, border-radius 0.12s',
               }}
@@ -349,6 +354,45 @@ function WidgetMenu({
           );
         })}
       </div>
+
+      {/* ── Remove grid checkbox ── */}
+      <Divider />
+      <button
+        onClick={onToggleFreeMode}
+        style={{
+          width: '100%', padding: '5px 6px', fontSize: 12.5,
+          color: 'rgba(255,255,255,0.70)', background: 'transparent',
+          border: 'none', cursor: 'pointer', borderRadius: 7,
+          display: 'flex', alignItems: 'center', gap: 8,
+          marginBottom: currentFreeMode ? 6 : 4,
+        }}
+      >
+        <div style={{
+          width: 14, height: 14, borderRadius: 4, flexShrink: 0,
+          border: `1.5px solid ${currentFreeMode ? '#60a5fa' : 'rgba(255,255,255,0.28)'}`,
+          background: currentFreeMode ? 'rgba(96,165,250,0.28)' : 'transparent',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          transition: 'border-color 0.12s, background 0.12s',
+        }}>
+          {currentFreeMode && <span style={{ color: '#93c5fd', fontSize: 9, lineHeight: 1, fontWeight: 700 }}>✓</span>}
+        </div>
+        <span>Remove grid</span>
+      </button>
+
+      {currentFreeMode && (
+        <button
+          onClick={onStartResize}
+          onMouseEnter={e => e.currentTarget.style.background = 'rgba(96,165,250,0.10)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          style={{
+            width: '100%', padding: '5px 6px', fontSize: 12.5,
+            color: 'rgba(147,210,255,0.80)', background: 'transparent',
+            border: 'none', cursor: 'pointer', borderRadius: 7,
+            textAlign: 'left', transition: 'background 0.12s',
+            marginBottom: 4,
+          }}
+        >Resize</button>
+      )}
 
       <div style={{ height: 1, background: 'rgba(255,255,255,0.07)', margin: '0 2px 8px' }} />
       <button
@@ -371,15 +415,15 @@ function WidgetMenu({
 const TOP_BOUND = 30;
 const BOT_BOUND = 56;
 
-function useDrag(id, position) {
+function useDrag(id, position, freeMode = false) {
   const { moveWidget, setIsDragging, snapGrid } = useWidgets();
   const drag = useRef({ active: false });
-  // Stable refs so the mouseup/mousemove closures always see the latest values
-  // (moveWidget itself is stable, but snapGrid flips at runtime).
   const moveRef = useRef(moveWidget);
   moveRef.current = moveWidget;
   const snapRef = useRef(snapGrid);
   snapRef.current = snapGrid;
+  const freeModeRef = useRef(freeMode);
+  freeModeRef.current = freeMode;
 
   function onMouseDown(e) {
     if (e.button !== 0) return;
@@ -388,12 +432,11 @@ function useDrag(id, position) {
     const ox = e.clientX - position.x;
     const oy = e.clientY - position.y;
     drag.current.active = true;
-    setIsDragging(true); // show grid overlay while in flight
+    if (!freeModeRef.current) setIsDragging(true);
 
     function clamp(x, y) {
       return {
         x: Math.max(0, Math.min(window.innerWidth - 60, x)),
-        // Bottom bound matches GRID_MB so a snapped widget never lands under the dock.
         y: Math.max(TOP_BOUND, Math.min(window.innerHeight - GRID_MB - 40, y)),
       };
     }
@@ -401,10 +444,7 @@ function useDrag(id, position) {
     function move(ev) {
       if (!drag.current.active) return;
       const raw = clamp(ev.clientX - ox, ev.clientY - oy);
-      // When snap is on, lock to the nearest cell *during* the drag so the
-      // widget visibly hops between cells instead of free-floating. This is
-      // what makes the grid feel real.
-      const next = snapRef.current ? snapToGrid(raw.x, raw.y) : raw;
+      const next = (snapRef.current && !freeModeRef.current) ? snapToGrid(raw.x, raw.y) : raw;
       moveRef.current(id, next);
     }
 
@@ -413,10 +453,8 @@ function useDrag(id, position) {
       setIsDragging(false);
       window.removeEventListener('mousemove', move);
       window.removeEventListener('mouseup', up);
-      // Always snap on release so a widget can never be left between cells,
-      // even if the user toggled snap off mid-drag.
       const raw = clamp(ev.clientX - ox, ev.clientY - oy);
-      moveRef.current(id, snapToGrid(raw.x, raw.y));
+      moveRef.current(id, freeModeRef.current ? raw : snapToGrid(raw.x, raw.y));
     }
 
     window.addEventListener('mousemove', move);
@@ -425,29 +463,98 @@ function useDrag(id, position) {
   return { onMouseDown };
 }
 
+/* ── free-resize hook (used when freeMode is on) ── */
+function useFreeResize(id, freeW, freeH, position) {
+  const { updateWidget } = useWidgets();
+
+  function onResizeMouseDown(e, dir) {
+    e.preventDefault();
+    e.stopPropagation();
+    const startMouseX = e.clientX;
+    const startMouseY = e.clientY;
+    const startW = freeW;
+    const startH = freeH;
+    const startPX = position.x;
+    const startPY = position.y;
+    const MIN_W = 120;
+    const MIN_H = 80;
+
+    function move(ev) {
+      const dx = ev.clientX - startMouseX;
+      const dy = ev.clientY - startMouseY;
+      let w = startW, h = startH, px = startPX, py = startPY;
+      if (dir.includes('e')) w = Math.max(MIN_W, startW + dx);
+      if (dir.includes('s')) h = Math.max(MIN_H, startH + dy);
+      if (dir.includes('w')) { w = Math.max(MIN_W, startW - dx); if (w > MIN_W) px = startPX + dx; }
+      if (dir.includes('n')) { h = Math.max(MIN_H, startH - dy); if (h > MIN_H) py = startPY + dy; }
+      updateWidget(id, { freeW: Math.round(w), freeH: Math.round(h), position: { x: Math.round(px), y: Math.round(py) } });
+    }
+
+    function up() {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    }
+
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  }
+
+  return { onResizeMouseDown };
+}
+
 /* ── shell ── */
+/* ── shell ── */
+const RESIZE_HANDLES = [
+  // corners – crisp squares with glow
+  { dir: 'nw', cursor: 'nw-resize', style: { top: -5, left: -5, width: 10, height: 10, borderRadius: 3 } },
+  { dir: 'ne', cursor: 'ne-resize', style: { top: -5, right: -5, width: 10, height: 10, borderRadius: 3 } },
+  { dir: 'sw', cursor: 'sw-resize', style: { bottom: -5, left: -5, width: 10, height: 10, borderRadius: 3 } },
+  { dir: 'se', cursor: 'se-resize', style: { bottom: -5, right: -5, width: 10, height: 10, borderRadius: 3 } },
+  // edges – slim pill bars
+  { dir: 'n',  cursor: 'n-resize',  style: { top: -4, left: 'calc(50% - 18px)', width: 36, height: 6, borderRadius: 99 } },
+  { dir: 's',  cursor: 's-resize',  style: { bottom: -4, left: 'calc(50% - 18px)', width: 36, height: 6, borderRadius: 99 } },
+  { dir: 'e',  cursor: 'e-resize',  style: { right: -4, top: 'calc(50% - 18px)', width: 6, height: 36, borderRadius: 99 } },
+  { dir: 'w',  cursor: 'w-resize',  style: { left: -4, top: 'calc(50% - 18px)', width: 6, height: 36, borderRadius: 99 } },
+];
+
 function Shell({
   id, position, label, children,
   cols = 1, rows = 1, customWidth, customHeight,
   accent = 'none', opacity = 100, radius = 'normal',
 }) {
-  const { removeWidget, resizeWidget, updateWidget } = useWidgets();
-  const { onMouseDown } = useDrag(id, position);
+  const { removeWidget, resizeWidget, updateWidget, widgets } = useWidgets();
+  const widget = widgets.find(w => w.id === id);
+  const freeMode = widget?.freeMode ?? false;
+  const freeW = widget?.freeW ?? colsToWidth(cols);
+  const freeH = widget?.freeH ?? rowsToHeight(rows);
+
+  const { onMouseDown } = useDrag(id, position, freeMode);
+  const { onResizeMouseDown } = useFreeResize(id, freeW, freeH, position);
   const { theme } = useUIPreference();
   const dark = theme !== 'light';
   const [menu, setMenu] = useState(null);
-  const width  = customWidth  ?? colsToWidth(cols);
-  // Only set minHeight when rows > 1 - single-row widgets stay tight to their
-  // content, matching previous behavior.
-  const minHeight = customHeight ?? (rows > 1 ? rowsToHeight(rows) : undefined);
+  const [isSelected, setIsSelected] = useState(false);
+  const shellRef = useRef(null);
+  const innerRef = useRef(null);
+
+  // Clicking outside the widget deselects it (hides handles)
+  useEffect(() => {
+    if (!freeMode) { setIsSelected(false); return; }
+    function onOutside(e) {
+      if (shellRef.current && !shellRef.current.contains(e.target)) {
+        setIsSelected(false);
+      }
+    }
+    document.addEventListener('mousedown', onOutside);
+    return () => document.removeEventListener('mousedown', onOutside);
+  }, [freeMode]);
+
+  const width     = freeMode ? freeW : (customWidth ?? colsToWidth(cols));
+  const minHeight = freeMode ? freeH : (customHeight ?? (rows > 1 ? rowsToHeight(rows) : undefined));
 
   const accentData = ACCENT_LIST.find(a => a.key === accent) || ACCENT_LIST[0];
   const radiusData = RADIUS_STEPS.find(r => r.value === radius) || RADIUS_STEPS[1];
 
-  // In light mode, widget bodies need a near-white background and a darker
-  // border so they read against a light wallpaper. Children still use
-  // `text-white/...` classes - those are scoped via the data-theme attr
-  // below so dark utility classes get mirrored for light mode.
   const surfaceBg = dark
     ? `rgba(17,17,24,${opacity / 100})`
     : `rgba(255,255,255,${Math.min(1, (opacity + 5) / 100)})`;
@@ -455,32 +562,50 @@ function Shell({
     ? accentData.border
     : (accent === 'none' ? 'rgba(0,0,0,0.10)' : accentData.border);
 
+  function handleToggleFreeMode() {
+    const entering = !freeMode;
+    updateWidget(id, {
+      freeMode: entering,
+      freeW: entering ? (customWidth ?? colsToWidth(cols)) : undefined,
+      freeH: entering ? (innerRef.current?.offsetHeight ?? rowsToHeight(rows)) : undefined,
+    });
+    setMenu(null);
+  }
+
   return (
     <div
+      ref={shellRef}
       data-widget
       data-widget-theme={dark ? 'dark' : 'light'}
       style={{
         position: 'fixed', left: position.x, top: position.y,
         zIndex: 7, userSelect: 'none', width,
-        transition: 'width 0.22s cubic-bezier(0.34,1.56,0.64,1)',
+        height: freeMode ? freeH : undefined,
+        transition: freeMode ? 'none' : 'width 0.22s cubic-bezier(0.34,1.56,0.64,1)',
       }}
-      onMouseDown={onMouseDown}
+      onMouseDown={e => { if (freeMode) setIsSelected(true); onMouseDown(e); }}
       onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setMenu({ x: e.clientX, y: e.clientY }); }}
       className="cursor-grab active:cursor-grabbing"
     >
       <div
+        ref={innerRef}
         className="shadow-2xl"
         style={{
+          position: 'relative',
           backgroundColor: surfaceBg,
           backgroundImage: accentData.bg
             ? `linear-gradient(135deg, ${accentData.bg} 0%, transparent 65%)`
             : 'none',
-          border: `1px solid ${surfaceBorder}`,
+          border: `1px solid ${freeMode ? 'rgba(96,165,250,0.40)' : surfaceBorder}`,
           borderRadius: radiusData.px,
           minHeight,
+          height: freeMode ? freeH : undefined,
+          overflow: freeMode ? 'hidden' : undefined,
           backdropFilter: opacity < 100 ? 'blur(24px) saturate(160%)' : undefined,
           WebkitBackdropFilter: opacity < 100 ? 'blur(24px) saturate(160%)' : undefined,
-          transition: 'background-color 0.2s, border-color 0.2s, background-image 0.2s, border-radius 0.22s, min-height 0.22s cubic-bezier(0.34,1.56,0.64,1)',
+          transition: freeMode
+            ? 'background-color 0.2s, border-color 0.2s'
+            : 'background-color 0.2s, border-color 0.2s, background-image 0.2s, border-radius 0.22s, min-height 0.22s cubic-bezier(0.34,1.56,0.64,1)',
           color: dark ? undefined : '#111',
         }}
       >
@@ -497,18 +622,39 @@ function Shell({
         </div>
         {children}
       </div>
-      {menu && (
+      {/* Resize handles – frosted glass style, visible only when selected */}
+      {freeMode && isSelected && RESIZE_HANDLES.map(({ dir, cursor, style }) => (
+        <div
+          key={dir}
+          data-nodrag
+          onMouseDown={e => onResizeMouseDown(e, dir)}
+          style={{
+            position: 'absolute', cursor, zIndex: 10,
+            background: 'rgba(255,255,255,0.13)',
+            backdropFilter: 'blur(6px)',
+            WebkitBackdropFilter: 'blur(6px)',
+            border: '1px solid rgba(255,255,255,0.38)',
+            boxShadow: '0 0 0 1px rgba(96,165,250,0.35), 0 2px 8px rgba(0,0,0,0.5)',
+            ...style,
+          }}
+        />
+      ))}
+      {menu && createPortal(
         <WidgetMenu
           x={menu.x} y={menu.y}
           currentCols={cols} currentRows={rows}
           currentAccent={accent} currentOpacity={opacity} currentRadius={radius}
+          currentFreeMode={freeMode}
           onResize={(size) => { resizeWidget(id, size); }}
           onAccentChange={(a) => { updateWidget(id, { accent: a }); }}
           onOpacityChange={(o) => { updateWidget(id, { opacity: o }); }}
           onRadiusChange={(r) => { updateWidget(id, { radius: r }); }}
+          onToggleFreeMode={handleToggleFreeMode}
+          onStartResize={() => { setIsSelected(true); setMenu(null); }}
           onRemove={() => { removeWidget(id); setMenu(null); }}
           onClose={() => setMenu(null)}
-        />
+        />,
+        document.body
       )}
     </div>
   );
@@ -1090,6 +1236,88 @@ function QuoteWidget({ id, position, cols, rows, accent, opacity, radius }) {
   );
 }
 
+/* ── recommended review (one note to study next) ── */
+function ReviewWidget({ id, position, cols, rows, accent, opacity, radius }) {
+  const { openApp } = useWindowManager();
+  const [rec, setRec] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(() => {
+    getRecommendedReview()
+      .then(setRec)
+      .catch(() => setRec(null))
+      .finally(() => setLoading(false));
+  }, []);
+
+  // Refresh on mount and whenever the user returns to the desktop (e.g. after
+  // reviewing in the Notes app), so the due count stays current.
+  useEffect(() => {
+    load();
+    const onFocus = () => load();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [load]);
+
+  const titleSize = scale(13, cols, rows, 0.06, 0.10);
+  const metaSize  = scale(10.5, cols, rows, 0.06, 0.10);
+  const btnIcon   = Math.max(10, scale(11, cols, rows, 0.06, 0.10));
+
+  const openReview = () => {
+    if (!rec?.note) return;
+    // Open a fresh Notes window routed straight to this note's flashcards.
+    // (No focusIfOpen: refocusing an existing window would ignore this meta.)
+    openApp('notes', 'Notes', { initialFlashcardsNoteId: rec.note.id, initialFlashcardsTitle: rec.note.title });
+  };
+  const openNotes = () => openApp('notes', 'Notes', { focusIfOpen: true });
+
+  let body;
+  if (loading) {
+    body = <p className="text-white/30" style={{ fontSize: metaSize }}>Finding something to review…</p>;
+  } else if (rec?.state === 'due' && rec.note) {
+    body = (
+      <>
+        <p className="font-semibold text-white/88 leading-snug line-clamp-2" style={{ fontSize: titleSize }}>{rec.note.title}</p>
+        <p className="text-white/40 mt-0.5" style={{ fontSize: metaSize }}>{rec.note.due} card{rec.note.due !== 1 ? 's' : ''} due</p>
+        <button data-nodrag onClick={openReview} onMouseDown={e => e.stopPropagation()}
+          className="mt-2.5 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-500/90 hover:bg-blue-500 text-white transition-colors"
+          style={{ fontSize: metaSize }}>
+          <RotateCcw size={btnIcon} /> Review
+        </button>
+      </>
+    );
+  } else if (rec?.state === 'caught_up') {
+    body = <p className="text-white/45 leading-snug" style={{ fontSize: titleSize }}>You’re all caught up. Nothing due to review right now.</p>;
+  } else if (rec?.state === 'no_cards') {
+    body = (
+      <>
+        <p className="text-white/45 leading-snug" style={{ fontSize: titleSize }}>No flashcards yet.</p>
+        <button data-nodrag onClick={openNotes} onMouseDown={e => e.stopPropagation()}
+          className="mt-2.5 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.10] hover:bg-white/[0.16] text-white/80 transition-colors"
+          style={{ fontSize: metaSize }}>
+          Make some in Notes
+        </button>
+      </>
+    );
+  } else {
+    body = (
+      <>
+        <p className="text-white/45 leading-snug" style={{ fontSize: titleSize }}>No notes yet.</p>
+        <button data-nodrag onClick={openNotes} onMouseDown={e => e.stopPropagation()}
+          className="mt-2.5 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.10] hover:bg-white/[0.16] text-white/80 transition-colors"
+          style={{ fontSize: metaSize }}>
+          Open Notes
+        </button>
+      </>
+    );
+  }
+
+  return (
+    <Shell id={id} position={position} label="Review" cols={cols} rows={rows} accent={accent} opacity={opacity} radius={radius}>
+      <div className="px-3.5 pb-3.5">{body}</div>
+    </Shell>
+  );
+}
+
 const WIDGET_MAP = {
   clock:      ClockWidget,
   streak:     StudyStreakWidget,
@@ -1099,6 +1327,7 @@ const WIDGET_MAP = {
   quote:      QuoteWidget,
   calculator: CalculatorWidget,
   todo:       TodoWidget,
+  review:     ReviewWidget,
 };
 
 export default function DesktopWidgets() {

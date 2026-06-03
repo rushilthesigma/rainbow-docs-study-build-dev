@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Check, ArrowLeft, Loader2, X, Plus } from 'lucide-react';
 import Button from '../shared/Button';
 import LoadingSpinner from '../shared/LoadingSpinner';
-import { sm2Update } from '../../utils/sm2';
 import { getMapSrs, generateNodeFlashcards, reviewMapCard } from '../../api/notes';
 
 // Anki-style grading → SM-2 quality. Again resets the card (<3); Hard/Good/Easy
@@ -13,13 +12,6 @@ const GRADES = [
   { q: 4, label: 'Good', hint: 'got it', cls: 'bg-emerald-500/12 border-emerald-400/30 text-emerald-200 hover:bg-emerald-500/20', key: '3' },
   { q: 5, label: 'Easy', hint: 'instant', cls: 'bg-sky-500/12 border-sky-400/30 text-sky-200 hover:bg-sky-500/20', key: '4' },
 ];
-
-function fmtInterval(days) {
-  if (!days || days < 1) return 'today';
-  if (days < 30) return `${days}d`;
-  if (days < 365) return `${Math.round(days / 30)}mo`;
-  return `${(days / 365).toFixed(1)}y`;
-}
 
 // Spaced-repetition review for one note map. Overview shows what to do next
 // (review due cards, quiz a new concept, drill weak spots); the session runs
@@ -306,10 +298,9 @@ function SessionView({ card, idx, total, flipped, grading, label, onFlip, onGrad
               key={g.q}
               onClick={() => onGrade(g.q)}
               disabled={grading}
-              className={`flex flex-col items-center gap-0.5 px-2 py-2.5 rounded-xl border text-[13px] font-semibold transition-colors disabled:opacity-50 ${g.cls}`}
+              className={`flex items-center justify-center px-2 py-2.5 rounded-xl border text-[13px] font-semibold transition-colors disabled:opacity-50 ${g.cls}`}
             >
-              <span>{g.label}</span>
-              <span className="text-[10px] font-normal opacity-70">{fmtInterval(sm2Update(card, g.q).interval)}</span>
+              {g.label}
             </button>
           ))}
         </div>

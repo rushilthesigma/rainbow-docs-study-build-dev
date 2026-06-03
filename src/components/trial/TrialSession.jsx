@@ -153,9 +153,19 @@ export default function TrialSession({
   const [matchWinner,    setMatchWinner]   = useState(null);
   const [userNegged,     setUserNegged]    = useState(false);
 
-  // Track phase in a ref so timeout callbacks can read current value without stale closures
-  const phaseRef = useRef('reading');
-  useEffect(() => { phaseRef.current = phase; }, [phase]);
+  // Refs so timeout callbacks and the single keydown listener always read
+  // current values without stale-closure re-registration.
+  const phaseRef       = useRef('reading');
+  const buzzedByRef    = useRef(null);
+  const userNeggedRef  = useRef(false);
+  const revealedCntRef = useRef(0);
+  const answerRef      = useRef('');
+  const submitAnswerRef= useRef(null);
+  phaseRef.current       = phase;
+  buzzedByRef.current    = buzzedBy;
+  userNeggedRef.current  = userNegged;
+  revealedCntRef.current = revealedCount;
+  answerRef.current      = answer;
 
   // Synchronous buzz claim. Set the moment a player (user or bot) wins
   // the buzz; any later bot timer that fires for the same question must
@@ -320,40 +330,43 @@ export default function TrialSession({
     return () => clearTimeout(t);
   }, [revealedCount, phase]); // eslint-disable-line
 
-  // ── Keyboard ──────────────────────────────────────────────────────────
+  // ── Keyboard ─────────────────────────────────────────────────────────
+  // Registered once; reads current values through refs to avoid
+  // the stale-closure bug where space presses were silently dropped.
   useEffect(() => {
     const onKey = e => {
-      if (e.code === 'Space' && phase === 'reading' && !buzzedBy && !userNegged) { e.preventDefault(); handleBuzz(); }
-      if (e.code === 'Enter' && phase === 'buzzed')               { e.preventDefault(); submitAnswer(); }
+      if (e.code === 'Space' && phaseRef.current === 'reading' && !buzzedByRef.current && !userNeggedRef.current) {
+        e.preventDefault(); handleBuzz();
+      }
+      if (e.code === 'Enter' && phaseRef.current === 'buzzed') {
+        e.preventDefault(); submitAnswerRef.current?.();
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [phase, buzzedBy, answer, userNegged]); // eslint-disable-line
+  }, []); // eslint-disable-line
 
   function handleBuzz() {
-    if (phase !== 'reading' || buzzedBy || userNegged) return;
-    // Race-free claim: if a bot's stage 2 already fired in the same
-    // tick, it has set claimedRef and we must yield. Otherwise we win
-    // the buzz and lock the question for ourselves.
+    if (phaseRef.current !== 'reading' || buzzedByRef.current || userNeggedRef.current) return;
     if (claimedRef.current != null) return;
     claimedRef.current = 'user';
     clearInterval(revealTimer.current);
-    setBuzzRatio(revealedCount / Math.max(1, words.current.length));
+    setBuzzRatio(revealedCntRef.current / Math.max(1, words.current.length));
     setBuzzedBy('user');
     setPhase('buzzed');
   }
 
+  submitAnswerRef.current = submitAnswer;
   function submitAnswer() {
-    if (phase !== 'buzzed') return;
-    const correct  = checkAnswer(answer, q.answer);
+    if (phaseRef.current !== 'buzzed') return;
+    const ans      = answerRef.current;
+    const correct  = checkAnswer(ans, q.answer);
     const quality  = buzzToQuality(correct, buzzRatio);
     const xpGained = correct ? Math.round(10 * (1 + combo * 0.25) * (2 - buzzRatio)) : 0;
     const ptsGained= scoreForBuzz({ correct, ratio: buzzRatio, format: FORMAT });
     const newScore = userScore + ptsGained;
 
-    // Stash the typed answer so the QBReader-style result panel can
-    // surface "Your answer: X" alongside the correct answer line.
-    setAnswerResult({ correct, xpGained, ptsGained, userAnswer: answer.trim() });
+    setAnswerResult({ correct, xpGained, ptsGained, userAnswer: ans.trim() });
     setSessionResults(prev => [...prev, { questionId: q.id, question: q, quality, correct, buzzRatio }]);
 
     if (correct) {
@@ -377,7 +390,7 @@ export default function TrialSession({
       setBuzzedBy(null);
       claimedRef.current = null;
       setPhase('reading');
-      if (revealedCount < words.current.length) startReveal();
+      if (revealedCntRef.current < words.current.length) startReveal();
       return;
     }
 

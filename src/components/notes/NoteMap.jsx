@@ -358,22 +358,6 @@ export default function NoteMap({ onOpenNote, mapId }) {
     setEdges(prev => prev.filter(e => edgeKey(e.from, e.to) !== key));
   }
 
-  function addTopicNode(label = 'New topic') {
-    const id = newId();
-    const node = {
-      id,
-      noteId: null,
-      label,
-      source: 'topic',
-      color: randPaletteColor(),
-      x: (Math.random() - 0.5) * 120,
-      y: (Math.random() - 0.5) * 120,
-    };
-    setNodes(prev => [...prev, node]);
-    setSelectedId(id);
-    setRenaming({ id, value: label });
-  }
-
   // Open the picker. Loads the user's notes and excludes any already on
   // the current map so the list shows only candidates worth pulling in.
   async function openPullNotes() {
@@ -669,7 +653,6 @@ export default function NoteMap({ onOpenNote, mapId }) {
           <Button size="sm" variant="ghost" onClick={openPullNotes}>
             <FileText size={13} /> Pull from notes
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => addTopicNode()}><Plus size={13} /> Topic</Button>
           <Button size="sm" variant="ghost" onClick={createNewNoteOnMap} disabled={creatingNoteFromId === '__new__'}>
             <StickyNote size={13} /> {creatingNoteFromId === '__new__' ? 'Adding…' : 'Note'}
           </Button>

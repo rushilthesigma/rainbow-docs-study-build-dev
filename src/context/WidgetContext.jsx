@@ -41,17 +41,30 @@ function firstFreeCell(existing) {
   return { x: G_OX, y: G_OY };
 }
 
-// Defaults use grid-aligned positions (col 0 row 0, col 0 row 1)
+// Defaults use grid-aligned positions (col 0 rows 0-2)
 const DEFAULTS = [
   { id: 'w-clock-default',  type: 'clock',  position: { x: 20, y: 42  }, cols: 1 },
   { id: 'w-streak-default', type: 'streak', position: { x: 20, y: 212 }, cols: 1 },
+  { id: 'w-review-default', type: 'review', position: { x: 20, y: 382 }, cols: 1 },
 ];
+
+const REVIEW_MIGRATION_KEY = 'cov-widgets-review-added';
 
 function load() {
   try {
     const stored = localStorage.getItem(KEY);
-    const parsed = stored ? JSON.parse(stored) : DEFAULTS;
-    return parsed.map(w => ({ cols: 1, rows: 1, radius: 'normal', ...w }));
+    let parsed = stored ? JSON.parse(stored) : DEFAULTS;
+    parsed = parsed.map(w => ({ cols: 1, rows: 1, radius: 'normal', ...w }));
+    // One-time: surface the Review widget for users who already have a saved
+    // layout from before it existed. Runs once; if they remove it, it stays gone.
+    if (stored && !localStorage.getItem(REVIEW_MIGRATION_KEY)) {
+      localStorage.setItem(REVIEW_MIGRATION_KEY, '1');
+      if (!parsed.some(w => w.type === 'review')) {
+        parsed = [...parsed, { id: 'w-review-default', type: 'review', position: firstFreeCell(parsed), cols: 1, rows: 1, radius: 'normal' }];
+        save(parsed);
+      }
+    }
+    return parsed;
   }
   catch { return DEFAULTS; }
 }

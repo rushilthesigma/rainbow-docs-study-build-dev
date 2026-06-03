@@ -1,5 +1,15 @@
 import { useEffect, useRef } from 'react';
 
+// Module-level guard: when an instance calls `history.back()` itself (to clean
+// up its own pushed entry), the resulting popstate must NOT be treated as a
+// user pressing Back. This matters under React StrictMode, where the effect
+// mounts → cleans up (calling history.back()) → re-mounts and re-adds its
+// listener before that programmatic popstate fires - which otherwise made a
+// component that mounts already-active (deep links like ?view=flashcards)
+// immediately "go back" to its default view. The short TTL means a real Back
+// pressed >150ms later is unaffected.
+let ignoreNextPopUntil = 0;
+
 // While `active` is true, intercept the browser Back button and run
 // `onBack()` instead of navigating away from the SPA.
 //
@@ -26,6 +36,9 @@ export default function useBrowserBack(active, onBack) {
 
     function onPop(e) {
       if (handlingRef.current) return;
+      // Swallow the popstate caused by our own cleanup history.back() (see note
+      // at top) so a deep-linked / already-active mount doesn't snap back.
+      if (Date.now() < ignoreNextPopUntil) { ignoreNextPopUntil = 0; return; }
       handlingRef.current = true;
       pushedRef.current = false;
       try { onBackRef.current?.(); } catch {}
@@ -51,6 +64,7 @@ export default function useBrowserBack(active, onBack) {
       // drilled-in view, so we'd loop.
       if (pushedRef.current && !handlingRef.current) {
         handlingRef.current = true;
+        ignoreNextPopUntil = Date.now() + 150; // suppress the popstate this triggers
         try { window.history.back(); } catch {}
         setTimeout(() => { handlingRef.current = false; }, 0);
         pushedRef.current = false;

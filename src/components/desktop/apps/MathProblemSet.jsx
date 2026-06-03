@@ -137,79 +137,87 @@ export default function MathProblemSet({ topic, count = 5, presetProblems = null
   const fb = feedback[cur.id];
 
   return (
-    <div className="flex flex-col h-full bg-transparent animate-view-fade" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif' }}>
-      {/* Header */}
-      <div className="flex items-center gap-2.5 mx-2 mt-2 px-4 py-2.5 rounded-2xl flex-shrink-0 bg-white/8 border border-white/10 backdrop-blur-sm">
-        {onBack && (
-          <button onClick={onBack} title="Back" className="w-7 h-7 rounded-lg flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-colors">
-            <ArrowLeft size={14} />
-          </button>
-        )}
-        <div className="w-6 h-6 rounded-lg bg-white/10 flex items-center justify-center"><ListChecks size={12} className="text-white" /></div>
-        <span className="text-white font-semibold text-[14px] tracking-tight truncate">{topic}</span>
-        <div className="flex-1" />
-        <span className="text-[11px] text-white/45 tabular-nums">Problem {idx + 1} of {problems.length}</span>
-        <div className="flex items-center gap-0.5 ml-1">
-          <button onClick={() => go(-1)} disabled={idx === 0} title="Previous" className="w-7 h-7 rounded-lg flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"><ChevronLeft size={15} /></button>
-          <button onClick={() => go(1)} disabled={idx >= problems.length - 1} title="Next" className="w-7 h-7 rounded-lg flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"><ChevronRight size={15} /></button>
-        </div>
-      </div>
-
-      {/* Progress */}
-      <div className="mx-3 mt-2 h-1 rounded-full bg-white/[0.06] overflow-hidden flex-shrink-0">
-        <div className="h-full bg-blue-400 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
-      </div>
-
-      {/* Problem prompt */}
-      <div className="mx-2 mt-2 px-4 py-3 rounded-2xl bg-white/[0.05] border border-white/10 flex-shrink-0">
-        <MathText as="div" className="text-[14px] text-white/90 leading-relaxed">{cur.prompt}</MathText>
-      </div>
-
-      {/* Canvas (remounts per problem so each keeps its own work) */}
-      <div className="flex-1 min-h-[240px] p-2">
-        <TutorCanvas
-          key={cur.id}
-          onCaptureReady={(api) => { captureRef.current = api; }}
-          initialStrokes={strokesRef.current[cur.id] || null}
-          onStrokesChange={(s) => {
-            strokesRef.current = { ...strokesRef.current, [cur.id]: s };
-            if (!seeded) savePS(persistKey, { topic, problems, idx, strokes: strokesRef.current, feedback, savedAt: Date.now() });
-          }}
-        />
-      </div>
-
-      {/* Feedback */}
-      {fb != null && (
-        <div key={cur.id} className="mx-2 mb-1 px-4 py-3 rounded-2xl bg-black/20 border border-white/10 max-h-44 overflow-y-auto flex-shrink-0 animate-view-fade">
-          <div className="prose prose-sm prose-invert max-w-none prose-p:my-1 prose-headings:my-1.5 prose-ul:my-1 prose-li:my-0 text-[13px] text-white/80 leading-relaxed">
-            <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
-              {normalizeMath(fb)}
-            </ReactMarkdown>
+    <div className="flex h-full bg-transparent animate-view-fade" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif' }}>
+      {/* Main column: header + progress + prompt + canvas */}
+      <div className="flex flex-col flex-1 min-w-0 h-full">
+        {/* Header */}
+        <div className="flex items-center gap-2.5 mx-2 mt-2 px-4 py-2.5 rounded-2xl flex-shrink-0 bg-white/8 border border-white/10 backdrop-blur-sm">
+          {onBack && (
+            <button onClick={onBack} title="Back" className="w-7 h-7 rounded-lg flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-colors">
+              <ArrowLeft size={14} />
+            </button>
+          )}
+          <div className="w-6 h-6 rounded-lg bg-white/10 flex items-center justify-center"><ListChecks size={12} className="text-white" /></div>
+          <span className="text-white font-semibold text-[14px] tracking-tight truncate">{topic}</span>
+          <div className="flex-1" />
+          <span className="text-[11px] text-white/45 tabular-nums">Problem {idx + 1} of {problems.length}</span>
+          <div className="flex items-center gap-0.5 ml-1">
+            <button onClick={() => go(-1)} disabled={idx === 0} title="Previous" className="w-7 h-7 rounded-lg flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"><ChevronLeft size={15} /></button>
+            <button onClick={() => go(1)} disabled={idx >= problems.length - 1} title="Next" className="w-7 h-7 rounded-lg flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"><ChevronRight size={15} /></button>
           </div>
         </div>
-      )}
 
-      {/* Actions */}
-      <div className="flex gap-2 px-2 pb-2 pt-1 flex-shrink-0">
-        <button onClick={() => getFeedback(false)} disabled={streaming} className="flex-1 py-2 rounded-lg bg-blue-500 hover:bg-blue-400 text-white border border-blue-400/40 text-[12px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-all">
+        {/* Progress */}
+        <div className="mx-3 mt-2 h-1 rounded-full bg-white/[0.06] overflow-hidden flex-shrink-0">
+          <div className="h-full bg-blue-400 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
+        </div>
+
+        {/* Problem prompt */}
+        <div className="mx-2 mt-2 px-4 py-3 rounded-2xl bg-white/[0.05] border border-white/10 flex-shrink-0">
+          <MathText as="div" className="text-[14px] text-white/90 leading-relaxed">{cur.prompt}</MathText>
+        </div>
+
+        {/* Canvas (remounts per problem so each keeps its own work) */}
+        <div className="flex-1 min-h-0 p-2">
+          <TutorCanvas
+            key={cur.id}
+            onCaptureReady={(api) => { captureRef.current = api; }}
+            initialStrokes={strokesRef.current[cur.id] || null}
+            onStrokesChange={(s) => {
+              strokesRef.current = { ...strokesRef.current, [cur.id]: s };
+              if (!seeded) savePS(persistKey, { topic, problems, idx, strokes: strokesRef.current, feedback, savedAt: Date.now() });
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Right sidebar: actions + feedback */}
+      <div className="flex flex-col w-52 flex-shrink-0 border-l border-white/10 p-2 gap-2">
+        {/* Action buttons */}
+        <button onClick={() => getFeedback(false)} disabled={streaming} className="w-full py-2.5 rounded-xl bg-blue-500 hover:bg-blue-400 text-white border border-blue-400/40 text-[12px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-all flex-shrink-0">
           {streaming ? <><InlineProgress active /> Checking…</> : <><Check size={12} /> Get feedback</>}
         </button>
-        <button onClick={() => getFeedback(true)} disabled={streaming} className="flex-1 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-white/80 border border-white/15 text-[12px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-all">
+        <button onClick={() => getFeedback(true)} disabled={streaming} className="w-full py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-white/80 border border-white/15 text-[12px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-all flex-shrink-0">
           <ClipboardCheck size={12} /> Grade
         </button>
         {idx < problems.length - 1 ? (
-          <button onClick={() => go(1)} className="flex-1 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-white/80 border border-white/15 text-[12px] font-semibold flex items-center justify-center gap-1.5 transition-all">
+          <button onClick={() => go(1)} className="w-full py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-white/80 border border-white/15 text-[12px] font-semibold flex items-center justify-center gap-1.5 transition-all flex-shrink-0">
             Next <ChevronRight size={12} />
           </button>
         ) : (
           onBack && (
-            <button onClick={onBack} className="flex-1 py-2 rounded-lg bg-emerald-500/80 hover:bg-emerald-500 text-white border border-emerald-400/40 text-[12px] font-semibold flex items-center justify-center gap-1.5 transition-all">
+            <button onClick={onBack} className="w-full py-2.5 rounded-xl bg-emerald-500/80 hover:bg-emerald-500 text-white border border-emerald-400/40 text-[12px] font-semibold flex items-center justify-center gap-1.5 transition-all flex-shrink-0">
               Finish
             </button>
           )
         )}
+
+        {error && <p className="text-[11px] text-[#f87171] px-1 animate-fade-in flex-shrink-0">{error}</p>}
+
+        {/* Divider */}
+        {fb != null && <div className="h-px bg-white/10 flex-shrink-0" />}
+
+        {/* Feedback */}
+        {fb != null && (
+          <div key={cur.id} className="flex-1 min-h-0 overflow-y-auto rounded-xl bg-black/20 border border-white/10 px-3 py-2.5 animate-view-fade">
+            <div className="prose prose-sm prose-invert max-w-none prose-p:my-1 prose-headings:my-1.5 prose-ul:my-1 prose-li:my-0 text-[12px] text-white/80 leading-relaxed">
+              <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+                {normalizeMath(fb)}
+              </ReactMarkdown>
+            </div>
+          </div>
+        )}
       </div>
-      {error && <p className="text-[11px] text-[#f87171] px-3 pb-2 flex-shrink-0 animate-fade-in">{error}</p>}
     </div>
   );
 }

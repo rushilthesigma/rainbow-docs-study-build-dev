@@ -4,8 +4,8 @@ export async function listNotes() {
   return apiFetch('/api/notes');
 }
 
-export async function createNote(title, type = 'regular') {
-  return apiFetch('/api/notes', { method: 'POST', body: JSON.stringify({ title, type }) });
+export async function createNote(title, type = 'regular', topicId = null) {
+  return apiFetch('/api/notes', { method: 'POST', body: JSON.stringify({ title, type, topicId }) });
 }
 
 export async function getNote(id) {
@@ -131,4 +131,31 @@ export async function reviewNoteCard(noteId, cardId, quality) {
 
 export async function deleteNoteCard(noteId, cardId) {
   return apiFetch(`/api/notes/${noteId}/flashcards/${cardId}`, { method: 'DELETE' });
+}
+
+// ── Topics (folders for notes; one topic per note) ────────────────────
+export async function listTopics() {
+  return apiFetch('/api/topics');
+}
+
+export async function createTopic(name, color) {
+  return apiFetch('/api/topics', { method: 'POST', body: JSON.stringify({ name, color }) });
+}
+
+export async function updateTopic(id, updates) {
+  return apiFetch(`/api/topics/${id}`, { method: 'PUT', body: JSON.stringify(updates) });
+}
+
+export async function deleteTopic(id) {
+  return apiFetch(`/api/topics/${id}`, { method: 'DELETE' });
+}
+
+// Assign (or clear, with null) a note's single topic.
+export async function setNoteTopic(noteId, topicId) {
+  return apiFetch(`/api/notes/${noteId}`, { method: 'PUT', body: JSON.stringify({ topicId }) });
+}
+
+// The single best note to review next (for the dashboard widget).
+export async function getRecommendedReview() {
+  return apiFetch('/api/review/recommended');
 }

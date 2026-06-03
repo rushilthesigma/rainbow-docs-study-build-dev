@@ -1,28 +1,24 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Layers, Plus, Loader2, X, ChevronDown, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Layers, Plus, Loader2, X, Trash2, RotateCcw } from 'lucide-react';
 import { getNoteFlashcards, generateNoteFlashcards, reviewNoteCard, deleteNoteCard } from '../../api/notes';
-import { sm2Update } from '../../utils/sm2';
+import Button from '../shared/Button';
+import LoadingSpinner from '../shared/LoadingSpinner';
 
 // Anki-style grading → SM-2 quality (mirrors NoteMapReview): Again resets,
 // Hard/Good/Easy pass with growing intervals.
 const GRADES = [
-  { q: 1, label: 'Again', cls: 'bg-rose-500/12 border-rose-400/30 text-rose-200 hover:bg-rose-500/20' },
-  { q: 3, label: 'Hard', cls: 'bg-amber-500/12 border-amber-400/30 text-amber-200 hover:bg-amber-500/20' },
-  { q: 4, label: 'Good', cls: 'bg-emerald-500/12 border-emerald-400/30 text-emerald-200 hover:bg-emerald-500/20' },
-  { q: 5, label: 'Easy', cls: 'bg-sky-500/12 border-sky-400/30 text-sky-200 hover:bg-sky-500/20' },
+  { q: 1, label: 'Again', key: '1', cls: 'bg-rose-500/12 border-rose-400/30 text-rose-200 hover:bg-rose-500/20' },
+  { q: 3, label: 'Hard', key: '2', cls: 'bg-amber-500/12 border-amber-400/30 text-amber-200 hover:bg-amber-500/20' },
+  { q: 4, label: 'Good', key: '3', cls: 'bg-emerald-500/12 border-emerald-400/30 text-emerald-200 hover:bg-emerald-500/20' },
+  { q: 5, label: 'Easy', key: '4', cls: 'bg-sky-500/12 border-sky-400/30 text-sky-200 hover:bg-sky-500/20' },
 ];
 
-function fmtInterval(days) {
-  if (!days || days < 1) return 'today';
-  if (days < 30) return `${days}d`;
-  if (days < 365) return `${Math.round(days / 30)}mo`;
-  return `${(days / 365).toFixed(1)}y`;
-}
-
-// Collapsible flashcards section for a single note. Generates SM-2 cards from
-// the note's content and runs an inline review without leaving the editor.
-export default function NoteFlashcards({ noteId }) {
-  const [open, setOpen] = useState(false);
+// Full-window flashcards view for a single note. Launched from the note
+// editor but rendered as its own view in the Notes app (like the note map),
+// not embedded in the editor GUI. Generates SM-2 cards from the note and runs
+// the review session here.
+export default function NoteFlashcards({ noteId, noteTitle, onBack }) {
+  const [loading, setLoading] = useState(true);
   const [cards, setCards] = useState([]);
   const [due, setDue] = useState(0);
   const [gen, setGen] = useState(false);
@@ -35,9 +31,10 @@ export default function NoteFlashcards({ noteId }) {
   const [grading, setGrading] = useState(false);
 
   const load = useCallback(() => {
-    getNoteFlashcards(noteId)
+    return getNoteFlashcards(noteId)
       .then(d => { setCards(d.cards || []); setDue(d.due || 0); })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, [noteId]);
 
   useEffect(() => { load(); }, [load]);
@@ -49,7 +46,6 @@ export default function NoteFlashcards({ noteId }) {
     try {
       const d = await generateNoteFlashcards(noteId, {});
       setCards(d.flashcards || []);
-      setOpen(true);
       load();
     } catch (e) {
       setGenError(e?.message || 'Could not generate flashcards.');
@@ -62,7 +58,7 @@ export default function NoteFlashcards({ noteId }) {
     const dueCards = cards.filter(c => !c.nextDue || new Date(c.nextDue).getTime() <= now);
     const q = dueCards.length ? dueCards : cards;
     if (!q.length) return;
-    setQueue(q); setIdx(0); setFlipped(false); setMode('session'); setOpen(true);
+    setQueue(q); setIdx(0); setFlipped(false); setMode('session');
   }
 
   const current = queue[idx];
@@ -77,89 +73,117 @@ export default function NoteFlashcards({ noteId }) {
     else { setMode('list'); load(); }
   }, [current, grading, noteId, idx, queue.length, load]);
 
+  // Keyboard: Space/Enter flips, 1-4 grade once flipped.
+  useEffect(() => {
+    if (mode !== 'session') return;
+    function onKey(e) {
+      if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setFlipped(f => !f); return; }
+      if (!flipped) return;
+      const g = GRADES.find(x => x.key === e.key);
+      if (g) { e.preventDefault(); handleGrade(g.q); }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mode, flipped, handleGrade]);
+
   async function handleDelete(cardId) {
     try { await deleteNoteCard(noteId, cardId); setCards(cs => cs.filter(c => c.id !== cardId)); load(); } catch {}
   }
 
   return (
-    <div className="mt-3 flex-shrink-0 rounded-2xl border border-white/[0.06] bg-white/[0.02]">
-      <div className="flex items-center gap-2 px-3 py-2.5">
-        <button onClick={() => setOpen(o => !o)} className="flex items-center gap-1.5 text-white/70 hover:text-white transition-colors">
-          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-          <Layers size={13} className="text-white/40" />
-          <span className="text-[12px] font-semibold">Flashcards</span>
+    <div className="flex flex-col flex-1 min-h-0">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3 flex-shrink-0 gap-2">
+        <button onClick={onBack} className="flex items-center gap-2 text-sm text-white/35 hover:text-white/60 transition-colors">
+          <ArrowLeft size={16} /> Note
         </button>
-        <span className="text-[11px] text-white/35">
-          {cards.length}{due > 0 && <span className="text-blue-300"> · {due} due</span>}
-        </span>
-        <div className="flex-1" />
-        {cards.length > 0 && (
-          <button onClick={startReview} className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-500/15 hover:bg-blue-500/25 text-blue-200 transition-colors">
-            Review
-          </button>
+        {mode === 'list' && (
+          <div className="flex items-center gap-2">
+            {cards.length > 0 && (
+              <Button size="sm" onClick={startReview}><RotateCcw size={14} /> Review{due > 0 ? ` (${due})` : ''}</Button>
+            )}
+            <Button size="sm" variant="secondary" onClick={handleGenerate} disabled={gen}>
+              {gen ? <><Loader2 size={14} className="animate-spin" /> Making…</> : <><Plus size={14} /> {cards.length ? 'More' : 'Generate'}</>}
+            </Button>
+          </div>
         )}
-        <button
-          onClick={handleGenerate}
-          disabled={gen}
-          className="text-[11px] px-2.5 py-1 rounded-lg text-white/65 hover:text-white hover:bg-white/[0.06] flex items-center gap-1 disabled:opacity-50 transition-colors"
-        >
-          {gen ? <><Loader2 size={11} className="animate-spin" /> Making…</> : <><Plus size={11} /> {cards.length ? 'More' : 'Make flashcards'}</>}
-        </button>
       </div>
 
-      {genError && <p className="px-3 pb-2.5 text-[11px] text-rose-300/90">{genError}</p>}
+      <div className="flex items-center gap-2 mb-3 flex-shrink-0 min-w-0">
+        <Layers size={15} className="text-white/40 flex-shrink-0" />
+        <h2 className="text-[17px] font-bold text-white/90 truncate">{noteTitle || 'Flashcards'}</h2>
+        <span className="text-[12px] text-white/40 flex-shrink-0">
+          {cards.length} card{cards.length !== 1 ? 's' : ''}{due > 0 && ` · ${due} due`}
+        </span>
+      </div>
 
-      {open && mode === 'list' && (
-        <div className="px-3 pb-3 pt-2 max-h-56 overflow-y-auto border-t border-white/[0.06] animate-view-fade">
-          {cards.length === 0 ? (
-            <p className="text-[11px] text-white/30 italic">No flashcards yet. Click “Make flashcards” to generate them from this note.</p>
-          ) : (
-            <div className="divide-y divide-white/[0.05]">
-              {cards.map(c => (
-                <div key={c.id} className="py-2 flex items-start gap-2 group">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[12px] text-white/85">{c.front}</p>
-                    <p className="text-[11px] text-white/45 mt-0.5">{c.back}</p>
-                  </div>
-                  <button onClick={() => handleDelete(c.id)} className="text-white/20 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-all flex-shrink-0 mt-0.5" title="Delete card">
-                    <X size={12} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+      {genError && (
+        <p className="mb-3 flex-shrink-0 text-[12px] text-rose-300/90 bg-rose-500/[0.08] border border-rose-400/[0.20] rounded-lg px-3 py-2">{genError}</p>
       )}
 
-      {open && mode === 'session' && current && (
-        <div className="px-3 pb-3 pt-2 border-t border-white/[0.06] animate-view-fade">
-          <div className="flex items-center justify-between text-[11px] text-white/45 mb-2">
+      {loading ? (
+        <div className="flex items-center justify-center flex-1"><LoadingSpinner size={26} /></div>
+      ) : mode === 'session' && current ? (
+        <div className="flex flex-col flex-1 min-h-0">
+          <div className="flex items-center justify-between text-[12px] text-white/45 mb-2 flex-shrink-0">
             <span>{idx + 1} / {queue.length}</span>
-            <button onClick={() => { setMode('list'); load(); }} className="hover:text-white/80 flex items-center gap-1"><X size={11} /> Exit</button>
+            <button onClick={() => { setMode('list'); load(); }} className="hover:text-white/80 flex items-center gap-1"><X size={12} /> Exit</button>
           </div>
-          <div
-            onClick={() => setFlipped(f => !f)}
-            className={`cursor-pointer rounded-xl border p-5 min-h-[120px] flex items-center justify-center text-center transition-colors ${flipped ? 'bg-blue-500/[0.08] border-blue-400/20' : 'bg-white/[0.04] border-white/[0.08]'}`}
-          >
-            <p className="text-[14px] text-white/90">{flipped ? current.back : current.front}</p>
+          <div className="w-full h-1.5 bg-white/[0.06] rounded-full overflow-hidden mb-4 flex-shrink-0">
+            <div className="h-full bg-blue-500 rounded-full transition-all duration-300" style={{ width: `${((idx + (flipped ? 0.5 : 0)) / queue.length) * 100}%` }} />
           </div>
-          {!flipped ? (
-            <p className="text-center text-[10px] text-white/35 mt-2">Click to reveal</p>
-          ) : (
-            <div className="grid grid-cols-4 gap-1.5 mt-2">
-              {GRADES.map(g => (
-                <button
-                  key={g.q}
-                  onClick={() => handleGrade(g.q)}
-                  disabled={grading}
-                  className={`flex flex-col items-center gap-0.5 px-1 py-2 rounded-lg border text-[12px] font-semibold disabled:opacity-50 transition-colors ${g.cls}`}
-                >
-                  <span>{g.label}</span>
-                  <span className="text-[9px] font-normal opacity-70">{fmtInterval(sm2Update(current, g.q).interval)}</span>
-                </button>
-              ))}
+          <div className="flex-1 min-h-0 flex items-center justify-center">
+            <div onClick={() => setFlipped(f => !f)} className="cursor-pointer w-full max-w-xl" style={{ perspective: '1000px' }}>
+              <div className="relative w-full h-[260px] transition-transform duration-500 ease-in-out" style={{ transformStyle: 'preserve-3d', transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}>
+                <div className="absolute inset-0 bg-white/[0.04] rounded-2xl border border-white/[0.10] p-8 flex flex-col items-center justify-center text-center overflow-auto" style={{ backfaceVisibility: 'hidden' }}>
+                  {current.origin === 'quiz-variant' && (
+                    <span className="mb-2 text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-200 border border-amber-400/25">from a question you missed</span>
+                  )}
+                  <p className="text-[18px] font-medium text-white/90">{current.front}</p>
+                </div>
+                <div className="absolute inset-0 bg-gradient-to-br from-blue-500/[0.10] to-purple-500/[0.10] rounded-2xl border border-blue-400/25 p-8 flex items-center justify-center text-center overflow-auto" style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
+                  <p className="text-[17px] text-white/85">{current.back}</p>
+                </div>
+              </div>
             </div>
-          )}
+          </div>
+          <div className="flex-shrink-0 mt-4 max-w-xl mx-auto w-full">
+            {!flipped ? (
+              <p className="text-center text-[11px] text-white/35">Click or press Space to reveal</p>
+            ) : (
+              <div className="grid grid-cols-4 gap-2">
+                {GRADES.map(g => (
+                  <button key={g.q} onClick={() => handleGrade(g.q)} disabled={grading} className={`flex items-center justify-center px-2 py-3 rounded-xl border text-[13px] font-semibold disabled:opacity-50 transition-colors ${g.cls}`}>
+                    {g.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : cards.length === 0 ? (
+        <div className="flex-1 flex flex-col items-center justify-center text-center text-white/35">
+          <Layers size={30} className="text-white/20 mb-3" />
+          <p className="text-[13px] mb-1">No flashcards yet</p>
+          <p className="text-[11px] mb-4">Generate a set from this note, then review them with spaced repetition.</p>
+          <Button size="sm" onClick={handleGenerate} disabled={gen}>
+            {gen ? <><Loader2 size={14} className="animate-spin" /> Making…</> : <><Plus size={14} /> Generate flashcards</>}
+          </Button>
+        </div>
+      ) : (
+        <div className="flex-1 min-h-0 overflow-y-auto -mr-1 pr-1 space-y-2">
+          {cards.map(c => (
+            <div key={c.id} className="group bg-white/[0.03] rounded-2xl border border-white/[0.06] px-4 py-3 flex items-start gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-[13px] text-white/90">{c.front}</p>
+                <div className="w-full h-px bg-white/[0.06] my-2" />
+                <p className="text-[12px] text-white/55">{c.back}</p>
+              </div>
+              <button onClick={() => handleDelete(c.id)} className="text-white/20 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-all flex-shrink-0 mt-0.5" title="Delete card">
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))}
         </div>
       )}
     </div>

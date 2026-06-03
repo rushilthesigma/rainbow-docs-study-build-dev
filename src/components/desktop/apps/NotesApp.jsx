@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, FileText, Plus, Trash2, Pencil, Layout, Sparkles, Wand2, Loader2, BookOpen, Network } from 'lucide-react';
+import { ArrowLeft, FileText, Plus, Trash2, Pencil, Layout, Sparkles, Wand2, Loader2, BookOpen, Network, Folder, Layers, ChevronRight } from 'lucide-react';
 import { InlineProgress } from '../../shared/ProgressBar';
 import { listNotes, createNote, deleteNote, getNote, updateNote, generateCues, generateSummary,
-         listNoteMaps, createNoteMap, deleteNoteMap, updateNoteMap } from '../../../api/notes';
+         listNoteMaps, createNoteMap, deleteNoteMap, updateNoteMap,
+         listTopics, createTopic, updateTopic, deleteTopic, setNoteTopic, getNoteFlashcards } from '../../../api/notes';
 import { apiFetch } from '../../../api/client';
 import { listCurricula, getCurriculum } from '../../../api/curriculum';
 import { peek, fetchOnce, bust } from '../../../api/cache';
@@ -17,13 +18,26 @@ import MarkdownNoteEditor from '../../notes/MarkdownNoteEditor';
 import NoteFlashcards from '../../notes/NoteFlashcards';
 import { useToast } from '../../shared/Toast';
 
-function NoteEditor({ noteId, onBack }) {
+function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashcards }) {
   const [note, setNote] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [genCues, setGenCues] = useState(false);
   const [genSummary, setGenSummary] = useState(false);
   const [saveTimer, setSaveTimer] = useState(null);
+  // Flashcard count for the launcher chip (the deck itself lives in its own view).
+  const [fc, setFc] = useState({ count: null, due: 0 });
+
+  useEffect(() => {
+    getNoteFlashcards(noteId).then(d => setFc({ count: (d.cards || []).length, due: d.due || 0 })).catch(() => {});
+  }, [noteId]);
+
+  async function handleTopicChange(value) {
+    const tid = value || null;
+    setNote(prev => (prev ? { ...prev, topicId: tid } : prev));
+    try { await setNoteTopic(noteId, tid); } catch {}
+    onTopicChanged?.();
+  }
 
   useEffect(() => {
     getNote(noteId).then(d => { setNote(d.note); setLoading(false); }).catch(() => setLoading(false));
@@ -60,11 +74,25 @@ function NoteEditor({ noteId, onBack }) {
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      <div className="flex items-center justify-between mb-3 flex-shrink-0">
+      <div className="flex items-center justify-between mb-3 flex-shrink-0 gap-2">
         <button onClick={onBack} className="flex items-center gap-2 text-sm text-white/35 hover:text-white/60 transition-colors">
           <ArrowLeft size={16} /> Notes
         </button>
-        <span className="text-xs text-white/25">{saving ? 'Saving...' : 'Auto-saved'}</span>
+        <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-1.5 text-white/40">
+            <Folder size={13} />
+            <select
+              value={note.topicId || ''}
+              onChange={e => handleTopicChange(e.target.value)}
+              title="Topic"
+              className="bg-white/[0.05] border border-white/[0.08] rounded-lg px-2 py-1 text-[11px] text-white/75 outline-none hover:bg-white/[0.08] focus:border-blue-400/40 cursor-pointer max-w-[150px]"
+            >
+              <option value="">No topic</option>
+              {topics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+          <span className="text-xs text-white/25">{saving ? 'Saving...' : 'Auto-saved'}</span>
+        </div>
       </div>
 
       <input
@@ -132,18 +160,34 @@ function NoteEditor({ noteId, onBack }) {
         </div>
       )}
 
-      <NoteFlashcards noteId={noteId} />
+      {/* Launcher for the flashcards view. The deck opens in its own window
+          (like the note map), not embedded here. */}
+      <button
+        onClick={() => onOpenFlashcards?.(noteId, note.title)}
+        className="mt-3 flex-shrink-0 flex items-center gap-2 px-3.5 py-2.5 rounded-2xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-white/[0.10] transition-colors text-left"
+      >
+        <Layers size={14} className="text-white/45" />
+        <span className="text-[12px] font-semibold text-white/80">Flashcards</span>
+        {fc.count != null && (
+          <span className="text-[11px] text-white/40">
+            {fc.count}{fc.due > 0 && <span className="text-blue-300"> · {fc.due} due</span>}
+          </span>
+        )}
+        <span className="flex-1" />
+        <ChevronRight size={14} className="text-white/30" />
+      </button>
     </div>
   );
 }
 
-export default function NotesApp({ initialNoteId = null, initialMapId = null, initialView = null } = {}) {
+export default function NotesApp({ initialNoteId = null, initialMapId = null, initialView = null, initialFlashcardsNoteId = null, initialFlashcardsTitle = null } = {}) {
   // Optional meta props from the desktop window manager - `initialNoteId`
   // jumps straight into the editor for that note; `initialMapId` opens
   // the merged Maps view on that specific map. The legacy Note Map app
   // entry passes initialView='map' so existing dock icons keep working.
   const toast = useToast();
-  const startView = initialNoteId ? 'editor'
+  const startView = initialFlashcardsNoteId ? 'flashcards'
+                    : initialNoteId ? 'editor'
                     : initialMapId ? 'map'
                     : initialView === 'map' ? 'map'
                     : 'list';
@@ -176,12 +220,24 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
   const [curriculumDetail, setCurriculumDetail] = useState(null);
   const [selectedLessonIds, setSelectedLessonIds] = useState([]); // [] = whole curriculum
   const [curriculumLoading, setCurriculumLoading] = useState(false);
-  const [selectedNoteId, setSelectedNoteId] = useState(initialNoteId);
+  const [selectedNoteId, setSelectedNoteId] = useState(initialNoteId || initialFlashcardsNoteId);
   // In-app naming modal - replaces the native browser prompt() that
   // surfaces the URL banner ("www.rushil12.com says…"). `mode` is
   // 'create' for new map, 'rename' when editing an existing one.
   const [nameDialog, setNameDialog] = useState(null);
   // Shape: { mode: 'create' | 'rename', initial: '', mapId? }
+
+  // Topics (folders for notes). activeTopicId: null = all notes, 'unfiled' =
+  // notes with no topic, or a topic id. topicDialog drives create/rename.
+  const cachedTopics = peek('notes:topics');
+  const [topics, setTopics] = useState(() => cachedTopics?.topics || []);
+  const [unfiled, setUnfiled] = useState(cachedTopics?.unfiled || 0);
+  const [activeTopicId, setActiveTopicId] = useState(null);
+  const [topicDialog, setTopicDialog] = useState(null); // { mode, id?, initial }
+  // Flashcards open in their own view (launched from the editor or a widget), not embedded.
+  const [flashcardsNote, setFlashcardsNote] = useState(
+    initialFlashcardsNoteId ? { id: initialFlashcardsNoteId, title: initialFlashcardsTitle || '' } : null,
+  ); // { id, title }
 
   useEffect(() => {
     fetchOnce('notes:list', listNotes)
@@ -210,6 +266,37 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
   }, [selectedMapId]);
 
   useEffect(() => { reloadMaps(); }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const reloadTopics = useCallback((force = false) => {
+    if (force) bust('notes:topics');
+    return fetchOnce('notes:topics', listTopics)
+      .then(d => { setTopics(d.topics || []); setUnfiled(d.unfiled || 0); })
+      .catch(() => {});
+  }, []);
+  useEffect(() => { reloadTopics(); }, [reloadTopics]);
+
+  function refreshNotes() {
+    bust('notes:list');
+    fetchOnce('notes:list', listNotes).then(d => setNotes(d.notes || [])).catch(() => {});
+  }
+
+  function submitTopicDialog(name) {
+    const n = (name || '').trim();
+    const d = topicDialog;
+    setTopicDialog(null);
+    if (!n || !d) return;
+    const p = d.mode === 'rename' && d.id ? updateTopic(d.id, { name: n }) : createTopic(n);
+    p.then(() => reloadTopics(true)).catch(() => {});
+  }
+
+  function handleDeleteTopic(e, id) {
+    e.stopPropagation();
+    deleteTopic(id).then(() => {
+      if (activeTopicId === id) setActiveTopicId(null);
+      reloadTopics(true);
+      refreshNotes();
+    }).catch(() => {});
+  }
 
   function handleCreateMap() {
     if (creatingMap) return;
@@ -293,9 +380,11 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
 
   async function handleCreate(type) {
     try {
-      const data = await createNote('Untitled Note', type);
+      const seedTopic = activeTopicId && activeTopicId !== 'unfiled' ? activeTopicId : null;
+      const data = await createNote('Untitled Note', type, seedTopic);
       setNotes(prev => [data.note, ...prev]);
       bust('notes:list');
+      if (seedTopic) reloadTopics(true);
       setSelectedNoteId(data.note.id);
       setView('editor');
       setShowCreate(false);
@@ -415,12 +504,31 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
   if (view === 'editor' && selectedNoteId) {
     return (
       <ViewFade viewKey="editor" className="h-full flex flex-col">
-        <NoteEditor noteId={selectedNoteId} onBack={() => {
-          setView('list');
-          // Force a refresh in case the body/title changed.
-          bust('notes:list');
-          fetchOnce('notes:list', listNotes).then(d => setNotes(d.notes || [])).catch(() => {});
-        }} />
+        <NoteEditor
+          noteId={selectedNoteId}
+          topics={topics}
+          onTopicChanged={() => { reloadTopics(true); bust('notes:list'); }}
+          onOpenFlashcards={(id, title) => { setSelectedNoteId(id); setFlashcardsNote({ id, title }); setView('flashcards'); }}
+          onBack={() => {
+            setView('list');
+            // Force a refresh in case the body/title/topic changed.
+            bust('notes:list');
+            fetchOnce('notes:list', listNotes).then(d => setNotes(d.notes || [])).catch(() => {});
+            reloadTopics(true);
+          }}
+        />
+      </ViewFade>
+    );
+  }
+
+  if (view === 'flashcards' && flashcardsNote) {
+    return (
+      <ViewFade viewKey="flashcards" className="h-full flex flex-col">
+        <NoteFlashcards
+          noteId={flashcardsNote.id}
+          noteTitle={flashcardsNote.title}
+          onBack={() => setView('editor')}
+        />
       </ViewFade>
     );
   }
@@ -464,6 +572,11 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
   }
 
   if (loading) return <div className="flex items-center justify-center h-48"><LoadingSpinner size={24} /></div>;
+
+  const topicById = new Map(topics.map(t => [t.id, t]));
+  const visibleNotes = activeTopicId == null ? notes
+    : activeTopicId === 'unfiled' ? notes.filter(n => !n.topicId)
+    : notes.filter(n => n.topicId === activeTopicId);
 
   return (
     <ViewFade viewKey="list">
@@ -536,6 +649,50 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
             )}
           </div>
         )}
+      </div>
+
+      {/* Topics - folders for notes. Click one to filter the list below. */}
+      <div className="mb-5">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-[11px] font-semibold text-white/40 uppercase tracking-wider flex items-center gap-1.5">
+            <Folder size={12} /> Topics
+          </h3>
+          <Button size="sm" variant="secondary" onClick={() => setTopicDialog({ mode: 'create', initial: '' })}>
+            <Plus size={12} /> New topic
+          </Button>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            onClick={() => setActiveTopicId(null)}
+            className={`text-[12px] px-2.5 py-1 rounded-lg border transition-colors ${activeTopicId === null ? 'bg-white/[0.10] border-white/20 text-white/90' : 'bg-white/[0.03] border-white/[0.06] text-white/55 hover:text-white/80 hover:bg-white/[0.06]'}`}
+          >
+            All <span className="text-white/35">{notes.length}</span>
+          </button>
+          {topics.map(t => (
+            <div
+              key={t.id}
+              onClick={() => setActiveTopicId(t.id)}
+              className={`group flex items-center gap-1.5 text-[12px] pl-2 pr-1.5 py-1 rounded-lg border cursor-pointer transition-colors ${activeTopicId === t.id ? 'bg-white/[0.10] border-white/20 text-white/90' : 'bg-white/[0.03] border-white/[0.06] text-white/65 hover:text-white/85 hover:bg-white/[0.06]'}`}
+            >
+              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: t.color }} />
+              <span className="truncate max-w-[140px]">{t.name}</span>
+              <span className="text-white/35">{t.noteCount}</span>
+              <button onClick={(e) => { e.stopPropagation(); setTopicDialog({ mode: 'rename', id: t.id, initial: t.name }); }} className="ml-0.5 opacity-0 group-hover:opacity-100 text-white/25 hover:text-white/70 transition-opacity" title="Rename topic"><Pencil size={11} /></button>
+              <button onClick={(e) => handleDeleteTopic(e, t.id)} className="opacity-0 group-hover:opacity-100 text-white/25 hover:text-rose-400 transition-opacity" title="Delete topic"><Trash2 size={11} /></button>
+            </div>
+          ))}
+          {unfiled > 0 && (
+            <button
+              onClick={() => setActiveTopicId('unfiled')}
+              className={`text-[12px] px-2.5 py-1 rounded-lg border transition-colors ${activeTopicId === 'unfiled' ? 'bg-white/[0.10] border-white/20 text-white/90' : 'bg-white/[0.03] border-white/[0.06] text-white/55 hover:text-white/80 hover:bg-white/[0.06]'}`}
+            >
+              Unfiled <span className="text-white/35">{unfiled}</span>
+            </button>
+          )}
+          {topics.length === 0 && (
+            <span className="text-[11px] text-white/30 italic px-1 py-1">No topics yet — make one to group your notes.</span>
+          )}
+        </div>
       </div>
 
       <Modal open={showAI} onClose={() => { setShowAI(false); setAiError(null); }} title="Generate note with AI">
@@ -696,9 +853,13 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
           <p className="text-sm text-white/55 mb-3">No notes yet</p>
           <Button size="sm" onClick={() => setShowCreate(true)}><Plus size={14} /> New note</Button>
         </div>
+      ) : visibleNotes.length === 0 ? (
+        <div className="text-center py-10 text-[12px] text-white/35">No notes in this topic yet.</div>
       ) : (
         <div className="space-y-1.5">
-          {notes.map(note => (
+          {visibleNotes.map(note => {
+            const topic = note.topicId ? topicById.get(note.topicId) : null;
+            return (
             <div key={note.id} onClick={() => openNote(note.id)} className="flex items-center gap-3 bg-white/[0.03] rounded-2xl border border-white/[0.06] px-4 py-3 cursor-pointer hover:bg-white/[0.06] hover:border-white/[0.10] transition-colors group">
               <div className="w-8 h-8 rounded-xl bg-white/[0.07] flex items-center justify-center flex-shrink-0 text-white/45">
                 {note.type === 'cornell' ? <Layout size={14} /> : <FileText size={14} />}
@@ -707,10 +868,36 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
                 <h3 className="text-sm font-medium text-white/90 truncate">{note.title}</h3>
                 <p className="text-xs text-white/55">{note.type === 'cornell' ? 'Cornell' : 'Note'} · {new Date(note.updatedAt || note.createdAt).toLocaleDateString()}</p>
               </div>
+              {topic && (
+                <span className="flex items-center gap-1 text-[10.5px] text-white/55 bg-white/[0.05] border border-white/[0.07] rounded-md px-1.5 py-0.5 flex-shrink-0">
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: topic.color }} />
+                  <span className="truncate max-w-[90px]">{topic.name}</span>
+                </span>
+              )}
               <button onClick={e => handleDelete(e, note.id)} className="p-1 rounded text-white/20 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={13} /></button>
             </div>
-          ))}
+            );
+          })}
         </div>
+      )}
+
+      {topicDialog && (
+        <Modal open onClose={() => setTopicDialog(null)} title={topicDialog.mode === 'rename' ? 'Rename topic' : 'New topic'} size="sm">
+          <form onSubmit={(e) => { e.preventDefault(); submitTopicDialog(e.target.elements.tname.value); }} className="flex flex-col gap-4">
+            <input
+              autoFocus
+              name="tname"
+              defaultValue={topicDialog.initial || ''}
+              onFocus={e => e.currentTarget.select()}
+              placeholder="e.g. Biology, Exam 2, Chapter 3"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-white/[0.10] bg-white/[0.04] text-[14px] text-white/90 placeholder-white/30 outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20"
+            />
+            <div className="flex justify-end gap-2">
+              <Button type="button" size="sm" variant="ghost" onClick={() => setTopicDialog(null)}>Cancel</Button>
+              <Button type="submit" size="sm">{topicDialog.mode === 'rename' ? 'Rename' : 'Create'}</Button>
+            </div>
+          </form>
+        </Modal>
       )}
     </ViewFade>
   );

@@ -19,6 +19,7 @@ const WIDGET_CATALOG = [
   { type: 'todo',       label: 'Tasks',        icon: ListChecks,   desc: 'Quick checklist' },
   { type: 'quote',      label: 'Daily Quote',  icon: Quote,        desc: 'A fresh quote every day' },
   { type: 'calculator', label: 'Calculator',   icon: Calculator,   desc: 'Four-function calc' },
+  { type: 'review',     label: 'Review',       icon: RotateCcw,    desc: 'A note to review next' },
 ];
 
 // Group widgets by the app they relate to. The gallery shows one
@@ -26,7 +27,7 @@ const WIDGET_CATALOG = [
 // widgets go with Notes?" instead of scrolling a flat catalog.
 const WIDGET_GROUPS = [
   { appId: 'curricula', label: 'Curricula',  types: ['calendar', 'streak']      },
-  { appId: 'notes',     label: 'Notes',      types: ['note', 'todo']            },
+  { appId: 'notes',     label: 'Notes',      types: ['note', 'todo', 'review']  },
   { appId: 'lessons',   label: 'Lessons',    types: ['pomodoro']                },
   { appId: 'mathtutor', label: 'Math Tutor', types: ['calculator']              },
   { appId: 'study',     label: 'Study Mode', types: ['quote']                   },
@@ -123,6 +124,16 @@ function WidgetPreview({ type }) {
         <div className="w-2 h-2 rounded-[2px] border border-white/30" />
         <div className="h-1 w-2/3 rounded-full bg-white/15" />
       </div>
+    </div>
+  );
+
+  if (type === 'review') return (
+    <div className="w-full h-full flex flex-col justify-center px-3">
+      <p className="text-[10.5px] font-semibold text-white/80 leading-tight">Cell Biology</p>
+      <p className="text-[8px] text-white/35 mt-0.5">3 cards due</p>
+      <span className="mt-1.5 inline-flex w-fit items-center gap-1 px-1.5 py-0.5 rounded-md bg-blue-500/80 text-white text-[8px]">
+        <RotateCcw size={8} /> Review
+      </span>
     </div>
   );
 
