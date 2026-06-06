@@ -98,7 +98,7 @@ export async function getStreak() {
   return apiFetch('/api/study/streak');
 }
 
-// ===== STRUCTURED LESSON BLOCKS (4 readings + 4 quizzes, no chat) =====
+// ===== STRUCTURED LESSON BLOCKS (varied block types + final quiz) =====
 export async function generateLessonBlocks(curriculumId, lessonId) {
   return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/blocks/generate`, {
     method: 'POST',
@@ -223,7 +223,7 @@ function streamSSE(url, body, { onChunk, onDone, onError, onMeta, onSource, onSt
               else if (data.source) onSource?.(data.source);
               else if (data.status) onStatus?.(data.status);
               else if (data.artifact) onArtifact?.(data.artifact);
-              else if (data.sessionId) onMeta?.(data);
+              else if (data.sessionId || data.studyModel) onMeta?.(data);
             } catch {}
           }
         }

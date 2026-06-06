@@ -11,9 +11,10 @@ function getDefaultSize(appId) {
     settings: { w: 600, h: 500 },
     newcurriculum: { w: 650, h: 550 },
     goals: { w: 950, h: 600 },
-    // Mobile Preview: window size matches a phone (375×812 + window
-    // chrome). The window itself IS the phone - no inner bezel.
-    mobilepreview: { w: 380, h: 870 },
+    // Mobile Preview: wider than a phone so it's usable on a desktop
+    // monitor. The iframe inside is constrained to 375px so the mobile
+    // breakpoint still fires.
+    mobilepreview: { w: 500, h: 820 },
     // Widgets gallery is intentionally small + fixed - it's a picker,
     // not a workspace.
     widgets: { w: 420, h: 580 },

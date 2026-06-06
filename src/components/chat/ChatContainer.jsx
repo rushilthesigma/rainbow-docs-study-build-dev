@@ -7,6 +7,7 @@ export default function ChatContainer({
   messages, streamingContent, streamingThinking, streamingSources, streamingArtifacts, onSend, disabled, placeholder,
   header, className = '', sourceMode, onToggleSource, searchStatus,
   showThinking = false, thinkingMode = true, thinkingLocked = false, onToggleThinking,
+  composerExtras = null,
   hideInput = false,
   editableIndices = null,
   onEditMessage = null,
@@ -117,6 +118,7 @@ export default function ChatContainer({
           thinkingMode={thinkingMode}
           thinkingLocked={thinkingLocked}
           onToggleThinking={onToggleThinking}
+          composerExtras={composerExtras}
           flush={flush}
         />
       )}

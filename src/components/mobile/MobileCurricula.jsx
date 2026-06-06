@@ -77,19 +77,21 @@ export default function MobileCurricula() {
   // ===== LESSON =====
   if (view === 'lesson' && activeLesson && activeCurriculum) {
     return (
-      <BlockLessonView
-        curriculumId={activeCurriculum.id}
-        lesson={activeLesson}
-        onBack={() => { setActiveLesson(null); setView('detail'); }}
-        backLabel="Back to course"
-      />
+      <div key="lesson" className="animate-fade-in">
+        <BlockLessonView
+          curriculumId={activeCurriculum.id}
+          lesson={activeLesson}
+          onBack={() => { setActiveLesson(null); setView('detail'); }}
+          backLabel="Back to course"
+        />
+      </div>
     );
   }
 
   // ===== DETAIL =====
   if (view === 'detail' && activeCurriculum) {
     return (
-      <div className="px-4 pt-3 pb-8">
+      <div key="detail" className="px-4 pt-3 pb-8 animate-fade-in">
         <button onClick={() => { setActiveCurriculum(null); setView('list'); }} className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-gray-500 dark:text-gray-400 mb-4 active:text-gray-700 dark:active:text-gray-200">
           <ArrowLeft size={14} /> All courses
         </button>
@@ -155,7 +157,7 @@ export default function MobileCurricula() {
   // ===== NEW =====
   if (view === 'new') {
     return (
-      <div className="px-4 pt-3 pb-8">
+      <div key="new" className="px-4 pt-3 pb-8 animate-fade-in">
         <button onClick={() => { setView('list'); setGenError(null); }} className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-gray-500 dark:text-gray-400 mb-4 active:text-gray-700 dark:active:text-gray-200">
           <ArrowLeft size={14} /> All courses
         </button>
@@ -225,7 +227,7 @@ export default function MobileCurricula() {
 
   // ===== LIST =====
   return (
-    <div className="px-4 pt-5 pb-8">
+    <div key="list" className="px-4 pt-5 pb-8 animate-fade-in">
       <h1 className="text-center text-[26px] font-bold tracking-[-0.02em] text-gray-900 dark:text-white mb-1">
         My Courses
       </h1>

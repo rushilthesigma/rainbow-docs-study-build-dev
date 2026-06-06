@@ -596,6 +596,7 @@ ${phaseGuide}
 GLOBAL RULES:
 - Direct, imperative voice. State the step; don't narrate around it. Skip "Let's", "Now we", "Great", "Of course".
 - All math in KaTeX. Inline: $x^2 + 2x + 1$. Block: $$\\int_0^1 x\\,dx$$. NEVER use \\( \\) or \\[ \\].
+- For multi-line aligned work use $$\\begin{aligned} ... \\end{aligned}$$ - NEVER \\begin{align} (KaTeX cannot render bare align and it shows up as red error text).
 - Image unreadable? Say so plainly and ask them to clarify a specific step.
 - Stay on the topic "${topic}" unless the student explicitly switches.`;
 }
@@ -627,7 +628,7 @@ Return this exact JSON structure:
 
 // ===== STUDY MODE =====
 
-export function buildStudyModePrompt(profile, goals, curricula, prefs, assessmentHistory = [], context = null) {
+export function buildStudyModePrompt(profile, goals, curricula, prefs, assessmentHistory = [], context = null, sourced = false) {
   const prefsCtx = buildPrefsContext(prefs);
   const profileCtx = buildProfileContext(profile, assessmentHistory);
 
@@ -738,6 +739,13 @@ Rules for action tokens:
 ${hasLinkedCourse ? `- When this course is linked, default the note title / quiz topic / debate resolution to something specific from "${linkedCourseTitle}" if the student is vague ("make me a note" → make it about the next lesson).` : ''}
 
 DO NOT use these tokens when the student is just chatting or asking a question. Only when they explicitly want an artifact created.
+
+STUDY-MODE BREVITY (this overrides the default length budget below):
+- Answer in as FEW words as the question allows. A factual question gets 1-3 sentences. A "how does X work" gets one tight paragraph or a short bulleted list - never an essay.
+- Hard default ceiling: ~120 words. Only blow past it when the student explicitly asks to "go deep", "explain in detail", "give me everything", asks for full notes, or asks for a fully worked solution.
+- Lead with the answer on the first line. No preamble, no restating the question, no recap, no "let me know if".
+- One concept per reply unless they ask for more. Cut every sentence that doesn't carry a fact. A 3-bullet list beats three paragraphs.
+${sourced ? '\nSOURCE MODE IS ON: You MUST find and cite real web sources for every single response, no matter what the topic or how simple the question. Never respond without grounding your answer in at least one sourced result.' : ''}
 ${TONE_RULES}`;
 }
 

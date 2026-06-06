@@ -6,7 +6,7 @@ import { listNotes, createNote, deleteNote, getNote, updateNote, generateCues, g
          listTopics, createTopic, updateTopic, deleteTopic, setNoteTopic, getNoteFlashcards } from '../../../api/notes';
 import { apiFetch } from '../../../api/client';
 import { listCurricula, getCurriculum } from '../../../api/curriculum';
-import { peek, fetchOnce, bust } from '../../../api/cache';
+import { peek, fetchOnce, bust, set } from '../../../api/cache';
 import ViewFade from '../../shared/ViewFade';
 import Button from '../../shared/Button';
 import LoadingSpinner from '../../shared/LoadingSpinner';
@@ -19,13 +19,13 @@ import NoteFlashcards from '../../notes/NoteFlashcards';
 import { useToast } from '../../shared/Toast';
 
 function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashcards }) {
-  const [note, setNote] = useState(null);
-  const [loading, setLoading] = useState(true);
+  // Serve from cache so re-opens are instant; always background-refresh for freshness.
+  const [note, setNote] = useState(() => peek(`note:${noteId}`)?.note || null);
+  const [loading, setLoading] = useState(() => !peek(`note:${noteId}`));
   const [saving, setSaving] = useState(false);
   const [genCues, setGenCues] = useState(false);
   const [genSummary, setGenSummary] = useState(false);
   const [saveTimer, setSaveTimer] = useState(null);
-  // Flashcard count for the launcher chip (the deck itself lives in its own view).
   const [fc, setFc] = useState({ count: null, due: 0 });
 
   useEffect(() => {
@@ -40,12 +40,22 @@ function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashca
   }
 
   useEffect(() => {
-    getNote(noteId).then(d => { setNote(d.note); setLoading(false); }).catch(() => setLoading(false));
-  }, [noteId]);
+    let cancelled = false;
+    getNote(noteId).then(d => {
+      if (cancelled) return;
+      setNote(d.note);
+      set(`note:${noteId}`, d);
+      setLoading(false);
+    }).catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [noteId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = useCallback(async (updates) => {
     setSaving(true);
-    try { await updateNote(noteId, updates); } catch {}
+    try {
+      const d = await updateNote(noteId, updates);
+      if (d?.note) { setNote(d.note); set(`note:${noteId}`, d); }
+    } catch {}
     setSaving(false);
   }, [noteId]);
 
@@ -111,16 +121,16 @@ function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashca
 
       {isCornell ? (
         <div className="flex flex-col flex-1 min-h-0 gap-3">
-          <div className="flex-1 min-h-0 grid grid-cols-[200px_1fr] bg-white/[0.02] rounded-2xl border border-white/[0.07] overflow-hidden">
-            <div className="border-r border-white/[0.06] p-3 bg-white/[0.02] overflow-y-auto">
+          <div className="flex-1 min-h-0 grid grid-cols-[200px_1fr] border border-white/[0.08] rounded-lg overflow-hidden">
+            <div className="border-r border-white/[0.07] p-3 overflow-y-auto">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] font-semibold text-white/35 uppercase tracking-wide">Cues</span>
+                <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Cues</span>
                 <button onClick={handleGenCues} disabled={genCues} className="text-white/40 hover:text-white/70 disabled:opacity-50 transition-colors"><Sparkles size={12} /></button>
               </div>
               {(note.cues || []).length > 0 ? (
-                <div className="space-y-1.5">
+                <div>
                   {note.cues.map((cue, i) => (
-                    <div key={i} className="text-[11px] text-white/80 bg-white/[0.04] rounded-xl px-2.5 py-1.5 border border-white/[0.06]">{cue}</div>
+                    <p key={i} className="text-[11px] text-white/65 py-1 border-b border-white/[0.05] last:border-0 leading-snug">{cue}</p>
                   ))}
                 </div>
               ) : (
@@ -134,9 +144,9 @@ function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashca
               placeholder="Notes… markdown supported"
             />
           </div>
-          <div className="bg-white/[0.02] rounded-2xl border border-white/[0.06] p-3 flex-shrink-0">
+          <div className="border-t border-white/[0.08] pt-3 flex-shrink-0">
             <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[10px] font-semibold text-white/35 uppercase tracking-wide">Summary</span>
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Summary</span>
               <button onClick={handleGenSummary} disabled={genSummary} className="flex items-center gap-1 text-[10px] text-white/40 hover:text-white/65 disabled:opacity-50 transition-colors">
                 <Sparkles size={10} /> Generate
               </button>
@@ -150,7 +160,7 @@ function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashca
           </div>
         </div>
       ) : (
-        <div className="flex-1 min-h-0 bg-white/[0.02] rounded-2xl border border-white/[0.06] overflow-hidden">
+        <div className="flex-1 min-h-0 border border-white/[0.07] rounded-lg overflow-hidden">
           <MarkdownNoteEditor
             value={note.mainNotes}
             onChange={v => handleChange('mainNotes', v)}
@@ -160,31 +170,25 @@ function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashca
         </div>
       )}
 
-      {/* Launcher for the flashcards view. The deck opens in its own window
-          (like the note map), not embedded here. */}
       <button
         onClick={() => onOpenFlashcards?.(noteId, note.title)}
-        className="mt-3 flex-shrink-0 flex items-center gap-2 px-3.5 py-2.5 rounded-2xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-white/[0.10] transition-colors text-left"
+        className="mt-3 flex-shrink-0 flex items-center gap-2 py-2 border-t border-white/[0.07] text-white/50 hover:text-white/80 transition-colors text-left w-full"
       >
-        <Layers size={14} className="text-white/45" />
-        <span className="text-[12px] font-semibold text-white/80">Flashcards</span>
+        <Layers size={14} />
+        <span className="text-[12px] font-semibold">Flashcards</span>
         {fc.count != null && (
-          <span className="text-[11px] text-white/40">
+          <span className="text-[11px] text-white/35">
             {fc.count}{fc.due > 0 && <span className="text-blue-300"> · {fc.due} due</span>}
           </span>
         )}
         <span className="flex-1" />
-        <ChevronRight size={14} className="text-white/30" />
+        <ChevronRight size={14} className="text-white/25" />
       </button>
     </div>
   );
 }
 
 export default function NotesApp({ initialNoteId = null, initialMapId = null, initialView = null, initialFlashcardsNoteId = null, initialFlashcardsTitle = null } = {}) {
-  // Optional meta props from the desktop window manager - `initialNoteId`
-  // jumps straight into the editor for that note; `initialMapId` opens
-  // the merged Maps view on that specific map. The legacy Note Map app
-  // entry passes initialView='map' so existing dock icons keep working.
   const toast = useToast();
   const startView = initialFlashcardsNoteId ? 'flashcards'
                     : initialNoteId ? 'editor'
@@ -192,16 +196,10 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
                     : initialView === 'map' ? 'map'
                     : 'list';
   const [view, setView] = useState(startView);
-  // Back button returns to the notes list instead of leaving the site.
   useBrowserBack(view !== 'list', () => setView('list'));
-  // Seed from the in-memory cache so re-opening the app feels instant -
-  // the most-recent list paints on first render and we kick a background
-  // refresh below.
   const cachedNotes = peek('notes:list');
   const cachedMaps = peek('notes:maps');
   const [notes, setNotes] = useState(() => cachedNotes?.notes || []);
-  // Multi-map state. Maps are summaries - each map's nodes+edges are
-  // fetched inside <NoteMap> by id.
   const [maps, setMaps] = useState(() => cachedMaps?.maps || []);
   const [mapsLoading, setMapsLoading] = useState(!cachedMaps);
   const [selectedMapId, setSelectedMapId] = useState(initialMapId);
@@ -213,31 +211,23 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
   const [aiType, setAiType] = useState('regular');
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState(null);
-  // AI source: 'prompt' (free-form) or 'curriculum' (pick curriculum + lessons).
   const [aiSource, setAiSource] = useState('prompt');
   const [curricula, setCurricula] = useState([]);
   const [selectedCurriculumId, setSelectedCurriculumId] = useState(null);
   const [curriculumDetail, setCurriculumDetail] = useState(null);
-  const [selectedLessonIds, setSelectedLessonIds] = useState([]); // [] = whole curriculum
+  const [selectedLessonIds, setSelectedLessonIds] = useState([]);
   const [curriculumLoading, setCurriculumLoading] = useState(false);
   const [selectedNoteId, setSelectedNoteId] = useState(initialNoteId || initialFlashcardsNoteId);
-  // In-app naming modal - replaces the native browser prompt() that
-  // surfaces the URL banner ("www.rushil12.com says…"). `mode` is
-  // 'create' for new map, 'rename' when editing an existing one.
   const [nameDialog, setNameDialog] = useState(null);
-  // Shape: { mode: 'create' | 'rename', initial: '', mapId? }
 
-  // Topics (folders for notes). activeTopicId: null = all notes, 'unfiled' =
-  // notes with no topic, or a topic id. topicDialog drives create/rename.
   const cachedTopics = peek('notes:topics');
   const [topics, setTopics] = useState(() => cachedTopics?.topics || []);
   const [unfiled, setUnfiled] = useState(cachedTopics?.unfiled || 0);
   const [activeTopicId, setActiveTopicId] = useState(null);
-  const [topicDialog, setTopicDialog] = useState(null); // { mode, id?, initial }
-  // Flashcards open in their own view (launched from the editor or a widget), not embedded.
+  const [topicDialog, setTopicDialog] = useState(null);
   const [flashcardsNote, setFlashcardsNote] = useState(
     initialFlashcardsNoteId ? { id: initialFlashcardsNoteId, title: initialFlashcardsTitle || '' } : null,
-  ); // { id, title }
+  );
 
   useEffect(() => {
     fetchOnce('notes:list', listNotes)
@@ -245,7 +235,6 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
       .catch(() => setLoading(false));
   }, []);
 
-  // Load map summaries. We refresh after create/delete via reloadMaps().
   const reloadMaps = useCallback((force = false) => {
     if (force) bust('notes:maps');
     setMapsLoading(!peek('notes:maps'));
@@ -253,9 +242,6 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
       .then(d => {
         const list = d.maps || [];
         setMaps(list);
-        // If we landed on the map view with no specific map selected
-        // (e.g. user clicked the dock Notes icon then "Map" tab), pick
-        // the default one so the canvas isn't blank.
         if (!selectedMapId && list.length > 0) {
           const def = list.find(m => m.isDefault) || list[0];
           if (def) setSelectedMapId(def.id);
@@ -307,8 +293,6 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
     setNameDialog({ mode: 'rename', initial: map.name, mapId: map.id });
   }
 
-  // Single submit handler for both create + rename. Keeps the modal
-  // generic - the surrounding state decides what to do with the name.
   async function handleNameSubmit(name) {
     const trimmed = (name || '').trim() || 'Untitled Map';
     const dialog = nameDialog;
@@ -352,8 +336,6 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
     setView('map');
   }
 
-  // Load the curriculum list the first time the user opens the AI modal in
-  // "curriculum" mode. Cached after that.
   useEffect(() => {
     if (!showAI || aiSource !== 'curriculum' || curricula.length > 0) return;
     listCurricula()
@@ -361,7 +343,6 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
       .catch(() => {});
   }, [showAI, aiSource, curricula.length]);
 
-  // Fetch the full curriculum (units + lessons) when the user picks one.
   useEffect(() => {
     if (!selectedCurriculumId) { setCurriculumDetail(null); return; }
     setCurriculumLoading(true);
@@ -369,7 +350,6 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
       .then(d => {
         const curr = d.curriculum || d;
         setCurriculumDetail(curr);
-        // Default: select all lessons in the curriculum.
         const allLessonIds = [];
         for (const u of (curr.units || [])) for (const l of (u.lessons || [])) allLessonIds.push(l.id);
         setSelectedLessonIds(allLessonIds);
@@ -391,16 +371,12 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
     } catch {}
   }
 
-  // Build the user-visible "what to cover" string, with optional curriculum
-  // lesson content appended as reference material.
   function buildAIUserMessage() {
     const isCornell = aiType === 'cornell';
     const header = `Create a ${isCornell ? 'Cornell' : 'regular'} study note.`;
     if (aiSource !== 'curriculum' || !curriculumDetail) {
       return `${header}\n\nTopic: ${aiPrompt.trim()}`;
     }
-    // Walk selected lessons from the curriculum and concatenate their titles
-    // + content so the AI grounds the note in those specific lessons.
     const lessonIdSet = new Set(selectedLessonIds);
     const sections = [];
     for (const u of (curriculumDetail.units || [])) {
@@ -421,7 +397,6 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
     return body;
   }
 
-  // Ask the AI to draft a full note (title + body + optional cues/summary for Cornell).
   async function handleGenerate() {
     const usingCurriculum = aiSource === 'curriculum' && selectedCurriculumId;
     if (!usingCurriculum && !aiPrompt.trim()) return;
@@ -464,7 +439,9 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
         if (Array.isArray(parsed.cues)) updates.cues = parsed.cues;
         if (typeof parsed.summary === 'string') updates.summary = parsed.summary;
       }
-      await updateNote(noteId, updates);
+      const d = await updateNote(noteId, updates);
+      // Seed cache so the editor opens instantly without a second fetch.
+      if (d?.note) set(`note:${noteId}`, d);
       setNotes(prev => [{ ...created.note, ...updates }, ...prev]);
       bust('notes:list');
       setSelectedNoteId(noteId);
@@ -511,7 +488,6 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
           onOpenFlashcards={(id, title) => { setSelectedNoteId(id); setFlashcardsNote({ id, title }); setView('flashcards'); }}
           onBack={() => {
             setView('list');
-            // Force a refresh in case the body/title/topic changed.
             bust('notes:list');
             fetchOnce('notes:list', listNotes).then(d => setNotes(d.notes || [])).catch(() => {});
             reloadTopics(true);
@@ -590,11 +566,10 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
         </div>
       </div>
 
-      {/* Maps section - merged from the standalone Note Map app. Each map
-          is its own canvas; clicking opens the merged map view. */}
+      {/* Maps */}
       <div className="mb-5">
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-[11px] font-semibold text-white/40 uppercase tracking-wider flex items-center gap-1.5">
+          <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 flex items-center gap-1.5">
             <Network size={12} /> Maps
           </h3>
           <Button size="sm" variant="secondary" onClick={handleCreateMap} disabled={creatingMap || maps.length >= 20}>
@@ -609,10 +584,10 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
               <div
                 key={m.id}
                 onClick={() => openMap(m)}
-                className="group flex items-center gap-2 bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.06] hover:border-white/[0.12] rounded-2xl px-3 py-2.5 cursor-pointer transition-colors"
+                className="group flex items-center gap-2 bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.06] hover:border-white/[0.12] rounded-lg px-3 py-2.5 cursor-pointer transition-colors"
               >
                 <span
-                  className="h-7 w-7 rounded-lg flex items-center justify-center shrink-0"
+                  className="h-7 w-7 rounded-md flex items-center justify-center shrink-0"
                   style={{ background: `${m.color}1F`, color: m.color }}
                 >
                   <Network size={13} />
@@ -651,10 +626,10 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
         )}
       </div>
 
-      {/* Topics - folders for notes. Click one to filter the list below. */}
+      {/* Topics */}
       <div className="mb-5">
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-[11px] font-semibold text-white/40 uppercase tracking-wider flex items-center gap-1.5">
+          <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 flex items-center gap-1.5">
             <Folder size={12} /> Topics
           </h3>
           <Button size="sm" variant="secondary" onClick={() => setTopicDialog({ mode: 'create', initial: '' })}>
@@ -697,39 +672,36 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
 
       <Modal open={showAI} onClose={() => { setShowAI(false); setAiError(null); }} title="Generate note with AI">
         <div className="space-y-3">
-          {/* Source tabs */}
           <div>
             <label className="text-xs font-medium text-white/40 mb-1.5 block">Source</label>
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => setAiSource('prompt')}
-                className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs transition-colors backdrop-blur-sm ${aiSource === 'prompt' ? 'border-blue-400/45 bg-blue-500/15 text-white' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}
+                className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs transition-colors ${aiSource === 'prompt' ? 'border-blue-400/45 bg-blue-500/15 text-white' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}
               >
                 <Wand2 size={12} /> From prompt
               </button>
               <button
                 onClick={() => setAiSource('curriculum')}
-                className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs transition-colors backdrop-blur-sm ${aiSource === 'curriculum' ? 'border-blue-400/45 bg-blue-500/15 text-white' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}
+                className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs transition-colors ${aiSource === 'curriculum' ? 'border-blue-400/45 bg-blue-500/15 text-white' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}
               >
                 <BookOpen size={12} /> From curriculum
               </button>
             </div>
           </div>
 
-          {/* Note type */}
           <div>
             <label className="text-xs font-medium text-white/40 mb-1.5 block">Type</label>
             <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => setAiType('regular')} className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs transition-colors backdrop-blur-sm ${aiType === 'regular' ? 'border-blue-400/45 bg-blue-500/15 text-white' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}>
+              <button onClick={() => setAiType('regular')} className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs transition-colors ${aiType === 'regular' ? 'border-blue-400/45 bg-blue-500/15 text-white' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}>
                 <FileText size={12} /> Regular
               </button>
-              <button onClick={() => setAiType('cornell')} className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs transition-colors backdrop-blur-sm ${aiType === 'cornell' ? 'border-blue-400/45 bg-blue-500/15 text-white' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}>
+              <button onClick={() => setAiType('cornell')} className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs transition-colors ${aiType === 'cornell' ? 'border-blue-400/45 bg-blue-500/15 text-white' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}>
                 <Layout size={12} /> Cornell
               </button>
             </div>
           </div>
 
-          {/* Curriculum source picker */}
           {aiSource === 'curriculum' && (
             <>
               <div>
@@ -737,7 +709,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
                 <select
                   value={selectedCurriculumId || ''}
                   onChange={e => setSelectedCurriculumId(e.target.value || null)}
-                  className="w-full px-3 py-2 rounded-xl border border-white/[0.06] bg-white/[0.04] text-sm text-white/70 outline-none"
+                  className="w-full px-3 py-2 rounded-lg border border-white/[0.06] bg-white/[0.04] text-sm text-white/70 outline-none"
                 >
                   <option value="">- Pick a curriculum -</option>
                   {curricula.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
@@ -765,7 +737,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
                       </div>
                     )}
                   </div>
-                  <div className="max-h-48 overflow-y-auto rounded-xl border border-white/[0.06] bg-white/[0.02] p-2">
+                  <div className="max-h-48 overflow-y-auto rounded-lg border border-white/[0.06] bg-white/[0.02] p-2">
                     {curriculumLoading ? (
                       <div className="flex items-center justify-center py-6 text-xs text-white/30"><InlineProgress active /> Loading lessons…</div>
                     ) : !curriculumDetail ? (
@@ -777,7 +749,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
                           {(u.lessons || []).map(l => {
                             const checked = selectedLessonIds.includes(l.id);
                             return (
-                              <label key={l.id} className="flex items-center gap-2 px-1.5 py-1 rounded-lg hover:bg-white/[0.04] cursor-pointer">
+                              <label key={l.id} className="flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-white/[0.04] cursor-pointer">
                                 <input
                                   type="checkbox"
                                   checked={checked}
@@ -806,7 +778,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
               onChange={e => setAiPrompt(e.target.value)}
               rows={3}
               placeholder={aiSource === 'curriculum' ? 'Extra instructions…' : 'What should the note cover?'}
-              className="w-full px-3 py-2 rounded-xl border border-white/[0.06] bg-white/[0.04] text-sm text-white/70 placeholder-white/20 outline-none resize-none"
+              className="w-full px-3 py-2 rounded-lg border border-white/[0.06] bg-white/[0.04] text-sm text-white/70 placeholder-white/20 outline-none resize-none"
             />
           </div>
 
@@ -834,12 +806,12 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
 
       <Modal open={showCreate} onClose={() => setShowCreate(false)} title="New note">
         <div className="grid grid-cols-2 gap-3">
-          <button onClick={() => handleCreate('regular')} className="flex flex-col items-center gap-2 p-5 rounded-2xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.06] hover:border-white/[0.14] transition-colors text-center backdrop-blur-sm">
+          <button onClick={() => handleCreate('regular')} className="flex flex-col items-center gap-2 p-5 rounded-xl border border-white/[0.08] bg-white/[0.02] hover:bg-white/[0.05] hover:border-white/[0.14] transition-colors text-center">
             <FileText size={24} className="text-white/50" />
             <span className="text-sm font-medium text-white/70">Regular</span>
             <span className="text-xs text-white/30">Freeform</span>
           </button>
-          <button onClick={() => handleCreate('cornell')} className="flex flex-col items-center gap-2 p-5 rounded-2xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.06] hover:border-white/[0.14] transition-colors text-center backdrop-blur-sm">
+          <button onClick={() => handleCreate('cornell')} className="flex flex-col items-center gap-2 p-5 rounded-xl border border-white/[0.08] bg-white/[0.02] hover:bg-white/[0.05] hover:border-white/[0.14] transition-colors text-center">
             <Layout size={24} className="text-white/50" />
             <span className="text-sm font-medium text-white/70">Cornell</span>
             <span className="text-xs text-white/30">Cues + summary</span>
@@ -856,20 +828,18 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
       ) : visibleNotes.length === 0 ? (
         <div className="text-center py-10 text-[12px] text-white/35">No notes in this topic yet.</div>
       ) : (
-        <div className="space-y-1.5">
+        <div>
           {visibleNotes.map(note => {
             const topic = note.topicId ? topicById.get(note.topicId) : null;
             return (
-            <div key={note.id} onClick={() => openNote(note.id)} className="flex items-center gap-3 bg-white/[0.03] rounded-2xl border border-white/[0.06] px-4 py-3 cursor-pointer hover:bg-white/[0.06] hover:border-white/[0.10] transition-colors group">
-              <div className="w-8 h-8 rounded-xl bg-white/[0.07] flex items-center justify-center flex-shrink-0 text-white/45">
-                {note.type === 'cornell' ? <Layout size={14} /> : <FileText size={14} />}
-              </div>
+            <div key={note.id} onClick={() => openNote(note.id)} className="flex items-center gap-3 py-2.5 border-b border-white/[0.06] last:border-b-0 cursor-pointer hover:bg-white/[0.03] rounded-md transition-colors group">
+              {note.type === 'cornell' ? <Layout size={13} className="text-white/35 flex-shrink-0" /> : <FileText size={13} className="text-white/35 flex-shrink-0" />}
               <div className="flex-1 min-w-0">
                 <h3 className="text-sm font-medium text-white/90 truncate">{note.title}</h3>
                 <p className="text-xs text-white/55">{note.type === 'cornell' ? 'Cornell' : 'Note'} · {new Date(note.updatedAt || note.createdAt).toLocaleDateString()}</p>
               </div>
               {topic && (
-                <span className="flex items-center gap-1 text-[10.5px] text-white/55 bg-white/[0.05] border border-white/[0.07] rounded-md px-1.5 py-0.5 flex-shrink-0">
+                <span className="flex items-center gap-1 text-[10.5px] text-white/50 flex-shrink-0">
                   <span className="w-1.5 h-1.5 rounded-full" style={{ background: topic.color }} />
                   <span className="truncate max-w-[90px]">{topic.name}</span>
                 </span>
@@ -890,7 +860,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
               defaultValue={topicDialog.initial || ''}
               onFocus={e => e.currentTarget.select()}
               placeholder="e.g. Biology, Exam 2, Chapter 3"
-              className="w-full px-3.5 py-2.5 rounded-xl border border-white/[0.10] bg-white/[0.04] text-[14px] text-white/90 placeholder-white/30 outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20"
+              className="w-full px-3.5 py-2.5 rounded-lg border border-white/[0.10] bg-white/[0.04] text-[14px] text-white/90 placeholder-white/30 outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20"
             />
             <div className="flex justify-end gap-2">
               <Button type="button" size="sm" variant="ghost" onClick={() => setTopicDialog(null)}>Cancel</Button>
@@ -903,13 +873,8 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
   );
 }
 
-// In-app rename / create dialog for note maps. Replaces the native
-// `prompt()` (which shows the URL banner) with our own Modal so the
-// flow feels like part of the app.
 function NameMapModal({ open, mode, initial, onClose, onSubmit }) {
   const [name, setName] = useState(initial || '');
-  // Reset the local input whenever the dialog opens with a different
-  // seed (e.g. user opens rename after just opening create).
   useEffect(() => {
     if (open) setName(initial || '');
   }, [open, initial]);
@@ -931,7 +896,7 @@ function NameMapModal({ open, mode, initial, onClose, onSubmit }) {
           onChange={e => setName(e.target.value)}
           onFocus={e => e.currentTarget.select()}
           placeholder="Untitled Map"
-          className="w-full px-3.5 py-2.5 rounded-xl border border-white/[0.10] bg-white/[0.04] text-[14px] text-white/90 placeholder-white/30 outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20"
+          className="w-full px-3.5 py-2.5 rounded-lg border border-white/[0.10] bg-white/[0.04] text-[14px] text-white/90 placeholder-white/30 outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20"
         />
         <div className="flex gap-2 justify-end">
           <Button type="button" variant="ghost" size="sm" onClick={onClose}>Cancel</Button>

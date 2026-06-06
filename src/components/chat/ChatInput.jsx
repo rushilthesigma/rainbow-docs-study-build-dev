@@ -40,6 +40,9 @@ export default function ChatInput({
   thinkingMode = true,
   thinkingLocked = false,
   onToggleThinking,
+  // Optional node rendered in the composer top rail (e.g. Study Mode's model
+  // dropdown). Sits between the tool buttons and the char count.
+  composerExtras = null,
   flush = false,
 }) {
   const [text, setText] = useState('');
@@ -305,6 +308,7 @@ export default function ChatInput({
               <Brain size={13} />
             </button>
           )}
+          {composerExtras}
           <span className="flex-1" />
           {text.length > 0 && (
             <span className={`text-[10px] tabular-nums px-1 ${text.length > 1800 ? 'text-rose-500' : 'text-gray-400 dark:text-blue-200/40'}`}>

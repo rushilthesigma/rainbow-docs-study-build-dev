@@ -1,8 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
-import { Sparkles, History, Send, Calculator, Beaker, Lightbulb, Compass, Plus, X, Brain, ChevronRight } from 'lucide-react';
+import { Sparkles, History, Send, Calculator, Beaker, Lightbulb, Compass, Plus, X, Brain, ChevronRight, Cpu, Check, Lock } from 'lucide-react';
 import { sendStudyMessage, listStudySessions, getStudySession, deleteStudySession } from '../../api/curriculum';
+import { syncData } from '../../api/auth';
 import { errorChatMessage } from '../../utils/aiErrors';
 import { Z } from '../../styles/tokens';
+import useKeyboardInset from '../../hooks/useKeyboardInset';
+import { useAuth } from '../../context/AuthContext';
+import { planFromUser } from '../billing/modelAccess';
+import { STUDY_MODELS, HAIKU_FREE_DAILY, resolveStudyModel, canUseStudyModel, requiredPlanLabelFor, studyModelLabel, studyModelHasFreeCap, studyModelBlurb } from '../study/studyModels';
 
 // Mobile-native Study Mode: full-bleed chat, slim title, no Debate
 // button (head-to-head needs a wider canvas), no sidebar. The empty
@@ -16,6 +21,8 @@ const QUICK_PROMPTS = [
 ];
 
 export default function MobileStudy() {
+  const { user, fetchUser } = useAuth();
+  const plan = planFromUser(user);
   const [messages, setMessages] = useState([]);
   const [streamingContent, setStreamingContent] = useState('');
   const [streamingThinking, setStreamingThinking] = useState('');
@@ -25,17 +32,44 @@ export default function MobileStudy() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  // Per-message model pick, mirrors the desktop Study toggle. The saved choice
+  // lives in preferences.studyModel; a plan-locked pick resolves to the floor.
+  const [studyModel, setStudyModel] = useState(() => resolveStudyModel(user?.data?.preferences?.studyModel, plan));
+  const studyModelRef = useRef(studyModel);
+  studyModelRef.current = studyModel;
+  const [modelSheetOpen, setModelSheetOpen] = useState(false);
+  // Free Haiku messages left in the rolling 24h window (non-paid only). Null
+  // until the server reports it on the first send.
+  const [haikuRemaining, setHaikuRemaining] = useState(null);
   const abortRef = useRef(null);
   const streamRef = useRef('');
   const thinkRef = useRef('');
   const scrollerRef = useRef(null);
+  const kbInset = useKeyboardInset();
 
-  // Auto-scroll to bottom on new content
+  // Keep the picker in sync if the cached user (plan / saved pick) changes.
+  useEffect(() => {
+    setStudyModel(resolveStudyModel(user?.data?.preferences?.studyModel, plan));
+  }, [user?.data?.preferences?.studyModel, plan]);
+
+  async function pickStudyModel(key) {
+    if (!canUseStudyModel(key, plan)) return; // locked tiers aren't selectable
+    setStudyModel(key);
+    setModelSheetOpen(false);
+    try {
+      const merged = { ...(user?.data?.preferences || {}), studyModel: key };
+      await syncData({ preferences: merged });
+      await fetchUser();
+    } catch (err) { console.error('save studyModel failed:', err); }
+  }
+
+  // Auto-scroll to bottom on new content - and whenever the keyboard
+  // opens/closes, so the latest message stays pinned above the input.
   useEffect(() => {
     if (scrollerRef.current) {
       scrollerRef.current.scrollTop = scrollerRef.current.scrollHeight;
     }
-  }, [messages, streamingContent]);
+  }, [messages, streamingContent, kbInset]);
 
   function doSend(text) {
     if (!text.trim() || streaming) return;
@@ -50,7 +84,10 @@ export default function MobileStudy() {
     const abort = sendStudyMessage(text, sessionId, {}, [], {
       onChunk: (chunk) => { streamRef.current += chunk; setStreamingContent(streamRef.current); },
       onThinking: (t) => { thinkRef.current += t; setStreamingThinking(thinkRef.current); },
-      onMeta: (d) => { if (d.sessionId) setSessionId(d.sessionId); },
+      onMeta: (d) => {
+        if (d.sessionId) setSessionId(d.sessionId);
+        if (typeof d.studyModel?.haikuRemaining === 'number') setHaikuRemaining(d.studyModel.haikuRemaining);
+      },
       onDone: () => {
         const full = streamRef.current;
         const think = thinkRef.current;
@@ -61,7 +98,7 @@ export default function MobileStudy() {
         setMessages((m) => [...m, errorChatMessage(err)]);
         setStreamingContent(''); setStreamingThinking(''); streamRef.current = ''; thinkRef.current = ''; setStreaming(false);
       },
-    });
+    }, false, false, studyModelRef.current);
     abortRef.current = abort;
   }
 
@@ -106,7 +143,18 @@ export default function MobileStudy() {
     // the parent uses flex-1 itself - `height: 100%` of a flex-grown
     // parent resolves inconsistently across browsers, while `flex-1`
     // on the child is rock solid.
-    <div className="flex-1 min-h-0 flex flex-col bg-[#F4F5F7] dark:bg-[#0a0a14]">
+    <div
+      className="flex-1 min-h-0 flex flex-col bg-[#F4F5F7] dark:bg-[#0a0a14]"
+      // When the on-screen keyboard opens, lift the pinned input form
+      // above it (the message scroller shrinks to match). The shell
+      // already reserves 90px at the bottom for its tab/nav chrome
+      // (which the keyboard covers anyway), so we only need the keyboard
+      // height beyond that. Settles back to 0 on dismiss.
+      style={{
+        paddingBottom: kbInset ? Math.max(0, kbInset - 90) : undefined,
+        transition: 'padding-bottom 0.18s ease-out',
+      }}
+    >
       {/* Slim header */}
       <header className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 dark:border-white/[0.06] flex-shrink-0">
         <div className="w-7 h-7 rounded-lg bg-blue-500 grid place-items-center">
@@ -148,6 +196,22 @@ export default function MobileStudy() {
         className="flex-shrink-0 px-3 py-2.5 border-t border-gray-200 dark:border-white/[0.06] bg-white dark:bg-[#0c0c16]"
         onSubmit={(e) => { e.preventDefault(); doSend(input); }}
       >
+        {/* Model toggle row */}
+        <div className="flex items-center gap-2 mb-2">
+          <button
+            type="button"
+            onClick={() => setModelSheetOpen(true)}
+            disabled={streaming}
+            className="flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-full border border-gray-200 dark:border-white/[0.08] bg-gray-50 dark:bg-[#13131f] text-gray-700 dark:text-gray-200 active:bg-gray-100 dark:active:bg-white/[0.06] disabled:opacity-50"
+          >
+            <Cpu size={13} className="text-blue-500" />
+            <span className="text-[12px] font-semibold max-w-[120px] truncate">{studyModelLabel(studyModel)}</span>
+            <ChevronRight size={12} className="-rotate-90 text-gray-400" />
+          </button>
+          {studyModelHasFreeCap(studyModel, plan) && (
+            <HaikuLimitPill remaining={haikuRemaining} />
+          )}
+        </div>
         <div className="flex items-end gap-2">
           <textarea
             value={input}
@@ -179,6 +243,101 @@ export default function MobileStudy() {
           onDelete={handleDeleteSession}
         />
       )}
+
+      {/* Model picker sheet */}
+      {modelSheetOpen && (
+        <ModelSheet
+          active={studyModel}
+          plan={plan}
+          onClose={() => setModelSheetOpen(false)}
+          onPick={pickStudyModel}
+        />
+      )}
+    </div>
+  );
+}
+
+// ===== Haiku daily-limit pill =====
+// Free Haiku quota indicator. Shows the static daily allowance until the
+// server reports a live count on the first send, then "N left today". Amber
+// when running low / out.
+function HaikuLimitPill({ remaining }) {
+  const known = typeof remaining === 'number';
+  const low = known && remaining <= 3;
+  const label = `${known ? remaining : HAIKU_FREE_DAILY}/${HAIKU_FREE_DAILY}`;
+  return (
+    <span
+      className={`animate-fade-in inline-flex items-center px-2 py-1 rounded-full text-[11px] font-semibold whitespace-nowrap ${
+        low
+          ? 'text-amber-600 dark:text-amber-300/90 bg-amber-500/10'
+          : 'text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-white/[0.05]'
+      }`}
+    >
+      {label}
+    </span>
+  );
+}
+
+// ===== Model picker sheet =====
+// Bottom sheet mirroring the desktop dropdown: lists every study model with
+// provider + blurb. Non-paid users see paid-only models locked with the
+// required plan. The server is the real enforcer (plan gate + Haiku cap).
+function ModelSheet({ active, plan, onClose, onPick }) {
+  return (
+    <div className="fixed inset-0" style={{ zIndex: Z.sheet }}>
+      <button onClick={onClose} aria-label="Close" className="absolute inset-0 bg-black/50 backdrop-blur-[2px] animate-fade-in" />
+      <div className="absolute bottom-0 left-0 right-0 max-h-[70%] rounded-t-3xl bg-white dark:bg-[#13131f] border-t border-gray-200 dark:border-white/[0.06] shadow-2xl flex flex-col animate-slide-up"
+           style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)' }}>
+        <div className="flex justify-center pt-2.5 pb-1">
+          <div className="w-9 h-1 rounded-full bg-gray-300 dark:bg-white/15" />
+        </div>
+        <div className="flex items-center justify-between px-5 pt-1 pb-3 flex-shrink-0">
+          <h3 className="text-[15px] font-bold text-gray-900 dark:text-white tracking-tight">Model</h3>
+          <button onClick={onClose} className="w-8 h-8 rounded-full grid place-items-center text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-3">
+          <div className="space-y-1.5">
+            {STUDY_MODELS.map((m) => {
+              const locked = !canUseStudyModel(m.key, plan);
+              const lockLabel = locked ? requiredPlanLabelFor(m.key) : null;
+              return (
+                <button
+                  key={m.key}
+                  type="button"
+                  disabled={locked}
+                  onClick={() => onPick(m.key)}
+                  className={`w-full flex items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                    active === m.key
+                      ? 'border-blue-400/60 bg-blue-50 dark:bg-blue-500/[0.12]'
+                      : locked
+                        ? 'border-gray-200 dark:border-white/[0.06] opacity-55'
+                        : 'border-gray-200 dark:border-white/[0.06] bg-white dark:bg-[#0e0e18] active:bg-gray-50 dark:active:bg-white/[0.04]'
+                  }`}
+                >
+                  <div className="w-9 h-9 rounded-xl bg-blue-100/70 dark:bg-blue-500/15 text-blue-500 grid place-items-center shrink-0">
+                    <Cpu size={16} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-bold text-gray-900 dark:text-white flex items-center gap-1.5 truncate">
+                      {m.label}
+                      <span className="text-[10px] font-medium text-gray-400 dark:text-white/40">{m.provider}</span>
+                      {locked && lockLabel && (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-300/80">
+                          <Lock size={10} /> {lockLabel}
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">{studyModelBlurb(m.key, plan)}</p>
+                  </div>
+                  {active === m.key && <Check size={16} className="text-blue-500 shrink-0" strokeWidth={3} />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -270,8 +429,8 @@ function TypingBubble() {
 function HistorySheet({ loading, sessions, onClose, onPick, onDelete }) {
   return (
     <div className="fixed inset-0" style={{ zIndex: Z.sheet }}>
-      <button onClick={onClose} aria-label="Close" className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" />
-      <div className="absolute bottom-0 left-0 right-0 max-h-[70%] rounded-t-3xl bg-white dark:bg-[#13131f] border-t border-gray-200 dark:border-white/[0.06] shadow-2xl flex flex-col"
+      <button onClick={onClose} aria-label="Close" className="absolute inset-0 bg-black/50 backdrop-blur-[2px] animate-fade-in" />
+      <div className="absolute bottom-0 left-0 right-0 max-h-[70%] rounded-t-3xl bg-white dark:bg-[#13131f] border-t border-gray-200 dark:border-white/[0.06] shadow-2xl flex flex-col animate-slide-up"
            style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)' }}>
         <div className="flex justify-center pt-2.5 pb-1">
           <div className="w-9 h-1 rounded-full bg-gray-300 dark:bg-white/15" />

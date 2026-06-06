@@ -1,6 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { History, Trash2, Plus, ChevronLeft, Compass, Lightbulb, Calculator, Beaker, Sparkles, Swords, BookOpen, Link2, X, Check, Paperclip, Globe } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { History, Trash2, Plus, ChevronLeft, ChevronDown, Compass, Lightbulb, Calculator, Beaker, Sparkles, Swords, BookOpen, Link2, X, Check, Paperclip, Globe, Cpu, Lock } from 'lucide-react';
 import { sendStudyMessage, listStudySessions, getStudySession, deleteStudySession, listCurricula, extractSourceUrl, extractFiles } from '../../api/curriculum';
+import { syncData } from '../../api/auth';
 import ChatContainer from '../chat/ChatContainer';
 import DebatePanel from './DebatePanel';
 import { errorChatMessage } from '../../utils/aiErrors';
@@ -8,7 +10,8 @@ import { InlineProgress } from '../shared/ProgressBar';
 import { Z } from '../../styles/tokens';
 import { useToast } from '../shared/Toast';
 import { useAuth } from '../../context/AuthContext';
-import { planFromUser, resolveModelTier, modelSupportsThinking, thinkingAlwaysOn } from '../billing/modelAccess';
+import { planFromUser } from '../billing/modelAccess';
+import { STUDY_MODELS, HAIKU_FREE_DAILY, resolveStudyModel, canUseStudyModel, requiredPlanLabelFor, studyModelLabel, studyModelHasFreeCap, studyModelBlurb, studyModelSupportsThinking } from './studyModels';
 
 // Quick-start prompts shown in the empty state. Replaces the bland
 // "Start the conversation..." default with concrete suggestions tied to
@@ -27,14 +30,39 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   // Pro always thinks (locked on); Flash / Flash-Lite default off for snappy
   // study answers and let the user opt in. A ref mirrors the value so doSend
   // reads the latest state even through memoized callbacks.
-  const { user } = useAuth();
-  const effectiveTier = resolveModelTier(user?.data?.preferences?.modelTier, planFromUser(user));
-  const supportsThinking = modelSupportsThinking(effectiveTier);
-  const thinkingLocked = thinkingAlwaysOn(effectiveTier);
+  const { user, fetchUser } = useAuth();
+  const plan = planFromUser(user);
+  // Study Mode model picker (separate from the global tier). The saved pick
+  // lives in preferences.studyModel; a plan-locked pick resolves to the floor.
+  const [studyModel, setStudyModel] = useState(() => resolveStudyModel(user?.data?.preferences?.studyModel, plan));
+  const studyModelRef = useRef(studyModel);
+  studyModelRef.current = studyModel;
+  // Thinking is a hard toggle the user controls for every model: off = no
+  // thinking at all, on = full thinking. Never locked.
+  const thinkingLocked = false;
   const [thinkingPref, setThinkingPref] = useState(false);
   const thinkingOn = thinkingLocked ? true : thinkingPref;
   const thinkingOnRef = useRef(thinkingOn);
   thinkingOnRef.current = thinkingOn;
+  // Live count of free Haiku messages left in the rolling 24h window for
+  // non-paid users. Null until the server reports it on the first send; the
+  // composer pill falls back to the static daily limit until then.
+  const [haikuRemaining, setHaikuRemaining] = useState(null);
+
+  // Keep the picker in sync if the cached user (plan / saved pick) changes.
+  useEffect(() => {
+    setStudyModel(resolveStudyModel(user?.data?.preferences?.studyModel, plan));
+  }, [user?.data?.preferences?.studyModel, plan]);
+
+  async function pickStudyModel(key) {
+    if (!canUseStudyModel(key, plan)) return; // locked tiers aren't selectable
+    setStudyModel(key);
+    try {
+      const merged = { ...(user?.data?.preferences || {}), studyModel: key };
+      await syncData({ preferences: merged });
+      await fetchUser();
+    } catch (err) { console.error('save studyModel failed:', err); }
+  }
   const [messages, setMessages] = useState([]);
   const [streamingContent, setStreamingContent] = useState('');
   const [streamingThinking, setStreamingThinking] = useState('');
@@ -107,7 +135,23 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         streamThinkingRef.current += t;
         setStreamingThinking(streamThinkingRef.current);
       },
-      onMeta: (data) => { if (data.sessionId) setSessionId(data.sessionId); },
+      onMeta: (data) => {
+        if (data.sessionId) setSessionId(data.sessionId);
+        if (typeof data.studyModel?.haikuRemaining === 'number') {
+          setHaikuRemaining(data.studyModel.haikuRemaining);
+        }
+        // Server auto-switched the model (Haiku daily cap hit, or a locked
+        // pick). Snap the toggle to whatever model the server actually used,
+        // then tell the user once rather than silently swapping models.
+        if (data.studyModel?.switched && data.studyModel.key) {
+          setStudyModel(data.studyModel.key);
+          if (data.studyModel.reason === 'haiku-limit') {
+            toast.info('Daily Haiku limit reached — switched to Flash Lite until tomorrow.');
+          } else if (data.studyModel.reason === 'plan') {
+            toast.info('That model needs an upgrade — using Flash Lite.');
+          }
+        }
+      },
       onSource: (src) => {
         streamSourcesRef.current = [...streamSourcesRef.current, src];
         setStreamingSources(streamSourcesRef.current);
@@ -160,7 +204,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         streamArtifactsRef.current = [];
         setStreaming(false);
       },
-    }, wasSourced, !thinkingOnRef.current);
+    }, wasSourced, !thinkingOnRef.current, studyModelRef.current);
     abortRef.current = abort;
   }
 
@@ -296,9 +340,6 @@ export default function StudyModePanel({ className = '', flush = false, initialM
 
   const header = (
     <div className="flex items-center gap-2 px-3 py-2.5 bg-transparent">
-      <div className="w-7 h-7 rounded-xl bg-white/20 dark:bg-white/10 border border-white/40 dark:border-white/15 flex items-center justify-center text-gray-700 dark:text-gray-200 flex-shrink-0">
-        <Sparkles size={13} />
-      </div>
       <span className="text-[13px] font-bold text-gray-900 dark:text-white">Study</span>
       <div className="flex-1" />
       <button
@@ -405,10 +446,23 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         className={className}
         sourceMode={sourceMode}
         onToggleSource={setSourceMode}
-        showThinking={supportsThinking}
+        showThinking={studyModelSupportsThinking(studyModel)}
         thinkingMode={thinkingOn}
         thinkingLocked={thinkingLocked}
         onToggleThinking={setThinkingPref}
+        composerExtras={
+          <div className="flex items-center gap-1.5">
+            <StudyModelDropdown
+              active={studyModel}
+              plan={plan}
+              onPick={pickStudyModel}
+              disabled={streaming}
+            />
+            {studyModelHasFreeCap(studyModel, plan) && (
+              <HaikuLimitPill remaining={haikuRemaining} />
+            )}
+          </div>
+        }
         onUserEditMessage={handleUserEdit}
         onAiInstruct={handleAiInstruct}
         emptyState={emptyState}
@@ -429,6 +483,165 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         />
       )}
     </>
+  );
+}
+
+// ===== Haiku daily-limit pill (composer toolbar) =====
+//
+// Shows the free Haiku quota for non-paid users right next to the model
+// dropdown. Before the first send the server hasn't reported a live count, so
+// it shows the static daily allowance; afterward it shows messages remaining
+// in the rolling 24h window. Turns amber when running low / out.
+function HaikuLimitPill({ remaining }) {
+  const known = typeof remaining === 'number';
+  const low = known && remaining <= 3;
+  const label = `${known ? remaining : HAIKU_FREE_DAILY}/${HAIKU_FREE_DAILY}`;
+  return (
+    <span
+      title={`Free plan: ${HAIKU_FREE_DAILY} Haiku messages per day`}
+      className={`animate-fade-in inline-flex items-center px-2 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap transition-colors ${
+        low
+          ? 'text-amber-600 dark:text-amber-300/90 bg-amber-500/10'
+          : 'text-gray-500 dark:text-blue-200/65 bg-white/30 dark:bg-blue-500/[0.10]'
+      }`}
+    >
+      {label}
+    </span>
+  );
+}
+
+// ===== Study model dropdown (composer toolbar) =====
+//
+// Compact picker that lives on the composer's top rail next to the paperclip /
+// globe / thinking buttons. Opens upward (it sits at the bottom of the panel).
+// Non-paid users see paid-only models locked with the required plan; the server
+// is the real enforcer and applies the rolling Haiku daily cap.
+function StudyModelDropdown({ active, plan, onPick, disabled }) {
+  const [open, setOpen] = useState(false);
+  // `mounted` keeps the portal in the DOM through the close animation; `shown`
+  // drives the opacity/translate so the popover fades both in and out instead
+  // of popping. Without the split, unmounting on close would kill the exit fade.
+  const [mounted, setMounted] = useState(false);
+  const [shown, setShown] = useState(false);
+  // Fixed-position coords for the portaled popover. The composer card has
+  // overflow-hidden, so an in-flow absolute popover gets clipped - we portal
+  // it to <body> and pin it just above the button instead.
+  const [pos, setPos] = useState(null);
+  const btnRef = useRef(null);
+  const popRef = useRef(null);
+
+  const WIDTH = 256;
+  function place() {
+    const b = btnRef.current?.getBoundingClientRect();
+    if (!b) return;
+    setPos({
+      left: Math.max(8, Math.min(b.left, window.innerWidth - WIDTH - 8)),
+      bottom: window.innerHeight - b.top + 6, // grow upward from button top
+    });
+  }
+  function toggle() {
+    if (!open) place();
+    setOpen((o) => !o);
+  }
+
+  // Drive the enter/exit fade. On open: mount, then flip `shown` on the next
+  // frame so the transition runs from the initial (faded) state. On close:
+  // clear `shown` to fade out, then unmount after the 150ms transition.
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      const id = requestAnimationFrame(() => setShown(true));
+      return () => cancelAnimationFrame(id);
+    }
+    setShown(false);
+    const t = setTimeout(() => setMounted(false), 160);
+    return () => clearTimeout(t);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e) {
+      if (btnRef.current?.contains(e.target)) return;
+      if (popRef.current?.contains(e.target)) return;
+      setOpen(false);
+    }
+    function reposition() { place(); }
+    document.addEventListener('mousedown', onDoc);
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
+    };
+  }, [open]);
+
+  return (
+    <div className="relative">
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={toggle}
+        disabled={disabled}
+        title="Choose model"
+        className="flex items-center gap-1 pl-1.5 pr-1 py-1 rounded-lg text-gray-500 dark:text-blue-200/65 hover:text-gray-800 dark:hover:text-blue-50 hover:bg-white/40 dark:hover:bg-blue-500/[0.12] disabled:opacity-40 transition-colors"
+      >
+        <Cpu size={13} />
+        <span className="text-[11px] font-semibold max-w-[88px] truncate">{studyModelLabel(active)}</span>
+        <ChevronDown size={11} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {mounted && pos && createPortal(
+        <div
+          ref={popRef}
+          style={{
+            position: 'fixed',
+            left: pos.left,
+            bottom: pos.bottom,
+            width: WIDTH,
+            zIndex: 9999,
+            opacity: shown ? 1 : 0,
+            transform: shown ? 'translateY(0)' : 'translateY(4px)',
+            transition: 'opacity 0.15s ease-out, transform 0.15s ease-out',
+          }}
+          className="rounded-xl border border-gray-200 dark:border-white/[0.12] bg-white dark:bg-[#1b1b1f] shadow-2xl p-1.5"
+        >
+          {STUDY_MODELS.map((m) => {
+            const locked = !canUseStudyModel(m.key, plan);
+            const lockLabel = locked ? requiredPlanLabelFor(m.key) : null;
+            return (
+              <button
+                key={m.key}
+                type="button"
+                onClick={() => { if (!locked) { onPick(m.key); setOpen(false); } }}
+                disabled={locked}
+                className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left transition-colors ${
+                  active === m.key
+                    ? 'bg-gray-100 dark:bg-white/[0.09]'
+                    : locked
+                      ? 'opacity-55 cursor-not-allowed'
+                      : 'hover:bg-gray-50 dark:hover:bg-white/[0.06]'
+                }`}
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-[12px] font-bold text-gray-900 dark:text-white flex items-center gap-1.5 truncate">
+                    {m.label}
+                    <span className="text-[9px] font-medium text-gray-400 dark:text-white/40">{m.provider}</span>
+                    {locked && lockLabel && (
+                      <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 dark:text-amber-300/80">
+                        <Lock size={9} /> {lockLabel}
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-[10px] text-gray-500 dark:text-white/45 truncate">{studyModelBlurb(m.key, plan)}</p>
+                </div>
+                {active === m.key && <Check size={13} className="text-gray-500 dark:text-white/80 shrink-0" strokeWidth={3} />}
+              </button>
+            );
+          })}
+        </div>,
+        document.body
+      )}
+    </div>
   );
 }
 

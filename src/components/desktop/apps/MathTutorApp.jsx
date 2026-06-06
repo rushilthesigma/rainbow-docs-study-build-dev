@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Calculator, Pen, Eraser, Undo2, Trash2, Sparkles, Check,
   ArrowLeft, ClipboardCheck, Settings, MessageSquare, Layers, RotateCcw,
-  Play, ChevronLeft, ChevronRight, ListChecks,
+  Play, ChevronLeft, ChevronRight, ListChecks, Cpu, ChevronDown, Lock,
 } from 'lucide-react';
 import { sendMathTutorMessage, generateProblemSet } from '../../../api/mathTutor';
 import MathProblemSet from './MathProblemSet';
@@ -10,6 +11,12 @@ import ChatContainer from '../../chat/ChatContainer';
 import { errorChatMessage } from '../../../utils/aiErrors';
 import useBrowserBack from '../../../hooks/useBrowserBack';
 import { InlineProgress } from '../../shared/ProgressBar';
+import { useAuth } from '../../../context/AuthContext';
+import { planFromUser } from '../../billing/modelAccess';
+import { syncData } from '../../../api/auth';
+import {
+  STUDY_MODELS, resolveStudyModel, canUseStudyModel, requiredPlanLabelFor, studyModelLabel,
+} from '../../study/studyModels';
 
 const STORAGE_KEY = 'covalent-math-tutor-state-v1';
 const PEN_SIZES = { thin: 2, medium: 4, thick: 7 };
@@ -257,6 +264,87 @@ export function TutorCanvas({ onCaptureReady, initialStrokes = null, onStrokesCh
   );
 }
 
+// ============== MODEL PICKER ==============
+// Compact dropdown (portaled so the app window's overflow doesn't clip it),
+// sharing the Study Mode model registry. Locked tiers show their required plan.
+function MathModelPicker({ active, plan, onPick, disabled = false }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos]   = useState(null);
+  const btnRef = useRef(null);
+  const popRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const r = btnRef.current?.getBoundingClientRect();
+      if (r) setPos({ left: Math.min(r.left, window.innerWidth - 232), top: r.bottom + 6 });
+    };
+    place();
+    const onDoc = (e) => {
+      if (popRef.current?.contains(e.target) || btnRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    window.addEventListener('resize', place);
+    return () => { document.removeEventListener('mousedown', onDoc); window.removeEventListener('resize', place); };
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        onClick={() => !disabled && setOpen(o => !o)}
+        disabled={disabled}
+        title="Choose tutor model"
+        className={`flex items-center gap-1 px-2 h-7 rounded-lg text-[11px] font-semibold transition-colors disabled:opacity-40 ${
+          open ? 'bg-white/15 text-white' : 'text-white/40 hover:text-white/80 hover:bg-white/10'
+        }`}
+      >
+        <Cpu size={13} />
+        <span className="max-w-[78px] truncate">{studyModelLabel(active)}</span>
+        <ChevronDown size={11} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && pos && createPortal(
+        <div
+          ref={popRef}
+          style={{ position: 'fixed', left: pos.left, top: pos.top, width: 224, zIndex: 9999 }}
+          className="rounded-xl border border-white/10 bg-[#1b1b1f] shadow-2xl p-1.5 animate-fade-in"
+        >
+          {STUDY_MODELS.map((m) => {
+            const locked = !canUseStudyModel(m.key, plan);
+            const lockLabel = locked ? requiredPlanLabelFor(m.key) : null;
+            return (
+              <button
+                key={m.key}
+                onClick={() => { if (!locked) { onPick(m.key); setOpen(false); } }}
+                disabled={locked}
+                className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left transition-colors ${
+                  active === m.key ? 'bg-white/[0.09]' : locked ? 'opacity-55 cursor-not-allowed' : 'hover:bg-white/[0.06]'
+                }`}
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-[12px] font-bold text-white flex items-center gap-1.5 truncate">
+                    {m.label}
+                    <span className="text-[9px] font-medium text-white/40">{m.provider}</span>
+                    {locked && lockLabel && (
+                      <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-300/80">
+                        <Lock size={9} /> {lockLabel}
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-[10px] text-white/45 truncate">{m.blurb}</p>
+                </div>
+                {active === m.key && <Check size={13} className="text-white/80 shrink-0" strokeWidth={3} />}
+              </button>
+            );
+          })}
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
+
 // ============== MAIN APP ==============
 export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, onBack = null, defaultMode = 'both' } = {}) {
   const persisted = loadState();
@@ -288,6 +376,28 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
   const thinkRef   = useRef('');
   const abortRef   = useRef(null);
   const captureRef = useRef(null);
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+
+  // Per-session model picker (shares the Study Mode registry; persisted under
+  // preferences.mathTutorModel). A ref mirrors the pick so doSend reads the
+  // latest value through memoized callbacks.
+  const { user, fetchUser } = useAuth();
+  const plan = planFromUser(user);
+  const [model, setModel] = useState(() => resolveStudyModel(user?.data?.preferences?.mathTutorModel, plan));
+  const modelRef = useRef(model);
+  modelRef.current = model;
+  useEffect(() => {
+    setModel(resolveStudyModel(user?.data?.preferences?.mathTutorModel, plan));
+  }, [user?.data?.preferences?.mathTutorModel, plan]);
+  async function pickModel(key) {
+    if (!canUseStudyModel(key, plan)) return;
+    setModel(key);
+    try {
+      await syncData({ preferences: { ...(user?.data?.preferences || {}), mathTutorModel: key } });
+      await fetchUser();
+    } catch (err) { console.error('save mathTutorModel failed:', err); }
+  }
 
   useEffect(() => {
     if (seedTopic) return;
@@ -311,7 +421,7 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
     streamRef.current = '';
     thinkRef.current = '';
 
-    const history = [...messages, userMsg].slice(-20).map((m, i, arr) => {
+    const history = [...messages, userMsg].slice(-50).map((m, i, arr) => {
       const isLast = i === arr.length - 1;
       return { role: m.role, content: m.content, ...(isLast && m.images ? { images: m.images } : {}) };
     });
@@ -320,6 +430,7 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
       topic: (topicOverride ?? topic).trim(),
       customInstructions: customInstructions.trim(),
       phase,
+      model: modelRef.current,
       messages: history.map(({ role, content }) => ({ role, content })),
       images: imageDataUrl ? [{ dataUrl: imageDataUrl, mimeType: 'image/png' }] : [],
     };
@@ -409,9 +520,6 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
         <div className="max-w-md mx-auto px-6 py-10 space-y-5">
           {/* Icon + title */}
           <div className="text-center">
-            <div className="w-11 h-11 rounded-2xl bg-white/10 flex items-center justify-center mx-auto mb-3">
-              <Calculator size={20} className="text-[#aaa]" />
-            </div>
             <h1 className="text-white text-[17px] font-semibold tracking-tight">Math Tutor</h1>
           </div>
 
@@ -529,7 +637,7 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
       };
     }
     setStreaming(true); setStreamingContent(''); setStreamingThinking(''); streamRef.current = ''; thinkRef.current = '';
-    const body = { topic: topic.trim(), customInstructions: customInstructions.trim(), phase: 'practice', messages: apiHistory, images: [] };
+    const body = { topic: topic.trim(), customInstructions: customInstructions.trim(), phase: 'practice', model: modelRef.current, messages: apiHistory, images: [] };
     const abort = sendMathTutorMessage(body, {
       onChunk: (c) => { streamRef.current += c; setStreamingContent(streamRef.current); },
       onThinking: (t) => { thinkRef.current += t; setStreamingThinking(thinkRef.current); },
@@ -558,11 +666,10 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
         >
           <ArrowLeft size={14} />
         </button>
-        <div className="w-6 h-6 rounded-lg bg-white/10 flex items-center justify-center">
-          <Sparkles size={12} className="text-white" />
-        </div>
         <span className="text-white font-semibold text-[14px] tracking-tight truncate">{topic}</span>
         <div className="flex-1" />
+
+        <MathModelPicker active={model} plan={plan} onPick={pickModel} disabled={streaming} />
 
         {/* Mode toggle */}
         <div className="flex items-center gap-0.5 bg-white/5 border border-white/10 rounded-lg p-0.5">

@@ -10,3 +10,6 @@ export const deleteUser     = (uid) => apiFetch(`/api/admin/users/${uid}`, { met
 export const getStudySession     = (uid, sid) => apiFetch(`/api/admin/users/${uid}/chats/study/${sid}`);
 export const getStandaloneLesson = (uid, lid) => apiFetch(`/api/admin/users/${uid}/chats/lesson/${lid}`);
 export const getCurriculumLesson = (uid, cid, lid) => apiFetch(`/api/admin/users/${uid}/chats/curriculum/${cid}/${lid}`);
+
+// Quiz bowl deep-dive for a specific user
+export const getUserQuizBowl = (uid) => apiFetch(`/api/admin/users/${uid}/quizbowl`);

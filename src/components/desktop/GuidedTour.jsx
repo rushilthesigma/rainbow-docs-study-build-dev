@@ -142,7 +142,14 @@ export default function GuidedTour() {
             try { el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' }); } catch {}
             setHasScrolled(true);
           }
-          setRect({ top: r.top, left: r.left, width: r.width, height: r.height });
+          // Only update state when the rect actually changed to avoid
+          // 60fps re-renders when the element is stationary.
+          setRect(prev => {
+            if (prev &&
+              prev.top === r.top && prev.left === r.left &&
+              prev.width === r.width && prev.height === r.height) return prev;
+            return { top: r.top, left: r.left, width: r.width, height: r.height };
+          });
         } else {
           setRect(null);
         }

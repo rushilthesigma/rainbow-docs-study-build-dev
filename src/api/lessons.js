@@ -4,7 +4,7 @@ export async function listLessons() {
   return apiFetch('/api/lessons');
 }
 
-// ===== STANDALONE LESSON BLOCKS (Claudius 4R/4Q + final SRS) =====
+// ===== STANDALONE LESSON BLOCKS (varied block types + final quiz) =====
 // Mirrors the curriculum-side block API but for the standalone Lessons
 // app - no parent curriculum/unit. Server endpoints live on
 // /api/lessons/:id/blocks/*.

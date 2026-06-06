@@ -3,11 +3,11 @@ import {
   Shield, ArrowLeft, Ban, Trash2, User, BookOpen, FileText, Target, Layers,
   MessageSquare, Lightbulb, Trophy, CreditCard, Search, Crown, Calendar,
   RefreshCw, ChevronRight, Zap, ClipboardList, BarChart3, X, Check,
-  Swords, Activity, ChevronDown, Sparkles,
+  Swords, Activity, ChevronDown, Sparkles, TrendingDown, Clock,
 } from 'lucide-react';
 import {
   checkAdmin, listUsers, getUser, toggleBan, deleteUser,
-  getStudySession, getStandaloneLesson, getCurriculumLesson,
+  getStudySession, getStandaloneLesson, getCurriculumLesson, getUserQuizBowl,
 } from '../../../api/admin';
 import { ownerGrantPro, ownerRevokePro } from '../../../api/billing';
 import LoadingSpinner from '../../shared/LoadingSpinner';
@@ -995,10 +995,6 @@ function QuizzesTab({ u }) {
   const assessments = u.assessmentHistory || [];
   const lessonQuizzes = u.lessonQuizResults || [];
   const curriculumQuizzes = u.curriculumQuizResults || [];
-  const quizBowlGames = u.usage?.quizBowlGames ?? 0;
-
-  const hasAnything = assessments.length || lessonQuizzes.length || curriculumQuizzes.length || quizBowlGames;
-  if (!hasAnything) return <Empty msg="No quiz results yet" />;
 
   return (
     <div className="space-y-5">
@@ -1089,19 +1085,339 @@ function QuizzesTab({ u }) {
         </div>
       )}
 
-      {/* Quiz Bowl */}
-      {quizBowlGames > 0 && (
-        <div>
-          <h3 className="text-[11px] font-semibold text-white/40 uppercase tracking-wider mb-2 flex items-center gap-1">
-            <Zap size={10} /> Quiz Bowl
-          </h3>
-          <div className="px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.06]">
-            <p className="text-xs text-white/75">{quizBowlGames} game{quizBowlGames !== 1 ? 's' : ''} played today</p>
+      {/* Quiz Bowl - rich admin view, lazy-loaded */}
+      <QuizBowlAdminSection uid={u.id} quizBowlGamesToday={u.usage?.quizBowlGames ?? 0} />
+    </div>
+  );
+}
+
+/* =====================================================================
+ * QUIZ BOWL ADMIN SECTION
+ * Lazy-loads the full quiz bowl dataset for a user via the admin
+ * endpoint. Shows: aggregate stats, per-category accuracy bars, the
+ * hidden student profile (strengths / weaknesses / buzz style /
+ * struggle + mastery topics), and an expandable per-set history with
+ * per-question breakdowns.
+ * ===================================================================*/
+function QuizBowlAdminSection({ uid, quizBowlGamesToday }) {
+  const [qbData, setQbData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [loadErr, setLoadErr] = useState(null);
+  const [showAll, setShowAll] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    setLoadErr(null);
+    getUserQuizBowl(uid)
+      .then(d => setQbData(d))
+      .catch(e => setLoadErr(e?.message || 'Failed to load'))
+      .finally(() => setLoading(false));
+  }, [uid]);
+
+  const hdr = (
+    <div className="flex items-center gap-1.5 mb-2">
+      <Zap size={10} className="text-white/40" />
+      <h3 className="text-[11px] font-semibold text-white/40 uppercase tracking-wider">Quiz Bowl</h3>
+      {!loading && qbData?.stats?.totalSets > 0 && (
+        <span className="text-[10px] text-white/20 font-normal">({qbData.stats.totalSets} sets)</span>
+      )}
+      {quizBowlGamesToday > 0 && (
+        <span className="ml-1 px-1.5 py-0.5 rounded-full bg-violet-500/20 border border-violet-400/30 text-violet-300 text-[9px] font-bold tabular-nums">
+          {quizBowlGamesToday} today
+        </span>
+      )}
+    </div>
+  );
+
+  if (loading) return (
+    <div>
+      {hdr}
+      <div className="flex items-center justify-center py-6 rounded-xl border border-white/[0.06] bg-white/[0.02]">
+        <LoadingSpinner size={16} />
+      </div>
+    </div>
+  );
+
+  if (loadErr) return (
+    <div>
+      {hdr}
+      <p className="text-[11px] text-rose-400 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/20">{loadErr}</p>
+    </div>
+  );
+
+  const stats = qbData?.stats;
+  const sets = qbData?.sets || [];
+  const profile = qbData?.secretProfile;
+
+  if (!stats?.totalSets) return (
+    <div>
+      {hdr}
+      <div className="px-3 py-3 rounded-lg bg-white/[0.03] border border-white/[0.06] text-xs text-white/35 text-center">
+        No completed sets yet
+        {quizBowlGamesToday > 0 && (
+          <span className="ml-1 text-white/50">&middot; {quizBowlGamesToday} game{quizBowlGamesToday !== 1 ? 's' : ''} started today</span>
+        )}
+      </div>
+    </div>
+  );
+
+  // Category accuracy bars (sorted by question volume)
+  const catEntries = Object.entries(stats.categoryStats || {})
+    .map(([cat, v]) => ({ cat, acc: v.total ? Math.round((v.correct / v.total) * 100) : 0, total: v.total }))
+    .sort((a, b) => b.total - a.total);
+
+  // Buzz style styling
+  const buzzStyle = profile?.buzzStyle;
+  const buzzStyleCls = buzzStyle?.style === 'aggressive'
+    ? 'text-rose-300 bg-rose-500/15 border-rose-400/30'
+    : buzzStyle?.style === 'balanced'
+    ? 'text-emerald-300 bg-emerald-500/15 border-emerald-400/30'
+    : buzzStyle?.style === 'cautious'
+    ? 'text-amber-300 bg-amber-500/15 border-amber-400/30'
+    : 'text-white/45 bg-white/[0.06] border-white/[0.12]';
+
+  const visibleSets = showAll ? sets : sets.slice(0, 6);
+
+  return (
+    <div className="space-y-3">
+      {hdr}
+
+      {/* Aggregate stats */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <QBStatTile label="Sets" value={stats.totalSets} />
+        <QBStatTile
+          label="Accuracy"
+          value={`${stats.accuracy}%`}
+          accent={stats.accuracy >= 70 ? 'emerald' : stats.accuracy >= 50 ? 'amber' : 'rose'}
+        />
+        <QBStatTile label="NAQT pts" value={stats.totalPoints.toLocaleString()} />
+        <QBStatTile label="Study time" value={fmtDur(stats.totalDurationMs)} />
+      </div>
+
+      {/* Category breakdown */}
+      {catEntries.length > 0 && (
+        <div className="rounded-xl border border-white/[0.07] bg-white/[0.03] p-3">
+          <p className="text-[9.5px] uppercase tracking-[0.15em] font-bold text-white/30 mb-2.5 flex items-center gap-1">
+            <TrendingDown size={9} /> Category Breakdown
+          </p>
+          <div className="space-y-1.5">
+            {catEntries.map(({ cat, acc, total }) => {
+              const barCls = acc >= 70 ? 'bg-emerald-400/70' : acc >= 50 ? 'bg-amber-400/70' : 'bg-rose-400/70';
+              return (
+                <div key={cat} className="grid grid-cols-[72px_1fr_56px] items-center gap-2">
+                  <span className="text-[11px] text-white/70 font-medium truncate">{cat}</span>
+                  <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+                    <div className={`h-full rounded-full ${barCls}`} style={{ width: `${Math.max(4, acc)}%` }} />
+                  </div>
+                  <span className="text-[10px] text-white/40 tabular-nums text-right">{acc}% · {total}</span>
+                </div>
+              );
+            })}
           </div>
+        </div>
+      )}
+
+      {/* Student profile */}
+      {profile && (
+        <div className="rounded-xl border border-white/[0.07] bg-white/[0.03] p-3 space-y-3">
+          <p className="text-[9.5px] uppercase tracking-[0.15em] font-bold text-white/30">Student Profile</p>
+
+          {/* Buzz style */}
+          {buzzStyle && buzzStyle.style !== 'unknown' && buzzStyle.samples > 0 && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] text-white/40">Buzz style</span>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border capitalize ${buzzStyleCls}`}>
+                {buzzStyle.style}
+              </span>
+              <span className="text-[10px] text-white/30 tabular-nums">
+                avg {buzzStyle.avgPosition}% through &middot; {buzzStyle.samples} samples
+              </span>
+            </div>
+          )}
+
+          {/* Strengths */}
+          {profile.strengths?.length > 0 && (
+            <div className="flex items-start gap-2 flex-wrap">
+              <span className="text-[10px] text-white/40 flex-shrink-0 pt-0.5">Strengths</span>
+              <div className="flex flex-wrap gap-1">
+                {profile.strengths.map((s, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-emerald-400/30 bg-emerald-500/10 text-emerald-300 text-[10px] font-semibold">
+                    {s.category}
+                    <span className="text-emerald-300/60 font-normal">{s.accuracy}%</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Weaknesses */}
+          {profile.weaknesses?.length > 0 && (
+            <div className="flex items-start gap-2 flex-wrap">
+              <span className="text-[10px] text-white/40 flex-shrink-0 pt-0.5">Weaknesses</span>
+              <div className="flex flex-wrap gap-1">
+                {profile.weaknesses.map((w, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-rose-400/30 bg-rose-500/10 text-rose-300 text-[10px] font-semibold">
+                    {w.category}
+                    <span className="text-rose-300/60 font-normal">{w.accuracy}%</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Struggle topics */}
+          {profile.struggleTopics?.length > 0 && (
+            <div>
+              <p className="text-[9.5px] uppercase tracking-[0.14em] font-bold text-white/25 mb-1.5">Keeps Missing</p>
+              <div className="flex flex-wrap gap-1">
+                {profile.struggleTopics.map((t, i) => (
+                  <span key={i} className="px-2 py-0.5 rounded border border-white/[0.08] bg-white/[0.03] text-[10px] text-white/55">
+                    {t.topic}
+                    <span className="ml-1.5 text-rose-300/70 tabular-nums">{t.correct}/{t.seen}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Mastery topics */}
+          {profile.masteryTopics?.length > 0 && (
+            <div>
+              <p className="text-[9.5px] uppercase tracking-[0.14em] font-bold text-white/25 mb-1.5">Mastered</p>
+              <div className="flex flex-wrap gap-1">
+                {profile.masteryTopics.map((t, i) => (
+                  <span key={i} className="px-2 py-0.5 rounded border border-emerald-400/20 bg-emerald-500/[0.08] text-[10px] text-emerald-300/70">
+                    {t.topic}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Set history */}
+      <div>
+        <p className="text-[9.5px] uppercase tracking-[0.15em] font-bold text-white/30 mb-1.5 flex items-center gap-1">
+          <Clock size={9} /> Set History
+        </p>
+        <div className="space-y-1">
+          {visibleSets.map(s => <QBSetRow key={s.id} s={s} />)}
+        </div>
+        {sets.length > 6 && (
+          <button
+            onClick={() => setShowAll(v => !v)}
+            className="mt-1.5 w-full text-[11px] text-white/35 hover:text-white/60 py-1.5 rounded-lg border border-white/[0.06] hover:border-white/[0.12] transition-colors"
+          >
+            {showAll ? 'Show fewer' : `Show all ${sets.length} sets`}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* Compact stat tile matching AdminApp visual language */
+function QBStatTile({ label, value, accent }) {
+  const valCls = accent === 'emerald' ? 'text-emerald-300'
+    : accent === 'amber' ? 'text-amber-300'
+    : accent === 'rose' ? 'text-rose-300'
+    : 'text-white/90';
+  return (
+    <div className="rounded-xl border border-white/[0.07] bg-white/[0.03] px-3 py-2.5">
+      <div className="text-[9.5px] uppercase tracking-[0.14em] font-bold text-white/30 mb-0.5">{label}</div>
+      <div className={`text-[16px] font-bold tabular-nums leading-none ${valCls}`}>{value}</div>
+    </div>
+  );
+}
+
+/* Expandable set row with per-question breakdown */
+function QBSetRow({ s }) {
+  const [open, setOpen] = useState(false);
+  const pct = s.total ? Math.round((s.score / s.total) * 100) : 0;
+  const hasPoints = typeof s.points === 'number';
+  const ago = fmtRelative(Date.now() - new Date(s.finishedAt).getTime());
+  const scoreCls = pct >= 70
+    ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/25'
+    : pct >= 50
+    ? 'text-white/80 bg-white/[0.06] border-white/[0.12]'
+    : 'text-rose-300 bg-rose-500/10 border-rose-500/25';
+
+  return (
+    <div className="rounded-lg bg-white/[0.03] border border-white/[0.07] overflow-hidden">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center gap-2.5 px-3 py-2 text-left">
+        <div className={`min-w-[54px] px-2 py-0.5 rounded border text-center text-[11px] font-bold tabular-nums flex-shrink-0 ${scoreCls}`}>
+          {hasPoints ? `${s.points}pt` : `${s.score}/${s.total}`}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[12px] font-medium text-white/85 truncate">
+            {s.category} <span className="text-white/35 font-normal">&middot; {s.difficulty}</span>
+          </p>
+          <p className="text-[10px] text-white/35">
+            {ago} &middot; {s.source === 'ai' ? 'AI' : 'QB'} &middot; {s.score}/{s.total} &middot; {fmtDur(s.durationMs)}
+          </p>
+        </div>
+        {s.perQuestion?.length > 0 && (
+          <ChevronDown size={13} className={`text-white/30 transition-transform flex-shrink-0 ${open ? 'rotate-180' : ''}`} />
+        )}
+      </button>
+      {open && s.perQuestion?.length > 0 && (
+        <div className="border-t border-white/[0.05] bg-black/20 px-3 py-2 space-y-1">
+          {s.perQuestion.map((q, i) => {
+            const pts = q.points;
+            const ptsCls = pts === 15 ? 'text-amber-300'
+              : pts === 10 ? 'text-emerald-300'
+              : pts === -5 ? 'text-rose-300'
+              : 'text-white/35';
+            return (
+              <div key={i} className="flex items-start gap-2 text-[11px] py-0.5">
+                <span className={`mt-0.5 flex-shrink-0 ${q.correct ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {q.correct ? <Check size={10} /> : <X size={10} />}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <span className="font-semibold text-white/80">{q.correctAnswer}</span>
+                  {!q.correct && q.answer && (
+                    <span className="text-white/35 ml-1.5">&rarr; {q.answer}</span>
+                  )}
+                  <span className="text-white/25 ml-1.5 text-[9px]">{q.category}</span>
+                </div>
+                <div className="flex-shrink-0 flex items-center gap-1.5">
+                  {q.buzzWord >= 0 && (
+                    <span className="text-[9px] text-white/25 tabular-nums">w{q.buzzWord + 1}/{q.totalWords}</span>
+                  )}
+                  {typeof pts === 'number' && (
+                    <span className={`text-[10px] font-bold tabular-nums ${ptsCls}`}>
+                      {pts > 0 ? `+${pts}` : pts}
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
   );
+}
+
+function fmtDur(ms) {
+  const total = Math.round((ms || 0) / 1000);
+  if (total < 60) return `${total}s`;
+  const min = Math.floor(total / 60);
+  if (min < 60) return `${min}m`;
+  const h = Math.floor(min / 60);
+  return `${h}h ${min % 60}m`;
+}
+
+function fmtRelative(deltaMs) {
+  const m = Math.floor(deltaMs / 60_000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return `${d}d ago`;
+  return new Date(Date.now() - deltaMs).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 function OtherTab({ u }) {

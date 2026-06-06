@@ -603,6 +603,11 @@ function Shell({
           overflow: freeMode ? 'hidden' : undefined,
           backdropFilter: opacity < 100 ? 'blur(24px) saturate(160%)' : undefined,
           WebkitBackdropFilter: opacity < 100 ? 'blur(24px) saturate(160%)' : undefined,
+          // Keep the composited blur layer permanently GPU-pinned so the
+          // browser doesn't demote/re-promote it on each background repaint,
+          // which is what causes the whole-screen flash.
+          willChange: opacity < 100 ? 'transform' : undefined,
+          transform: opacity < 100 ? 'translateZ(0)' : undefined,
           transition: freeMode
             ? 'background-color 0.2s, border-color 0.2s'
             : 'background-color 0.2s, border-color 0.2s, background-image 0.2s, border-radius 0.22s, min-height 0.22s cubic-bezier(0.34,1.56,0.64,1)',
@@ -840,18 +845,9 @@ function CustomWidget({ id, position, cols, rows, config = {}, accent, opacity, 
 }
 
 /* ── pomodoro timer ── */
-function PomodoroWidget({ id, position, cols, rows, accent, opacity, radius, settings = {} }) {
-  const { updateWidget } = useWidgets();
-  const focusMin = settings.focusMin ?? 25;
-  const breakMin = settings.breakMin ?? 5;
-  const phase   = settings.phase   ?? 'focus';   // 'focus' | 'break'
-  const running = settings.running ?? false;
-  // `endsAt` is an absolute ms timestamp so the timer stays accurate even when
-  // the widget unmounts or the tab is backgrounded. When paused, `remaining`
-  // (ms) holds the leftover time.
-  const endsAt    = settings.endsAt    ?? null;
-  const remaining = settings.remaining ?? focusMin * 60_000;
-
+// The live timer display is split into a leaf so the 250ms tick only
+// re-renders the digits - not the surrounding Shell (same fix as ClockBody).
+function PomodoroBody({ id, running, endsAt, remaining, phase, focusMin, breakMin, settings, updateWidget, cols, rows }) {
   const [, force] = useState(0);
   useEffect(() => {
     if (!running) return;
@@ -859,11 +855,12 @@ function PomodoroWidget({ id, position, cols, rows, accent, opacity, radius, set
     return () => clearInterval(t);
   }, [running]);
 
-  const msLeft = running && endsAt ? Math.max(0, endsAt - Date.now()) : remaining;
   const totalMs = (phase === 'focus' ? focusMin : breakMin) * 60_000;
+  const msLeft = running && endsAt ? Math.max(0, endsAt - Date.now()) : remaining;
   const pct = Math.max(0, Math.min(1, 1 - msLeft / totalMs));
   const mm = Math.floor(msLeft / 60_000);
   const ss = Math.floor((msLeft % 60_000) / 1000);
+  const accentColor = phase === 'focus' ? '#f97316' : '#34d399';
 
   // Auto-advance when the clock hits zero.
   useEffect(() => {
@@ -883,53 +880,69 @@ function PomodoroWidget({ id, position, cols, rows, accent, opacity, radius, set
     updateWidget(id, { settings: { ...settings, running: false, endsAt: null, remaining: totalMs } });
   }
 
-  const accentColor = phase === 'focus' ? '#f97316' : '#34d399';
-
   const timerSize = scale(34, cols, rows);
   const barH = Math.max(3, scale(3, cols, rows, 0.06, 0.12));
   const btnText = scale(10, cols, rows, 0.06, 0.10);
   const iconPx = scale(9, cols, rows, 0.06, 0.10);
   return (
-    <Shell id={id} position={position} label={phase === 'focus' ? 'Focus' : 'Break'} cols={cols} rows={rows} accent={accent} opacity={opacity} radius={radius}>
-      <div className="px-3.5 pb-3.5">
-        <div className="flex items-end gap-1.5">
-          <span
-            className="font-black text-white/92 tabular-nums leading-none"
-            style={{ fontSize: timerSize }}
-          >
-            {String(mm).padStart(2, '0')}:{String(ss).padStart(2, '0')}
-          </span>
-        </div>
-        <div className="rounded-full bg-white/[0.08] mt-2 overflow-hidden" style={{ height: barH }}>
-          <div className="h-full rounded-full transition-[width] duration-200" style={{ width: `${pct * 100}%`, background: accentColor }} />
-        </div>
-        <div data-nodrag className="flex items-center gap-1.5 mt-2.5">
-          {running ? (
-            <button
-              onClick={pause}
-              className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/[0.10] text-white/75 hover:bg-white/[0.16] transition-colors"
-              style={{ fontSize: btnText }}
-            >
-              <Pause size={iconPx} /> Pause
-            </button>
-          ) : (
-            <button
-              onClick={start}
-              className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/[0.10] text-white/75 hover:bg-white/[0.16] transition-colors"
-              style={{ fontSize: btnText }}
-            >
-              <Play size={iconPx} /> Start
-            </button>
-          )}
+    <div className="px-3.5 pb-3.5">
+      <div className="flex items-end gap-1.5">
+        <span
+          className="font-black text-white/92 tabular-nums leading-none"
+          style={{ fontSize: timerSize }}
+        >
+          {String(mm).padStart(2, '0')}:{String(ss).padStart(2, '0')}
+        </span>
+      </div>
+      <div className="rounded-full bg-white/[0.08] mt-2 overflow-hidden" style={{ height: barH }}>
+        <div className="h-full rounded-full transition-[width] duration-200" style={{ width: `${pct * 100}%`, background: accentColor }} />
+      </div>
+      <div data-nodrag className="flex items-center gap-1.5 mt-2.5">
+        {running ? (
           <button
-            onClick={reset}
-            className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/[0.04] text-white/45 hover:bg-white/[0.10] hover:text-white/70 transition-colors"
+            onClick={pause}
+            className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/[0.10] text-white/75 hover:bg-white/[0.16] transition-colors"
             style={{ fontSize: btnText }}
           >
-            <RotateCcw size={iconPx} /> Reset
+            <Pause size={iconPx} /> Pause
           </button>
-        </div>
+        ) : (
+          <button
+            onClick={start}
+            className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/[0.10] text-white/75 hover:bg-white/[0.16] transition-colors"
+            style={{ fontSize: btnText }}
+          >
+            <Play size={iconPx} /> Start
+          </button>
+        )}
+        <button
+          onClick={reset}
+          className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/[0.04] text-white/45 hover:bg-white/[0.10] hover:text-white/70 transition-colors"
+          style={{ fontSize: btnText }}
+        >
+          <RotateCcw size={iconPx} /> Reset
+        </button>
       </div>
+    </div>
+  );
+}
+
+function PomodoroWidget({ id, position, cols, rows, accent, opacity, radius, settings = {} }) {
+  const { updateWidget } = useWidgets();
+  const focusMin = settings.focusMin ?? 25;
+  const breakMin = settings.breakMin ?? 5;
+  const phase    = settings.phase    ?? 'focus';
+  const running  = settings.running  ?? false;
+  const endsAt   = settings.endsAt   ?? null;
+  const remaining = settings.remaining ?? focusMin * 60_000;
+  return (
+    <Shell id={id} position={position} label={phase === 'focus' ? 'Focus' : 'Break'} cols={cols} rows={rows} accent={accent} opacity={opacity} radius={radius}>
+      <PomodoroBody
+        id={id} running={running} endsAt={endsAt} remaining={remaining}
+        phase={phase} focusMin={focusMin} breakMin={breakMin}
+        settings={settings} updateWidget={updateWidget}
+        cols={cols} rows={rows}
+      />
     </Shell>
   );
 }

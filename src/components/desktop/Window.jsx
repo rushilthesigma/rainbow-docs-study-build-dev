@@ -19,7 +19,7 @@ function MacTitleBar({ windowId, isActive, title, onDragStart, onDoubleClick, ti
       }
     : { background: isActive ? `rgba(232,232,234,${a})` : `rgba(240,240,240,${a})` };
   return (
-    <div className="h-8 flex items-center flex-shrink-0 select-none backdrop-blur-md" style={barStyle} onPointerDown={onDragStart} onDoubleClick={onDoubleClick} data-titlebar={windowId}>
+    <div className="h-8 flex items-center flex-shrink-0 select-none" style={barStyle} onPointerDown={onDragStart} onDoubleClick={onDoubleClick} data-titlebar={windowId}>
       <div className="flex items-center gap-[7px] px-3" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
         <button onClick={e => { e.stopPropagation(); closeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FF5F57] hover:brightness-90 flex items-center justify-center" title="Close"><X size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#4a0002]" /></button>
         <button onClick={e => { e.stopPropagation(); minimizeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FEBC2E] hover:brightness-90 flex items-center justify-center" title="Minimize"><Minus size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#5a3e00]" /></button>
@@ -183,7 +183,10 @@ export default function Window({ win, isActive, children }) {
         // hot-reload class race) can't reintroduce visible corners.
         ...(fullBleed ? { borderRadius: 0 } : null),
         // Minimize = shrink + fade (CSS-transition driven, never unmount).
-        transform: minimized ? 'scale(0.2)' : 'scale(1)',
+        // translateZ(0) + willChange keep the window pinned to its own GPU
+        // compositor layer so the backdrop-blur never needs to re-rasterize.
+        transform: minimized ? 'scale(0.2) translateZ(0)' : 'scale(1) translateZ(0)',
+        willChange: 'transform',
         transformOrigin: 'bottom center',
         opacity: minimized ? 0 : 1,
         pointerEvents: minimized ? 'none' : 'auto',

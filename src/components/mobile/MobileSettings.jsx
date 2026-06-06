@@ -10,11 +10,11 @@ import { Z } from '../../styles/tokens';
 // Mobile-native settings - plan banner removed (it's not actionable
 // from this screen anyway). Model preference is now a real picker
 // sheet. Theme toggle stays inline.
-// Tiers map to Gemini 3 models: 3.1 Pro / 3.5 Flash / 3.1 Flash-Lite.
+// Each tier spans a Gemini + Claude model; the server auto-picks per request.
 const MODEL_OPTIONS = [
-  { value: 'pro',        label: '3.1 Pro',        description: 'Advanced math & code · deepest reasoning' },
-  { value: 'flash',      label: '3.5 Flash',      description: 'All-around help · solid for most lessons' },
-  { value: 'flash-lite', label: '3.1 Flash-Lite', description: 'Fastest answers · light tasks' },
+  { value: 'pro',      label: 'Pro',      description: 'Advanced math & code · deepest reasoning' },
+  { value: 'balanced', label: 'Balanced', description: 'All-around help · solid for most lessons' },
+  { value: 'speed',    label: 'Speed',    description: 'Fastest answers · light tasks' },
 ];
 
 export default function MobileSettings() {

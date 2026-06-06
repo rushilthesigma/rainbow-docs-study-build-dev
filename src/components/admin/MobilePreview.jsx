@@ -58,23 +58,22 @@ export default function MobilePreview() {
   }
 
   return (
-    <div className="h-full w-full flex flex-col bg-black">
+    <div className="h-full w-full flex flex-col bg-[#0d0d18]">
       <DevToolbar onReload={reload} onOpenInTab={openInTab} />
-      {/* The phone screen - black bg behind status bar, then the live
-          iframe of the real site at phone width. */}
-      <div className="relative flex-1 min-h-0 overflow-hidden">
-        <MockStatusBar />
-        <iframe
-          ref={iframeRef}
-          key={reloadKey}
-          src={src}
-          title="Mobile site preview"
-          className="absolute inset-0 w-full h-full pt-[26px] bg-white dark:bg-[#0a0a14] border-0"
-          // sandbox is intentionally NOT restricted - we want full
-          // same-origin access so the iframe can hit the real APIs
-          // and share the auth token via localStorage.
-          allow="clipboard-write *;"
-        />
+      {/* Center the 375px phone viewport so the window is desktop-sized
+          but the iframe stays phone-width (triggers the mobile breakpoint). */}
+      <div className="flex-1 min-h-0 flex items-stretch justify-center overflow-hidden py-2 px-4">
+        <div className="relative w-[375px] flex-shrink-0 rounded-2xl overflow-hidden border border-white/10 shadow-xl shadow-black/60">
+          <MockStatusBar />
+          <iframe
+            ref={iframeRef}
+            key={reloadKey}
+            src={src}
+            title="Mobile site preview"
+            className="absolute inset-0 w-full h-full pt-[26px] bg-white dark:bg-[#0a0a14] border-0"
+            allow="clipboard-write *;"
+          />
+        </div>
       </div>
     </div>
   );

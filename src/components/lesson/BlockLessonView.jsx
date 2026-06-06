@@ -3,6 +3,14 @@ import { ArrowLeft, Trophy, Lightbulb } from 'lucide-react';
 import StageTracker from './StageTracker';
 import ReadingBlock from './ReadingBlock';
 import QuizBlock from './QuizBlock';
+import ExampleBlock from './ExampleBlock';
+import RecapBlock from './RecapBlock';
+import ApplicationBlock from './ApplicationBlock';
+import ChallengeBlock from './ChallengeBlock';
+import OpenAnswerBlock from './OpenAnswerBlock';
+import DiscussionBlock from './DiscussionBlock';
+import MatchingBlock from './MatchingBlock';
+import FillBlankBlock from './FillBlankBlock';
 import ProgressBar from '../shared/ProgressBar';
 import { SkeletonProse } from '../shared/Skeleton';
 import ViewFade from '../shared/ViewFade';
@@ -14,14 +22,13 @@ import {
   gradeOpenBlock as curriculumGradeOpenBlock,
 } from '../../api/curriculum';
 
-// Block-based lesson runner. Walks the user through 8 stages:
-//   R1 → Q1 → R2 → Q2 → R3 (SRS) → Q3 → R4 → FINAL QUIZ
-//
-// When the surrounding window is maximized or the browser is in
-// fullscreen, the lesson swaps to a side-by-side layout: the current
-// reading sits on the left, its paired quiz on the right. The student
-// can read and answer concurrently - the next pair loads after the
-// quiz is submitted.
+// Block-based lesson runner. A lesson is a sequence of typed blocks the
+// student steps through one at a time - readings, quizzes, worked
+// examples, recaps, real-world applications, challenges, open-answer
+// prompts, AI discussions, and matching / fill-in-the-blank games. The
+// AI picks the mix per lesson; a final quiz is appended lazily at the
+// end. Each block renders with its own component and reports back via
+// onComplete (or a grader) so the runner can mark it done and advance.
 export default function BlockLessonView({ curriculumId, lesson, onBack, api: apiProp, backLabel = 'Back to curriculum' }) {
   const api = useMemo(() => {
     if (apiProp) return apiProp;
@@ -46,7 +53,10 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
 
   useEffect(() => {
     let cancelled = false;
-    if (blocks.length >= 7) return;
+    // Already have blocks (count varies by difficulty: 5/7/10/14) - the
+    // server is idempotent, so don't refetch and risk swapping IDs the
+    // child blocks are holding.
+    if (blocks.length > 0) return;
     (async () => {
       setGenerating(true); setErr('');
       try {
@@ -67,7 +77,12 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
     setActiveIdx(i => Math.min(blocks.length - 1, i + 1));
   }
 
-  async function handleReadingComplete() {
+  // Generic "this block is done" handler. Self-contained blocks (reading,
+  // example, recap, application, challenge, discussion, matching,
+  // fill-blank) call this from their Continue button; the server marks
+  // the block complete and we advance. Quiz and open-answer have their
+  // own grading handlers below.
+  async function handleBlockComplete() {
     const block = blocks[activeIdx];
     if (!block) return;
     if (block.completedAt) {
@@ -126,20 +141,60 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
   }
 
   const active = blocks[activeIdx];
-  const allDone = blocks.length === 8 && blocks.every(b => b.completedAt);
+  // Done = the lazily-appended final quiz is present AND every block is
+  // complete. Block count varies by difficulty, so a hardcoded length
+  // check (== 8) wrongly left non-intermediate lessons never "done".
+  const allDone = blocks.length > 0 && !!blocks[blocks.length - 1]?.isFinal && blocks.every(b => b.completedAt);
   const avgQuizScore = (() => {
     const qs = blocks.filter(b => b.type === 'quiz' && typeof b.score === 'number').map(b => b.score);
     return qs.length ? Math.round(qs.reduce((s, n) => s + n, 0) / qs.length) : 0;
   })();
 
-  // Width container: in side-by-side mode we let the lesson breathe to
-  // ~7xl so two columns actually fit. The single-block layout keeps
-  // its tighter reading-width column.
-  // Reading and quiz are independent sequential blocks - same width
-  // as every other variety block (example, recap, etc.) - so the
-  // student advances through them one at a time, the way they walk
-  // through any other lesson step.
+  // Every block is its own sequential step at the same reading width -
+  // the student advances through them one at a time.
   const wrapWidth = 'max-w-3xl';
+
+  // Dispatch the active block to the component that renders its type.
+  // Self-contained blocks (reading / example / recap / application /
+  // challenge / discussion / matching / fill-blank) get the generic
+  // completion handler; quiz and open-answer get their graders. Unknown
+  // or malformed legacy blocks fall back to a reading rendering so a
+  // step never shows up blank.
+  function renderActiveBlock() {
+    if (!active) return null;
+    const props = { key: active.id, block: active, onComplete: handleBlockComplete };
+    switch (active.type) {
+      case 'quiz':
+        return (
+          <QuizBlock
+            key={active.id}
+            block={active}
+            onComplete={handleQuizSubmit}
+            gradeFn={(blockId, responses) => api.gradeBlock(blockId, responses)}
+          />
+        );
+      case 'open':
+        return (
+          <OpenAnswerBlock
+            key={active.id}
+            block={active}
+            gradeFn={handleOpenSubmit}
+            onComplete={handleBlockComplete}
+            continueLabel="Continue"
+          />
+        );
+      case 'example':     return <ExampleBlock {...props} continueLabel="Continue" />;
+      case 'recap':       return <RecapBlock {...props} />;
+      case 'application': return <ApplicationBlock {...props} continueLabel="Continue" />;
+      case 'challenge':   return <ChallengeBlock {...props} continueLabel="Continue" />;
+      case 'discussion':  return <DiscussionBlock {...props} />;
+      case 'matching':    return <MatchingBlock {...props} />;
+      case 'fill-blank':  return <FillBlankBlock {...props} />;
+      case 'reading':     return <ReadingBlock {...props} continueLabel="Continue" />;
+      default:
+        return <ReadingBlock key={active.id} block={normalizeToReading(active)} onComplete={handleBlockComplete} continueLabel="Continue" />;
+    }
+  }
 
   return (
     <div className={`w-full ${wrapWidth} mx-auto px-5 md:px-8 py-7 md:py-9`}>
@@ -173,7 +228,7 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
           <ProgressBar
             active
             label="Building your lesson"
-            hint="4 readings + 4 quizzes · 15-30 seconds"
+            hint="A mix of readings, quizzes, and exercises · 15-30 seconds"
             duration={20000}
           />
           <div className="mt-6 space-y-3 opacity-40">
@@ -188,7 +243,7 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
         </div>
       )}
 
-      {blocks.length >= 7 && (
+      {blocks.length > 0 && (
         <>
           <StageTracker blocks={blocks} activeIdx={activeIdx} onJump={(i) => setActiveIdx(i)} />
 
@@ -209,7 +264,7 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
               <h2 className="text-[28px] md:text-[32px] font-semibold tracking-[-0.02em] text-white mb-2">
                 Lesson complete
               </h2>
-              <p className="text-white/55 text-[14px] mb-1">4 readings and 4 quizzes finished.</p>
+              <p className="text-white/55 text-[14px] mb-1">All {blocks.length} blocks finished.</p>
               <p className="text-[13px] text-emerald-200/85 mb-7">
                 Average quiz score
                 <span className="ml-2 font-mono font-bold text-white text-[15px] tabular-nums">{avgQuizScore}%</span>
@@ -221,21 +276,9 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
                 <ArrowLeft size={14} /> {backLabel}
               </button>
             </div>
-          ) : active?.type === 'quiz' ? (
-            <QuizBlock
-              key={active.id}
-              block={active}
-              onComplete={handleQuizSubmit}
-              gradeFn={(blockId, responses) => api.gradeBlock(blockId, responses)}
-            />
-          ) : active ? (
-            // Lessons are now reading-only. Any block type other than
-            // `quiz` (legacy lessons may still have example / recap /
-            // application / challenge / open / discussion / matching /
-            // fill-blank) renders as a ReadingBlock with a synthesized
-            // markdown body so existing user data doesn't render blank.
-            <ReadingBlock key={active.id} block={normalizeToReading(active)} onComplete={handleReadingComplete} />
-          ) : null}
+          ) : (
+            renderActiveBlock()
+          )}
           </ViewFade>
         </>
       )}
@@ -243,11 +286,10 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
   );
 }
 
-// Lessons are reading-only. The AI now generates only `reading` blocks
-// (plus a final quiz at the end), but lessons saved before this change
-// still have the variety types in user data. Rather than break those,
-// flatten any non-reading block into a reading-shaped block by
-// stitching together whatever text content the block carried.
+// Fallback only. Known block types render with their own component; this
+// catches an unknown type or a malformed/legacy block missing the fields
+// its component needs, flattening whatever text it carried into a
+// reading-shaped block so a step never renders blank.
 function normalizeToReading(block) {
   if (!block) return block;
   if (block.type === 'reading' && block.content) return block;

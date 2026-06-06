@@ -1,26 +1,31 @@
-import { BookOpen, ListChecks, Trophy, Sparkles, Globe, Flame, ClipboardList, PenTool } from 'lucide-react';
+import { BookOpen, ListChecks, Trophy, Sparkles, Globe, Flame, ClipboardList, PenTool, MessagesSquare, Puzzle, PencilLine } from 'lucide-react';
 
 // Maps a block's `type` to the label + icon shown in the stage tracker
-// chip. Reading + quiz keep the original wording; the new variety
-// types surface with their own labels so the student knows what's
-// coming.
+// chip. Reading + quiz keep the original wording; the variety types
+// surface with their own labels so the student knows what's coming.
 const TYPE_LABELS = {
-  reading:     'Reading',
-  quiz:        'Quiz',
-  example:     'Worked Example',
-  recap:       'Recap',
-  application: 'In the Wild',
-  challenge:   'Challenge',
-  open:        'Open Answer',
+  reading:      'Reading',
+  quiz:         'Quiz',
+  example:      'Worked Example',
+  recap:        'Recap',
+  application:  'In the Wild',
+  challenge:    'Challenge',
+  open:         'Open Answer',
+  discussion:   'Discussion',
+  matching:     'Matching',
+  'fill-blank': 'Fill in the Blank',
 };
 const TYPE_ICONS = {
-  reading:     BookOpen,
-  quiz:        ListChecks,
-  example:     Sparkles,
-  recap:       ClipboardList,
-  application: Globe,
-  challenge:   Flame,
-  open:        PenTool,
+  reading:      BookOpen,
+  quiz:         ListChecks,
+  example:      Sparkles,
+  recap:        ClipboardList,
+  application:  Globe,
+  challenge:    Flame,
+  open:         PenTool,
+  discussion:   MessagesSquare,
+  matching:     Puzzle,
+  'fill-blank': PencilLine,
 };
 
 export default function StageTracker({ blocks = [], activeIdx = 0, onJump }) {
@@ -73,7 +78,7 @@ export default function StageTracker({ blocks = [], activeIdx = 0, onJump }) {
             if (!raw) return null;
             const stripped = raw
               .replace(new RegExp(`^${stageName}\\s*[-\\-:·]\\s*`, 'i'), '')
-              .replace(/^(Reading|Quiz|Example|Recap|Application|Challenge)\s+\d*\s*[-\-:·]\s*/i, '');
+              .replace(/^(Reading|Quiz|Example|Recap|Application|Challenge|Open Answer|Open|Discussion|Matching|Fill in the Blank)\s+\d*\s*[-\-:·]\s*/i, '');
             const display = stripped || raw;
             if (display === stageName) return null;
             return (

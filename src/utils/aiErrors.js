@@ -12,6 +12,14 @@ export function friendlyAIError(raw) {
   // Message-limit hit: the streamer attaches `_code` from the server's
   // `error` field and (since the limit update) the plan/upgradeKind.
   const code = raw?._code || raw?.error;
+
+  if (code === 'haiku_limit_reached' || msg.includes('haiku_limit_reached')) {
+    return {
+      title: 'Daily Haiku limit reached',
+      body: `You've used all your free Haiku messages today. Upgrade to Plus for unlimited Haiku, or switch to Flash Lite to keep chatting for free.`,
+    };
+  }
+
   const isLimit = code === 'message_limit_reached'
     || msg.includes('message_limit_reached')
     || msg.includes("today's message limit")

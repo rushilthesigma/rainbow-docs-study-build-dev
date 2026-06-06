@@ -277,9 +277,9 @@ export default function SettingsPage() {
             } catch (err) { console.error('Failed to save model tier:', err); }
           }
           const options = [
-            { value: 'pro',        label: '3.1 Pro',        description: '· advanced math & code' },
-            { value: 'flash',      label: '3.5 Flash',      description: '· all-around help' },
-            { value: 'flash-lite', label: '3.1 Flash-Lite', description: '· fastest answers' },
+            { value: 'pro',      label: 'Pro',      description: '· advanced math & code' },
+            { value: 'balanced', label: 'Balanced', description: '· all-around help' },
+            { value: 'speed',    label: 'Speed',    description: '· fastest answers' },
           ].map((o) => {
             if (canUseModel(o.value, plan)) return o;
             return { ...o, locked: true, lockLabel: requiredPlanFor(o.value)?.label };
@@ -297,7 +297,7 @@ export default function SettingsPage() {
                 onChange={setTier}
               />
               <p className="text-[10px] text-white/25 mt-2 leading-relaxed">
-                All Gemini 3. 3.1 Pro for proofs, 3.5 Flash for default, 3.1 Flash-Lite for short Q&amp;A.
+                Each tier spans multiple models (Gemini + Claude) and picks the best one automatically. Pro for proofs, Balanced for everyday work, Speed for quick Q&amp;A.
               </p>
             </div>
           );

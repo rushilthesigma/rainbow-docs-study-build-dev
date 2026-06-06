@@ -9,6 +9,7 @@ import bcrypt from 'bcryptjs';
 import multer from 'multer';
 import Stripe from 'stripe';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import Anthropic from '@anthropic-ai/sdk';
 import { createRequire } from 'module';
 const _require = createRequire(import.meta.url);
 const pdfParse = _require('pdf-parse');
@@ -32,21 +33,48 @@ dotenv.config({ path: join(__dirname, '.env'), override: true });
 const app = express();
 const PORT = process.env.PORT || 3002;
 
-// ===== Google Gemini =====
+// ===== AI providers: Google Gemini + Anthropic Claude =====
+// The app is multi-model. Each speed/balanced/pro tier maps to BOTH a Gemini
+// model and a Claude model; which provider actually serves a request is
+// decided per-user by providerForUser() (new users → Claude for a better
+// first impression; established users → Gemini). callGemini() is the single
+// entry point and routes Claude model ids to callClaude() automatically.
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 
-// Model ids, verified live against the ListModels API on this key (all three
-// are generateContent-capable). Each tier resolves to a DISTINCT real model so
-// the model picker genuinely changes which model serves a request:
-//   pro        → gemini-3.1-pro-preview  (Gemini 3.1 Pro — deepest reasoning)
-//   flash      → gemini-3.5-flash        (Gemini 3.5 Flash — latest flagship, default)
-//   flash-lite → gemini-3.1-flash-lite   (Gemini 3.1 Flash-Lite — fastest + cheapest)
-// All Gemini 3 era; no 2.5 fallbacks.
+// Gemini ids, verified live against the ListModels API (all generateContent-
+// capable). Each tier resolves to a DISTINCT real model so the picker
+// genuinely changes which model serves a request.
 const GEMINI_PRO        = 'gemini-3.1-pro-preview';
 const GEMINI_FLASH      = 'gemini-3.5-flash';
 const GEMINI_FLASH_LITE = 'gemini-3.1-flash-lite';
+
+// Claude ids. Haiku 4.5 is the fast/cheap first-impression model used for
+// new-user curriculum generation; Sonnet 4.6 backs the balanced + pro tiers.
+const CLAUDE_HAIKU  = 'claude-haiku-4-5-20251001';
+const CLAUDE_SONNET = 'claude-sonnet-4-6';
+
+// Tier → { gemini, claude } pairs. speed = flash-lite/haiku, balanced =
+// flash/sonnet, pro = pro/sonnet. providerForUser() picks which half runs.
+const TIER_MODELS = {
+  speed:    { gemini: GEMINI_FLASH_LITE, claude: CLAUDE_HAIKU },
+  balanced: { gemini: GEMINI_FLASH,      claude: CLAUDE_SONNET },
+  pro:      { gemini: GEMINI_PRO,        claude: CLAUDE_SONNET },
+};
+const CLAUDE_MODELS = new Set([CLAUDE_HAIKU, CLAUDE_SONNET]);
+const isClaudeModel = (id) => CLAUDE_MODELS.has(id) || /^claude/i.test(String(id || ''));
+
 const DEFAULT_MODEL = GEMINI_FLASH;
 const FALLBACK_MODEL = GEMINI_FLASH_LITE;
+
+// Map any model id to its Gemini sibling. Streaming + vision paths run on
+// Gemini only (no Anthropic streaming wired), so they call this to coerce a
+// Claude id back to the equivalent-tier Gemini model rather than 404-ing.
+const geminiSiblingOf = (id) => {
+  if (!isClaudeModel(id)) return id || DEFAULT_MODEL;
+  if (id === CLAUDE_HAIKU) return GEMINI_FLASH_LITE;
+  return GEMINI_FLASH; // Sonnet → Flash (balanced); Pro tier streams on Flash too
+};
 
 // How many blocks the AI generates per lesson, before the final quiz
 // is appended. Difficulty drives this - beginner is a quick foothold,
@@ -71,6 +99,8 @@ const fallbackFor = (name) => {
 };
 const genAI = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
 if (!GEMINI_API_KEY) console.warn('GEMINI_API_KEY is not set - AI calls will fail');
+const anthropic = ANTHROPIC_API_KEY ? new Anthropic({ apiKey: ANTHROPIC_API_KEY }) : null;
+if (!ANTHROPIC_API_KEY) console.warn('ANTHROPIC_API_KEY is not set - Claude calls will fall back to Gemini');
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 
 // Data storage - try multiple locations until one works
@@ -281,37 +311,161 @@ function getPlan(user, email) {
 // "Pro" in the legacy sense = any paid tier. New code that needs to
 // distinguish Plus vs Lifetime vs Pro should call getPlan() directly.
 function isPro(user, email) { return PAID_TIERS.has(getPlan(user, email)); }
-// Three tiers selectable via preferences.modelTier:
-//   'pro'        → gemini-3.1-pro-preview          (default - deepest reasoning)
-//   'flash'      → gemini-3.1-flash-preview        (balanced - faster, lower cost)
-//   'flash-lite' → gemini-3.1-flash-lite-preview   (fastest + cheapest)
-// Free users always get FREE (Flash) regardless of preference.
+// Three tiers selectable via preferences.modelTier, each spanning two models:
+//   'speed'    → flash-lite / Claude Haiku   (fastest + cheapest, the floor)
+//   'balanced' → flash / Claude Sonnet       (all-around, any paid tier)
+//   'pro'      → pro / Claude Sonnet          (deepest reasoning, Pro plan)
+// Old tier names (flash-lite/flash) are still accepted and normalized.
+function normalizeTier(tier) {
+  if (tier === 'flash-lite') return 'speed';
+  if (tier === 'flash') return 'balanced';
+  return tier; // 'speed' | 'balanced' | 'pro' pass through unchanged
+}
 // Which model tiers a plan may use. Mirrors canUseModel() in
 // src/components/billing/modelAccess.js — keep the allow-lists in sync.
-//   pro        → Pro plan only
-//   flash      → any paid tier (PAID_TIERS: plus / lifetime / pro)
-//   flash-lite → everyone
+//   pro       → Pro plan only
+//   balanced  → any paid tier (PAID_TIERS: plus / lifetime / pro)
+//   speed     → everyone
 function canUseTier(tier, plan) {
-  if (tier === 'pro') return plan === 'pro';
-  if (tier === 'flash') return PAID_TIERS.has(plan);
-  if (tier === 'flash-lite') return true;
+  const t = normalizeTier(tier);
+  if (t === 'pro') return plan === 'pro';
+  if (t === 'balanced') return PAID_TIERS.has(plan);
+  if (t === 'speed') return true;
   return false; // unknown tier → unusable, falls through to bestTierForPlan
 }
 // Best tier a plan is allowed to use, for an unset or plan-locked preference.
-// flash-lite has no requirement, so a result is guaranteed.
+// speed has no requirement, so a result is guaranteed.
 function bestTierForPlan(plan) {
-  return ['pro', 'flash', 'flash-lite'].find((t) => canUseTier(t, plan)) || 'flash-lite';
+  return ['pro', 'balanced', 'speed'].find((t) => canUseTier(t, plan)) || 'speed';
 }
-const TIER_MODEL = { pro: GEMINI_PRO, flash: GEMINI_FLASH, 'flash-lite': GEMINI_FLASH_LITE };
-function modelForUser(user, email) {
-  const tier = user?.data?.preferences?.modelTier;
+// The effective speed/balanced/pro tier for a user (after plan gating).
+function tierForUser(user, email) {
+  const tier = normalizeTier(user?.data?.preferences?.modelTier);
   const plan = getPlan(user, email);
-  // Honor an explicit, allowed preference; otherwise serve the best tier the
-  // plan can use. So a Plus/Lifetime user with a stale 'pro' or unset
-  // preference gets Flash (not Flash Lite), and a Pro user with an unset
-  // preference gets Pro. Mirrors resolveModelTier() in modelAccess.js.
-  const effective = tier && canUseTier(tier, plan) ? tier : bestTierForPlan(plan);
-  return TIER_MODEL[effective];
+  return tier && canUseTier(tier, plan) ? tier : bestTierForPlan(plan);
+}
+
+// "First impression" = a brand-new account that hasn't built anything yet.
+// These users are routed to Claude so their first session feels premium.
+// Once they have a curriculum, they're established and fall to Gemini.
+function isFirstImpressionUser(user) {
+  const d = user?.data || {};
+  return (d.curricula?.length || 0) === 0;
+}
+// Which provider serves this user. An explicit preferences.aiProvider wins
+// ('anthropic' | 'gemini'); otherwise 'auto' → Claude for first-impression
+// users (when Anthropic is configured), Gemini for everyone else.
+function providerForUser(user, email) {
+  const pref = user?.data?.preferences?.aiProvider;
+  if (pref === 'anthropic') return anthropic ? 'anthropic' : 'gemini';
+  if (pref === 'gemini') return 'gemini';
+  return (anthropic && isFirstImpressionUser(user)) ? 'anthropic' : 'gemini';
+}
+
+// Resolve the concrete model id for a user's request. Honors the plan-gated
+// tier, then picks the Gemini or Claude half via providerForUser(). Pass
+// opts.stream=true for SSE/streaming + vision calls — those run on Gemini
+// only, so they always get the tier's Gemini model. Mirrors
+// resolveModelTier() in modelAccess.js for the tier half.
+function modelForUser(user, email, opts = {}) {
+  const pair = TIER_MODELS[tierForUser(user, email)];
+  if (opts.stream) return pair.gemini;
+  const provider = opts.provider || providerForUser(user, email);
+  return provider === 'anthropic' && anthropic ? pair.claude : pair.gemini;
+}
+
+// ===== Study Mode model picker =====
+// Study Mode has its OWN per-message model toggle, independent of the global
+// speed/balanced/pro tier. Non-paid users may only pick the two "floor" models
+// (Flash Lite + Haiku). Haiku is additionally capped at HAIKU_FREE_DAILY
+// messages per rolling 24h for non-paid users; past the cap it silently
+// auto-switches to Flash Lite (no hard block). Every PAID tier unlocks all
+// models with no per-model cap. Mirrors STUDY_MODELS in
+// src/components/study/studyModels.js — keep the two allow-lists in sync.
+const HAIKU_FREE_DAILY = 12;
+const STUDY_MODELS = {
+  'flash-lite': { id: GEMINI_FLASH_LITE, label: 'Flash Lite', provider: 'gemini', paidOnly: false },
+  'haiku':      { id: CLAUDE_HAIKU,      label: 'Haiku 4.5',  provider: 'claude', paidOnly: false, freeDailyLimit: HAIKU_FREE_DAILY },
+  'flash':      { id: GEMINI_FLASH,      label: 'Flash',      provider: 'gemini', paidOnly: true },
+  'sonnet':     { id: CLAUDE_SONNET,     label: 'Sonnet 4.6', provider: 'claude', paidOnly: true },
+  'gemini-pro': { id: GEMINI_PRO,        label: 'Gemini Pro', provider: 'gemini', paidOnly: true },
+};
+// Haiku is the default pick for everyone. When a non-paid user exhausts the
+// rolling Haiku cap, the model locks until UTC midnight and auto-switches to
+// HAIKU_LIMIT_FALLBACK (Sonnet) for the rest of the day. Plan-locked picks
+// (non-paid user requests Flash/Sonnet/Pro) still drop to the uncapped floor
+// model (Flash Lite) so they keep chatting for free.
+const DEFAULT_STUDY_MODEL = 'haiku';
+const FALLBACK_STUDY_MODEL = 'flash-lite';
+const HAIKU_LIMIT_FALLBACK = 'flash-lite'; // model served when daily Haiku cap is hit
+
+function studyModelAllowed(key, plan) {
+  const m = STUDY_MODELS[key];
+  if (!m) return false;
+  return m.paidOnly ? PAID_TIERS.has(plan) : true;
+}
+
+// Count Haiku study messages logged in the rolling 24h window (non-paid only).
+function rollingHaikuUsage(user) {
+  const cutoff = Date.now() - ROLLING_WINDOW_MS;
+  return (user?.data?.usage?.haikuWindow || []).filter(ts => ts > cutoff).length;
+}
+
+// Timestamp of the next UTC midnight (i.e. when today's Haiku lock expires).
+function nextMidnightUTC() {
+  const d = new Date();
+  d.setUTCHours(24, 0, 0, 0);
+  return d.getTime();
+}
+
+// Resolve the study model a user actually gets for a request. Returns
+// { key, id, provider, switched, reason, haikuRemaining }.
+//   - unknown / plan-locked request → falls back to Flash Lite (switched, reason='plan')
+//   - non-paid past the Haiku cap   → locks until UTC midnight, serves Sonnet (switched, reason='haiku-limit')
+// haikuRemaining is the non-paid Haiku quota left BEFORE this message is
+// recorded (null for paid users or non-Haiku picks).
+function resolveStudyModel(requested, user, email) {
+  const plan = getPlan(user, email);
+  let key = STUDY_MODELS[requested]
+    ? requested
+    : (user?.data?.preferences?.studyModel || DEFAULT_STUDY_MODEL);
+  if (!STUDY_MODELS[key]) key = DEFAULT_STUDY_MODEL;
+
+  let switched = false, reason = null;
+  // Plan-locked pick → drop to the uncapped floor model (Flash Lite), since the
+  // default itself (Haiku) carries a cap for non-paid users.
+  if (!studyModelAllowed(key, plan)) { key = FALLBACK_STUDY_MODEL; switched = true; reason = 'plan'; }
+
+  let haikuRemaining = null;
+  const paid = PAID_TIERS.has(plan);
+  if (key === 'haiku' && !paid) {
+    // Check the day-level lock first (set at midnight UTC when limit was hit).
+    const lockedUntil = user?.data?.usage?.haikuLockedUntil || 0;
+    if (lockedUntil > Date.now()) {
+      key = HAIKU_LIMIT_FALLBACK; switched = true; reason = 'haiku-limit'; haikuRemaining = 0;
+    } else {
+      const used = rollingHaikuUsage(user);
+      haikuRemaining = Math.max(0, HAIKU_FREE_DAILY - used);
+      if (used >= HAIKU_FREE_DAILY) {
+        // Lock Haiku until UTC midnight and serve Sonnet for the rest of the day.
+        if (user?.data) {
+          ensureUsageBucket(user);
+          user.data.usage.haikuLockedUntil = nextMidnightUTC();
+        }
+        key = HAIKU_LIMIT_FALLBACK; switched = true; reason = 'haiku-limit'; haikuRemaining = 0;
+      }
+    }
+  }
+
+  const m = STUDY_MODELS[key];
+  return { key, id: m.id, provider: m.provider, switched, reason, haikuRemaining };
+}
+
+// Log a Haiku study message into the rolling window (drives the non-paid cap).
+function recordHaikuUse(user) {
+  if (!user?.data) return;
+  ensureUsageBucket(user);
+  user.data.usage.haikuWindow.push(Date.now());
 }
 
 // Daily limits are a ROLLING 24h window. Instead of a midnight reset,
@@ -330,9 +484,11 @@ function ensureUsageBucket(user) {
   // window.
   if (!Array.isArray(user.data.usage.msgWindow)) user.data.usage.msgWindow = [];
   if (!Array.isArray(user.data.usage.qbWindow)) user.data.usage.qbWindow = [];
+  if (!Array.isArray(user.data.usage.haikuWindow)) user.data.usage.haikuWindow = [];
   const cutoff = Date.now() - ROLLING_WINDOW_MS;
   user.data.usage.msgWindow = user.data.usage.msgWindow.filter(e => (e?.ts || 0) > cutoff);
   user.data.usage.qbWindow = user.data.usage.qbWindow.filter(ts => ts > cutoff);
+  user.data.usage.haikuWindow = user.data.usage.haikuWindow.filter(ts => ts > cutoff);
   if (user.data.usage.week !== week) {
     user.data.usage.week = week;
     user.data.usage.curricula = 0;
@@ -572,7 +728,11 @@ function createDefaultData() {
       dockPosition: 'bottom',
       onboarded: false,
       tourStep: null,
-      modelTier: 'flash-lite',
+      modelTier: 'speed',
+      // 'auto' lets the server pick the provider (new users → Claude for a
+      // strong first impression, established users → Gemini). Users can pin
+      // 'anthropic' or 'gemini' explicitly.
+      aiProvider: 'auto',
     },
     profile: { level: 1, xp: 0, xpToNextLevel: 100, strengths: [], weaknesses: [], topicScores: {} },
     goals: [],
@@ -1999,6 +2159,57 @@ function messagesToGeminiContents(messages) {
   });
 }
 
+// Convert the same Claude-style messages into the Anthropic SDK's shape.
+// Images become base64 image blocks alongside the text.
+function messagesToAnthropic(messages) {
+  return (messages || []).map(m => {
+    const imgs = Array.isArray(m.images) ? m.images : [];
+    const blocks = [];
+    for (const img of imgs) {
+      const dataUrl = img?.dataUrl || img?.url || '';
+      const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
+      if (match) {
+        blocks.push({ type: 'image', source: { type: 'base64', media_type: img.mimeType || match[1], data: match[2] } });
+      }
+    }
+    const text = String(m.content ?? '');
+    if (text || !blocks.length) blocks.push({ type: 'text', text: text || '' });
+    return { role: m.role === 'assistant' ? 'assistant' : 'user', content: blocks };
+  });
+}
+
+// Non-streaming Anthropic call. Returns the SAME envelope as callGemini
+// ({ success, data: { content: [{ type:'text', text }], sources }, model })
+// so every existing call site works unchanged. On any failure it degrades to
+// the tier's Gemini sibling, keeping the live app resilient if Anthropic is
+// down, rate-limited, or the key is bad.
+async function callClaude(systemPrompt, messages, model, maxOutputTokens = 4096, opts = {}) {
+  if (!anthropic) return callGemini(systemPrompt, messages, geminiSiblingOf(model), maxOutputTokens, opts);
+  const resolved = isClaudeModel(model) ? model : CLAUDE_SONNET;
+  // jsonMode has no Anthropic equivalent; the prompts already say "output
+  // only JSON" and parseAIJson tolerates stray fences. We just nudge it.
+  const system = opts.jsonMode
+    ? `${systemPrompt || ''}\n\nRespond with ONLY valid JSON — no markdown, no code fences, no prose before or after.`.trim()
+    : (systemPrompt || undefined);
+  try {
+    const resp = await anthropic.messages.create({
+      model: resolved,
+      max_tokens: Math.min(Math.max(Number(maxOutputTokens) || 4096, 256), 32000),
+      temperature: Number.isFinite(opts.temperature) ? opts.temperature : 0.7,
+      ...(system ? { system } : {}),
+      messages: messagesToAnthropic(messages),
+    });
+    const text = (resp?.content || [])
+      .filter(b => b?.type === 'text' && typeof b.text === 'string')
+      .map(b => b.text)
+      .join('');
+    return { success: true, data: { content: [{ type: 'text', text }], sources: [] }, model: resolved };
+  } catch (err) {
+    console.warn(`Claude call (${resolved}) failed: ${err?.message || err}. Falling back to Gemini.`);
+    return callGemini(systemPrompt, messages, geminiSiblingOf(resolved), maxOutputTokens, opts);
+  }
+}
+
 function isInvalidModelError(errMsg = '') {
   const s = String(errMsg).toLowerCase();
   return s.includes('not found') || s.includes('invalid') || s.includes('unsupported')
@@ -2016,9 +2227,20 @@ function isRateLimitError(err) {
 // Pass opts.enableWebSearch=true to enable Google Search grounding (sources
 // surfaced on data.sources for the caller to use).
 async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096, opts = {}) {
+  let currentModel = model || DEFAULT_MODEL;
+
+  // Multi-model routing: a Claude model id is served by Anthropic. Google
+  // Search grounding is Gemini-only, so a Claude id that requests web search
+  // is coerced to its Gemini sibling instead of routing to Anthropic.
+  if (isClaudeModel(currentModel)) {
+    if (!opts.enableWebSearch && anthropic) {
+      return callClaude(systemPrompt, messages, currentModel, maxOutputTokens, opts);
+    }
+    currentModel = geminiSiblingOf(currentModel);
+  }
+
   if (!genAI) return { success: false, error: 'GEMINI_API_KEY not configured', status: 500 };
 
-  let currentModel = model || DEFAULT_MODEL;
   let lastError = null;
 
   // Grounding consumes a significant share of the token budget for "thinking"
@@ -2604,10 +2826,8 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
     saveUsers(usersC);
 
     const { system, user } = buildCurriculumPrompt(settings, sources);
-    // Flash Lite for curriculum generation - fastest model, structured JSON
-    // output is schema-constrained so quality is the same as heavier models.
-    // 4096 tokens is plenty for 5-8 units × 4-7 lessons (title + description).
-    const result = await callGemini(system, [{ role: 'user', content: user }], GEMINI_FLASH_LITE, 4096, { jsonMode: true, temperature: 0.7 });
+    const curriculumModel = GEMINI_FLASH_LITE;
+    const result = await callGemini(system, [{ role: 'user', content: user }], curriculumModel, 4096, { jsonMode: true, temperature: 0.7 });
 
     if (!result.success) return res.status(500).json({ error: result.error });
 
@@ -2619,7 +2839,7 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
       const retryResult = await callGemini(
         'You MUST output ONLY a valid JSON object. No markdown, no explanation, no text before or after. Just raw JSON.',
         [{ role: 'user', content: `${user}\n\nIMPORTANT: Output ONLY the JSON object, nothing else.` }],
-        GEMINI_FLASH_LITE, 4096, { jsonMode: true, temperature: 0.3 }
+        curriculumModel, 4096, { jsonMode: true, temperature: 0.3 }
       );
       if (retryResult.success) {
         const retryText = retryResult.data.content?.[0]?.text || '';
@@ -3389,6 +3609,63 @@ function advancePhaseIfNeeded(lesson, fullContent) {
   return false;
 }
 
+// Stream a response from Anthropic Claude using the SAME SSE schema as the
+// Gemini path ({ content }, { thinking }, { done, sources }, { error }). Used
+// by Study Mode when the user picks a Claude model (Haiku / Sonnet). Source
+// mode never reaches here — that's Gemini-grounding only. On a failure with
+// nothing streamed yet, it transparently retries on the Gemini sibling so a
+// flaky Anthropic call never leaves the user with a dead stream.
+async function streamClaudeResponse(res, sse, systemPrompt, messages, onComplete, model, opts = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 300000);
+  const heartbeat = setInterval(() => {
+    try { res.write(`: keepalive ${Date.now()}\n\n`); res.flush?.(); } catch {}
+  }, 15000);
+
+  let buffered = '';
+  try {
+    // Extended thinking only when the caller asked for thoughts AND didn't
+    // disable thinking. Anthropic requires temperature unset (defaults to 1)
+    // while thinking is enabled, and max_tokens > budget_tokens.
+    const thinkingOn = !opts.disableThinking && !!opts.includeThoughts;
+    const stream = anthropic.messages.stream({
+      model,
+      max_tokens: 8192,
+      ...(thinkingOn
+        ? { thinking: { type: 'enabled', budget_tokens: 4096 } }
+        : { temperature: 0.7 }),
+      ...(systemPrompt ? { system: systemPrompt } : {}),
+      messages: messagesToAnthropic(messages),
+    }, { signal: controller.signal });
+
+    for await (const event of stream) {
+      if (event?.type !== 'content_block_delta') continue;
+      const d = event.delta;
+      if (d?.type === 'text_delta' && d.text) { buffered += d.text; sse({ content: d.text }); }
+      else if (d?.type === 'thinking_delta' && d.thinking) { sse({ thinking: d.thinking }); }
+    }
+
+    clearTimeout(timeout);
+    clearInterval(heartbeat);
+    if (onComplete) {
+      try { await onComplete(buffered, []); }
+      catch (bookkeepErr) { console.error('streamClaudeResponse onComplete threw:', bookkeepErr); }
+    }
+    sse({ done: true, sources: [] });
+    res.end();
+  } catch (e) {
+    clearTimeout(timeout);
+    clearInterval(heartbeat);
+    console.error('Claude stream error:', e);
+    // Nothing emitted yet → fall back to the Gemini sibling on the same socket
+    // (headers already sent, so streamAIResponse skips re-sending them).
+    if (!buffered && !res.writableEnded) {
+      return streamAIResponse(res, systemPrompt, messages, onComplete, geminiSiblingOf(model), opts);
+    }
+    if (!res.writableEnded) { sse({ error: e?.message || String(e) }); res.end(); }
+  }
+}
+
 // Helper: stream AI response as SSE, backed by Google Gemini.
 //
 // SSE event schema (unchanged from the old Anthropic impl - frontend consumers
@@ -3406,8 +3683,12 @@ function advancePhaseIfNeeded(lesson, fullContent) {
 //     correct segment indices and flush the rewritten text as a single content
 //     event followed by per-source events + the done event.
 async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOverride, opts = {}) {
-  const requestedModel = modelOverride || DEFAULT_MODEL;
   const enableWebSearch = !!opts.enableWebSearch;
+  // Claude models stream natively for non-sourced requests. Source mode is
+  // backed by Google Search grounding (Gemini only), so a Claude id in source
+  // mode is coerced to its Gemini sibling instead of routing to Anthropic.
+  const wantClaude = !!anthropic && isClaudeModel(modelOverride) && !enableWebSearch;
+  const requestedModel = wantClaude ? modelOverride : geminiSiblingOf(modelOverride || DEFAULT_MODEL);
   if (!res.headersSent) {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -3424,6 +3705,12 @@ async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOv
       res.flush?.();
     } catch {}
   };
+
+  // Native Anthropic streaming path (same SSE schema). On any early failure it
+  // transparently falls back to the equivalent-tier Gemini stream below.
+  if (wantClaude) {
+    return streamClaudeResponse(res, sse, systemPrompt, messages, onComplete, requestedModel, opts);
+  }
 
   if (!genAI) {
     sse({ error: 'GEMINI_API_KEY not configured' });
@@ -4015,11 +4302,55 @@ app.get('/api/curriculum/:id/grade', authMiddleware, (req, res) => {
 });
 
 
+// A block is "usable" if it carries the payload its type needs. Used to
+// score generation attempts and to drop empty/garbled blocks the model
+// occasionally emits, so the student never lands on a blank step.
+function isUsableBlock(b) {
+  if (!b || typeof b.type !== 'string') return false;
+  const has = (v) => typeof v === 'string' && v.trim().length > 0;
+  const arr = (v) => Array.isArray(v) && v.length > 0;
+  switch (b.type) {
+    case 'reading':
+    case 'application': return has(b.content);
+    case 'quiz':       return arr(b.questions);
+    case 'example':    return has(b.problem) || arr(b.steps);
+    case 'recap':      return arr(b.bullets);
+    case 'challenge':  return has(b.prompt);
+    case 'open':       return has(b.prompt);
+    case 'discussion': return has(b.prompt) || arr(b.talkingPoints);
+    case 'matching':   return arr(b.pairs);
+    case 'fill-blank': return arr(b.sentences);
+    default:           return has(b.content) || has(b.prompt) || arr(b.questions);
+  }
+}
+
+// Generate lesson blocks with retries + count tolerance. Lesson
+// generation must NEVER hard-fail on a count mismatch - the student
+// would just see a broken lesson with no recourse. We retry up to 3x
+// trying to hit the exact requested count; if the model keeps drifting
+// we accept the best attempt that has at least a few well-formed blocks.
+// Returns an array of raw blocks, or null only if every attempt produced
+// nothing usable.
+async function generateLessonBlocksWithRetry(sys, prompt, model, maxTokens, blockCount) {
+  let best = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const result = await callGemini(sys, [{ role: 'user', content: prompt }], model, maxTokens, { jsonMode: true, temperature: 0.6 });
+    if (!result.success) continue;
+    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
+    if (!parsed || !Array.isArray(parsed.blocks)) continue;
+    const usable = parsed.blocks.filter(isUsableBlock);
+    if (usable.length === blockCount) return usable;          // exact hit
+    if (!best || usable.length > best.length) best = usable;  // keep the fullest
+  }
+  return best && best.length >= 3 ? best : null;
+}
+
 function stampBlock(lessonId, b, i, opts = {}) {
   const blockId = `${lessonId}-b${i}`;
   const typeLabel = {
     reading: 'Reading', quiz: 'Quiz', example: 'Worked Example',
     recap: 'Recap', application: 'In the Wild', challenge: 'Challenge', open: 'Open Answer',
+    discussion: 'Discussion', matching: 'Matching', 'fill-blank': 'Fill in the Blank',
   }[b.type] || 'Step';
   const base = {
     id: blockId,
@@ -4081,6 +4412,35 @@ function stampBlock(lessonId, b, i, opts = {}) {
       score: null,
     };
   }
+  if (b.type === 'discussion') {
+    return {
+      ...base,
+      prompt: String(b.prompt || ''),
+      talkingPoints: (Array.isArray(b.talkingPoints) ? b.talkingPoints : []).map(String),
+    };
+  }
+  if (b.type === 'matching') {
+    return {
+      ...base,
+      instructions: String(b.instructions || ''),
+      pairs: (Array.isArray(b.pairs) ? b.pairs : []).map(p => ({
+        term: String(p?.term || ''),
+        definition: String(p?.definition || ''),
+      })),
+    };
+  }
+  if (b.type === 'fill-blank') {
+    return {
+      ...base,
+      instructions: String(b.instructions || ''),
+      sentences: (Array.isArray(b.sentences) ? b.sentences : []).map(s => ({
+        before: String(s?.before || ''),
+        answer: String(s?.answer || ''),
+        after: String(s?.after || ''),
+        hint: String(s?.hint || ''),
+      })),
+    };
+  }
   // Unknown type - preserve raw shape so frontend can render best-effort.
   return { ...base, ...b };
 }
@@ -4107,6 +4467,69 @@ function collectMissedFromLesson(lesson) {
   return missed;
 }
 
+// Builds the system + user prompt for one varied, mixed-format lesson.
+// Shared by the curriculum lesson generator and the standalone lesson
+// generator so the two paths can't drift in which block types they
+// produce (they did once - curriculum was stuck on reading+quiz while
+// standalone had the full mix). `title` is the phrase after "Build "
+// (the curriculum path names the unit + course; standalone just names
+// the topic). `contextLines` are extra lines inserted before Difficulty.
+function buildVariedLessonPrompt({ title, contextLines = [], difficulty, blockCount }) {
+  const middleCount = blockCount - 2;
+  const sys = `You generate one complete lesson as ${blockCount} blocks. You pick the right MIX of block types for the topic - see the schema. Output ONLY valid JSON - no markdown, no fences, no commentary.`;
+  const context = contextLines.filter(Boolean).join('\n');
+  const prompt = `Build ${title}.
+${context ? context + '\n' : ''}Difficulty: ${difficulty}.
+
+EXACTLY ${blockCount} blocks total (this length is set by the difficulty - do not deviate). You decide the type of each MIDDLE block based on what best serves this topic. Pick a varied, motivated mix - not all the same type.
+
+FIXED slots:
+  Slot 1:  "reading"  - Core definition + framing of the topic. The simplest correct mental model. 350-500 words of markdown.
+  Slot ${blockCount}: "reading"  - Synthesis + edge cases. Surface 1-2 lingering subtleties. 350-500 words.
+
+MIDDLE slots (slots 2 through ${blockCount - 1}, ${middleCount} blocks total) - pick from these types:
+  • "reading"     - A second teaching pass (mechanics, examples). 350-500 words of markdown.
+  • "quiz"        - 3 multiple-choice questions on what's been read so far.
+  • "example"     - A WORKED EXAMPLE. One concrete problem the student would face, broken into 3-5 numbered solution steps the student can reveal one at a time, then a short "now you try" prompt.
+  • "recap"       - A CONCEPT RECAP. 4-6 tight bullet points summarising what's been covered so far.
+  • "application" - A REAL-WORLD APPLICATION. 200-300 words of markdown showing where this concept shows up.
+  • "challenge"   - A STRETCH PROBLEM. A harder, non-obvious question with a hint and a full solution.
+  • "open"        - An OPEN-ANSWER prompt. A short question the student must answer in their own words (40-150 words). MUST include a 2-3 item rubric - each item is { label, criterion (one sentence describing what an A-grade response shows), weight (1-3) }.
+  • "discussion"  - AN AI DISCUSSION. The student chats back-and-forth with an AI tutor about what they just learned. Give a thoughtful opening question + 3-5 specific talking points the AI should hit across the conversation.
+  • "matching"    - A MATCHING MINIGAME. 5-7 pairs of terms and their definitions/examples the student matches by clicking. Great for vocabulary, formula↔meaning, or cause↔effect drills.
+  • "fill-blank"  - A FILL-IN-THE-BLANK exercise. 4-6 sentences with one key word/phrase omitted. The student types the missing piece. Good for keyword recall after a reading.
+
+RULES for the middle ${middleCount} blocks:
+  • Include AT LEAST 2 "quiz" blocks.
+  • Include AT LEAST ${middleCount >= 5 ? 3 : 2} NON-quiz, NON-reading types - mix freely from {example, recap, application, challenge, open, discussion, matching, fill-blank}.
+  • Include AT LEAST 1 "open" OR "discussion" block so the student has to express their understanding in their own words.
+  • For lessons of ${middleCount >= 4 ? '4+' : 'any'} middle blocks, include AT LEAST 1 INTERACTIVE type - pick from {matching, fill-blank, discussion} - so the lesson isn't just read-and-quiz.
+  • A "quiz" or "open" must follow material it can test - never put a checkpoint before the relevant teaching content.
+  • A "recap" comes AFTER at least one reading or example.
+  • A "discussion" should usually be near the end - it's most useful when the student has something to discuss.
+  • "matching" and "fill-blank" work best right after the reading that introduces the terms they test.
+  • Sequence the blocks so the lesson flows naturally for a student new to the topic.
+
+SHAPES - each block's fields by type:
+  reading:     {"type":"reading","title":"...","content":"<markdown>"}
+  quiz:        {"type":"quiz","title":"...","questions":[{"prompt":"...","choices":["...","...","...","..."],"answer":"<exact text of correct choice>","explanation":"<1-2 sentences>"}, ...3 total...]}
+  example:     {"type":"example","title":"...","problem":"<markdown problem statement>","steps":[{"label":"Step name","text":"<markdown>"}, ...3-5 total...],"tryThis":"<short prompt for student to try a variant>"}
+  recap:       {"type":"recap","title":"...","bullets":["...","...","...","..."]}
+  application: {"type":"application","title":"...","content":"<200-300 words of markdown>"}
+  challenge:   {"type":"challenge","title":"...","prompt":"<markdown problem>","hint":"<1-2 sentences nudging without solving>","solution":"<markdown explanation>"}
+  open:        {"type":"open","title":"...","prompt":"<markdown question, 1-3 sentences>","minWords":<40-80>,"rubric":[{"label":"...","criterion":"...","weight":<1-3>}, ...2-3 total...]}
+  discussion:  {"type":"discussion","title":"...","prompt":"<the AI's opening question to the student, 1-2 sentences>","talkingPoints":["<concept the AI should make sure gets discussed>", ...3-5 total...]}
+  matching:    {"type":"matching","title":"...","instructions":"<one-line how-to>","pairs":[{"term":"<short term>","definition":"<definition or example, 1 sentence>"}, ...5-7 pairs...]}
+  fill-blank:  {"type":"fill-blank","title":"...","instructions":"<one-line how-to>","sentences":[{"before":"<text before the blank>","answer":"<single word or short phrase>","after":"<text after the blank>","hint":"<optional short hint>"}, ...4-6 sentences...]}
+
+Markdown inside content/problem/prompt/solution: ## sub-headings, **bold**, lists, fenced code where useful, math via $...$ or $$...$$ if it fits.
+Distractors in quizzes must be plausible.
+
+Return JSON in this shape:
+{ "blocks": [ <block 1>, <block 2>, ... <block ${blockCount}> ] }`;
+  return { sys, prompt };
+}
+
 app.post('/api/curriculum/:id/lesson/:lessonId/blocks/generate', authMiddleware, async (req, res) => {
   try {
     const users = loadUsers();
@@ -4130,55 +4553,36 @@ app.post('/api/curriculum/:id/lesson/:lessonId/blocks/generate', authMiddleware,
 
     const difficulty = curriculum.difficulty || 'intermediate';
     const blockCount = LESSON_BLOCK_COUNT[difficulty] || LESSON_BLOCK_COUNT.intermediate;
-    const middleCount = blockCount - 2;
-    const sys = `You generate one complete lesson as ${blockCount} blocks of two types only: "reading" and "quiz". Output ONLY valid JSON - no markdown, no fences, no commentary.`;
-    const prompt = `Build the lesson "${lesson.title}" from the unit "${unit.title}" of the course "${curriculum.title}".
-${lesson.description ? `Lesson goal: ${lesson.description}\n` : ''}${curriculum.description ? `Course context: ${curriculum.description}\n` : ''}
-Difficulty: ${difficulty}.
-
-EXACTLY ${blockCount} blocks total. Use ONLY the two types below - do NOT emit example/recap/application/challenge/open/discussion/matching/fill-blank.
-
-SLOT PATTERN:
-  Block 1:            "reading" - Core definition + framing. The simplest correct mental model. 350-500 words of markdown.
-  Block ${blockCount}: "reading" - Synthesis + edge cases. Tie the lesson to the surrounding course; surface lingering subtleties; preview what builds on this. 350-500 words.
-  Middle (blocks 2 - ${blockCount - 1}): ALTERNATE reading and quiz so each quiz tests the immediately-preceding reading. Start the middle with a reading (so the second slot is a reading), then quiz, reading, quiz, etc. Result: ~half the middle slots are readings, ~half are quizzes, with reading always before its quiz.
-
-CONTENT RULES:
-  - reading: 350-500 words of markdown teaching a distinct angle (mechanics, worked example in prose, common pitfalls, real-world application). No two readings cover the same ground.
-  - quiz: EXACTLY 3 multiple-choice questions on the material from the readings that came before this quiz. Each wrong choice must encode a real misconception named in the explanation.
-
-SHAPES:
-  reading: {"type":"reading","title":"...","content":"<markdown>"}
-  quiz:    {"type":"quiz","title":"...","questions":[{"prompt":"...","choices":["...","...","...","..."],"answer":"<exact text of correct choice>","explanation":"<1-2 sentences>"}, ...3 total...]}
-
-Markdown inside content: ## sub-headings, **bold**, lists, fenced code where useful, math via $...$ or $$...$$ if it fits.
-
-Return JSON in this shape:
-{ "blocks": [ <block 1>, <block 2>, ... <block ${blockCount}> ] }`;
+    const { sys, prompt } = buildVariedLessonPrompt({
+      title: `the lesson "${lesson.title}" from the unit "${unit.title}" of the course "${curriculum.title}"`,
+      contextLines: [
+        lesson.description ? `Lesson goal: ${lesson.description}` : '',
+        curriculum.description ? `Course context: ${curriculum.description}` : '',
+      ],
+      difficulty,
+      blockCount,
+    });
 
     // Speed: Flash (not Pro) is plenty for structured-JSON lesson generation
-    // and runs ~2-3x faster. Reading + quiz quality is identical because
-    // the prompt does the heavy lifting. Pro is reserved for free-form
-    // tutoring where reasoning depth matters.
+    // and runs ~2-3x faster - the prompt does the heavy lifting. Pro is
+    // reserved for free-form tutoring where reasoning depth matters.
     // Bump the token ceiling for longer lessons - expert mode emits
     // ~14 blocks with a couple readings inside, easily 6k tokens of
     // markdown alone. Flash's hard cap is 8192; we'll use Pro for the
     // deepest two tiers where the ceiling matters.
     const maxTokens = blockCount >= 10 ? 12000 : 8192;
     const model = blockCount >= 10 ? GEMINI_PRO : GEMINI_FLASH;
-    const result = await callGemini(sys, [{ role: 'user', content: prompt }], model, maxTokens, { jsonMode: true, temperature: 0.6 });
-    if (!result.success) return res.status(500).json({ error: result.error || 'Lesson generation failed' });
-    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
-    if (!parsed || !Array.isArray(parsed.blocks) || parsed.blocks.length !== blockCount) {
-      console.error('Block parse failed. Got', parsed?.blocks?.length, 'blocks, expected', blockCount);
-      return res.status(500).json({ error: `Lesson did not return ${blockCount} blocks. Try again.` });
+    const blocksRaw = await generateLessonBlocksWithRetry(sys, prompt, model, maxTokens, blockCount);
+    if (!blocksRaw) {
+      console.error('curriculum blocks/generate: no usable blocks after retries for lesson', lesson.id);
+      return res.status(500).json({ error: 'Lesson generation failed. Please try again.' });
     }
 
     // No SRS slot anymore - the AI mixes types as it sees fit, so a
     // hard-coded spaced-repetition reading at index 4 no longer makes
     // sense. The "recap" type covers reinforcement when the AI decides
     // that's what the lesson needs.
-    const blocks = parsed.blocks.map((b, i) => stampBlock(lesson.id, b, i));
+    const blocks = blocksRaw.map((b, i) => stampBlock(lesson.id, b, i));
 
     lesson.blocks = blocks;
     saveUsers(users);
@@ -4687,12 +5091,34 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
       users[email].data.profile, users[email].data.goals,
       users[email].data.curricula, users[email].data.preferences,
       users[email].data.assessmentHistory || [],
-      session.context || null
+      session.context || null,
+      !!req.sourced
     ) + buildChildGuardrails(_activeChildSM);
 
     const aiMessages = session.messages.map(m => ({ role: m.role, content: m.content }));
     if (req.images.length && aiMessages.length && aiMessages[aiMessages.length - 1].role === 'user') {
       aiMessages[aiMessages.length - 1].images = req.images;
+    }
+
+    // Study Mode model picker. The chosen model only applies to non-sourced
+    // turns — source mode is Google-Search grounding, which is Gemini-only.
+    // resolveStudyModel() gates by plan (non-paid → Flash Lite / Haiku only)
+    // and auto-switches Haiku → Flash Lite once a non-paid user passes the
+    // rolling-24h Haiku cap. We persist the user's actual pick (not the
+    // auto-switched fallback) so the preference sticks across messages.
+    const requestedStudyModel = req.body.model;
+    const planSM = getPlan(users[email], email);
+    let effectiveStudyModel = null;
+    let studyMeta = null;
+    let billHaiku = false;
+    if (!req.sourced) {
+      const r = resolveStudyModel(requestedStudyModel, users[email], email);
+      effectiveStudyModel = r.id;
+      studyMeta = { key: r.key, switched: r.switched, reason: r.reason, haikuRemaining: r.haikuRemaining };
+      billHaiku = r.key === 'haiku' && !PAID_TIERS.has(planSM);
+      if (STUDY_MODELS[requestedStudyModel] && studyModelAllowed(requestedStudyModel, planSM)) {
+        users[email].data.preferences = { ...(users[email].data.preferences || {}), studyModel: requestedStudyModel };
+      }
     }
 
     // Send sessionId in the first event
@@ -4701,8 +5127,9 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders();
     res.write(`data: ${JSON.stringify({ sessionId: session.id })}\n\n`);
+    if (studyMeta) res.write(`data: ${JSON.stringify({ studyModel: studyMeta })}\n\n`);
 
-    const tierModel = modelForUser(users[email], email);
+    const tierModel = effectiveStudyModel || modelForUser(users[email], email);
     await streamAIResponse(res, systemPrompt, aiMessages, async (fullContent, sources) => {
       const msg = { role: 'assistant', content: fullContent, timestamp: new Date().toISOString() };
       if (sources && sources.length) msg.sources = sources;
@@ -4743,6 +5170,15 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
       // Keep only last 50 sessions
       if (users[email].data.studySessions.length > 50) {
         users[email].data.studySessions = users[email].data.studySessions.slice(0, 50);
+      }
+
+      // Charge the non-paid rolling-24h Haiku quota only on a completed turn,
+      // so a failed/aborted stream never burns a message.
+      if (billHaiku) {
+        recordHaikuUse(users[email]);
+        // Send the post-send count so the client pill reflects the deduction.
+        const afterRemaining = Math.max(0, (studyMeta?.haikuRemaining ?? HAIKU_FREE_DAILY) - 1);
+        try { res.write(`data: ${JSON.stringify({ studyModel: { haikuRemaining: afterRemaining } })}\n\n`); } catch {}
       }
 
       saveUsers(users);
@@ -7289,7 +7725,7 @@ Output ONLY JSON in this exact shape (no prose, no markdown):
 }`;
 
     const m = genAI.getGenerativeModel({
-      model: resolveModel(modelForUser(users[email], email)),
+      model: resolveModel(modelForUser(users[email], email, { stream: true })),
       generationConfig: {
         maxOutputTokens: 2048,
         temperature: 0.6,
@@ -8597,8 +9033,9 @@ function requireMessageQuota(req, res, next) {
   const email = findEmailById(users, req.userId);
   if (!email) return res.status(404).json({ error: 'User not found' });
   users[email].data = migrateUserData(users[email].data);
-  // Sourced (web-search) requests cost 2 messages against the daily cap.
+  // Sourced requests always route to Gemini regardless of the model picker.
   const sourced = !!(req.body && req.body.sourced);
+  // Sourced (web-search) requests cost 2 messages against the daily cap.
   const cost = sourced ? 2 : 1;
   const result = consumeMessage(users, email, cost);
   if (!result.allowed) {
@@ -8783,69 +9220,21 @@ app.post('/api/lessons/:id/blocks/generate', authMiddleware, async (req, res) =>
 
     const difficulty = lesson.difficulty || 'beginner';
     const blockCount = LESSON_BLOCK_COUNT[difficulty] || LESSON_BLOCK_COUNT.intermediate;
-    const middleCount = blockCount - 2;
-    const sys = `You generate one complete lesson as ${blockCount} blocks. You pick the right MIX of block types for the topic - see the schema. Output ONLY valid JSON - no markdown, no fences, no commentary.`;
-    const prompt = `Build a standalone lesson on "${lesson.topic || lesson.title}".
-Difficulty: ${difficulty}.
-
-EXACTLY ${blockCount} blocks total (this length is set by the difficulty - do not deviate). You decide the type of each MIDDLE block based on what best serves this topic. Pick a varied, motivated mix - not all the same type.
-
-FIXED slots:
-  Slot 1:  "reading"  - Core definition + framing of the topic. The simplest correct mental model. 350-500 words of markdown.
-  Slot ${blockCount}: "reading"  - Synthesis + edge cases. Surface 1-2 lingering subtleties. 350-500 words.
-
-MIDDLE slots (slots 2 through ${blockCount - 1}, ${middleCount} blocks total) - pick from these types:
-  • "reading"     - A second teaching pass (mechanics, examples). 350-500 words of markdown.
-  • "quiz"        - 3 multiple-choice questions on what's been read so far.
-  • "example"     - A WORKED EXAMPLE. One concrete problem the student would face, broken into 3-5 numbered solution steps the student can reveal one at a time, then a short "now you try" prompt.
-  • "recap"       - A CONCEPT RECAP. 4-6 tight bullet points summarising what's been covered so far.
-  • "application" - A REAL-WORLD APPLICATION. 200-300 words of markdown showing where this concept shows up.
-  • "challenge"   - A STRETCH PROBLEM. A harder, non-obvious question with a hint and a full solution.
-  • "open"        - An OPEN-ANSWER prompt. A short question the student must answer in their own words (40-150 words). MUST include a 2-3 item rubric - each item is { label, criterion (one sentence describing what an A-grade response shows), weight (1-3) }.
-  • "discussion"  - AN AI DISCUSSION. The student chats back-and-forth with an AI tutor about what they just learned. Give a thoughtful opening question + 3-5 specific talking points the AI should hit across the conversation.
-  • "matching"    - A MATCHING MINIGAME. 5-7 pairs of terms and their definitions/examples the student matches by clicking. Great for vocabulary, formula↔meaning, or cause↔effect drills.
-  • "fill-blank"  - A FILL-IN-THE-BLANK exercise. 4-6 sentences with one key word/phrase omitted. The student types the missing piece. Good for keyword recall after a reading.
-
-RULES for the middle ${middleCount} blocks:
-  • Include AT LEAST 2 "quiz" blocks.
-  • Include AT LEAST ${middleCount >= 5 ? 3 : 2} NON-quiz, NON-reading types - mix freely from {example, recap, application, challenge, open, discussion, matching, fill-blank}.
-  • Include AT LEAST 1 "open" OR "discussion" block so the student has to express their understanding in their own words.
-  • For lessons of ${middleCount >= 4 ? '4+' : 'any'} middle blocks, include AT LEAST 1 INTERACTIVE type - pick from {matching, fill-blank, discussion} - so the lesson isn't just read-and-quiz.
-  • A "quiz" or "open" must follow material it can test - never put a checkpoint before the relevant teaching content.
-  • A "recap" comes AFTER at least one reading or example.
-  • A "discussion" should usually be near the end - it's most useful when the student has something to discuss.
-  • "matching" and "fill-blank" work best right after the reading that introduces the terms they test.
-  • Sequence the blocks so the lesson flows naturally for a student new to the topic.
-
-SHAPES - each block's fields by type:
-  reading:     {"type":"reading","title":"...","content":"<markdown>"}
-  quiz:        {"type":"quiz","title":"...","questions":[{"prompt":"...","choices":["...","...","...","..."],"answer":"<exact text of correct choice>","explanation":"<1-2 sentences>"}, ...3 total...]}
-  example:     {"type":"example","title":"...","problem":"<markdown problem statement>","steps":[{"label":"Step name","text":"<markdown>"}, ...3-5 total...],"tryThis":"<short prompt for student to try a variant>"}
-  recap:       {"type":"recap","title":"...","bullets":["...","...","...","..."]}
-  application: {"type":"application","title":"...","content":"<200-300 words of markdown>"}
-  challenge:   {"type":"challenge","title":"...","prompt":"<markdown problem>","hint":"<1-2 sentences nudging without solving>","solution":"<markdown explanation>"}
-  open:        {"type":"open","title":"...","prompt":"<markdown question, 1-3 sentences>","minWords":<40-80>,"rubric":[{"label":"...","criterion":"...","weight":<1-3>}, ...2-3 total...]}
-  discussion:  {"type":"discussion","title":"...","prompt":"<the AI's opening question to the student, 1-2 sentences>","talkingPoints":["<concept the AI should make sure gets discussed>", ...3-5 total...]}
-  matching:    {"type":"matching","title":"...","instructions":"<one-line how-to>","pairs":[{"term":"<short term>","definition":"<definition or example, 1 sentence>"}, ...5-7 pairs...]}
-  fill-blank:  {"type":"fill-blank","title":"...","instructions":"<one-line how-to>","sentences":[{"before":"<text before the blank>","answer":"<single word or short phrase>","after":"<text after the blank>","hint":"<optional short hint>"}, ...4-6 sentences...]}
-
-Markdown inside content/problem/prompt/solution: ## sub-headings, **bold**, lists, fenced code where useful, math via $...$ or $$...$$ if it fits.
-Distractors in quizzes must be plausible.
-
-Return JSON in this shape:
-{ "blocks": [ <block 1>, <block 2>, ... <block ${blockCount}> ] }`;
+    const { sys, prompt } = buildVariedLessonPrompt({
+      title: `a standalone lesson on "${lesson.topic || lesson.title}"`,
+      difficulty,
+      blockCount,
+    });
 
     const maxTokens = blockCount >= 10 ? 12000 : 8192;
     const model = blockCount >= 10 ? GEMINI_PRO : GEMINI_FLASH;
-    const result = await callGemini(sys, [{ role: 'user', content: prompt }], model, maxTokens, { jsonMode: true, temperature: 0.6 });
-    if (!result.success) return res.status(500).json({ error: result.error || 'Lesson generation failed' });
-    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
-    if (!parsed || !Array.isArray(parsed.blocks) || parsed.blocks.length !== blockCount) {
-      console.error('lessons blocks/generate parse failed. Got', parsed?.blocks?.length, 'blocks, expected', blockCount);
-      return res.status(500).json({ error: `Lesson did not return ${blockCount} blocks. Try again.` });
+    const blocksRaw = await generateLessonBlocksWithRetry(sys, prompt, model, maxTokens, blockCount);
+    if (!blocksRaw) {
+      console.error('lessons blocks/generate: no usable blocks after retries for lesson', lesson.id);
+      return res.status(500).json({ error: 'Lesson generation failed. Please try again.' });
     }
 
-    const blocks = parsed.blocks.map((b, i) => stampBlock(lesson.id, b, i));
+    const blocks = blocksRaw.map((b, i) => stampBlock(lesson.id, b, i));
 
     lesson.blocks = blocks;
     lesson.lastActiveAt = Date.now();
@@ -9213,15 +9602,37 @@ app.post('/api/math-tutor/chat', authMiddleware, requireMessageQuota, async (req
       aiMessages[aiMessages.length - 1].images = imgs;
     }
 
-    const tierModel = modelForUser(users[email], email);
+    // Per-session model picker (same registry as Study Mode, but persisted
+    // under preferences.mathTutorModel so the two tools stay independent).
+    // resolveStudyModel gates by plan and auto-switches Haiku → Flash Lite once
+    // a non-paid user passes the rolling-24h Haiku cap.
+    const planMT = getPlan(users[email], email);
+    const requestedMT = STUDY_MODELS[req.body?.model]
+      ? req.body.model
+      : (users[email].data.preferences?.mathTutorModel || DEFAULT_STUDY_MODEL);
+    const r = resolveStudyModel(requestedMT, users[email], email);
+    const billHaiku = r.key === 'haiku' && !PAID_TIERS.has(planMT);
+    if (STUDY_MODELS[req.body?.model] && studyModelAllowed(req.body.model, planMT)) {
+      users[email].data.preferences = { ...(users[email].data.preferences || {}), mathTutorModel: req.body.model };
+      saveUsers(users);
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+    res.write(`data: ${JSON.stringify({ mathModel: { key: r.key, switched: r.switched, reason: r.reason, haikuRemaining: r.haikuRemaining } })}\n\n`);
+
     await streamAIResponse(
       res,
       systemPrompt,
       aiMessages,
       async () => {
-        // No server-side persistence - client holds state. Just consume the quota.
+        // No server-side persistence of the transcript - client holds state.
+        // Charge the non-paid rolling Haiku quota only on a completed turn.
+        if (billHaiku) { recordHaikuUse(users[email]); saveUsers(users); }
       },
-      tierModel,
+      r.id,
       { enableWebSearch: false },
     );
   } catch (e) {
@@ -10056,6 +10467,37 @@ app.delete('/api/admin/users/:uid', authMiddleware, adminMiddleware, (req, res) 
   delete social.profiles[req.params.uid];
   saveSocial(social);
   res.json({ success: true });
+});
+
+// GET /api/admin/users/:uid/quizbowl - full quiz bowl data for admin panel
+app.get('/api/admin/users/:uid/quizbowl', authMiddleware, adminMiddleware, (req, res) => {
+  const users = loadUsers();
+  const entry = Object.entries(users).find(([, u]) => u.id === req.params.uid);
+  if (!entry) return res.status(404).json({ error: 'User not found' });
+  const [, u] = entry;
+  u.data = migrateUserData(u.data);
+  const sets = (u.data.quizbowlSets || []).slice(0, 100);
+  const secretProfile = u.data.secretProfile || null;
+  const totalQuestions = sets.reduce((n, s) => n + (s.total || 0), 0);
+  const totalCorrect = sets.reduce((n, s) => n + (s.score || 0), 0);
+  const totalPoints = sets.reduce((n, s) => n + (typeof s.points === 'number' ? s.points : 0), 0);
+  const totalDurationMs = sets.reduce((n, s) => n + (s.durationMs || 0), 0);
+  const accuracy = totalQuestions ? Math.round((totalCorrect / totalQuestions) * 100) : 0;
+  const categoryStats = computeQBCategoryStats(sets);
+  res.json({
+    sets,
+    stats: { totalSets: sets.length, totalQuestions, totalCorrect, totalPoints, accuracy, totalDurationMs, categoryStats },
+    secretProfile: secretProfile ? {
+      strengths: secretProfile.strengths || [],
+      weaknesses: secretProfile.weaknesses || [],
+      struggleTopics: (secretProfile.struggleTopics || []).slice(0, 12),
+      masteryTopics: (secretProfile.masteryTopics || []).slice(0, 12),
+      buzzStyle: secretProfile.buzzStyle || null,
+      totals: secretProfile.totals || null,
+      categoryProfile: secretProfile.categoryProfile || {},
+      updatedAt: secretProfile.updatedAt || null,
+    } : null,
+  });
 });
 
 // Health check

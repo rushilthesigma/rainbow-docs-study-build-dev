@@ -36,9 +36,6 @@ function ProfileSetup({ onDone }) {
 
   return (
     <div className="flex flex-col items-center justify-center h-full p-6 gap-4">
-      <div className="w-14 h-14 rounded-2xl bg-gradient-to-b from-blue-500/25 to-blue-600/15 border border-blue-400/35 flex items-center justify-center">
-        <Users size={22} className="text-blue-200" />
-      </div>
       <h2 className="text-[15px] font-bold text-white/90">Your profile</h2>
       {error && <p className="text-[12px] text-rose-400 px-4 py-2 rounded-xl bg-rose-500/10 border border-rose-500/20">{error}</p>}
       <form onSubmit={handleSubmit} className="w-full max-w-xs flex flex-col gap-3">
