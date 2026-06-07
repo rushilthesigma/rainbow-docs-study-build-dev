@@ -39,7 +39,7 @@ export default function ApplicationBlock({ block, onComplete, hideContinue = fal
             prose-li:text-white/82 prose-li:text-[15.5px] prose-li:leading-[1.7]
             prose-a:text-violet-200/90 prose-a:no-underline hover:prose-a:underline
             prose-blockquote:border-violet-300/30 prose-blockquote:text-white/70 prose-blockquote:not-italic prose-blockquote:pl-5">
-            <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+            <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: '#94a3b8' }]]}>
               {block.content || ''}
             </ReactMarkdown>
           </article>

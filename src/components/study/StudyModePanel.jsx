@@ -11,7 +11,7 @@ import { Z } from '../../styles/tokens';
 import { useToast } from '../shared/Toast';
 import { useAuth } from '../../context/AuthContext';
 import { planFromUser } from '../billing/modelAccess';
-import { STUDY_MODELS, HAIKU_FREE_DAILY, resolveStudyModel, canUseStudyModel, requiredPlanLabelFor, studyModelLabel, studyModelHasFreeCap, studyModelBlurb, studyModelSupportsThinking } from './studyModels';
+import { STUDY_MODELS, resolveStudyModel, canUseStudyModel, requiredPlanLabelFor, studyModelLabel, studyModelHasFreeCap, studyModelDailyCap, studyModelBlurb, studyModelSupportsThinking } from './studyModels';
 
 // Quick-start prompts shown in the empty state. Replaces the bland
 // "Start the conversation..." default with concrete suggestions tied to
@@ -44,10 +44,11 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   const thinkingOn = thinkingLocked ? true : thinkingPref;
   const thinkingOnRef = useRef(thinkingOn);
   thinkingOnRef.current = thinkingOn;
-  // Live count of free Haiku messages left in the rolling 24h window for
-  // non-paid users. Null until the server reports it on the first send; the
-  // composer pill falls back to the static daily limit until then.
+  // Live counts of capped model messages left in the rolling 24h window.
+  // Null until the server reports on the first send; the pill falls back to
+  // the static daily limit until then.
   const [haikuRemaining, setHaikuRemaining] = useState(null);
+  const [sonnetRemaining, setSonnetRemaining] = useState(null);
 
   // Keep the picker in sync if the cached user (plan / saved pick) changes.
   useEffect(() => {
@@ -139,6 +140,9 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         if (data.sessionId) setSessionId(data.sessionId);
         if (typeof data.studyModel?.haikuRemaining === 'number') {
           setHaikuRemaining(data.studyModel.haikuRemaining);
+        }
+        if (typeof data.studyModel?.sonnetRemaining === 'number') {
+          setSonnetRemaining(data.studyModel.sonnetRemaining);
         }
         // Server auto-switched the model (Haiku daily cap hit, or a locked
         // pick). Snap the toggle to whatever model the server actually used,
@@ -459,7 +463,11 @@ export default function StudyModePanel({ className = '', flush = false, initialM
               disabled={streaming}
             />
             {studyModelHasFreeCap(studyModel, plan) && (
-              <HaikuLimitPill remaining={haikuRemaining} />
+              <ModelCapPill
+                cap={studyModelDailyCap(studyModel, plan)}
+                remaining={studyModel === 'haiku' ? haikuRemaining : sonnetRemaining}
+                model={studyModel}
+              />
             )}
           </div>
         }
@@ -486,19 +494,20 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   );
 }
 
-// ===== Haiku daily-limit pill (composer toolbar) =====
+// ===== Daily-cap pill (composer toolbar) =====
 //
-// Shows the free Haiku quota for non-paid users right next to the model
-// dropdown. Before the first send the server hasn't reported a live count, so
-// it shows the static daily allowance; afterward it shows messages remaining
-// in the rolling 24h window. Turns amber when running low / out.
-function HaikuLimitPill({ remaining }) {
+// Shows the rolling daily quota for capped models (Haiku on free, Sonnet on
+// Plus). Before the first send the server hasn't reported a live count, so it
+// shows the static cap; afterward it shows messages remaining. Turns amber
+// when running low.
+function ModelCapPill({ cap, remaining, model }) {
   const known = typeof remaining === 'number';
   const low = known && remaining <= 3;
-  const label = `${known ? remaining : HAIKU_FREE_DAILY}/${HAIKU_FREE_DAILY}`;
+  const label = `${known ? remaining : cap}/${cap}`;
+  const modelName = model === 'haiku' ? 'Haiku' : 'Sonnet';
   return (
     <span
-      title={`Free plan: ${HAIKU_FREE_DAILY} Haiku messages per day`}
+      title={`${cap} ${modelName} messages per day on your plan`}
       className={`animate-fade-in inline-flex items-center px-2 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap transition-colors ${
         low
           ? 'text-amber-600 dark:text-amber-300/90 bg-amber-500/10'
@@ -607,7 +616,7 @@ function StudyModelDropdown({ active, plan, onPick, disabled }) {
         >
           {STUDY_MODELS.map((m) => {
             const locked = !canUseStudyModel(m.key, plan);
-            const lockLabel = locked ? requiredPlanLabelFor(m.key) : null;
+            const lockLabel = locked ? requiredPlanLabelFor(m.key, plan) : null;
             return (
               <button
                 key={m.key}

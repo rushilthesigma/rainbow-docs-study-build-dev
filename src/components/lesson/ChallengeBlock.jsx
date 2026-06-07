@@ -39,7 +39,7 @@ export default function ChallengeBlock({ block, onComplete, hideContinue = false
             prose-strong:text-white prose-strong:font-semibold
             prose-code:bg-white/[0.07] prose-code:text-white/85 prose-code:rounded prose-code:px-1.5 prose-code:py-0.5 prose-code:text-[13px] prose-code:before:content-none prose-code:after:content-none
             prose-li:text-white/82 prose-li:text-[15.5px] prose-li:leading-[1.7]">
-            <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+            <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: '#94a3b8' }]]}>
               {block.prompt || ''}
             </ReactMarkdown>
           </article>
@@ -79,7 +79,7 @@ export default function ChallengeBlock({ block, onComplete, hideContinue = false
               <article className="prose prose-invert max-w-none
                 prose-p:text-white/80 prose-p:leading-[1.7] prose-p:text-[14.5px] prose-p:my-2
                 prose-code:bg-white/[0.07] prose-code:text-white/85 prose-code:rounded prose-code:px-1.5 prose-code:py-0.5 prose-code:text-[13px] prose-code:before:content-none prose-code:after:content-none">
-                <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+                <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: '#94a3b8' }]]}>
                   {block.solution}
                 </ReactMarkdown>
               </article>

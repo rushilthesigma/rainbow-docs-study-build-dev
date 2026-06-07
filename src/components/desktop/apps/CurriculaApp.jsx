@@ -998,7 +998,7 @@ function AssessmentView({ lesson, curriculum, onBack }) {
             // Default to 3 questions instead of 5. ~40% faster
             // generation on Flash Lite + still enough to gauge
             // mastery; users can re-take to drill more.
-            questionCount: 3,
+            questionCount: 10,
             difficulty: curriculum?.settings?.difficulty || 'beginner',
           }),
         });
@@ -1092,79 +1092,64 @@ function AssessmentView({ lesson, curriculum, onBack }) {
         {/* ── Back nav ── */}
         <button
           onClick={onBack}
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 transition-colors mb-6"
+          className="inline-flex items-center gap-1.5 text-[13px] text-white/30 hover:text-white/60 transition-colors mb-6"
         >
           <ArrowLeft size={14} /> Back
         </button>
 
         {/* ── Header ── */}
         <div className="mb-6">
-          <div className="flex items-center gap-2 mb-1.5">
-            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${
-              isEssay
-                ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
-                : 'bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400'
+          <div className="flex items-center gap-2 mb-2">
+            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-[0.18em] ${
+              isEssay ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
             }`}>
-              {isEssay ? <FileText size={10} /> : <ClipboardCheck size={10} />}
+              {isEssay ? <FileText size={9} /> : <ClipboardCheck size={9} />}
               {isEssay ? 'Graded Essay' : 'Assessment'}
             </span>
             {totalRubricPoints && (
-              <span className="text-[10px] text-gray-400 dark:text-gray-500 font-medium">{totalRubricPoints} pts total</span>
+              <span className="text-[10px] text-white/25 font-medium">{totalRubricPoints} pts total</span>
             )}
           </div>
-          <h1 className="text-xl font-bold text-white leading-snug">{lesson.title}</h1>
+          <h1 className="text-[18px] font-bold text-white/90 leading-snug">{lesson.title}</h1>
         </div>
 
         {/* ── Loading ── */}
         {loading && (
-          <div className="py-12">
-            <LoadingProgress
-              active
-              label={isEssay ? 'Building your essay prompt…' : 'Generating quiz…'}
-              duration={8000}
-            />
+          <div className="py-16 flex flex-col items-center gap-4">
+            <LoadingProgress active label={isEssay ? 'Building essay prompt…' : 'Generating assessment…'} duration={8000} />
           </div>
         )}
 
         {error && (
-          <div className="flex items-start gap-3 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-2xl p-4 mb-4">
-            <X size={14} className="text-rose-500 mt-0.5 flex-shrink-0" />
-            <p className="text-sm text-rose-700 dark:text-rose-300">{error}</p>
+          <div className="flex items-start gap-3 bg-rose-900/20 border border-rose-800/50 rounded-2xl p-4 mb-4">
+            <X size={14} className="text-rose-400 mt-0.5 flex-shrink-0" />
+            <p className="text-[13px] text-rose-300">{error}</p>
           </div>
         )}
 
         {/* ===== ESSAY FORM ===== */}
         {!loading && !error && assessment && !result && isEssay && (
           <div className="space-y-4">
-            {/* Prompt card */}
-            <div className="relative bg-white/[0.07] backdrop-blur-sm border border-amber-200 dark:border-amber-900/60 rounded-2xl overflow-hidden">
-              <div className="absolute left-0 inset-y-0 w-1 bg-amber-400 dark:bg-amber-500 rounded-l-2xl" />
-              <div className="pl-5 pr-4 py-4">
-                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-amber-600 dark:text-amber-400 mb-2">Essay Prompt</p>
-                <MathText as="p" className="text-sm text-gray-800 dark:text-gray-100 leading-relaxed">{assessment.prompt || ''}</MathText>
-              </div>
+            {/* Prompt */}
+            <div className="rounded-2xl border border-amber-500/25 bg-amber-500/[0.05] p-5">
+              <p className="text-[9px] font-black uppercase tracking-[0.22em] text-amber-400/70 mb-3">Essay Prompt</p>
+              <MathText as="p" className="text-[14px] text-white/85 leading-[1.75]">{assessment.prompt || ''}</MathText>
             </div>
 
-            {/* Rubric card */}
+            {/* Rubric */}
             {Array.isArray(assessment.rubric) && assessment.rubric.length > 0 && (
-              <div className="bg-white/[0.07] backdrop-blur-sm border border-white/10 rounded-2xl p-4">
-                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-white/45 mb-3">Grading Rubric</p>
-                <div className="space-y-2.5">
+              <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4">
+                <p className="text-[9px] font-black uppercase tracking-[0.22em] text-white/25 mb-3">Grading Rubric</p>
+                <div className="flex flex-col gap-2">
                   {assessment.rubric.map((r, i) => (
                     <div key={i} className="flex items-start gap-3">
-                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-gray-100 dark:bg-white/[0.04] text-[10px] font-bold text-white/45 flex items-center justify-center mt-0.5">
-                        {i + 1}
-                      </span>
+                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-white/[0.05] text-[9px] font-bold text-white/30 flex items-center justify-center mt-0.5">{i + 1}</span>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-baseline justify-between gap-2">
-                          <span className="text-xs font-semibold text-gray-800 dark:text-gray-100">{r.criterion}</span>
-                          <span className="flex-shrink-0 text-[10px] font-bold tabular-nums text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 px-1.5 py-0.5 rounded-md">
-                            {r.maxScore || 5} pts
-                          </span>
+                          <span className="text-[12px] font-semibold text-white/75">{r.criterion}</span>
+                          <span className="flex-shrink-0 text-[10px] font-bold tabular-nums text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded-md">{r.maxScore || 5} pts</span>
                         </div>
-                        {r.description && (
-                          <p className="text-[11px] text-white/45 mt-0.5 leading-snug">{r.description}</p>
-                        )}
+                        {r.description && <p className="text-[11px] text-white/35 mt-0.5 leading-snug">{r.description}</p>}
                       </div>
                     </div>
                   ))}
@@ -1173,29 +1158,29 @@ function AssessmentView({ lesson, curriculum, onBack }) {
             )}
 
             {/* Textarea */}
-            <div className="bg-white/[0.07] backdrop-blur-sm border border-white/10 rounded-2xl overflow-hidden focus-within:border-white/30 transition-colors">
-              <div className="px-4 pt-3 pb-1 border-b border-gray-100 dark:border-[#1e1e2e]">
-                <p className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Your Response</p>
+            <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] overflow-hidden focus-within:border-white/20 transition-colors">
+              <div className="px-4 pt-3 pb-2 border-b border-white/[0.06]">
+                <p className="text-[9px] font-black uppercase tracking-[0.22em] text-white/25">Your Response</p>
               </div>
               <textarea
                 value={essayText}
                 onChange={e => setEssayText(e.target.value)}
-                placeholder="Write your essay here. Make a clear claim, support it with evidence, and address each rubric criterion explicitly."
+                placeholder="Make a clear argument, support it with evidence, and address each rubric criterion."
                 rows={14}
-                className="w-full px-4 py-3 bg-transparent text-sm text-gray-900 dark:text-gray-100 outline-none resize-y leading-7 placeholder:text-gray-400 dark:placeholder:text-gray-600"
+                className="w-full px-4 py-4 bg-transparent text-[13px] text-white/80 outline-none resize-y leading-7 placeholder:text-white/20"
               />
-              <div className="flex items-center justify-between px-4 py-2.5 border-t border-gray-100 dark:border-[#1e1e2e]">
-                <p className="text-[10px] text-gray-400 tabular-nums">
-                  <span className="font-semibold text-gray-600 dark:text-gray-300">{wordCount}</span> word{wordCount === 1 ? '' : 's'}
-                  <span className="mx-1.5 text-gray-300 dark:text-gray-600">·</span>
-                  <span className="font-semibold text-gray-600 dark:text-gray-300">{essayText.length}</span> char{essayText.length === 1 ? '' : 's'}
+              <div className="flex items-center justify-between px-4 py-2.5 border-t border-white/[0.06]">
+                <p className="text-[10px] text-white/25 tabular-nums">
+                  <span className="font-semibold text-white/45">{wordCount}</span> {wordCount === 1 ? 'word' : 'words'}
+                  <span className="mx-1.5 text-white/15">·</span>
+                  <span className="font-semibold text-white/45">{essayText.length}</span> chars
                 </p>
                 {!canSubmitEssay && essayText.length > 0 && (
-                  <p className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">30 characters minimum</p>
+                  <p className="text-[10px] text-amber-400 font-medium">30 characters minimum</p>
                 )}
                 {canSubmitEssay && (
-                  <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
-                    <Check size={10} /> Ready to submit
+                  <p className="text-[10px] text-emerald-400 font-medium flex items-center gap-1">
+                    <Check size={9} /> Ready
                   </p>
                 )}
               </div>
@@ -1204,18 +1189,12 @@ function AssessmentView({ lesson, curriculum, onBack }) {
             <button
               onClick={handleEssaySubmit}
               disabled={grading || !canSubmitEssay}
-              className="w-full py-3 rounded-2xl bg-white/15 hover:bg-white/20 border border-white/15 text-white text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-colors"
+              className="w-full py-3 rounded-2xl bg-white text-black text-[13px] font-bold disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2 hover:bg-white/90 transition-colors"
             >
               {grading ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                  Grading your essay…
-                </>
+                <><div className="w-3.5 h-3.5 border-2 border-black/30 border-t-black rounded-full animate-spin" /> Grading…</>
               ) : (
-                <>
-                  <FileText size={14} />
-                  Submit for Grading
-                </>
+                'Submit Essay'
               )}
             </button>
           </div>
@@ -1231,132 +1210,107 @@ function AssessmentView({ lesson, curriculum, onBack }) {
         )}
 
         {/* ===== RESULT - ESSAY ===== */}
-        {result && isEssay && (
-          <div className="space-y-4">
-            {/* Score hero */}
-            <div className="bg-white/[0.07] backdrop-blur-sm border border-white/10 rounded-2xl p-6 text-center">
-              <Trophy size={32} className="text-amber-500 mx-auto mb-3" />
-              <p className="text-5xl font-bold text-white tabular-nums tracking-tight">
-                {result.score}
-                <span className="text-2xl font-medium text-gray-400 dark:text-gray-500">/{result.total}</span>
-              </p>
-              <div className="mt-2 flex items-center justify-center gap-2">
-                <span className={`text-sm font-bold px-3 py-1 rounded-full ${
-                  result.percentage >= 80 ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'
-                  : result.percentage >= 60 ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
-                  : 'bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400'
-                }`}>
-                  {result.percentage}%
-                </span>
-              </div>
-              {/* Mini progress bar */}
-              <div className="mt-4 h-1.5 rounded-full bg-gray-100 dark:bg-white/[0.04] overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all duration-700 ${
-                    result.percentage >= 80 ? 'bg-emerald-500'
-                    : result.percentage >= 60 ? 'bg-amber-500'
-                    : 'bg-rose-500'
-                  }`}
-                  style={{ width: `${result.percentage}%` }}
-                />
-              </div>
-            </div>
-
-            {/* Overall feedback */}
-            {result.overallFeedback && (
-              <div className="relative bg-white/[0.07] backdrop-blur-sm border border-white/[0.10] rounded-2xl overflow-hidden">
-                <div className="absolute left-0 inset-y-0 w-1 bg-white/20 rounded-l-2xl" />
-                <div className="pl-5 pr-4 py-4">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-white/70 mb-2">Overall Feedback</p>
-                  <MathText as="p" className="text-sm text-gray-800 dark:text-gray-100 leading-relaxed">{result.overallFeedback}</MathText>
+        {result && isEssay && (() => {
+          const pct = result.percentage ?? 0;
+          const letter = pct >= 93 ? 'A' : pct >= 90 ? 'A−' : pct >= 87 ? 'B+' : pct >= 83 ? 'B' : pct >= 80 ? 'B−' : pct >= 77 ? 'C+' : pct >= 73 ? 'C' : pct >= 70 ? 'C−' : pct >= 67 ? 'D+' : pct >= 60 ? 'D' : 'F';
+          const col = pct >= 80 ? { text: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/25', bar: 'bg-emerald-500' }
+            : pct >= 65 ? { text: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/25', bar: 'bg-amber-500' }
+            : { text: 'text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/25', bar: 'bg-rose-500' };
+          return (
+            <div className="space-y-4">
+              {/* Score hero */}
+              <div className={`rounded-2xl border ${col.border} ${col.bg} p-6 text-center`}>
+                <div className="flex items-end justify-center gap-3 mb-2">
+                  <span className={`text-6xl font-black tabular-nums ${col.text}`}>{letter}</span>
+                  <span className={`text-2xl font-bold pb-1 ${col.text} opacity-60`}>{pct}%</span>
+                </div>
+                <p className="text-[12px] text-white/35">{result.score} / {result.total} pts</p>
+                <div className="mt-4 h-1 rounded-full bg-white/[0.07] overflow-hidden mx-auto max-w-[140px]">
+                  <div className={`h-full rounded-full transition-all duration-700 ${col.bar}`} style={{ width: `${pct}%` }} />
                 </div>
               </div>
-            )}
 
-            {/* Rubric breakdown */}
-            {Array.isArray(result.rubricScores) && result.rubricScores.length > 0 && (
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-white/45 mb-2.5 px-0.5">Rubric Breakdown</p>
+              {/* Overall feedback */}
+              {result.overallFeedback && (
+                <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
+                  <p className="text-[9px] font-black uppercase tracking-[0.22em] text-white/25 mb-2">Overall Feedback</p>
+                  <MathText as="p" className="text-[13px] text-white/70 leading-relaxed">{result.overallFeedback}</MathText>
+                </div>
+              )}
+
+              {/* Rubric breakdown */}
+              {Array.isArray(result.rubricScores) && result.rubricScores.length > 0 && (
                 <div className="space-y-2">
+                  <p className="text-[9px] font-black uppercase tracking-[0.22em] text-white/25 px-0.5">Rubric Breakdown</p>
                   {result.rubricScores.map((r, i) => {
-                    const pct = r.maxScore > 0 ? Math.round((r.score / r.maxScore) * 100) : 0;
-                    const tone = pct >= 80 ? 'emerald' : pct >= 60 ? 'amber' : 'rose';
-                    const barColor = { emerald: 'bg-emerald-500', amber: 'bg-amber-500', rose: 'bg-rose-500' }[tone];
-                    const scoreColor = {
-                      emerald: 'text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20',
-                      amber: 'text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20',
-                      rose: 'text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/20',
-                    }[tone];
+                    const p = r.maxScore > 0 ? Math.round((r.score / r.maxScore) * 100) : 0;
+                    const c = p >= 80 ? { score: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20', bar: 'bg-emerald-500' }
+                      : p >= 60 ? { score: 'text-amber-400 bg-amber-500/10 border-amber-500/20', bar: 'bg-amber-500' }
+                      : { score: 'text-rose-400 bg-rose-500/10 border-rose-500/20', bar: 'bg-rose-500' };
                     return (
-                      <div key={i} className="bg-white/[0.07] backdrop-blur-sm border border-white/10 rounded-2xl p-4">
+                      <div key={i} className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-4">
                         <div className="flex items-start justify-between gap-3 mb-2">
-                          <p className="text-sm font-semibold text-white">{r.criterion}</p>
-                          <span className={`flex-shrink-0 text-xs font-bold tabular-nums px-2 py-0.5 rounded-lg ${scoreColor}`}>
-                            {r.score}/{r.maxScore}
-                          </span>
+                          <p className="text-[13px] font-semibold text-white/80">{r.criterion}</p>
+                          <span className={`flex-shrink-0 text-[11px] font-bold tabular-nums px-2 py-0.5 rounded-lg border ${c.score}`}>{r.score}/{r.maxScore}</span>
                         </div>
-                        <div className="h-1 rounded-full bg-gray-100 dark:bg-white/[0.04] mb-2 overflow-hidden">
-                          <div className={`h-full rounded-full ${barColor}`} style={{ width: `${pct}%` }} />
+                        <div className="h-0.5 rounded-full bg-white/[0.06] mb-2.5 overflow-hidden">
+                          <div className={`h-full rounded-full ${c.bar}`} style={{ width: `${p}%` }} />
                         </div>
-                        {r.feedback && (
-                          <MathText as="p" className="text-xs text-gray-600 dark:text-gray-400 leading-snug">{r.feedback}</MathText>
-                        )}
+                        {r.feedback && <MathText as="p" className="text-[11px] text-white/40 leading-snug">{r.feedback}</MathText>}
                       </div>
                     );
                   })}
                 </div>
+              )}
+
+              {/* Strengths + improvements */}
+              <div className="grid grid-cols-1 gap-3">
+                {Array.isArray(result.strengths) && result.strengths.length > 0 && (
+                  <div className="rounded-2xl border border-emerald-800/40 bg-emerald-900/10 p-4">
+                    <p className="text-[9px] font-black uppercase tracking-[0.22em] text-emerald-400/70 mb-3">Strengths</p>
+                    <ul className="space-y-2">
+                      {result.strengths.map((s, i) => (
+                        <li key={i} className="flex items-start gap-2.5">
+                          <Check size={11} className="text-emerald-400 flex-shrink-0 mt-0.5" />
+                          <span className="text-[12px] text-white/60 leading-snug">{s}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {Array.isArray(result.improvements) && result.improvements.length > 0 && (
+                  <div className="rounded-2xl border border-amber-800/40 bg-amber-900/10 p-4">
+                    <p className="text-[9px] font-black uppercase tracking-[0.22em] text-amber-400/70 mb-3">To Improve</p>
+                    <ul className="space-y-2">
+                      {result.improvements.map((s, i) => (
+                        <li key={i} className="flex items-start gap-2.5">
+                          <span className="text-amber-400 flex-shrink-0 text-[11px] font-bold mt-0.5">→</span>
+                          <span className="text-[12px] text-white/60 leading-snug">{s}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
-            )}
 
-            {/* Strengths & improvements side by side (or stacked) */}
-            <div className="grid grid-cols-1 gap-3">
-              {Array.isArray(result.strengths) && result.strengths.length > 0 && (
-                <div className="bg-white/[0.07] backdrop-blur-sm border border-emerald-200 dark:border-emerald-900/50 rounded-2xl p-4">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-emerald-600 dark:text-emerald-400 mb-2.5">Strengths</p>
-                  <ul className="space-y-2">
-                    {result.strengths.map((s, i) => (
-                      <li key={i} className="flex items-start gap-2.5">
-                        <span className="flex-shrink-0 w-4 h-4 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center mt-0.5">
-                          <Check size={9} className="text-emerald-600 dark:text-emerald-400" />
-                        </span>
-                        <span className="text-xs text-white/60 leading-snug">{s}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {Array.isArray(result.improvements) && result.improvements.length > 0 && (
-                <div className="bg-white/[0.07] backdrop-blur-sm border border-amber-200 dark:border-amber-900/50 rounded-2xl p-4">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-amber-600 dark:text-amber-400 mb-2.5">Areas to Improve</p>
-                  <ul className="space-y-2">
-                    {result.improvements.map((s, i) => (
-                      <li key={i} className="flex items-start gap-2.5">
-                        <span className="flex-shrink-0 w-4 h-4 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center mt-0.5 text-amber-600 dark:text-amber-400 text-[10px] font-bold">→</span>
-                        <span className="text-xs text-white/60 leading-snug">{s}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+              {/* Actions */}
+              <div className="flex flex-col gap-2 pt-1">
+                <button
+                  onClick={() => { setResult(null); setEssayText(result.essay || essayText); }}
+                  className="w-full py-2.5 rounded-2xl border border-white/[0.09] text-[13px] font-medium text-white/50 hover:bg-white/[0.05] hover:text-white/70 transition-colors"
+                >
+                  Revise &amp; Resubmit
+                </button>
+                <button
+                  onClick={onBack}
+                  className="w-full py-3 rounded-2xl bg-white text-black text-[13px] font-bold hover:bg-white/90 transition-colors"
+                >
+                  Back to Curriculum
+                </button>
+              </div>
             </div>
-
-            {/* Action buttons */}
-            <div className="flex flex-col gap-2 pt-1">
-              <button
-                onClick={() => { setResult(null); setEssayText(result.essay || essayText); }}
-                className="w-full py-2.5 rounded-2xl border border-white/10 text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#1a1a28] transition-colors"
-              >
-                Revise &amp; Resubmit
-              </button>
-              <button
-                onClick={onBack}
-                className="w-full py-3 rounded-2xl bg-white/[0.10] hover:bg-white/[0.15] border border-white/[0.12] text-white text-sm font-semibold transition-colors"
-              >
-                Back to Curriculum
-              </button>
-            </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* In NEW (QuizBlock) mode the quiz results are rendered
             inside QuizBlock itself (score chip + per-question
@@ -1500,6 +1454,7 @@ function PausdCatalogView({ catalog, loading, enrollingSlug, onBack, onEnroll })
   const SUBJECT_META = {
     math: { label: 'Mathematics', icon: Sigma, color: 'text-white/60', bg: 'bg-white/[0.06]' },
     science: { label: 'Science', icon: Atom, color: 'text-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-900/20' },
+    geography: { label: 'Geography', icon: MapIcon, color: 'text-sky-400', bg: 'bg-sky-50 dark:bg-sky-900/20' },
   };
 
   return (
@@ -1526,7 +1481,7 @@ function PausdCatalogView({ catalog, loading, enrollingSlug, onBack, onEnroll })
         </div>
       ) : (
         <div className="space-y-6">
-          {['math', 'science'].map(key => {
+          {['math', 'science', 'geography'].map(key => {
             const courses = grouped[key];
             if (!courses?.length) return null;
             const meta = SUBJECT_META[key] || { label: key, icon: BookOpen, color: 'text-gray-500', bg: 'bg-gray-50' };
@@ -1574,7 +1529,7 @@ function PausdCourseCard({ course, enrolling, onEnroll, tourAnchor }) {
       <p className="text-[11px] text-white/45 leading-snug line-clamp-3 mb-2 flex-1">{course.description}</p>
       {course.textbook && (
         <p className="text-[10px] text-gray-400 dark:text-gray-500 italic leading-snug line-clamp-1 mb-2">
-          📖 {course.textbook}
+          {course.textbook}
         </p>
       )}
       <div className="flex items-center justify-between mt-auto">

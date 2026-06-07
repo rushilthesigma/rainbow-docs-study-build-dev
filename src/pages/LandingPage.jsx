@@ -3,9 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { googleLogin } from '../api/auth';
 import { WALLPAPERS } from '../components/desktop/DesktopBackground';
-import { Z } from '../styles/tokens';
 import {
-  Loader2 as Loader, Sparkles, ArrowRight, X, Check, ChevronDown,
+  Loader2 as Loader, Sparkles, X, Check, ChevronDown,
   BookOpen, Brain, Zap, PenTool, Cpu, Repeat,
   Lightbulb, Calculator, MessageSquare, Target, ClipboardCheck,
   Scale, Link2,
@@ -27,7 +26,6 @@ export default function LandingPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
-  const [whyOpen, setWhyOpen] = useState(false);
   const googleBtnRef = useRef(null);
   const scrollerRef = useRef(null);
 
@@ -40,6 +38,10 @@ export default function LandingPage() {
         window.google.accounts.id.initialize({
           client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID || '',
           callback: handleGoogleResponse,
+          // Required for Chrome 116+ FedCM on Chromebooks: allows prompt() to
+          // trigger the browser-native account picker from a user-gesture handler
+          // without needing an on-screen rendered button element.
+          use_fedcm_for_prompt: true,
         });
         if (googleBtnRef.current) {
           window.google.accounts.id.renderButton(googleBtnRef.current, {
@@ -67,9 +69,16 @@ export default function LandingPage() {
   }
 
   function triggerGoogle() {
-    const btn = googleBtnRef.current?.querySelector('div[role=button], button');
-    if (btn) btn.click();
-    else if (window.google?.accounts?.id) window.google.accounts.id.prompt();
+    if (!window.google?.accounts?.id) return;
+    // Call prompt() from within the user-gesture handler so Chrome's FedCM
+    // (used on Chromebooks) accepts it without needing a visible rendered button.
+    // If One Tap / FedCM is suppressed, fall back to clicking the rendered button.
+    window.google.accounts.id.prompt((notification) => {
+      if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+        const btn = googleBtnRef.current?.querySelector('div[role=button], button');
+        if (btn) btn.click();
+      }
+    });
   }
 
   function scrollTo(idx) {
@@ -117,12 +126,10 @@ export default function LandingPage() {
         <SignInSection
           loading={loading}
           onSignIn={triggerGoogle}
-          onWhyNotGpt={() => setWhyOpen(true)}
+          onWhyNotGpt={() => scrollTo(7)}
         />
+        <WhyNotGptSection />
       </div>
-
-      {/* Why not GPT? modal - full-screen overlay over the snap flow */}
-      {whyOpen && <WhyNotGptModal onClose={() => setWhyOpen(false)} />}
 
       {/* Hidden GIS button - mounted off-screen so the script + button
           are present in the DOM. All sign-in CTAs click this. */}
@@ -593,7 +600,7 @@ function SignInSection({ loading, onSignIn, onWhyNotGpt }) {
       {/* Bottom links */}
       <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 flex items-center gap-5">
         <a
-          href="https://discord.gg/E9YXNj4F"
+          href="https://discord.gg/rRdhczxjgC"
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-white/70 hover:text-white transition-colors"
@@ -615,19 +622,8 @@ function SignInSection({ loading, onSignIn, onWhyNotGpt }) {
   );
 }
 
-// ===== Why not GPT? modal =====
-function WhyNotGptModal({ onClose }) {
-  useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    function onKey(e) { if (e.key === 'Escape') onClose(); }
-    window.addEventListener('keydown', onKey);
-    return () => {
-      document.body.style.overflow = prev;
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [onClose]);
-
+// ===== Section 8: Why not GPT? =====
+function WhyNotGptSection() {
   const ROWS = [
     {
       icon: BookOpen,
@@ -668,54 +664,25 @@ function WhyNotGptModal({ onClose }) {
   ];
 
   return (
-    <div className="fixed inset-0 flex items-start justify-center overflow-y-auto bg-black/65 backdrop-blur-lg animate-fade-in" style={{ zIndex: Z.modal }}>
-      <button aria-label="Close" onClick={onClose} className="absolute inset-0 -z-0" />
-      <div
-        className="relative my-12 mx-4 w-full max-w-3xl rounded-2xl overflow-hidden border border-white/[0.10]"
-        style={{
-          background:
-            'radial-gradient(at 0% 0%, rgba(59,130,246,0.12) 0%, transparent 50%),' +
-            'radial-gradient(at 100% 100%, rgba(139,92,246,0.10) 0%, transparent 55%),' +
-            '#0a0c16',
-          boxShadow:
-            '0 30px 60px -15px rgba(0,0,0,0.65),' +
-            '0 0 0 0.5px rgba(255,255,255,0.05) inset,' +
-            '0 1px 0 rgba(255,255,255,0.06) inset',
-        }}
-      >
-        {/* macOS-style window titlebar */}
-        <div className="relative h-9 flex items-center px-4 border-b border-white/[0.07] bg-white/[0.025]">
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={onClose}
-              aria-label="Close"
-              className="group w-3 h-3 rounded-full bg-[#ff5f57] shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.20)] grid place-items-center hover:brightness-110 transition-all"
-            >
-              <X size={7} strokeWidth={3} className="text-[#4d0000] opacity-0 group-hover:opacity-100 transition-opacity" />
-            </button>
-            <span className="w-3 h-3 rounded-full bg-[#febc2e] shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.20)]" />
-            <span className="w-3 h-3 rounded-full bg-[#28c840] shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.20)]" />
-          </div>
-          <div className="absolute inset-x-0 text-center text-[12px] font-medium text-white/55 pointer-events-none">
-            Why not GPT?
-          </div>
-        </div>
+    <section
+      data-section="whynotgpt"
+      className="snap-start min-h-screen w-full flex flex-col items-center justify-center px-6 py-16 relative"
+    >
+      <div className="absolute inset-0 bg-black/40" />
 
-        {/* Header */}
-        <div className="px-7 pt-7 pb-6 border-b border-white/[0.07]">
-          <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-blue-300">RushilAI vs ChatGPT</span>
-          <h2 className="mt-3 text-[26px] sm:text-[30px] font-semibold tracking-[-0.02em] text-white leading-tight">
-            ChatGPT answers questions.
-            <br />
-            <span className="text-blue-300">RushilAI actually teaches you.</span>
-          </h2>
-          <p className="mt-3 text-[13px] text-white/55 leading-relaxed max-w-xl">
-            One&apos;s a chatbot. The other walks you through a real course.
-          </p>
-        </div>
+      <div className="relative z-10 w-full max-w-3xl animate-fade-up">
+        <p className="text-center text-[11px] font-bold uppercase tracking-[0.22em] text-white/55 mb-3">RushilAI vs ChatGPT</p>
+        <h2 className="text-center text-[34px] sm:text-[44px] leading-[1.05] font-bold tracking-[-0.025em] text-white mb-3">
+          ChatGPT answers questions.
+          <br />
+          <span className="text-blue-300 italic">RushilAI teaches you.</span>
+        </h2>
+        <p className="text-center text-[14px] text-white/55 max-w-md mx-auto mb-10">
+          One is a chatbot. The other walks you through a real course.
+        </p>
 
         {/* Column labels */}
-        <div className="px-7 pt-5 pb-3 grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-3 mb-3">
           <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-400/[0.07] ring-1 ring-emerald-400/[0.14]">
             <Check size={10} className="text-emerald-400 shrink-0" strokeWidth={3} />
             <span className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-emerald-300">RushilAI</span>
@@ -726,8 +693,8 @@ function WhyNotGptModal({ onClose }) {
           </div>
         </div>
 
-        {/* Comparison cards */}
-        <div className="px-5 sm:px-7 pb-5 space-y-2">
+        {/* Comparison rows */}
+        <div className="space-y-2">
           {ROWS.map((row) => {
             const Icon = row.icon;
             return (
@@ -752,19 +719,8 @@ function WhyNotGptModal({ onClose }) {
             );
           })}
         </div>
-
-        {/* Footer */}
-        <div className="px-7 py-4 border-t border-white/[0.07] flex items-center justify-between bg-white/[0.015]">
-          <span className="text-[11.5px] text-white/40">Press <kbd className="px-1.5 py-0.5 rounded bg-white/[0.06] border border-white/[0.10] text-white/70 font-mono text-[10.5px]">Esc</kbd> to close</span>
-          <button
-            onClick={onClose}
-            className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-b from-blue-500 to-indigo-600 hover:brightness-110 active:scale-[0.98] text-white text-[13px] font-semibold tracking-[-0.005em] transition-all border border-blue-400/55"
-          >
-            Got it <ArrowRight size={13} />
-          </button>
-        </div>
       </div>
-    </div>
+    </section>
   );
 }
 

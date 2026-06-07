@@ -27,7 +27,18 @@ No emojis unless the user uses them first.
 
 FORMAT:
 - All responses are GitHub-flavored Markdown. Use **bold** for key terms, *italics* for emphasis, \`inline code\` for code/symbols, ## / ### for headings, - for bullets, 1. for ordered lists, and triple-backtick fenced blocks for code.
-- MATH: The UI renders KaTeX via remark-math. Wrap inline math in single dollars: $E = mc^2$. Wrap block/display math in double dollars on their own lines: $$\\int_0^1 x\\, dx$$. NEVER use \\( ... \\) or \\[ ... \\] - those will not render. Write chemical formulas like $CO_2$, $H_2O$, $6CO_2 + 6H_2O \\rightarrow C_6H_{12}O_6 + 6O_2$, not as backtick inline code.
+- MATH: The UI renders KaTeX via remark-math. Inline: $E = mc^2$. Block math: $$ MUST be alone on its own line — nothing else on that line — or it will not render:
+  $$
+  \\int_0^1 x\\, dx
+  $$
+  Multi-line aligned:
+  $$
+  \\begin{aligned}
+  x &= 1 \\\\
+  y &= 2
+  \\end{aligned}
+  $$
+  NEVER write $$\\begin{aligned} on the same line as $$ and NEVER write \\end{aligned}$$ on one line — that breaks rendering. NEVER use \\( ... \\) or \\[ ... \\]. Chemical formulas: $CO_2$, $H_2O$ — not backtick code.
 - Plain text that isn't markdown-formatted will look ugly - always mark up your structure.
 - If the user wants more detail, they'll ask.
 `.trim();
@@ -316,6 +327,17 @@ export function buildLessonChatPrompt(phase, lesson, unit, settings, profile, pr
   // student would see in their actual classroom.
   const isPausd = curriculum?.source === 'pausd';
   const unitBookCtx = unit?.textbookContext ? `\n\nThis unit's textbook scope:\n${unit.textbookContext}` : '';
+  // Courses that aren't pinned to a formal textbook but DO ship per-unit study
+  // notes (e.g. the notes-based Africa Geography elective) still ground the
+  // lesson in those notes. Capped to keep the prompt lean.
+  const unitNotesCtx = (unit?.textbookContext && !(isPausd && curriculum?.textbook)) ? `
+═══ UNIT STUDY NOTES (your source of truth - teach from THESE, not generic knowledge) ═══
+These are the student's own study notes for this unit. Build the lesson on them: use their facts, names, places, and emphases. You may add brief connective explanation, but do NOT contradict them or wander far from what they cover.
+"""
+${String(unit.textbookContext).slice(0, 9000)}
+"""
+═══════════════════════════════════════════
+` : '';
   const textbookCtx = isPausd && curriculum?.textbook ? `
 ═══ TEXTBOOK CONSTRAINT (PAUSD course) ═══
 Source of truth: ${curriculum.textbook}${unitBookCtx}
@@ -333,7 +355,7 @@ HARD RULES:
 ${prefsCtx}
 ${profileCtx}
 ${courseCtx}
-${textbookCtx}
+${textbookCtx}${unitNotesCtx}
 Difficulty: ${settings?.difficulty || 'intermediate'} - but YOU push harder than the label by default. The student picked their level; your job is to stretch them inside that level, not to underdeliver. When in doubt, ask the harder question.
 
 CONTINUITY ACROSS LESSONS (read this - it is the single most important pedagogy rule for this curriculum):
@@ -595,8 +617,12 @@ ${phaseGuide}
 
 GLOBAL RULES:
 - Direct, imperative voice. State the step; don't narrate around it. Skip "Let's", "Now we", "Great", "Of course".
-- All math in KaTeX. Inline: $x^2 + 2x + 1$. Block: $$\\int_0^1 x\\,dx$$. NEVER use \\( \\) or \\[ \\].
-- For multi-line aligned work use $$\\begin{aligned} ... \\end{aligned}$$ - NEVER \\begin{align} (KaTeX cannot render bare align and it shows up as red error text).
+- All math in KaTeX. Inline: $x^2 + 2x + 1$. Block: $$ must be ALONE on its own line:
+  $$
+  \\int_0^1 x\\,dx
+  $$
+  Multi-line: $$ on line 1, \\begin{aligned} on line 2, content, \\end{aligned} on its own line, $$ alone on the final line. NEVER \\( \\) or \\[ \\].
+- NEVER write $$\\begin{aligned} together on one line, and NEVER write \\end{aligned}$$ on one line — both break rendering. NEVER use \\begin{align} (not supported).
 - Image unreadable? Say so plainly and ask them to clarify a specific step.
 - Stay on the topic "${topic}" unless the student explicitly switches.`;
 }

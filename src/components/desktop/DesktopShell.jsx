@@ -13,6 +13,26 @@ import GuidedTour from './GuidedTour';
 import ShortcutsHelp from './ShortcutsHelp';
 import DesktopWidgets from './DesktopWidgets';
 
+// Null-rendering component that owns only the ⌘⇧H snap-grid shortcut.
+// Keeping useWidgets() here (instead of in MacOSContent) means widget
+// state changes — drag moves, clock ticks propagating through context —
+// do NOT re-render MacOSContent or any of its Window children.
+function SnapGridShortcut() {
+  const { toggleSnapGrid } = useWidgets();
+  useEffect(() => {
+    function handleKey(e) {
+      const cmdish = e.metaKey || e.ctrlKey;
+      if (cmdish && e.shiftKey && (e.key === 'h' || e.key === 'H')) {
+        e.preventDefault();
+        toggleSnapGrid();
+      }
+    }
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [toggleSnapGrid]);
+  return null;
+}
+
 // macOS is the only desktop shell. Win11 / ChromeOS / Linux paths were
 // removed along with the OS-style picker. The HTML root gets a
 // hardcoded `os-macos` class - there are no macOS-specific index.css
@@ -21,15 +41,11 @@ import DesktopWidgets from './DesktopWidgets';
 // Tailwind radii).
 function MacOSContent() {
   const { state } = useWindowManager();
-  const { toggleSnapGrid } = useWidgets();
+  // useWidgets() intentionally removed from this component — widget state
+  // changes (drag, clock tick, etc.) must not re-render MacOSContent or
+  // its Window children. SnapGridShortcut handles the one widget call.
   const [spotlightOpen, setSpotlightOpen] = useState(false);
   const toggleSpotlight = useCallback(() => setSpotlightOpen(prev => !prev), []);
-
-  // Slides-specific full-screen takeover logic lived here. It minimized
-  // every other visible window when the slides deck went maximized and
-  // restored them on exit. Now that slides is gone, the shell behaves
-  // like every other app - maximize fills the workspace but doesn't
-  // touch siblings.
 
   useEffect(() => {
     function handleKey(e) {
@@ -38,12 +54,10 @@ function MacOSContent() {
       const isDigit1 = e.code === 'Digit1' || e.key === '1' || e.key === '!' || e.keyCode === 49;
       if (cmdish && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); toggleSpotlight(); }
       else if (cmdish && e.shiftKey && isDigit1) { e.preventDefault(); toggleSpotlight(); }
-      // ⌘⇧H → toggle widget snap dock
-      else if (cmdish && e.shiftKey && (e.key === 'h' || e.key === 'H')) { e.preventDefault(); toggleSnapGrid(); }
     }
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [toggleSpotlight, toggleSnapGrid]);
+  }, [toggleSpotlight]);
 
   const windows = Object.values(state.windows);
   // Any visible (not minimized / not closing) window in the maximized
@@ -53,6 +67,7 @@ function MacOSContent() {
 
   return (
     <div className="h-screen w-screen overflow-hidden relative">
+      <SnapGridShortcut />
       <DesktopBackground />
       {!anyMaximized && <MenuBar onSpotlight={toggleSpotlight} />}
       <DesktopWidgets />

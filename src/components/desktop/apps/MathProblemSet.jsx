@@ -211,7 +211,7 @@ export default function MathProblemSet({ topic, count = 5, presetProblems = null
         {fb != null && (
           <div key={cur.id} className="flex-1 min-h-0 overflow-y-auto rounded-xl bg-black/20 border border-white/10 px-3 py-2.5 animate-view-fade">
             <div className="prose prose-sm prose-invert max-w-none prose-p:my-1 prose-headings:my-1.5 prose-ul:my-1 prose-li:my-0 text-[12px] text-white/80 leading-relaxed">
-              <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+              <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: '#94a3b8' }]]}>
                 {normalizeMath(fb)}
               </ReactMarkdown>
             </div>

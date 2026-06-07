@@ -28,7 +28,7 @@ function ThinkingPanel({ text, streaming }) {
         <div className="overflow-hidden">
           <div className="px-3 pb-2.5 pt-0.5 max-h-60 overflow-y-auto border-t border-white/[0.06]">
             <div className="prose prose-sm prose-invert max-w-none prose-p:my-1 prose-headings:my-1.5 prose-ul:my-1 prose-li:my-0 text-[12px] text-white/55 leading-relaxed">
-              <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+              <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: '#94a3b8' }]]}>
                 {text}
               </ReactMarkdown>
             </div>
@@ -72,14 +72,35 @@ function parseUserContent(raw) {
   return { files, text: userText };
 }
 
-// Normalize LaTeX delimiter variants that remark-math doesn't parse:
-//   \( ... \) and \[ ... \]  →  $ ... $ / $$ ... $$
-// KaTeX-inside-React via rehype-katex avoids the DOM reconciliation fight
-// that kills math on streaming re-renders.
+// remark-math's mathFlow tokenizer treats $$ as a FENCED block (like ```).
+// The $$ MUST be alone on its own line — anything after $$ on the same line
+// is treated as "fence meta" (stripped) and is NOT sent to KaTeX.
+// So $$\begin{aligned}...\end{aligned}$$ breaks because:
+//   • \begin{aligned} becomes fence meta → KaTeX never sees it
+//   • \end{aligned}$$ is content (not a closing fence) → block never closes
+// Fix: ensure $$ fences are always on their own lines.
 function normalizeMathDelimiters(s) {
-  return s
-    .replace(/\\\[([\s\S]+?)\\\]/g, (_, body) => `\n$$${body}$$\n`)
+  let r = s;
+  // 1. Normalize non-standard environments to aligned
+  r = r
+    .replace(/\\begin\{(align\*?|eqnarray\*?)\}/g, '\\begin{aligned}')
+    .replace(/\\end\{(align\*?|eqnarray\*?)\}/g, '\\end{aligned}');
+  // 2. Wrap bare aligned blocks (no delimiters) — each $$ on its own line
+  r = r.replace(
+    /(\${1,2})?[ \t]*\n?[ \t]*\\begin\{aligned\}([\s\S]*?)\\end\{aligned\}[ \t]*\n?[ \t]*(\${1,2})?/g,
+    (m, open, body, close) => (open && close ? m : `\n$$\n\\begin{aligned}${body}\\end{aligned}\n$$\n`),
+  );
+  // 3. Convert \[...\] → block, \(...\) → inline
+  r = r
+    .replace(/\\\[([\s\S]+?)\\\]/g, (_, body) => `\n$$\n${body}\n$$\n`)
     .replace(/\\\(([\s\S]+?)\\\)/g, (_, body) => `$${body}$`);
+  // 4. Fix $$\begin{env}: move \begin to the next line so it's math content, not fence meta
+  r = r.replace(/\$\$\\begin\{/g, '$$\n\\begin{');
+  // 5. Fix \end{env}$$: move closing $$ to its own line so mathFlow recognises it as the fence
+  r = r.replace(/\\end\{([^}]+)\}\$\$/g, '\\end{$1}\n$$');
+  // 6. Fix mid-paragraph $$: if $$ is not at the start of a line, force it to a new line
+  r = r.replace(/([^\n$][ \t]*)\$\$/g, (_, pre) => `${pre.trimEnd()}\n$$`);
+  return r;
 }
 
 const CURSOR = '\u200B@@CURSOR@@';
@@ -378,7 +399,7 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
           <div ref={markdownRef} className="prose prose-sm dark:prose-invert max-w-none prose-p:my-2 prose-headings:my-3 prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-code:bg-gray-200 dark:prose-code:bg-white/[0.08] prose-code:px-1 prose-code:rounded prose-pre:bg-gray-900 dark:prose-pre:bg-black/60 prose-pre:rounded-lg">
             <ReactMarkdown
               remarkPlugins={[remarkGfm, remarkMath]}
-              rehypePlugins={[rehypeKatex]}
+              rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: '#94a3b8' }]]}
               components={{
                 p: ({ children, ...props }) => <p {...props}>{styleCitations(injectCursor(children), message.sources)}</p>,
                 li: ({ children, ...props }) => <li {...props}>{styleCitations(injectCursor(children), message.sources)}</li>,

@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback, memo } from 'react';
 import { X, Minus, Maximize2 } from 'lucide-react';
 import { useWindowManager } from '../../context/WindowManagerContext';
 import { useUIPreference } from '../../context/UIPreferenceContext';
@@ -19,7 +19,8 @@ function MacTitleBar({ windowId, isActive, title, onDragStart, onDoubleClick, ti
       }
     : { background: isActive ? `rgba(232,232,234,${a})` : `rgba(240,240,240,${a})` };
   return (
-    <div className="h-8 flex items-center flex-shrink-0 select-none" style={barStyle} onPointerDown={onDragStart} onDoubleClick={onDoubleClick} data-titlebar={windowId}>
+    // position:relative + zIndex:1 keeps this above the dedicated blur layer below it.
+    <div className="h-8 flex items-center flex-shrink-0 select-none" style={{ ...barStyle, position: 'relative', zIndex: 1 }} onPointerDown={onDragStart} onDoubleClick={onDoubleClick} data-titlebar={windowId}>
       <div className="flex items-center gap-[7px] px-3" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
         <button onClick={e => { e.stopPropagation(); closeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FF5F57] hover:brightness-90 flex items-center justify-center" title="Close"><X size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#4a0002]" /></button>
         <button onClick={e => { e.stopPropagation(); minimizeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FEBC2E] hover:brightness-90 flex items-center justify-center" title="Minimize"><Minus size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#5a3e00]" /></button>
@@ -30,7 +31,7 @@ function MacTitleBar({ windowId, isActive, title, onDragStart, onDoubleClick, ti
   );
 }
 
-export default function Window({ win, isActive, children }) {
+function Window({ win, isActive, children }) {
   const { focusWindow, moveWindow, resizeWindow, removeWindow, maximizeWindow } = useWindowManager();
   const { windowOpacity, titlebarOpacity } = useUIPreference();
   const windowRef = useRef(null);
@@ -175,7 +176,7 @@ export default function Window({ win, isActive, children }) {
   return (
     <div
       ref={windowRef}
-      className={`absolute flex flex-col ${radius} overflow-hidden ${animClass} backdrop-blur-xl`}
+      className={`absolute flex flex-col ${radius} overflow-hidden ${animClass}`}
       style={{
         ...style,
         // Belt-and-suspenders for the rounded-none class - explicit
@@ -183,8 +184,8 @@ export default function Window({ win, isActive, children }) {
         // hot-reload class race) can't reintroduce visible corners.
         ...(fullBleed ? { borderRadius: 0 } : null),
         // Minimize = shrink + fade (CSS-transition driven, never unmount).
-        // translateZ(0) + willChange keep the window pinned to its own GPU
-        // compositor layer so the backdrop-blur never needs to re-rasterize.
+        // translateZ(0) + willChange keep the window on its own compositor
+        // layer for smooth position/minimize transitions.
         transform: minimized ? 'scale(0.2) translateZ(0)' : 'scale(1) translateZ(0)',
         willChange: 'transform',
         transformOrigin: 'bottom center',
@@ -210,11 +211,41 @@ export default function Window({ win, isActive, children }) {
       aria-hidden={minimized}
       onPointerDown={() => focusWindow(win.id)}
     >
+      {/* ── Dedicated blur layer ──────────────────────────────────────────
+          This is the ONLY element that carries backdrop-filter. It is
+          completely inert (no content, no props that ever change), so it
+          never triggers a repaint on its own. When the desktop behind it
+          updates (clock tick, widget drag, wallpaper), this layer briefly
+          re-samples – but the title bar and content (zIndex:1 above it)
+          remain painted throughout, so the window never flashes blank.
+          Previously, backdrop-blur-xl lived on the Window root div, which
+          repaints on every focus change / streaming chunk / keystroke.
+          Each of those repaints triggered a full GPU backdrop re-sample
+          that could drop the compositor layer for one frame → wallpaper
+          flash. Isolating the blur here eliminates that race entirely. */}
+      {!fullBleed && (
+        <div
+          aria-hidden
+          style={{
+            position: 'absolute', inset: 0,
+            backdropFilter: 'blur(24px) saturate(1.8)',
+            WebkitBackdropFilter: 'blur(24px) saturate(1.8)',
+            willChange: 'transform',
+            transform: 'translateZ(0)',
+            backfaceVisibility: 'hidden',
+            pointerEvents: 'none',
+            zIndex: 0,
+            borderRadius: 'inherit',
+          }}
+        />
+      )}
+
       <TitleBar windowId={win.id} appId={win.appId} isMaximized={maxed} isActive={isActive} title={win.title} onDragStart={handleDragStart} onDoubleClick={maxed ? undefined : () => maximizeWindow(win.id)} onFullscreen={toggleFullscreen} titlebarOpacity={titlebarOpacity ?? 80} />
 
       <div
         className="flex-1 overflow-hidden"
         style={{
+          position: 'relative', zIndex: 1,
           background: document.documentElement.classList.contains('dark')
             ? `rgba(24, 24, 24, ${(windowOpacity ?? 100) / 100})`
             : `rgba(255,255,255,${(windowOpacity ?? 100) / 100})`
@@ -224,15 +255,29 @@ export default function Window({ win, isActive, children }) {
       </div>
 
       {!maxed && !isFullscreen && !win.fixedSize && <>
-        <div className="absolute top-0 left-0 right-0 h-1 cursor-n-resize" onPointerDown={e => handleResizeStart(e, 'n')} />
-        <div className="absolute bottom-0 left-0 right-0 h-1 cursor-s-resize" onPointerDown={e => handleResizeStart(e, 's')} />
-        <div className="absolute top-0 left-0 bottom-0 w-1 cursor-w-resize" onPointerDown={e => handleResizeStart(e, 'w')} />
-        <div className="absolute top-0 right-0 bottom-0 w-1 cursor-e-resize" onPointerDown={e => handleResizeStart(e, 'e')} />
-        <div className="absolute top-0 left-0 w-3 h-3 cursor-nw-resize" onPointerDown={e => handleResizeStart(e, 'nw')} />
-        <div className="absolute top-0 right-0 w-3 h-3 cursor-ne-resize" onPointerDown={e => handleResizeStart(e, 'ne')} />
-        <div className="absolute bottom-0 left-0 w-3 h-3 cursor-sw-resize" onPointerDown={e => handleResizeStart(e, 'sw')} />
-        <div className="absolute bottom-0 right-0 w-3 h-3 cursor-se-resize" onPointerDown={e => handleResizeStart(e, 'se')} />
+        <div className="absolute top-0 left-0 right-0 h-1 cursor-n-resize" style={{ zIndex: 10 }} onPointerDown={e => handleResizeStart(e, 'n')} />
+        <div className="absolute bottom-0 left-0 right-0 h-1 cursor-s-resize" style={{ zIndex: 10 }} onPointerDown={e => handleResizeStart(e, 's')} />
+        <div className="absolute top-0 left-0 bottom-0 w-1 cursor-w-resize" style={{ zIndex: 10 }} onPointerDown={e => handleResizeStart(e, 'w')} />
+        <div className="absolute top-0 right-0 bottom-0 w-1 cursor-e-resize" style={{ zIndex: 10 }} onPointerDown={e => handleResizeStart(e, 'e')} />
+        <div className="absolute top-0 left-0 w-3 h-3 cursor-nw-resize" style={{ zIndex: 10 }} onPointerDown={e => handleResizeStart(e, 'nw')} />
+        <div className="absolute top-0 right-0 w-3 h-3 cursor-ne-resize" style={{ zIndex: 10 }} onPointerDown={e => handleResizeStart(e, 'ne')} />
+        <div className="absolute bottom-0 left-0 w-3 h-3 cursor-sw-resize" style={{ zIndex: 10 }} onPointerDown={e => handleResizeStart(e, 'sw')} />
+        <div className="absolute bottom-0 right-0 w-3 h-3 cursor-se-resize" style={{ zIndex: 10 }} onPointerDown={e => handleResizeStart(e, 'se')} />
       </>}
     </div>
   );
 }
+
+// Memoize so that only the window whose `win` object or `isActive` flag
+// actually changed re-renders. Without this, every FOCUS_WINDOW / MOVE_WINDOW
+// dispatch re-renders ALL open windows — each re-render applies new inline
+// styles to the blur layer, which triggers a backdrop-filter GPU re-sample
+// that can drop the compositor layer for one frame → wallpaper flash.
+//
+// `children` (AppWindow) is intentionally excluded from the comparator: it
+// is always the same element type+props (derived from win.appId / win.meta
+// which are covered by prev.win === next.win), and AppWindow manages its own
+// state independently so it updates without needing Window to re-render it.
+export default memo(Window, (prev, next) =>
+  prev.win === next.win && prev.isActive === next.isActive
+);

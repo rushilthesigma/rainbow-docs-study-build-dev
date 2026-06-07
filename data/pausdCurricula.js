@@ -13,6 +13,11 @@
 // AI lesson chat takes those titles + the COURSE MEMORY block and
 // teaches each lesson at PAUSD-honors rigor. Science courses follow
 // the NGSS California Integrated 1/2/3 sequence.
+//
+// The Africa Geography elective is generated from the user's IGC Africa study
+// notes (one unit per country, grounded in the notes via textbookContext) and
+// lives in its own module.
+import { AFRICA_GEOGRAPHY_COURSE } from './africaGeography.js';
 
 export const PAUSD_CATALOG = [
   // =====================================================================
@@ -894,6 +899,12 @@ export const PAUSD_CATALOG = [
       },
     ],
   },
+
+  // =====================================================================
+  // GEOGRAPHY - "Africa Geography", generated from the user's IGC Africa
+  // study notes. Country-by-country units + a cumulative final exam.
+  // =====================================================================
+  AFRICA_GEOGRAPHY_COURSE,
 ];
 
 // Helper: get a single template by slug.

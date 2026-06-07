@@ -832,7 +832,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
           {visibleNotes.map(note => {
             const topic = note.topicId ? topicById.get(note.topicId) : null;
             return (
-            <div key={note.id} onClick={() => openNote(note.id)} className="flex items-center gap-3 py-2.5 border-b border-white/[0.06] last:border-b-0 cursor-pointer hover:bg-white/[0.03] rounded-md transition-colors group">
+            <div key={note.id} onClick={() => openNote(note.id)} className="flex items-center gap-3 px-2 py-2.5 border-b border-white/[0.06] last:border-b-0 cursor-pointer hover:bg-white/[0.03] rounded-md transition-colors group">
               {note.type === 'cornell' ? <Layout size={13} className="text-white/35 flex-shrink-0" /> : <FileText size={13} className="text-white/35 flex-shrink-0" />}
               <div className="flex-1 min-w-0">
                 <h3 className="text-sm font-medium text-white/90 truncate">{note.title}</h3>

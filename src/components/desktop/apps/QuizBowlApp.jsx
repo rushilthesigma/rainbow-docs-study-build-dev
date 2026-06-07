@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Zap, Play, Check, X, Loader2, Lightbulb, Users, BookOpen, Sparkles, Settings, ArrowRight, Target, TrendingDown, Clock, History, Flame, ChevronRight, Trophy, Swords, RefreshCw } from 'lucide-react';
+import { Zap, Play, Check, X, Loader2, Lightbulb, Users, BookOpen, Sparkles, Settings, ArrowRight, Target, TrendingDown, Clock, History, Flame, ChevronRight, Trophy, Swords, RefreshCw, Eye } from 'lucide-react';
 import TrialSession, { AnswerResultPanel } from '../../trial/TrialSession';
 import { apiFetch } from '../../../api/client';
 import { fetchQBReaderTossups, saveQuizBowlSet, fetchQuizBowlHistory, fetchQuizBowlRecommendations, fetchQuizBowlPatterns } from '../../../api/quizMatch';
@@ -126,7 +126,8 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   // custom form so the student can hit Start without hunting.
   const [view, setView] = useState(initialTopic ? 'custom' : 'hub');
   const [aiLobbyInitial, setAiLobbyInitial] = useState('lobby');
-  useBrowserBack(view !== 'hub', () => setView(view === 'custom' ? 'hub' : 'hub'));
+  const [replaySet, setReplaySet] = useState(null);
+  useBrowserBack(view !== 'hub', () => { setView('hub'); setReplaySet(null); });
   const { user } = useAuth();
   const [questions, setQuestions] = useState([]);
   const [currentQ, setCurrentQ] = useState(0);
@@ -405,6 +406,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
         points: typeof s.points === 'number' ? s.points : (s.correct ? 10 : 0),
         answer: s.answer,
         correctAnswer: s.correctAnswer,
+        text: q.text || '',
       };
     });
     const score = scores.filter(s => s.correct).length;
@@ -783,6 +785,11 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
     );
   }
 
+  // ===== REPLAY - watch back a saved set question by question =====
+  if (view === 'replay' && replaySet) {
+    return <ReplayView set={replaySet} onExit={() => { setReplaySet(null); setView('hub'); }} />;
+  }
+
   // ===== HUB (default) - stats, recommendations, history =====
   return (
     <ViewFade viewKey="hub" className="h-full flex flex-col">
@@ -797,6 +804,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
       onMultiplayer={() => setView('multiplayer')}
       onCustom={() => setView('custom')}
       onAILobby={() => { setAiLobbyInitial('lobby'); setView('ai-lobby'); }}
+      onReplay={(s) => { setReplaySet(s); setView('replay'); }}
     />
     </ViewFade>
   );
@@ -805,7 +813,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
 // ============================================================
 // HUB
 // ============================================================
-function QuizBowlHub({ hubLoading, history, recs, patterns, error, generating, onLaunch, onMultiplayer, onCustom, onAILobby }) {
+function QuizBowlHub({ hubLoading, history, recs, patterns, error, generating, onLaunch, onMultiplayer, onCustom, onAILobby, onReplay }) {
   const stats = history?.stats || { sets: 0, accuracy: 0, studyMs: 0, categoryStats: {} };
   const sets = history?.sets || [];
 
@@ -936,7 +944,8 @@ function QuizBowlHub({ hubLoading, history, recs, patterns, error, generating, o
                   : pct >= 50 ? 'text-white/80 bg-white/[0.06] border-white/[0.12]'
                   : 'text-rose-300 bg-rose-500/10 border-rose-500/25';
                 return (
-                  <div key={s.id} className="flex items-center gap-3 rounded-lg px-3 py-2 bg-white/[0.02] border border-white/[0.05] hover:border-white/[0.10] transition-colors">
+                  <div key={s.id} onClick={() => onReplay?.(s)}
+                    className="flex items-center gap-3 rounded-lg px-3 py-2 bg-white/[0.02] border border-white/[0.05] hover:border-white/[0.14] hover:bg-white/[0.05] transition-colors cursor-pointer group">
                     <div className={`min-w-[44px] px-2 py-1 rounded-md border text-center text-[11px] font-bold tabular-nums ${scoreCls}`}>
                       {hasPoints ? `${s.points} pts` : `${s.score}/${s.total}`}
                     </div>
@@ -944,6 +953,7 @@ function QuizBowlHub({ hubLoading, history, recs, patterns, error, generating, o
                       <p className="text-[12px] font-medium text-white/85 truncate">{s.category} <span className="text-white/35">· {s.difficulty}</span></p>
                       <p className="text-[10px] text-white/35">{ago} · {s.source === 'ai' ? 'AI' : 'QBReader'} · {formatDuration(s.durationMs)} · {s.score}/{s.total} correct</p>
                     </div>
+                    <Eye size={12} className="text-white/20 group-hover:text-white/50 flex-shrink-0 transition-colors" />
                   </div>
                 );
               })}
@@ -1844,6 +1854,221 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
           <button onClick={startSession}
             className="w-full py-3.5 rounded-2xl text-white text-[14px] font-bold inline-flex items-center justify-center gap-2 transition-all border bg-blue-500 hover:bg-blue-400 border-blue-400/40">
             {lobbyType === 'lobby' ? <><Users size={15} /> Enter Lobby</> : <><Swords size={15} /> Start Match</>}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// REPLAY VIEW - replays a saved set question by question,
+// animating the word reveal up to the buzz point, then showing
+// the result. Works for any set in history; questions without a
+// stored text field show only the result card.
+// ============================================================
+function ReplayView({ set, onExit }) {
+  const [qIdx, setQIdx] = useState(0);
+  const [revealedUpTo, setRevealedUpTo] = useState(-1);
+  const [showResult, setShowResult] = useState(false);
+  const timerRef = useRef(null);
+  const showResultTimerRef = useRef(null);
+
+  // Refs so the effect closure always sees the current question's data
+  // without needing to list derived values in the dependency array.
+  const wordsRef = useRef([]);
+  const stopAtRef = useRef(0);
+
+  const totalQ = set?.perQuestion?.length || 0;
+  const q = set?.perQuestion?.[qIdx] || null;
+  const words = q?.text ? q.text.split(/\s+/).filter(Boolean) : [];
+  // Stop reveal at buzz word; if timed out (buzzWord === -1) reveal everything.
+  const stopAt = q ? (q.buzzWord >= 0 ? q.buzzWord : words.length - 1) : 0;
+
+  wordsRef.current = words;
+  stopAtRef.current = stopAt;
+
+  useEffect(() => {
+    clearInterval(timerRef.current);
+    clearTimeout(showResultTimerRef.current);
+    setRevealedUpTo(-1);
+    setShowResult(false);
+
+    const currentWords = wordsRef.current;
+    const currentStopAt = stopAtRef.current;
+
+    if (!currentWords.length) {
+      setShowResult(true);
+      return;
+    }
+
+    let current = -1;
+    timerRef.current = setInterval(() => {
+      current++;
+      setRevealedUpTo(current);
+      if (current >= currentStopAt) {
+        clearInterval(timerRef.current);
+        showResultTimerRef.current = setTimeout(() => setShowResult(true), 450);
+      }
+    }, 120);
+
+    return () => {
+      clearInterval(timerRef.current);
+      clearTimeout(showResultTimerRef.current);
+    };
+  }, [qIdx]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function skipToResult() {
+    clearInterval(timerRef.current);
+    clearTimeout(showResultTimerRef.current);
+    setRevealedUpTo(stopAt);
+    setShowResult(true);
+  }
+
+  function goNext() { if (qIdx < totalQ - 1) setQIdx(i => i + 1); }
+  function goPrev() { if (qIdx > 0) setQIdx(i => i - 1); }
+
+  const naqtTotal = set?.perQuestion?.reduce((n, q) => n + (q.points || 0), 0) ?? 0;
+  const correctCount = set?.perQuestion?.filter(q => q.correct).length ?? 0;
+
+  return (
+    <div className="h-full flex flex-col bg-transparent overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/[0.04] flex-shrink-0">
+        <button onClick={onExit}
+          className="text-white/45 hover:text-white/75 text-[11px] flex items-center gap-1 transition-colors">
+          <ChevronRight size={12} className="rotate-180" /> Back
+        </button>
+        <div className="flex-1 text-center">
+          <span className="text-[12px] font-bold text-white/70">{set?.category}</span>
+          <span className="text-[11px] text-white/35"> · {set?.difficulty}</span>
+        </div>
+        <span className="text-[11px] text-white/35 tabular-nums">{qIdx + 1}/{totalQ}</span>
+      </div>
+
+      {/* Summary bar */}
+      <div className="flex items-center justify-center gap-3 px-4 py-1.5 border-b border-white/[0.03] flex-shrink-0 bg-white/[0.01]">
+        <span className="text-[10px] text-white/40 tabular-nums">{naqtTotal} pts total</span>
+        <span className="text-white/20 text-[9px]">·</span>
+        <span className="text-[10px] text-white/40 tabular-nums">{correctCount}/{totalQ} correct</span>
+        <span className="text-white/20 text-[9px]">·</span>
+        <span className="text-[10px] text-white/30">{set?.source === 'ai' ? 'AI' : 'QBReader'}</span>
+      </div>
+
+      {/* Body */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        {/* Question text with animated reveal */}
+        {words.length > 0 ? (
+          <div
+            onClick={!showResult ? skipToResult : undefined}
+            className={`rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4 leading-relaxed ${!showResult ? 'cursor-pointer' : ''}`}
+          >
+            {words.map((w, i) => {
+              const isRevealed = i <= revealedUpTo;
+              const isBuzzWord = showResult && q?.buzzWord >= 0 && i === q.buzzWord;
+              const isPowerMark = q?.powerWordIndex != null && i === q.powerWordIndex;
+              return (
+                <span
+                  key={i}
+                  className={[
+                    'mr-1 text-[13px] transition-opacity duration-75',
+                    isRevealed ? 'opacity-100' : 'opacity-0',
+                    isBuzzWord
+                      ? (q.correct
+                          ? 'text-emerald-300 underline decoration-dotted underline-offset-2'
+                          : 'text-rose-300 underline decoration-dotted underline-offset-2')
+                      : isPowerMark
+                        ? 'text-amber-300/80'
+                        : 'text-white/80',
+                  ].join(' ')}
+                >
+                  {w}
+                </span>
+              );
+            })}
+            {/* Inline buzz badge rendered after the last revealed word */}
+            {showResult && q?.buzzWord >= 0 && (
+              <span className={`inline-flex items-center gap-0.5 ml-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded align-middle ${
+                q.correct
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30'
+                  : 'bg-rose-500/20 text-rose-300 border border-rose-400/30'
+              }`}>
+                <Zap size={8} /> BUZZ
+              </span>
+            )}
+            {!showResult && (
+              <span className="ml-2 text-[10px] text-white/20 italic">tap to skip…</span>
+            )}
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4 text-center text-[12px] text-white/30">
+            No question text recorded — play a new set to enable replays.
+          </div>
+        )}
+
+        {/* Result card */}
+        {showResult && q && (
+          <div className={`rounded-2xl border p-3.5 ${
+            q.correct
+              ? 'border-emerald-500/25 bg-emerald-500/8'
+              : 'border-rose-500/25 bg-rose-500/8'
+          }`}>
+            <div className="flex items-center gap-2 mb-1">
+              <span className={q.correct ? 'text-emerald-400' : 'text-rose-400'}>
+                {q.correct ? <Check size={14} /> : <X size={14} />}
+              </span>
+              <span className="text-[13px] font-bold text-white/90">{q.correctAnswer}</span>
+              {typeof q.points === 'number' && (
+                <span className={`ml-auto text-[11px] font-bold px-2 py-0.5 rounded-md ${
+                  q.points === 15 ? 'bg-amber-500/20 text-amber-300 border border-amber-400/30'
+                  : q.points === 10 ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-400/25'
+                  : q.points === -5 ? 'bg-rose-500/20 text-rose-300 border border-rose-400/30'
+                  : 'bg-white/[0.06] text-white/45 border border-white/[0.10]'
+                }`}>
+                  {q.points > 0 ? `+${q.points}` : q.points}
+                </span>
+              )}
+            </div>
+            {q.answer && !q.correct && (
+              <p className="text-[11px] text-white/45 mb-1">You said: <span className="text-white/60">{q.answer}</span></p>
+            )}
+            <div className="flex items-center gap-3 mt-1.5">
+              {q.buzzWord >= 0 && (
+                <span className="text-[10px] text-white/30">
+                  Word {q.buzzWord + 1}/{q.totalWords}
+                  {q.powerWordIndex != null && (
+                    <span className="ml-1 text-amber-400/60">
+                      {q.buzzWord < q.powerWordIndex ? '· before power' : '· after power'}
+                    </span>
+                  )}
+                </span>
+              )}
+              {q.buzzWord === -1 && (
+                <span className="text-[10px] text-white/30">Timed out</span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Nav footer */}
+      <div className="flex-shrink-0 border-t border-white/[0.04] p-3 grid grid-cols-3 gap-2 items-center">
+        <button onClick={goPrev} disabled={qIdx === 0}
+          className="py-2 rounded-xl border border-white/[0.08] bg-white/[0.03] text-[12px] font-semibold text-white/55 hover:text-white/80 hover:border-white/[0.14] disabled:opacity-25 transition-colors">
+          ← Prev
+        </button>
+        <div className="text-center text-[10px] text-white/30 tabular-nums">
+          Q{qIdx + 1} of {totalQ}
+        </div>
+        {qIdx < totalQ - 1 ? (
+          <button onClick={goNext}
+            className="py-2 rounded-xl border border-white/[0.08] bg-white/[0.03] text-[12px] font-semibold text-white/55 hover:text-white/80 hover:border-white/[0.14] transition-colors">
+            Next →
+          </button>
+        ) : (
+          <button onClick={onExit}
+            className="py-2 rounded-xl border border-white/[0.08] bg-white/[0.03] text-[12px] font-semibold text-white/55 hover:text-white/80 hover:border-white/[0.14] transition-colors">
+            Done
           </button>
         )}
       </div>

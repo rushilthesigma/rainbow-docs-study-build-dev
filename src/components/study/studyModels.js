@@ -1,51 +1,63 @@
 // Client mirror of STUDY_MODELS in server.js. The server is the real
-// enforcer (plan gating + the rolling Haiku cap); this drives the Study Mode
-// picker UI and pre-empts obviously-locked selections. Keep the two in sync.
+// enforcer (plan gating + rolling caps); this drives the Study Mode
+// picker UI and pre-empts obviously-locked selections. Keep in sync.
 //
-// Non-paid users may only pick the two "floor" models (Flash Lite + Haiku).
-// Haiku is additionally capped at HAIKU_FREE_DAILY messages per day for non-paid
-// users; when the cap is hit the server locks Haiku until UTC midnight and
-// auto-switches to Flash Lite for the rest of the day.
-// Every paid plan (Plus / Lifetime / Pro) unlocks all models with no cap.
+// Plan access matrix:
+//   flash-lite : everyone
+//   haiku      : free / plus-lite (12/day cap) · lifetime / pro (unlimited)
+//   flash      : plus / lifetime / pro (unlimited)
+//   sonnet     : plus (24/day cap) · lifetime / pro (unlimited)
+//   gemini-pro : pro only (unlimited)
 export const HAIKU_FREE_DAILY = 12;
-const PAID_PLANS = ['plus', 'lifetime', 'pro'];
+export const SONNET_PLUS_DAILY = 24;
 
 export const STUDY_MODELS = [
-  { key: 'flash-lite', label: 'Flash Lite', provider: 'Gemini', blurb: 'Fastest · everyday study', paidOnly: false },
-  { key: 'haiku',      label: 'Haiku 4.5',  provider: 'Claude', blurb: `Quick + sharp · ${HAIKU_FREE_DAILY}/day free`, paidOnly: false },
-  { key: 'flash',      label: 'Flash',      provider: 'Gemini', blurb: 'Balanced reasoning', paidOnly: true },
-  { key: 'sonnet',     label: 'Sonnet 4.6', provider: 'Claude', blurb: 'Deepest writing + explanation', paidOnly: true },
-  { key: 'gemini-pro', label: 'Gemini Pro', provider: 'Gemini', blurb: 'Hardest math + code', paidOnly: true },
+  { key: 'flash-lite', label: 'Flash Lite', provider: 'Gemini', blurb: 'Fastest · everyday study',                                     plans: ['free', 'plus-lite', 'plus', 'lifetime', 'pro'] },
+  { key: 'haiku',      label: 'Haiku 4.5',  provider: 'Claude', blurb: `Quick + sharp · ${HAIKU_FREE_DAILY}/day free`,                  plans: ['free', 'plus-lite', 'lifetime', 'pro'] },
+  { key: 'flash',      label: 'Flash',      provider: 'Gemini', blurb: 'Balanced reasoning',                                            plans: ['plus', 'lifetime', 'pro'] },
+  { key: 'sonnet',     label: 'Sonnet 4.6', provider: 'Claude', blurb: `Deepest writing + explanation · ${SONNET_PLUS_DAILY}/day`,      plans: ['plus', 'lifetime', 'pro'] },
+  { key: 'gemini-pro', label: 'Gemini Pro', provider: 'Gemini', blurb: 'Hardest math + code',                                           plans: ['pro'] },
 ];
-// Haiku is the default for everyone. Non-paid users keep it until the daily
-// cap is hit, at which point the server locks Haiku until UTC midnight and
-// auto-switches to Sonnet for the rest of the day.
+
 export const DEFAULT_STUDY_MODEL = 'haiku';
-export const FALLBACK_STUDY_MODEL = 'flash-lite'; // plan-locked fallback (not haiku-limit)
-export const HAIKU_LIMIT_FALLBACK = 'flash-lite';  // served when daily Haiku cap is hit
+export const FALLBACK_STUDY_MODEL = 'flash-lite';
+export const HAIKU_LIMIT_FALLBACK = 'flash-lite';
 
 const BY_KEY = Object.fromEntries(STUDY_MODELS.map((m) => [m.key, m]));
 
-export function isPaidPlan(plan) { return PAID_PLANS.includes(plan); }
+export function isPaidPlan(plan) { return ['plus', 'lifetime', 'pro'].includes(plan); }
 
 export function canUseStudyModel(key, plan) {
   const m = BY_KEY[key];
   if (!m) return false;
-  return m.paidOnly ? isPaidPlan(plan) : true;
+  return m.plans.includes(plan);
 }
 
-// Lowest plan that unlocks a locked model (any paid plan → "Plus"), else null.
-export function requiredPlanLabelFor(key) {
+const PLAN_ORDER = ['free', 'plus-lite', 'plus', 'lifetime', 'pro'];
+const PLAN_DISPLAY = { 'plus-lite': 'Plus-Lite', plus: 'Plus', lifetime: 'Lifetime', pro: 'Pro' };
+
+// Returns the label of the lowest plan that unlocks the model for a user on
+// currentPlan (e.g. a free user sees "Plus" for Flash, a plus user sees
+// "Lifetime" for Haiku). Returns null if already accessible.
+export function requiredPlanLabelFor(key, currentPlan = 'free') {
   const m = BY_KEY[key];
-  return m?.paidOnly ? 'Plus' : null;
+  if (!m || m.plans.includes(currentPlan)) return null;
+  const currentIdx = PLAN_ORDER.indexOf(currentPlan);
+  for (const p of PLAN_ORDER) {
+    if (PLAN_ORDER.indexOf(p) > currentIdx && m.plans.includes(p)) {
+      return PLAN_DISPLAY[p] || p;
+    }
+  }
+  return 'Pro';
 }
 
-// The study model the user can actually use — falls back to the default when
-// the saved pick is unknown or plan-locked. The Haiku daily auto-switch snaps
-// the picker to Flash Lite via the onMeta callback in StudyModePanel.
+// The model the user can actually use — falls back when saved pick is unknown
+// or plan-locked, preferring the best accessible model over always using haiku.
 export function resolveStudyModel(savedKey, plan) {
   if (savedKey && canUseStudyModel(savedKey, plan)) return savedKey;
-  return DEFAULT_STUDY_MODEL;
+  if (canUseStudyModel('haiku', plan)) return 'haiku';
+  if (canUseStudyModel('flash', plan)) return 'flash';
+  return FALLBACK_STUDY_MODEL;
 }
 
 export function studyModelLabel(key) { return BY_KEY[key]?.label || 'Flash Lite'; }
@@ -53,18 +65,31 @@ export function studyModelLabel(key) { return BY_KEY[key]?.label || 'Flash Lite'
 export function studyModelBlurb(key, plan) {
   const m = BY_KEY[key];
   if (!m) return '';
-  if (key === 'haiku' && isPaidPlan(plan)) return 'Quick + sharp · Unlimited';
+  if (key === 'haiku') {
+    if (['lifetime', 'pro'].includes(plan)) return 'Quick + sharp · Unlimited';
+    return m.blurb; // "Quick + sharp · 12/day free"
+  }
+  if (key === 'sonnet') {
+    if (['lifetime', 'pro'].includes(plan)) return 'Deepest writing + explanation · Unlimited';
+    return m.blurb; // "Deepest writing + explanation · 24/day" for plus
+  }
   return m.blurb;
 }
 
-// Whether the given study model is the daily-capped Haiku for a non-paid plan.
-// Paid plans have no cap, so the limit indicator is only relevant when this is
-// true. The server is still the real enforcer of the rolling-window count.
+// Whether the given model has a per-day cap for this plan (drives the cap pill).
 export function studyModelHasFreeCap(key, plan) {
-  return key === 'haiku' && !isPaidPlan(plan);
+  if (key === 'haiku') return ['free', 'plus-lite'].includes(plan);
+  if (key === 'sonnet') return plan === 'plus';
+  return false;
 }
 
-// Models whose reasoning can stream into the Thinking panel.
+// The daily message cap for a capped model/plan combination, or null.
+export function studyModelDailyCap(key, plan) {
+  if (key === 'haiku' && ['free', 'plus-lite'].includes(plan)) return HAIKU_FREE_DAILY;
+  if (key === 'sonnet' && plan === 'plus') return SONNET_PLUS_DAILY;
+  return null;
+}
+
 export function studyModelSupportsThinking(key) {
   return ['haiku', 'sonnet', 'gemini-pro'].includes(key);
 }

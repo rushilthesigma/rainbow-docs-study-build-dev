@@ -13,3 +13,10 @@ export const getCurriculumLesson = (uid, cid, lid) => apiFetch(`/api/admin/users
 
 // Quiz bowl deep-dive for a specific user
 export const getUserQuizBowl = (uid) => apiFetch(`/api/admin/users/${uid}/quizbowl`);
+
+// Unlock midterm or final exam for a user's curriculum
+export const unlockExam = (uid, curriculumId, kind) =>
+  apiFetch(`/api/admin/users/${uid}/curricula/${curriculumId}/exams/unlock`, {
+    method: 'POST',
+    body: JSON.stringify({ kind }),
+  });

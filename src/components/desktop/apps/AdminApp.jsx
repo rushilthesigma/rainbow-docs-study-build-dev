@@ -4,10 +4,12 @@ import {
   MessageSquare, Lightbulb, Trophy, CreditCard, Search, Crown, Calendar,
   RefreshCw, ChevronRight, Zap, ClipboardList, BarChart3, X, Check,
   Swords, Activity, ChevronDown, Sparkles, TrendingDown, Clock,
+  Lock, Unlock, GraduationCap,
 } from 'lucide-react';
 import {
   checkAdmin, listUsers, getUser, toggleBan, deleteUser,
   getStudySession, getStandaloneLesson, getCurriculumLesson, getUserQuizBowl,
+  unlockExam,
 } from '../../../api/admin';
 import { ownerGrantPro, ownerRevokePro } from '../../../api/billing';
 import LoadingSpinner from '../../shared/LoadingSpinner';
@@ -22,6 +24,7 @@ const isAdvisorEmail = (email) => ADVISOR_EMAILS.has((email || '').toLowerCase()
 /* ====================== TOP-LEVEL ====================== */
 export default function AdminApp() {
   const [isAdmin, setIsAdmin] = useState(null);
+  const [canBan, setCanBan] = useState(false);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState('list'); // list | analytics | detail | chat
@@ -41,7 +44,7 @@ export default function AdminApp() {
     const cachedUsers = peek(cacheKey);
     const cachedAdmin = peek('admin:check');
     // If we have prior caches, paint immediately - refresh runs in parallel below.
-    if (cachedAdmin?.isAdmin !== undefined) setIsAdmin(!!cachedAdmin.isAdmin);
+    if (cachedAdmin?.isAdmin !== undefined) { setIsAdmin(!!cachedAdmin.isAdmin); setCanBan(!!cachedAdmin.canBan); }
     if (cachedUsers?.users) setUsers(cachedUsers.users);
     if (cachedAdmin && cachedUsers) setLoading(false);
     // Always re-validate. checkAdmin + listUsers are independent - fire in parallel.
@@ -54,6 +57,7 @@ export default function AdminApp() {
           fetchOnce(cacheKey, () => listUsers({ includeDemo })).catch(() => ({ users: [] })),
         ]);
         setIsAdmin(!!a.isAdmin);
+        setCanBan(!!a.canBan);
         if (a.isAdmin) setUsers(d.users || []);
       } catch {}
       setLoading(false);
@@ -173,9 +177,14 @@ export default function AdminApp() {
           user={selectedUser}
           onBack={() => { setView('list'); setSelectedUser(null); }}
           onBan={() => handleBan(selectedUser.id)}
+          canBan={canBan}
           onDelete={() => handleDelete(selectedUser.id)}
           onSetPlan={(tier) => handleSetPlan(selectedUser.email, tier)}
           onOpenConv={openConv}
+          onRefreshUser={async () => {
+            const d = await getUser(selectedUser.id, { includeDemo });
+            setSelectedUser(d.user);
+          }}
         />
       </ViewFade>
     );
@@ -727,7 +736,7 @@ function StatRow({ label, value }) {
 }
 
 /* ====================== USER DETAIL ====================== */
-function UserDetail({ user: u, onBack, onBan, onDelete, onSetPlan, onOpenConv }) {
+function UserDetail({ user: u, onBack, onBan, canBan, onDelete, onSetPlan, onOpenConv, onRefreshUser }) {
   const [tab, setTab] = useState('overview');
 
   const totalMsgs =
@@ -764,9 +773,11 @@ function UserDetail({ user: u, onBack, onBan, onDelete, onSetPlan, onOpenConv })
       {/* Actions */}
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <PlanPicker plan={u.plan || 'free'} onSetPlan={onSetPlan} />
-        <button onClick={onBan} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${u.banned ? 'bg-emerald-700/80 text-white' : 'bg-rose-700/80 text-white'}`}>
-          <Ban size={12} className="inline mr-1" /> {u.banned ? 'Unban' : 'Ban'}
-        </button>
+        {canBan && (
+          <button onClick={onBan} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${u.banned ? 'bg-emerald-700/80 text-white' : 'bg-rose-700/80 text-white'}`}>
+            <Ban size={12} className="inline mr-1" /> {u.banned ? 'Unban' : 'Ban'}
+          </button>
+        )}
         <button onClick={onDelete} className="px-3 py-1.5 rounded-lg border border-white/[0.08] text-xs font-medium text-rose-400 hover:bg-white/[0.04] transition-colors">
           <Trash2 size={12} className="inline mr-1" /> Delete
         </button>
@@ -779,6 +790,7 @@ function UserDetail({ user: u, onBack, onBan, onDelete, onSetPlan, onOpenConv })
           ['study',      `Study (${u.studySessions?.length || 0})`,      <MessageSquare size={12} key="s" />],
           ['lessons',    `Lessons (${u.standaloneLessons?.length || 0})`, <Lightbulb size={12} key="l" />],
           ['curriculum', `Curriculum (${u.curriculumChats?.length || 0})`, <BookOpen size={12} key="c" />],
+          ['exams',      `Exams (${u.curricula?.length || 0})`,           <GraduationCap size={12} key="e" />],
           ['quizzes',    'Quizzes',    <ClipboardList size={12} key="q" />],
           ['debates',    `Debates (${u.debateHistory?.length || 0})`,    <Swords size={12} key="d" />],
           ['other',      'Other',      <Layers size={12} key="o" />],
@@ -801,6 +813,7 @@ function UserDetail({ user: u, onBack, onBan, onDelete, onSetPlan, onOpenConv })
         {tab === 'study' && <StudyTab u={u} onOpen={(sid) => onOpenConv('study', { sid })} />}
         {tab === 'lessons' && <LessonsTab u={u} onOpen={(lid) => onOpenConv('lesson', { lid })} />}
         {tab === 'curriculum' && <CurriculumTab u={u} onOpen={(cid, lid) => onOpenConv('curriculum', { cid, lid })} />}
+        {tab === 'exams' && <ExamsTab u={u} onRefresh={onRefreshUser} />}
         {tab === 'quizzes' && <QuizzesTab u={u} />}
         {tab === 'debates' && <DebatesTab u={u} />}
         {tab === 'other' && <OtherTab u={u} />}
@@ -981,6 +994,119 @@ function CurriculumTab({ u, onOpen }) {
           meta={`${c.curriculumTitle} / ${c.unitTitle} · ${c.messageCount} msgs${c.lastActiveAt ? ' · ' + new Date(c.lastActiveAt).toLocaleString() : ''}`}
         />
       ))}
+    </div>
+  );
+}
+
+function ExamsTab({ u, onRefresh }) {
+  const curricula = u.curricula || [];
+  const toast = useToast();
+  const [unlocking, setUnlocking] = useState({});
+
+  async function handleUnlock(curriculumId, kind) {
+    const key = `${curriculumId}:${kind}`;
+    setUnlocking(prev => ({ ...prev, [key]: true }));
+    try {
+      await unlockExam(u.id, curriculumId, kind);
+      toast.success(`${kind.charAt(0).toUpperCase() + kind.slice(1)} unlocked`);
+      await onRefresh?.();
+    } catch (e) {
+      toast.error(e.message || 'Unlock failed');
+    } finally {
+      setUnlocking(prev => ({ ...prev, [key]: false }));
+    }
+  }
+
+  if (!curricula.length) return <Empty msg="No curricula enrolled" />;
+
+  return (
+    <div className="space-y-3">
+      {curricula.map(c => {
+        const pct = Math.round((c.progressFraction ?? 0) * 100);
+        const midtermEligible = pct >= 50;
+        const finalEligible = pct >= 90;
+
+        return (
+          <div key={c.id} className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3 space-y-2.5">
+            {/* Curriculum header */}
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-white/85 truncate">{c.title}</p>
+                <p className="text-[10px] text-white/35 mt-0.5">
+                  {c.completedLessons}/{c.lessonCount} lessons · {pct}% complete
+                </p>
+              </div>
+              {/* Progress pill */}
+              <span className={`flex-shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                pct >= 90 ? 'bg-emerald-900/40 text-emerald-400' :
+                pct >= 50 ? 'bg-amber-900/40 text-amber-400' :
+                'bg-white/[0.06] text-white/30'
+              }`}>{pct}%</span>
+            </div>
+
+            {/* Progress bar */}
+            <div className="h-1 rounded-full bg-white/[0.08] overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${pct >= 90 ? 'bg-emerald-500' : pct >= 50 ? 'bg-amber-500' : 'bg-white/25'}`}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+
+            {/* Exam rows */}
+            {[
+              { kind: 'midterm', label: 'Midterm', data: c.midterm, eligible: midtermEligible, threshold: 50 },
+              { kind: 'final',   label: 'Final',   data: c.final,   eligible: finalEligible,   threshold: 90 },
+            ].map(({ kind, label, data, eligible, threshold }) => {
+              const isUnlocked = data?.adminUnlocked || eligible;
+              const isCompleted = data?.completed;
+              const isUnlocking = !!unlocking[`${c.id}:${kind}`];
+
+              return (
+                <div key={kind} className="flex items-center gap-2 rounded-lg bg-white/[0.04] border border-white/[0.06] px-3 py-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-medium text-white/75">{label}</span>
+                      {isCompleted && (
+                        <span className="flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-900/40 text-emerald-400">
+                          <Check size={8} /> Done · {data.score != null ? `${Math.round(data.score)}%` : ''}
+                        </span>
+                      )}
+                      {data?.adminUnlocked && !isCompleted && (
+                        <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-violet-900/40 text-violet-400">Admin unlocked</span>
+                      )}
+                      {!isUnlocked && (
+                        <span className="flex items-center gap-0.5 text-[9px] text-white/30">
+                          <Lock size={8} /> needs {threshold}%
+                        </span>
+                      )}
+                    </div>
+                    {data?.adminUnlockedAt && (
+                      <p className="text-[9px] text-white/25 mt-0.5">
+                        Unlocked {new Date(data.adminUnlockedAt).toLocaleString()}
+                      </p>
+                    )}
+                  </div>
+                  {/* Unlock button — only show if not already admin-unlocked and not completed */}
+                  {!data?.adminUnlocked && !isCompleted && (
+                    <button
+                      onClick={() => handleUnlock(c.id, kind)}
+                      disabled={isUnlocking}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white text-black text-[10px] font-semibold hover:bg-white/90 disabled:opacity-50 transition-opacity flex-shrink-0"
+                    >
+                      {isUnlocking ? (
+                        <RefreshCw size={10} className="animate-spin" />
+                      ) : (
+                        <Unlock size={10} />
+                      )}
+                      Unlock
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
     </div>
   );
 }

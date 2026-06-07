@@ -472,16 +472,11 @@ input[data-spotlight-input]:hover,
 
 /* ===== LIQUID GLASS ===== */
 
-/* Backdrop-filter flicker fix. Any element with a backdrop blur re-rasterizes
-   its sampled backdrop whenever something behind it repaints (e.g. the clock
-   tick). translateZ promotes it to its own GPU layer, but on its own the
-   browser is free to DEMOTE that layer when it thinks the element is idle and
-   re-promote it on the next repaint - that promote/demote thrash is what
-   flashes the whole screen at random. will-change: transform pins the layer so
-   it's never torn down, and isolation keeps compositing contained to the
-   surface. backdrop-filter already establishes a containing block, so this
-   adds no new fixed-positioning side effects. Elements that set their own
-   inline transform (e.g. floating windows) handle promotion themselves. */
+/* Backdrop-filter flicker mitigation for miscellaneous elements (dock,
+   spotlight, widgets, etc.). Windows use a dedicated inert blur layer in
+   Window.jsx instead of backdrop-blur-xl on the root div — that separation
+   is the real flash fix; this rule is belt-and-suspenders for everything
+   else that uses a backdrop-blur Tailwind class. */
 [class*="backdrop-blur"] {
   transform: translateZ(0);
   will-change: transform;

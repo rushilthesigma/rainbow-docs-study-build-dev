@@ -29,7 +29,7 @@ const SANITIZE_SCHEMA = {
   },
 };
 const REMARK_PLUGINS = [remarkGfm, remarkMath];
-const REHYPE_PLUGINS = [rehypeRaw, [rehypeSanitize, SANITIZE_SCHEMA], rehypeKatex];
+const REHYPE_PLUGINS = [rehypeRaw, [rehypeSanitize, SANITIZE_SCHEMA], [rehypeKatex, { throwOnError: false, errorColor: '#94a3b8' }]];
 const MD_COMPONENTS = { a: ({ node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" /> };
 
 const PROSE_TWEAKS =

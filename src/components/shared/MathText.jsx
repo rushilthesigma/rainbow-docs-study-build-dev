@@ -28,8 +28,10 @@ export function normalizeMath(src) {
     .replace(/\\begin\{(align\*?|eqnarray\*?)\}/g, '\\begin{aligned}')
     .replace(/\\end\{(align\*?|eqnarray\*?)\}/g, '\\end{aligned}');
   // Wrap any aligned block that isn't already delimited by $…$ / $$…$$.
+  // Allow at most one newline between the optional $$ and \begin{aligned}
+  // so that $$\n\begin{aligned} is correctly detected as already-delimited.
   s = s.replace(
-    /(\${1,2})?[ \t]*\\begin\{aligned\}([\s\S]*?)\\end\{aligned\}[ \t]*(\${1,2})?/g,
+    /(\${1,2})?[ \t]*\n?[ \t]*\\begin\{aligned\}([\s\S]*?)\\end\{aligned\}[ \t]*\n?[ \t]*(\${1,2})?/g,
     (m, open, body, close) => (open && close ? m : `$$\\begin{aligned}${body}\\end{aligned}$$`),
   );
   return s;

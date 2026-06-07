@@ -28,7 +28,7 @@ export default function ReadingBlock({ block, onComplete, hideContinue = false, 
           prose-a:text-blue-200/90 prose-a:no-underline hover:prose-a:underline prose-a:underline-offset-2
           prose-blockquote:border-blue-300/30 prose-blockquote:text-white/70 prose-blockquote:not-italic prose-blockquote:pl-5
           prose-hr:border-white/[0.08]">
-          <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+          <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: '#94a3b8' }]]}>
             {block.content || ''}
           </ReactMarkdown>
         </article>
