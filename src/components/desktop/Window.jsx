@@ -209,18 +209,18 @@ function Window({ win, isActive, children, focusWindow, moveWindow, resizeWindow
       onPointerDown={() => focusWindow(win.id)}
     >
       {/* ── Dedicated blur layer ──────────────────────────────────────────
-          This is the ONLY element that carries backdrop-filter. It is
-          completely inert (no content, no props that ever change), so it
-          never triggers a repaint on its own. When the desktop behind it
-          updates (clock tick, widget drag, wallpaper), this layer briefly
-          re-samples – but the title bar and content (zIndex:1 above it)
-          remain painted throughout, so the window never flashes blank.
-          Previously, backdrop-blur-xl lived on the Window root div, which
-          repaints on every focus change / streaming chunk / keystroke.
-          Each of those repaints triggered a full GPU backdrop re-sample
-          that could drop the compositor layer for one frame → wallpaper
-          flash. Isolating the blur here eliminates that race entirely. */}
-      {!fullBleed && (
+          Carries backdrop-filter ONLY when the blur is actually visible —
+          i.e. when the content area or titlebar is semi-transparent.
+          At default opacity (windowOpacity=100, titlebarOpacity=100) every
+          surface is fully opaque, so the blur layer is completely hidden.
+          Rendering it anyway still costs a full compositor re-sample on
+          every paint: when two windows both update in the same frame
+          (FOCUS_WINDOW changes isActive on both), all backdrop-filter
+          layers above them chain-resample → multi-window wallpaper flash.
+          Skipping the blur layer when opaque eliminates that cost entirely
+          while preserving the frosted-glass effect when the user dials
+          opacity down in Settings. */}
+      {!fullBleed && ((windowOpacity ?? 100) < 100 || (titlebarOpacity ?? 100) < 100) && (
         <div
           aria-hidden
           style={{

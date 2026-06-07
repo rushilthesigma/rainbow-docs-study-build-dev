@@ -699,11 +699,11 @@ export function buildStudyModePrompt(profile, goals, curricula, prefs, assessmen
     const sourcesBlock = context.sources
       .map((s, i) => {
         const head = `[${i + 1}] ${s.title || s.url || s.name || 'Source'}${s.url ? ` (${s.url})` : ''}`;
-        const body = (s.content || s.text || '').slice(0, 12000); // hard cap per source
+        const body = (s.content || s.text || '').slice(0, 30000); // extended cap — notes can be long
         return `${head}\n${body}`.trim();
       })
       .join('\n\n---\n\n');
-    integrationCtx += `\n\nATTACHED SOURCES - the student added these. The numbered [1], [2], … indices below are the citation handles you MUST use.\n\n${sourcesBlock}\n\nSOURCE-CITATION RULES (NON-NEGOTIABLE):\n- EVERY single response you write while sources are attached MUST cite at least one of the sources above using [n] inline. No exceptions, including short answers, follow-ups, "yes/no" replies, and quick clarifications.\n- Place the [n] tag immediately after the specific claim it supports - not at the end of the paragraph.\n- If multiple sources back the same claim, use [1][2].\n- If the user asks something the attached sources do NOT cover, say so plainly ("the attached sources don't cover that") and refuse to invent. Do not pull from outside knowledge unless the user explicitly waives the source restriction.\n- The UI renders the sources list separately. Do NOT write your own "Sources:" footer; just put [n] tags inline.\n`;
+    integrationCtx += `\n\nATTACHED NOTES / STUDY MATERIAL — the student attached their own notes. These are THE CURRICULUM for this session. Everything you produce must come from this material.\n\n${sourcesBlock}\n\nNOTES-FIRST RULES (NON-NEGOTIABLE — these override the general rules below):\n- These notes ARE the course. Treat them as the authoritative textbook. Explanations, examples, and quiz questions MUST be drawn exclusively from the content above. Do not supplement with outside information unless the student explicitly asks ("what else is there?" / "explain more").\n- EVERY response MUST cite at least one source using [n] inline, placed immediately after the specific claim it supports — not at the end of the paragraph. No exceptions.\n- If multiple sources support the same claim, stack the tags: [1][2].\n- When the student asks for a quiz or practice questions, generate ALL questions directly from the attached notes — test mastery of the note content, not general knowledge of the topic.\n- If the student asks something the notes do NOT cover, say so clearly ("that isn't in your notes") rather than pulling from outside knowledge.\n- The UI renders the source list separately. Do NOT write your own "Sources:" footer; use only inline [n] tags.\n`;
   }
 
   return `You are a general-purpose AI study assistant for RushilAI. The student opens this when they want to chat, ask, learn, or work through whatever's on their mind. You follow THEIR lead.
@@ -737,8 +737,8 @@ WHAT YOU CAN DO:
   [QUIZ_START]
   {"topic":"...","questions":[{"question":"...","options":["A) ...","B) ...","C) ...","D) ..."],"correct":"A","explanation":"..."}]}
   [QUIZ_END]
-  Output the FULL JSON in one block. Do NOT split it across messages.
-- Answer ANY question on ANY topic - never refuse or redirect.
+  Output the FULL JSON in one block. Do NOT split it across messages.${context?.sources?.length ? ' When notes are attached, every single quiz question MUST test content from those notes — do not add questions on related topics not covered in the notes.' : ''}
+- ${context?.sources?.length ? 'Focus on the attached notes. For anything outside the notes, let the student know and offer to go further only if they ask.' : 'Answer ANY question on ANY topic - never refuse or redirect.'}
 
 CREATING REAL ARTIFACTS (notes, QB game, debate):
 When the student asks you to "make notes on X", "give me a quiz bowl game on Y", "let's debate Z", or similar, DO NOT paste content into the chat. Emit one of the action tokens below INSTEAD. The app creates the real artifact in Notes / Quiz Bowl / Debate and shows the student an Open button to jump to it.

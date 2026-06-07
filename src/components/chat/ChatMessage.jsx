@@ -124,7 +124,7 @@ function InlineQuiz({ quizJson }) {
         const isWrong = submitted && userAnswer && userAnswer !== q.correct;
         return (
           <div key={i} className={`rounded-lg border p-3 ${submitted ? (isCorrect ? 'border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/10' : isWrong ? 'border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-900/10' : 'border-gray-200 dark:border-[#2A2A40]') : 'border-gray-200 dark:border-[#2A2A40]'}`}>
-            <MathText as="p" className="text-sm font-medium mb-2">{i + 1}. {q.question.replace(/^\d+[.,)][^\w]*(?=[A-Za-z])/, '')}</MathText>
+            <MathText as="p" className="text-sm font-medium mb-2">{i + 1}. {q.question.replace(/^\d+[.,)\s:]+/, '')}</MathText>
             <div className="space-y-1">
               {(q.options || []).map(opt => {
                 const letter = opt.charAt(0);
