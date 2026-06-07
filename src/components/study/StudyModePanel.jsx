@@ -11,7 +11,7 @@ import { Z } from '../../styles/tokens';
 import { useToast } from '../shared/Toast';
 import { useAuth } from '../../context/AuthContext';
 import { planFromUser } from '../billing/modelAccess';
-import { STUDY_MODELS, resolveStudyModel, canUseStudyModel, requiredPlanLabelFor, studyModelLabel, studyModelHasFreeCap, studyModelDailyCap, studyModelBlurb, studyModelSupportsThinking } from './studyModels';
+import { STUDY_MODELS, resolveStudyModel, canUseStudyModel, requiredPlanLabelFor, studyModelLabel, studyModelHasFreeCap, studyModelDailyCap, studyModelBlurb, studyModelSupportsThinking, isGeminiOnlyEmail, visibleStudyModels, resolveGeminiOnlyModel } from './studyModels';
 
 // Quick-start prompts shown in the empty state. Replaces the bland
 // "Start the conversation..." default with concrete suggestions tied to
@@ -32,9 +32,21 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   // reads the latest state even through memoized callbacks.
   const { user, fetchUser } = useAuth();
   const plan = planFromUser(user);
+  const userEmail = user?.email || '';
+  const geminiOnly = isGeminiOnlyEmail(userEmail);
   // Study Mode model picker (separate from the global tier). The saved pick
   // lives in preferences.studyModel; a plan-locked pick resolves to the floor.
-  const [studyModel, setStudyModel] = useState(() => resolveStudyModel(user?.data?.preferences?.studyModel, plan));
+  // For Gemini-only accounts, Claude picks are silently replaced with the best
+  // available Gemini model.
+  function resolveEffectiveModel(savedKey) {
+    const resolved = resolveStudyModel(savedKey, plan);
+    if (geminiOnly) {
+      const m = STUDY_MODELS.find(x => x.key === resolved);
+      if (!m || m.provider !== 'Gemini') return resolveGeminiOnlyModel(plan);
+    }
+    return resolved;
+  }
+  const [studyModel, setStudyModel] = useState(() => resolveEffectiveModel(user?.data?.preferences?.studyModel));
   const studyModelRef = useRef(studyModel);
   studyModelRef.current = studyModel;
   // Thinking is a hard toggle the user controls for every model: off = no
@@ -52,8 +64,8 @@ export default function StudyModePanel({ className = '', flush = false, initialM
 
   // Keep the picker in sync if the cached user (plan / saved pick) changes.
   useEffect(() => {
-    setStudyModel(resolveStudyModel(user?.data?.preferences?.studyModel, plan));
-  }, [user?.data?.preferences?.studyModel, plan]);
+    setStudyModel(resolveEffectiveModel(user?.data?.preferences?.studyModel));
+  }, [user?.data?.preferences?.studyModel, plan, geminiOnly]);
 
   async function pickStudyModel(key) {
     if (!canUseStudyModel(key, plan)) return; // locked tiers aren't selectable
@@ -459,6 +471,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
             <StudyModelDropdown
               active={studyModel}
               plan={plan}
+              email={userEmail}
               onPick={pickStudyModel}
               disabled={streaming}
             />
@@ -525,7 +538,7 @@ function ModelCapPill({ cap, remaining, model }) {
 // globe / thinking buttons. Opens upward (it sits at the bottom of the panel).
 // Non-paid users see paid-only models locked with the required plan; the server
 // is the real enforcer and applies the rolling Haiku daily cap.
-function StudyModelDropdown({ active, plan, onPick, disabled }) {
+function StudyModelDropdown({ active, plan, email, onPick, disabled }) {
   const [open, setOpen] = useState(false);
   // `mounted` keeps the portal in the DOM through the close animation; `shown`
   // drives the opacity/translate so the popover fades both in and out instead
@@ -614,7 +627,7 @@ function StudyModelDropdown({ active, plan, onPick, disabled }) {
           }}
           className="rounded-xl border border-gray-200 dark:border-white/[0.12] bg-white dark:bg-[#1b1b1f] shadow-2xl p-1.5"
         >
-          {STUDY_MODELS.map((m) => {
+          {visibleStudyModels(email).map((m) => {
             const locked = !canUseStudyModel(m.key, plan);
             const lockLabel = locked ? requiredPlanLabelFor(m.key, plan) : null;
             return (

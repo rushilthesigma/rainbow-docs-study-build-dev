@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { Zap, Play, Check, X, Loader2, Lightbulb, Users, BookOpen, Sparkles, Settings, ArrowRight, Target, TrendingDown, Clock, History, Flame, ChevronRight, Trophy, Swords, RefreshCw, Eye } from 'lucide-react';
 import TrialSession, { AnswerResultPanel } from '../../trial/TrialSession';
 import { apiFetch } from '../../../api/client';
-import { fetchQBReaderTossups, saveQuizBowlSet, fetchQuizBowlHistory, fetchQuizBowlRecommendations, fetchQuizBowlPatterns } from '../../../api/quizMatch';
+import { fetchQBReaderTossups, saveQuizBowlSet, fetchQuizBowlHistory, fetchQuizBowlRecommendations, fetchQuizBowlPatterns, fetchQuizBowlSm2Due } from '../../../api/quizMatch';
+import { intervalLabel } from '../../../utils/sm2';
 import { peek, fetchOnce, bustPrefix } from '../../../api/cache';
 import ViewFade from '../../shared/ViewFade';
 import { useWindowManager } from '../../../context/WindowManagerContext';
@@ -154,9 +155,11 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   const cachedHist = peek('qb:history');
   const cachedRecs = peek('qb:recs');
   const cachedPats = peek('qb:patterns');
+  const cachedSm2  = peek('qb:sm2due');
   const [history, setHistory] = useState(cachedHist || null);
   const [recs, setRecs] = useState(cachedRecs?.recommendations || []);
   const [patterns, setPatterns] = useState(cachedPats?.patterns || null);
+  const [sm2Due, setSm2Due] = useState(cachedSm2?.dueCategories || []);
   const [hubLoading, setHubLoading] = useState(!(cachedHist && cachedRecs && cachedPats));
   const setStartedAtRef = useRef(null);     // ms timestamp when current set began
   const savedSetIdRef = useRef(null);       // guard so we save each set exactly once
@@ -166,17 +169,20 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
     // refresh in the background and keep the stale data on screen.
     if (!peek('qb:history')) setHubLoading(true);
     try {
-      const [h, r, p] = await Promise.all([
+      const [h, r, p, s] = await Promise.all([
         fetchOnce('qb:history', fetchQuizBowlHistory)
           .catch(() => ({ sets: [], stats: { sets: 0, accuracy: 0, studyMs: 0, categoryStats: {} } })),
         fetchOnce('qb:recs', fetchQuizBowlRecommendations)
           .catch(() => ({ recommendations: [] })),
         fetchOnce('qb:patterns', fetchQuizBowlPatterns)
           .catch(() => ({ patterns: null })),
+        fetchOnce('qb:sm2due', fetchQuizBowlSm2Due)
+          .catch(() => ({ dueCategories: [] })),
       ]);
       setHistory(h);
       setRecs(r.recommendations || []);
       setPatterns(p.patterns || null);
+      setSm2Due(s.dueCategories || []);
     } finally { setHubLoading(false); }
   }
 
@@ -622,7 +628,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
         <div className="px-4 py-3 border-t border-white/[0.04] flex-shrink-0 space-y-2">
           {!buzzed && (
             <>
-              <button onClick={handleBuzz}
+              <button onClick={handleBuzz} data-tour="qb-buzz"
                 className="w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white text-[15px] font-bold uppercase tracking-[0.15em] active:scale-[0.98] transition-all">
                 BUZZ
               </button>
@@ -712,12 +718,12 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
           </div>
 
           {/* Category */}
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap gap-1.5" data-tour="qb-category-picker">
             {CATEGORIES.map(c => <GlassPill key={c} active={category === c} onClick={() => setCategory(c)}>{c}</GlassPill>)}
           </div>
 
           {/* Difficulty */}
-          <div className="grid grid-cols-4 gap-1.5">
+          <div className="grid grid-cols-4 gap-1.5" data-tour="qb-difficulty-picker">
             {DIFFICULTIES.map(d => <GlassPill key={d} active={difficulty === d} onClick={() => setDifficulty(d)}>{d}</GlassPill>)}
           </div>
 
@@ -751,7 +757,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
           )}
 
           {/* Start */}
-          <button onClick={handleGenerate} disabled={generating}
+          <button onClick={handleGenerate} disabled={generating} data-tour="qb-generate"
             className="w-full py-3.5 rounded-2xl bg-blue-500 hover:bg-blue-400 backdrop-blur-sm disabled:opacity-40 text-white text-[14px] font-bold inline-flex items-center justify-center gap-2 transition-all border border-blue-400/40">
             {generating
               ? <><InlineProgress active /> {questionSource === 'qbreader' ? 'Loading…' : 'Generating…'}</>
@@ -798,6 +804,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
       history={history}
       recs={recs}
       patterns={patterns}
+      sm2Due={sm2Due}
       error={error}
       generating={generating}
       onLaunch={launchSet}
@@ -813,7 +820,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
 // ============================================================
 // HUB
 // ============================================================
-function QuizBowlHub({ hubLoading, history, recs, patterns, error, generating, onLaunch, onMultiplayer, onCustom, onAILobby, onReplay }) {
+function QuizBowlHub({ hubLoading, history, recs, patterns, sm2Due = [], error, generating, onLaunch, onMultiplayer, onCustom, onAILobby, onReplay }) {
   const stats = history?.stats || { sets: 0, accuracy: 0, studyMs: 0, categoryStats: {} };
   const sets = history?.sets || [];
 
@@ -864,6 +871,7 @@ function QuizBowlHub({ hubLoading, history, recs, patterns, error, generating, o
         {/* Play vs AI CTA */}
         <button
           onClick={onAILobby}
+          data-tour="qb-ai-lobby"
           className="w-full text-left rounded-2xl border border-blue-500/30 bg-gradient-to-br from-blue-500/20 via-blue-500/10 to-transparent p-4 hover:border-blue-400/55 hover:from-blue-500/30 transition-all"
         >
           <div className="flex items-center gap-2 mb-1">
@@ -880,13 +888,45 @@ function QuizBowlHub({ hubLoading, history, recs, patterns, error, generating, o
             className="py-2.5 rounded-2xl border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] text-white/70 hover:text-white/95 text-[12px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
             <Users size={13} /> Head-to-head
           </button>
-          <button onClick={onCustom}
+          <button onClick={onCustom} data-tour="qb-custom-set"
             className="py-2.5 rounded-2xl border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] text-white/70 hover:text-white/95 text-[12px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
             <Settings size={13} /> Custom set
           </button>
         </div>
 
-        {/* Recommendations */}
+        {/* SM-2 "Recommended today" — categories the spaced-repetition algorithm
+            says are due based on the player's past buzz performance. */}
+        {sm2Due.length > 0 && (
+          <div>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <RefreshCw size={11} className="text-blue-400/70" />
+              <span className="text-[10px] uppercase tracking-[0.16em] font-bold text-blue-400/70">Recommended today</span>
+              <span className="text-[9px] text-white/25 ml-0.5">· spaced repetition</span>
+            </div>
+            <div className="space-y-1.5">
+              {sm2Due.map((d, i) => (
+                <button key={i}
+                  onClick={() => onLaunch({ category: d.category, difficulty: 'Medium', source: 'qbreader' })}
+                  disabled={generating}
+                  className="group w-full text-left rounded-xl border border-blue-500/20 bg-blue-500/[0.05] hover:bg-blue-500/[0.12] hover:border-blue-500/35 p-3 transition-colors disabled:opacity-40 flex items-center gap-3"
+                >
+                  <span className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-blue-500/15 text-blue-300 border border-blue-400/30">
+                    <RefreshCw size={13} />
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-semibold text-white/90">{d.category}</p>
+                    <p className="text-[10px] text-white/40">
+                      {d.reps} review{d.reps !== 1 ? 's' : ''} · interval was {intervalLabel(d.interval)} · due now
+                    </p>
+                  </div>
+                  <ChevronRight size={14} className="text-white/25 group-hover:text-white/55 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* AI Recommendations */}
         {recs.length > 0 && (
           <div>
             <div className="flex items-center gap-1.5 mb-1.5">
@@ -1584,7 +1624,7 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/40">Competition level</span>
             </div>
-            <div className="grid grid-cols-4 gap-1.5">
+            <div className="grid grid-cols-4 gap-1.5" data-tour="qb-room-level">
               {ROOM_LEVELS.map(l => (
                 <button key={l.id} onClick={() => setRoomLevel(l.id)}
                   className={`py-1.5 rounded-xl text-[11px] font-semibold transition-all border ${
@@ -1741,7 +1781,7 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
             <GlassTile active={source === 'ai'} icon={<Sparkles size={14} />} label="AI" sub="Gemini · niche topics" onClick={() => setSource('ai')} />
           </div>
 
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap gap-1.5" data-tour="qb-lobby-category">
             {QB_LOBBY_CATEGORIES.map(c => <GlassPill key={c} active={category === c} onClick={() => setCategory(c)}>{c}</GlassPill>)}
           </div>
 
@@ -1851,7 +1891,7 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
         )}
 
         {!(lobbyType === 'head-to-head' && h2hOpponent === 'real') && (
-          <button onClick={startSession}
+          <button onClick={startSession} data-tour="qb-enter-lobby"
             className="w-full py-3.5 rounded-2xl text-white text-[14px] font-bold inline-flex items-center justify-center gap-2 transition-all border bg-blue-500 hover:bg-blue-400 border-blue-400/40">
             {lobbyType === 'lobby' ? <><Users size={15} /> Enter Lobby</> : <><Swords size={15} /> Start Match</>}
           </button>

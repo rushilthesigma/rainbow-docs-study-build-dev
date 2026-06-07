@@ -541,7 +541,7 @@ export default function TrialSession({
                 disabled control sitting there. */}
             {phase === 'reading' && !botAnsweredCorrectly && !userNegged && (
               <>
-                <button onClick={handleBuzz}
+                <button onClick={handleBuzz} data-tour="qb-buzz"
                   className="w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white text-[15px] font-bold uppercase tracking-[0.15em] active:scale-[0.98] transition-all">
                   BUZZ
                 </button>

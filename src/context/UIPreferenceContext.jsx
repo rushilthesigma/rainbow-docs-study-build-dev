@@ -19,7 +19,7 @@ const RETIRED_WALLPAPERS = new Set(['desert', 'cherry']);
 // who want frosted-glass chrome can still dial it down in Settings.
 const DEFAULTS = {
   theme: 'dark',
-  wallpaper: 'aurora',
+  wallpaper: 'milkyway',
   dockSize: 'medium',
   iconStyle: 'gradient',
   dockPosition: 'bottom',

@@ -8,6 +8,14 @@
 //   flash      : plus / lifetime / pro (unlimited)
 //   sonnet     : plus (24/day cap) · lifetime / pro (unlimited)
 //   gemini-pro : pro only (unlimited)
+
+// Accounts that may only use Gemini models. Claude options are hidden
+// from the picker and rejected server-side for these emails.
+export const GEMINI_ONLY_EMAILS = new Set(['kelapure@gmail.com']);
+export function isGeminiOnlyEmail(email) {
+  return GEMINI_ONLY_EMAILS.has((email || '').toLowerCase());
+}
+
 export const HAIKU_FREE_DAILY = 12;
 export const SONNET_PLUS_DAILY = 24;
 
@@ -92,4 +100,22 @@ export function studyModelDailyCap(key, plan) {
 
 export function studyModelSupportsThinking(key) {
   return ['haiku', 'sonnet', 'gemini-pro'].includes(key);
+}
+
+// Returns the subset of STUDY_MODELS visible to a given user. For
+// Gemini-only accounts the Claude entries are filtered out entirely.
+export function visibleStudyModels(email) {
+  if (isGeminiOnlyEmail(email)) {
+    return STUDY_MODELS.filter(m => m.provider === 'Gemini');
+  }
+  return STUDY_MODELS;
+}
+
+// Resolve the best accessible Gemini model for an account that is
+// restricted to Gemini-only (falls back from flash to flash-lite for
+// lower-tier plans).
+export function resolveGeminiOnlyModel(plan) {
+  if (canUseStudyModel('gemini-pro', plan)) return 'gemini-pro';
+  if (canUseStudyModel('flash', plan)) return 'flash';
+  return 'flash-lite';
 }

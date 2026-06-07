@@ -199,6 +199,13 @@ function isOwner(email) {
   return OWNER_EMAILS.includes(email?.toLowerCase());
 }
 
+// Accounts restricted to Gemini-only models in Study Mode.
+// Mirrors GEMINI_ONLY_EMAILS in src/components/study/studyModels.js.
+const GEMINI_ONLY_EMAILS = new Set(['kelapure@gmail.com']);
+function isGeminiOnly(email) {
+  return GEMINI_ONLY_EMAILS.has((email || '').toLowerCase());
+}
+
 // Viewer admins can access the admin panel (read + plan changes) but cannot ban users.
 const VIEWER_ADMIN_EMAILS = ['mnaman446@gmail.com'];
 function isViewerAdmin(email) {
@@ -459,6 +466,14 @@ function resolveStudyModel(requested, user, email) {
   // default itself (Haiku) carries a cap for non-paid users.
   if (!studyModelAllowed(key, plan)) { key = FALLBACK_STUDY_MODEL; switched = true; reason = 'plan'; }
 
+  // Gemini-only accounts may never use a Claude model, regardless of plan.
+  if (isGeminiOnly(email) && STUDY_MODELS[key]?.provider === 'claude') {
+    // Best available Gemini model for the plan: pro → flash → flash-lite
+    const geminiModels = ['gemini-pro', 'flash', 'flash-lite'];
+    key = geminiModels.find(k => studyModelAllowed(k, plan)) || FALLBACK_STUDY_MODEL;
+    switched = true; reason = 'gemini-only';
+  }
+
   let haikuRemaining = null;
   const paid = PAID_TIERS.has(plan);
   if (key === 'haiku' && !paid) {
@@ -618,9 +633,9 @@ function findEmailById(users, id) {
 // Spaced repetition intervals in ms: now, 1h, 6h, 1d, 3d, 1w, 2w, 1mo
 const SR_INTERVALS = [0, 3600000, 21600000, 86400000, 259200000, 604800000, 1209600000, 2592000000];
 
-// ── SM-2 scheduler (note-map flashcards) ────────────────────────────────
-// Server-side mirror of src/utils/sm2.js (the client reuses that module to
-// preview the next interval on each review button). Keep the two in sync:
+// ── SM-2 scheduler ─────────────────────────────────────────────────────
+// Shared by deck flashcards, note-map flashcards, and quiz-bowl category
+// tracking. Server-side mirror of src/utils/sm2.js — keep the two in sync.
 // quality 0-5, where <3 is a lapse that resets the card to a 1-day step.
 // `interval` is in days. Returns a NEW card object with updated SM-2 state.
 function sm2Schedule(card, quality) {
@@ -653,6 +668,15 @@ function sm2Schedule(card, quality) {
 function cardIsDue(card, now = Date.now()) {
   if (!card?.nextDue) return true;
   return new Date(card.nextDue).getTime() <= now;
+}
+
+// Map quiz-bowl buzz timing to SM-2 quality — mirrors src/utils/sm2.js.
+function buzzToQuality(correct, buzzRatio) {
+  if (!correct) return 1;
+  if (buzzRatio < 0.3) return 5;
+  if (buzzRatio < 0.5) return 4;
+  if (buzzRatio < 0.7) return 3;
+  return 2;
 }
 
 // Fresh SM-2 state for a brand-new card.
@@ -5415,7 +5439,10 @@ app.get('/api/flashcards', authMiddleware, (req, res) => {
     if (!email) return res.status(404).json({ error: 'User not found' });
     const decks = (users[email].data?.flashcardDecks || []).map(d => ({
       id: d.id, title: d.title, createdAt: d.createdAt, cardCount: (d.cards || []).length,
-      dueCount: (d.cards || []).filter(c => !c.nextReview || new Date(c.nextReview) <= new Date()).length,
+      dueCount: (d.cards || []).filter(c => {
+        const due = c.nextDue || c.nextReview;
+        return !due || new Date(due) <= new Date();
+      }).length,
     }));
     res.json({ decks });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -5440,7 +5467,8 @@ app.post('/api/flashcards', authMiddleware, async (req, res) => {
         if (parsed?.cards) {
           cards = parsed.cards.map(c => ({
             id: crypto.randomUUID(), front: c.front, back: c.back,
-            srLevel: 0, nextReview: new Date().toISOString(), lastReviewed: null, correctCount: 0, incorrectCount: 0,
+            ease: 2.5, interval: 0, reps: 0, lapses: 0,
+            nextDue: new Date().toISOString(), lastReviewed: null, correctCount: 0, incorrectCount: 0,
           }));
         }
       }
@@ -5507,14 +5535,16 @@ app.post('/api/flashcards/:deckId/cards', authMiddleware, async (req, res) => {
         if (parsed?.cards) {
           newCards = parsed.cards.map(c => ({
             id: crypto.randomUUID(), front: c.front, back: c.back,
-            srLevel: 0, nextReview: new Date().toISOString(), lastReviewed: null, correctCount: 0, incorrectCount: 0,
+            ease: 2.5, interval: 0, reps: 0, lapses: 0,
+            nextDue: new Date().toISOString(), lastReviewed: null, correctCount: 0, incorrectCount: 0,
           }));
         }
       }
     } else if (cards) {
       newCards = cards.map(c => ({
         id: crypto.randomUUID(), front: c.front, back: c.back,
-        srLevel: 0, nextReview: new Date().toISOString(), lastReviewed: null, correctCount: 0, incorrectCount: 0,
+        ease: 2.5, interval: 0, reps: 0, lapses: 0,
+        nextDue: new Date().toISOString(), lastReviewed: null, correctCount: 0, incorrectCount: 0,
       }));
     }
 
@@ -5556,7 +5586,11 @@ app.delete('/api/flashcards/:deckId/cards/:cardId', authMiddleware, (req, res) =
 
 app.post('/api/flashcards/:deckId/review', authMiddleware, (req, res) => {
   try {
-    const { cardId, correct } = req.body;
+    const { cardId, quality, correct } = req.body;
+    // Accept quality (0-5) from new clients or legacy boolean `correct`.
+    const q = typeof quality === 'number'
+      ? Math.max(0, Math.min(5, Math.round(quality)))
+      : (correct ? 4 : 1);
     const users = loadUsers();
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
@@ -5565,15 +5599,10 @@ app.post('/api/flashcards/:deckId/review', authMiddleware, (req, res) => {
     const card = (deck.cards || []).find(c => c.id === cardId);
     if (!card) return res.status(404).json({ error: 'Card not found' });
 
-    card.lastReviewed = new Date().toISOString();
-    if (correct) {
-      card.correctCount++;
-      card.srLevel = Math.min((card.srLevel || 0) + 1, SR_INTERVALS.length - 1);
-    } else {
-      card.incorrectCount++;
-      card.srLevel = 0;
-    }
-    card.nextReview = new Date(Date.now() + SR_INTERVALS[card.srLevel]).toISOString();
+    const updated = sm2Schedule(card, q);
+    Object.assign(card, updated);
+    if (q >= 3) card.correctCount = (card.correctCount || 0) + 1;
+    else card.incorrectCount = (card.incorrectCount || 0) + 1;
 
     saveUsers(users);
     res.json({ card });
@@ -11022,6 +11051,20 @@ app.post('/api/quizbowl/sets', authMiddleware, (req, res) => {
     prof.strengths = allScores.filter(([, v]) => (v.attempts || 0) >= 3 && v.score >= 75).map(([k]) => k).slice(0, 5);
     prof.weaknesses = allScores.filter(([, v]) => (v.attempts || 0) >= 3 && v.score < 60).map(([k]) => k).slice(0, 5);
 
+    // Update per-category SM-2 state using buzz performance so the hub
+    // can surface categories that are algorithmically due for re-drilling.
+    if (!users[email].data.quizbowlCategorySm2) users[email].data.quizbowlCategorySm2 = {};
+    for (const pq of entry.perQuestion) {
+      const catKey = (pq.category || entry.category || 'Mixed').toLowerCase().replace(/[\s/]+/g, '-');
+      const buzzRatio = pq.buzzWord >= 0 && pq.totalWords > 0 ? pq.buzzWord / pq.totalWords : 1;
+      const quality = buzzToQuality(!!pq.correct, buzzRatio);
+      const prev = users[email].data.quizbowlCategorySm2[catKey] || {};
+      users[email].data.quizbowlCategorySm2[catKey] = {
+        ...sm2Schedule(prev, quality),
+        displayName: pq.category || entry.category || 'Mixed',
+      };
+    }
+
     // Update the hidden student model. This is what packet recommendations
     // actually read - the student never sees it directly.
     if (!users[email].data.secretProfile) {
@@ -11066,6 +11109,34 @@ app.get('/api/quizbowl/sets', authMiddleware, (req, res) => {
     console.error('QB list sets error:', e);
     res.status(500).json({ error: e.message });
   }
+});
+
+// GET /api/quizbowl/sm2-due - categories where the SM-2 algorithm says the
+// student is due for another drill session. Capped at 5 results, sorted by
+// how overdue they are. Only surfaces categories with at least 1 rep so a
+// brand-new player doesn't see an empty "recommended today" panel.
+app.get('/api/quizbowl/sm2-due', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const sm2 = users[email].data.quizbowlCategorySm2 || {};
+    const now = Date.now();
+    const dueCategories = Object.entries(sm2)
+      .filter(([, s]) => s.reps > 0 && cardIsDue(s, now))
+      .map(([, s]) => ({
+        category: s.displayName || 'Mixed',
+        interval: s.interval,
+        reps: s.reps,
+        ease: s.ease,
+        lastReviewed: s.lastReviewed,
+        nextDue: s.nextDue,
+      }))
+      .sort((a, b) => new Date(a.nextDue) - new Date(b.nextDue))
+      .slice(0, 5);
+    res.json({ dueCategories });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // GET /api/quizbowl/recommendations - Gemini picks 3 specific niche sub-topics

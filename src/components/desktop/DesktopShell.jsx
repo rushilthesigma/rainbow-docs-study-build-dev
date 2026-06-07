@@ -40,7 +40,7 @@ function SnapGridShortcut() {
 // forced font swap, no squared corners, components keep their declared
 // Tailwind radii).
 function MacOSContent() {
-  const { state } = useWindowManager();
+  const { state, focusWindow, moveWindow, resizeWindow, removeWindow, maximizeWindow, closeWindow, minimizeWindow } = useWindowManager();
   // useWidgets() intentionally removed from this component — widget state
   // changes (drag, clock tick, etc.) must not re-render MacOSContent or
   // its Window children. SnapGridShortcut handles the one widget call.
@@ -72,7 +72,11 @@ function MacOSContent() {
       {!anyMaximized && <MenuBar onSpotlight={toggleSpotlight} />}
       <DesktopWidgets />
       {windows.map(win => (
-        <Window key={win.id} win={win} isActive={win.id === state.activeWindowId}>
+        <Window key={win.id} win={win} isActive={win.id === state.activeWindowId}
+          focusWindow={focusWindow} moveWindow={moveWindow} resizeWindow={resizeWindow}
+          removeWindow={removeWindow} maximizeWindow={maximizeWindow}
+          closeWindow={closeWindow} minimizeWindow={minimizeWindow}
+        >
           <AppWindow appId={win.appId} meta={win.meta} />
         </Window>
       ))}
@@ -132,6 +136,14 @@ function ShellContent() {
     Array.from(root.classList).filter(c => c.startsWith('os-')).forEach(c => root.classList.remove(c));
     root.classList.add('os-macos');
   }, []);
+
+  // After quiz bowl onboarding, open the Quiz Bowl app immediately.
+  useEffect(() => {
+    const pending = sessionStorage.getItem('postOnboardOpen');
+    if (!pending) return;
+    sessionStorage.removeItem('postOnboardOpen');
+    if (pending === 'quizbowl') openApp('quizbowl', 'Quiz Bowl');
+  }, [openApp]);
 
   // Global keyboard shortcuts.
   useEffect(() => {

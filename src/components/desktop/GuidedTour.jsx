@@ -57,6 +57,54 @@ const STEPS = [
   },
 ];
 
+const QB_STEPS = [
+  {
+    id: 'qb-ai-lobby',
+    target: '[data-tour="qb-ai-lobby"]',
+    title: 'Play vs AI bots',
+    body: 'Click "Compete in a Lobby" to enter a game against AI opponents. Pick your difficulty and they\'ll buzz against you in real time.',
+    advanceOn: 'click',
+  },
+  {
+    id: 'qb-room-level',
+    target: '[data-tour="qb-room-level"]',
+    title: 'Choose your competition level',
+    body: 'Casual is forgiving, Varsity is standard club level, Elite is tournament-ready. Start with Varsity.',
+    advanceOn: 'next',
+  },
+  {
+    id: 'qb-lobby-category',
+    target: '[data-tour="qb-lobby-category"]',
+    title: 'Pick a category',
+    body: 'Choose any subject — History, Science, Literature, Mixed. The bots and you get the same questions.',
+    advanceOn: 'next',
+  },
+  {
+    id: 'qb-enter-lobby',
+    target: '[data-tour="qb-enter-lobby"]',
+    title: 'Enter the lobby',
+    body: 'Click Enter Lobby. Questions load from QBReader\'s tournament database — real past tossups.',
+    advanceOn: 'click',
+  },
+  {
+    id: 'qb-buzz',
+    target: '[data-tour="qb-buzz"]',
+    title: 'Buzz when you know',
+    body: 'Words appear one at a time. Hit Buzz the instant you recognize the answer — bots are doing the same, so be fast.',
+    advanceOn: 'next',
+    waitingTitle: 'Loading questions…',
+    waitingBody: 'Hold tight — pulling tossups now.',
+  },
+  {
+    id: 'qb-wrap',
+    target: null,
+    title: "You're in",
+    body: 'Your accuracy and buzz timing track over every game. After each set, the Hub shows where to drill next. Good luck.',
+    advanceOn: 'finish',
+    placement: 'center',
+  },
+];
+
 // Tour state lives in user.data.preferences.tourStep on the server
 // (no localStorage). Onboarding sets it to 0 when the user picks
 // "Show me around"; this component reads it on mount and persists
@@ -69,12 +117,15 @@ function persistTourStep(user, value) {
 
 export default function GuidedTour() {
   const { user } = useAuth();
+  const useCase = user?.data?.preferences?.useCase;
+  const steps = useCase === 'quizbowl' ? QB_STEPS : STEPS;
+
   // Initialize from the server-side flag. If the user record loads
   // late, we'll re-sync once it's available via the effect below.
   const [stepIdx, setStepIdx] = useState(() => {
     const raw = user?.data?.preferences?.tourStep;
     if (raw == null) return -1;
-    return Math.max(0, Math.min(STEPS.length - 1, parseInt(raw, 10) || 0));
+    return Math.max(0, Math.min(steps.length - 1, parseInt(raw, 10) || 0));
   });
   // When user.data lands after first render (post-fetch), pick up the
   // tour step on the way through.
@@ -85,7 +136,7 @@ export default function GuidedTour() {
     initRef.current = true;
     const raw = user?.data?.preferences?.tourStep;
     if (raw != null) {
-      setStepIdx(Math.max(0, Math.min(STEPS.length - 1, parseInt(raw, 10) || 0)));
+      setStepIdx(Math.max(0, Math.min(steps.length - 1, parseInt(raw, 10) || 0)));
     }
   }, [user]);
 
@@ -93,7 +144,7 @@ export default function GuidedTour() {
   const [hasScrolled, setHasScrolled] = useState(false);
   const tipRef = useRef(null);
 
-  const step = stepIdx >= 0 ? STEPS[stepIdx] : null;
+  const step = stepIdx >= 0 ? steps[stepIdx] : null;
   const isWaiting = step && step.target && !rect;
 
   const advance = useCallback(() => {
@@ -101,14 +152,14 @@ export default function GuidedTour() {
     setHasScrolled(false);
     setStepIdx(prev => {
       const next = prev + 1;
-      if (next >= STEPS.length) {
+      if (next >= steps.length) {
         persistTourStep(user, null);
         return -1;
       }
       persistTourStep(user, next);
       return next;
     });
-  }, [user]);
+  }, [user, steps.length]);
 
   const skip = useCallback(() => {
     persistTourStep(user, null);
@@ -288,7 +339,7 @@ export default function GuidedTour() {
             the tooltip. Completed steps get a dimmed blue; future steps
             stay neutral. */}
         <div className="flex gap-1 mb-3">
-          {STEPS.map((_, i) => (
+          {steps.map((_, i) => (
             <div
               key={i}
               className={`flex-1 h-[3px] rounded-full transition-all ${
@@ -302,7 +353,7 @@ export default function GuidedTour() {
           <div className="flex items-center gap-1.5">
             <Sparkles size={12} className={isWaiting ? 'text-blue-300/50 animate-pulse' : 'text-blue-400/85'} />
             <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/45">
-              {isWaiting ? 'Loading…' : `Step ${stepIdx + 1} of ${STEPS.length}`}
+              {isWaiting ? 'Loading…' : `Step ${stepIdx + 1} of ${steps.length}`}
             </span>
           </div>
           <button onClick={skip} title="Skip tour (Esc)" className="text-white/30 hover:text-white/65 -m-1 p-1 transition-colors">
