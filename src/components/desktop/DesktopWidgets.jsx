@@ -603,11 +603,16 @@ function Shell({
           overflow: freeMode ? 'hidden' : undefined,
           backdropFilter: opacity < 100 ? 'blur(24px) saturate(160%)' : undefined,
           WebkitBackdropFilter: opacity < 100 ? 'blur(24px) saturate(160%)' : undefined,
-          // Keep the composited blur layer permanently GPU-pinned so the
-          // browser doesn't demote/re-promote it on each background repaint,
-          // which is what causes the whole-screen flash.
-          willChange: opacity < 100 ? 'transform' : undefined,
-          transform: opacity < 100 ? 'translateZ(0)' : undefined,
+          // Unconditionally GPU-pin the widget surface. At opacity=100 there
+          // is no backdropFilter, but without promotion the widget still
+          // paints into the main compositor layer. When MacOSContent re-renders
+          // on every focusWindow() call, unmemoized DesktopWidgets re-renders
+          // all shells — main-layer repaints force every backdrop-filter
+          // element (window blur layer, MenuBar, Dock) to re-sample, dropping
+          // the compositor layer for one frame → visible wallpaper flash.
+          // Pinning every shell to its own layer keeps repaints self-contained.
+          willChange: 'transform',
+          transform: 'translateZ(0)',
           transition: freeMode
             ? 'background-color 0.2s, border-color 0.2s'
             : 'background-color 0.2s, border-color 0.2s, background-image 0.2s, border-radius 0.22s, min-height 0.22s cubic-bezier(0.34,1.56,0.64,1)',

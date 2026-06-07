@@ -44,6 +44,10 @@ export const fetchQuizBowlRecommendations = () => apiFetch('/api/quizbowl/recomm
 // categoryPatterns, trend, optimalZone, recentBuzzes } }
 export const fetchQuizBowlPatterns = () => apiFetch('/api/quizbowl/patterns');
 
+// Returns { dueCategories: [{ category, interval, reps, ease, lastReviewed, nextDue }] }
+// SM-2-based categories the algorithm says are due for re-drilling today.
+export const fetchQuizBowlSm2Due = () => apiFetch('/api/quizbowl/sm2-due');
+
 // Returns { niches: [{ topic, reason }] } - Gemini-suggested niche sub-topics
 // within a category for targeted AI drilling.
 export const fetchQuizBowlNiches = ({ category, difficulty = 'Medium' } = {}) => {

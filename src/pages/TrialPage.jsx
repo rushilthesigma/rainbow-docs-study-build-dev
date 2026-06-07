@@ -476,7 +476,7 @@ export default function TrialPage() {
             <p className="text-sm font-semibold text-emerald-300 mb-1">SM-2 Spaced Repetition</p>
             <p className="text-xs text-white/40">
               {dueCount > 0
-                ? `${dueCount} items due today. Questions you struggled with return sooner; mastered ones are spaced further out.`
+                ? `${dueCount} item${dueCount !== 1 ? 's' : ''} recommended today. Questions you struggled with return sooner; mastered ones are spaced further out.`
                 : 'No items due yet - play other modes first to build your review queue.'}
             </p>
           </div>

@@ -49,9 +49,10 @@ export default function UpgradeChip() {
     setBusy(id);
     try {
       const { url } = await createCheckoutSession(id);
-      if (url) window.location.href = url;
+      if (url) window.open(url, '_blank', 'noopener');
     } catch (e) {
       alert(e?.message || 'Checkout failed.');
+    } finally {
       setBusy(null);
     }
   }

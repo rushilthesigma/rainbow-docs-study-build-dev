@@ -1086,19 +1086,19 @@ function ExamsTab({ u, onRefresh }) {
                       </p>
                     )}
                   </div>
-                  {/* Unlock button — only show if not already admin-unlocked and not completed */}
+                  {/* Unlock icon — only show if not already admin-unlocked and not completed */}
                   {!data?.adminUnlocked && !isCompleted && (
                     <button
                       onClick={() => handleUnlock(c.id, kind)}
                       disabled={isUnlocking}
-                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white text-black text-[10px] font-semibold hover:bg-white/90 disabled:opacity-50 transition-opacity flex-shrink-0"
+                      title={`Admin-unlock ${label}`}
+                      className="w-7 h-7 flex items-center justify-center rounded-lg text-white/35 hover:text-violet-300 hover:bg-violet-500/[0.12] disabled:opacity-40 transition-colors flex-shrink-0"
                     >
                       {isUnlocking ? (
-                        <RefreshCw size={10} className="animate-spin" />
+                        <RefreshCw size={13} className="animate-spin" />
                       ) : (
-                        <Unlock size={10} />
+                        <Unlock size={13} />
                       )}
-                      Unlock
                     </button>
                   )}
                 </div>

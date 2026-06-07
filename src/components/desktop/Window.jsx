@@ -1,14 +1,12 @@
 import { useRef, useEffect, useState, useCallback, memo } from 'react';
 import { X, Minus, Maximize2 } from 'lucide-react';
-import { useWindowManager } from '../../context/WindowManagerContext';
 import { useUIPreference } from '../../context/UIPreferenceContext';
 
 // macOS traffic lights. Green button = in-app "zoom" (full window inside
 // the macOS shell - covers the dock area but stays inside the browser
 // window). For TRUE OS-level fullscreen (taking over the whole monitor),
 // use ⌘⇧P - that calls the browser Fullscreen API.
-function MacTitleBar({ windowId, isActive, title, onDragStart, onDoubleClick, titlebarOpacity = 80 }) {
-  const { closeWindow, minimizeWindow, maximizeWindow } = useWindowManager();
+function MacTitleBar({ windowId, isActive, title, onDragStart, onDoubleClick, titlebarOpacity = 80, closeWindow, minimizeWindow, maximizeWindow }) {
   const [hovered, setHovered] = useState(false);
   const isDark = document.documentElement.classList.contains('dark');
   const a = titlebarOpacity / 100;
@@ -31,8 +29,7 @@ function MacTitleBar({ windowId, isActive, title, onDragStart, onDoubleClick, ti
   );
 }
 
-function Window({ win, isActive, children }) {
-  const { focusWindow, moveWindow, resizeWindow, removeWindow, maximizeWindow } = useWindowManager();
+function Window({ win, isActive, children, focusWindow, moveWindow, resizeWindow, removeWindow, maximizeWindow, closeWindow, minimizeWindow }) {
   const { windowOpacity, titlebarOpacity } = useUIPreference();
   const windowRef = useRef(null);
   const resizeRef = useRef(null);
@@ -240,7 +237,7 @@ function Window({ win, isActive, children }) {
         />
       )}
 
-      <TitleBar windowId={win.id} appId={win.appId} isMaximized={maxed} isActive={isActive} title={win.title} onDragStart={handleDragStart} onDoubleClick={maxed ? undefined : () => maximizeWindow(win.id)} onFullscreen={toggleFullscreen} titlebarOpacity={titlebarOpacity ?? 80} />
+      <TitleBar windowId={win.id} appId={win.appId} isMaximized={maxed} isActive={isActive} title={win.title} onDragStart={handleDragStart} onDoubleClick={maxed ? undefined : () => maximizeWindow(win.id)} onFullscreen={toggleFullscreen} titlebarOpacity={titlebarOpacity ?? 80} closeWindow={closeWindow} minimizeWindow={minimizeWindow} maximizeWindow={maximizeWindow} />
 
       <div
         className="flex-1 overflow-hidden"
@@ -269,10 +266,15 @@ function Window({ win, isActive, children }) {
 }
 
 // Memoize so that only the window whose `win` object or `isActive` flag
-// actually changed re-renders. Without this, every FOCUS_WINDOW / MOVE_WINDOW
-// dispatch re-renders ALL open windows — each re-render applies new inline
-// styles to the blur layer, which triggers a backdrop-filter GPU re-sample
-// that can drop the compositor layer for one frame → wallpaper flash.
+// actually changed re-renders. The callback props (focusWindow, moveWindow,
+// etc.) are stable useCallback refs from WindowManagerProvider and never
+// change, so the comparator safely ignores them.
+//
+// Critically: Window must NOT call useWindowManager() directly. Context
+// subscriptions bypass React.memo — every FOCUS_WINDOW dispatch would
+// re-render ALL open windows, causing simultaneous re-renders of every blur
+// layer, which drops compositor layers for one frame → wallpaper flash.
+// Callbacks are instead passed down as props from MacOSContent.
 //
 // `children` (AppWindow) is intentionally excluded from the comparator: it
 // is always the same element type+props (derived from win.appId / win.meta

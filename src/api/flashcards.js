@@ -44,9 +44,10 @@ export async function deleteCard(deckId, cardId) {
   return apiFetch(`/api/flashcards/${deckId}/cards/${cardId}`, { method: 'DELETE' });
 }
 
-export async function submitReview(deckId, cardId, correct) {
+// quality: 0-5 SM-2 scale (1=forgot, 3=hard, 4=good, 5=easy)
+export async function submitReview(deckId, cardId, quality) {
   return apiFetch(`/api/flashcards/${deckId}/review`, {
     method: 'POST',
-    body: JSON.stringify({ cardId, correct }),
+    body: JSON.stringify({ cardId, quality }),
   });
 }

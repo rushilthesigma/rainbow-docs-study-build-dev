@@ -29,11 +29,33 @@ export function sm2Update(card, quality) {
 }
 
 export function isDue(card) {
-  if (!card.nextDue) return true;
-  return new Date(card.nextDue) <= new Date();
+  if (!card.nextDue && !card.nextReview) return true;
+  const due = card.nextDue || card.nextReview;
+  return new Date(due) <= new Date();
 }
 
-// Map a 0-1 buzz accuracy to SM-2 quality (0-5)
+// How many days until this card is due (negative = already overdue).
+export function daysUntilDue(card) {
+  const due = card.nextDue || card.nextReview;
+  if (!due) return 0;
+  return Math.round((new Date(due) - new Date()) / 86400000);
+}
+
+// Human-readable interval label for a day count.
+export function intervalLabel(days) {
+  if (!days || days <= 0) return '<1d';
+  if (days === 1) return '1d';
+  if (days < 7) return `${days}d`;
+  if (days < 30) return `${Math.round(days / 7)}w`;
+  return `${Math.round(days / 30)}mo`;
+}
+
+// Predict the next interval (in days) if the user rates this quality now.
+export function sm2NextInterval(card, quality) {
+  return sm2Update(card, quality).interval;
+}
+
+// Map a 0-1 buzz ratio to SM-2 quality (0-5)
 // buzzRatio: how far into question user buzzed (0=start, 1=end)
 // correct: boolean
 export function buzzToQuality(correct, buzzRatio) {

@@ -86,8 +86,8 @@ export default function FlashcardsPage() {
                 <div className="flex items-center gap-2 mt-0.5 text-[12px] text-white/35">
                   <span>{deck.cardCount} card{deck.cardCount !== 1 ? 's' : ''}</span>
                   {deck.dueCount > 0 && (
-                    <span className="flex items-center gap-1 text-white/55 font-medium">
-                      <RotateCcw size={10} /> {deck.dueCount} due
+                    <span className="flex items-center gap-1 text-blue-400 font-medium">
+                      <RotateCcw size={10} /> {deck.dueCount} recommended
                     </span>
                   )}
                 </div>

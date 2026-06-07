@@ -75,7 +75,7 @@ function DockIcon({ app, mouseX, isOpen, isActive, onClick, size, iconStyle }) {
             `bg-gradient-to-br ${app.gradient}`
           }`}
           style={
-            iconStyle === 'glass'  ? { background: 'rgba(255,255,255,0.08)', backdropFilter: 'blur(20px)' } :
+            iconStyle === 'glass'  ? { background: 'rgba(255,255,255,0.08)', backdropFilter: 'blur(20px)', willChange: 'transform', transform: 'translateZ(0)' } :
             iconStyle === 'accent' ? { backgroundColor: `${app.color}22`, border: `1px solid ${app.color}44` } :
             undefined
           }

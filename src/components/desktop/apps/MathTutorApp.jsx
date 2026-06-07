@@ -232,18 +232,24 @@ export function TutorCanvas({ onCaptureReady, initialStrokes = null, onStrokesCh
         {iconBtn(tool === 'pen',    () => setTool('pen'),    <Pen    size={13} />, 'Pen')}
         {iconBtn(tool === 'eraser', () => setTool('eraser'), <Eraser size={13} />, 'Eraser')}
         <div className="w-px h-4 bg-white/10 mx-1" />
-        {Object.keys(PEN_SIZES).map(s => (
-          <button
-            key={s}
-            onClick={() => setPenSize(s)}
-            title={s}
-            className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
-              penSize === s && tool === 'pen' ? 'bg-white/15' : 'hover:bg-white/10'
-            }`}
-          >
-            <div className="rounded-full bg-white" style={{ width: PEN_SIZES[s], height: PEN_SIZES[s], opacity: penSize === s && tool === 'pen' ? 1 : 0.35 }} />
-          </button>
-        ))}
+        {Object.keys(PEN_SIZES).map(s => {
+          const active = penSize === s && tool === 'pen';
+          return (
+            <button
+              key={s}
+              onClick={() => setPenSize(s)}
+              title={s}
+              className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
+                active ? 'bg-white/[0.08] ring-1 ring-white/20' : 'hover:bg-white/10'
+              }`}
+            >
+              <div
+                className="rounded-full bg-white transition-opacity"
+                style={{ width: PEN_SIZES[s], height: PEN_SIZES[s], opacity: active ? 0.75 : 0.3 }}
+              />
+            </button>
+          );
+        })}
         <div className="w-px h-4 bg-white/10 mx-1" />
         {iconBtn(false, handleUndo,  <Undo2  size={13} />, 'Undo')}
         {iconBtn(false, handleClear, <Trash2 size={13} />, 'Clear')}

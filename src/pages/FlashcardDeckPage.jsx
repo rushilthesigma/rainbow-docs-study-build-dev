@@ -1,10 +1,20 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, RotateCcw, Plus, Check, X, Trash2 } from 'lucide-react';
+import { ArrowLeft, RotateCcw, Plus, Trash2 } from 'lucide-react';
 import { getDeck, deleteDeck, submitReview, addCards } from '../api/flashcards';
+import { isDue, intervalLabel, sm2NextInterval } from '../utils/sm2';
 import Button from '../components/shared/Button';
 import Input from '../components/shared/Input';
 import LoadingSpinner from '../components/shared/LoadingSpinner';
+
+// SM-2 rating buttons shown after flipping a card.
+// quality maps to: 1=forgot, 3=hard, 4=good, 5=easy
+const RATINGS = [
+  { quality: 1, label: 'Forgot',  key: '1', cls: 'border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20' },
+  { quality: 3, label: 'Hard',    key: '2', cls: 'border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20' },
+  { quality: 4, label: 'Good',    key: '3', cls: 'border-blue-500/40 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20' },
+  { quality: 5, label: 'Easy',    key: '4', cls: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20' },
+];
 
 export default function FlashcardDeckPage() {
   const { id } = useParams();
@@ -25,7 +35,8 @@ export default function FlashcardDeckPage() {
     getDeck(id).then(d => { setDeck(d.deck); setLoading(false); }).catch(() => setLoading(false));
   }, [id]);
 
-  const dueCards = (deck?.cards || []).filter(c => !c.nextReview || new Date(c.nextReview) <= new Date());
+  // Supports both legacy `nextReview` and SM-2 `nextDue` fields.
+  const dueCards = (deck?.cards || []).filter(isDue);
   const reviewCards = mode === 'review' ? dueCards : [];
   const currentCard = reviewCards[reviewIndex];
 
@@ -36,10 +47,10 @@ export default function FlashcardDeckPage() {
     setTimeout(() => setFlipping(false), 300);
   }
 
-  const handleReview = useCallback(async (correct) => {
+  const handleReview = useCallback(async (quality) => {
     if (!currentCard) return;
     try {
-      const data = await submitReview(id, currentCard.id, correct);
+      const data = await submitReview(id, currentCard.id, quality);
       setDeck(prev => ({
         ...prev,
         cards: prev.cards.map(c => c.id === currentCard.id ? data.card : c),
@@ -57,9 +68,16 @@ export default function FlashcardDeckPage() {
   useEffect(() => {
     if (mode !== 'review') return;
     function handleKey(e) {
-      if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); doFlip(); }
-      if (flipped && (e.key === 'ArrowRight' || e.key === '2')) handleReview(true);
-      if (flipped && (e.key === 'ArrowLeft' || e.key === '1')) handleReview(false);
+      if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); if (!flipped) doFlip(); }
+      if (flipped) {
+        if (e.key === '1') handleReview(1);
+        if (e.key === '2') handleReview(3);
+        if (e.key === '3') handleReview(4);
+        if (e.key === '4') handleReview(5);
+        // arrow shortcuts: left=forgot, right=easy
+        if (e.key === 'ArrowLeft') handleReview(1);
+        if (e.key === 'ArrowRight') handleReview(5);
+      }
     }
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
@@ -110,7 +128,12 @@ export default function FlashcardDeckPage() {
       </div>
 
       <h1 className="text-xl font-bold text-gray-900 dark:text-white mb-1">{deck.title}</h1>
-      <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">{deck.cards?.length || 0} cards &middot; {dueCards.length} due for review</p>
+      <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+        {deck.cards?.length || 0} cards
+        {dueCards.length > 0
+          ? <> &middot; <span className="text-blue-400 font-medium">{dueCards.length} recommended for review</span></>
+          : ' · all caught up'}
+      </p>
 
       {mode === 'browse' && (
         <div className="flex gap-2 mb-6">
@@ -128,36 +151,25 @@ export default function FlashcardDeckPage() {
         <div className="space-y-4">
           <div className="flex items-center justify-between text-sm text-gray-400 mb-2">
             <span>{reviewIndex + 1} / {reviewCards.length}</span>
-            <button onClick={() => { setMode('browse'); setReviewIndex(0); setFlipped(false); }} className="hover:text-gray-600 dark:hover:text-gray-300">Exit Review</button>
+            <button onClick={() => { setMode('browse'); setReviewIndex(0); setFlipped(false); }} className="hover:text-gray-600 dark:hover:text-gray-300">Exit</button>
           </div>
 
-          {/* Progress bar */}
           <div className="w-full h-1.5 bg-gray-200 dark:bg-[#2A2A40] rounded-full overflow-hidden">
             <div className="h-full bg-blue-500 rounded-full transition-all duration-300" style={{ width: `${reviewProgress}%` }} />
           </div>
 
           {/* 3D flip card */}
-          <div
-            onClick={doFlip}
-            className="cursor-pointer"
-            style={{ perspective: '1000px' }}
-          >
+          <div onClick={doFlip} className="cursor-pointer" style={{ perspective: '1000px' }}>
             <div
               className="relative w-full h-[240px] transition-transform duration-500 ease-in-out"
-              style={{
-                transformStyle: 'preserve-3d',
-                transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
-              }}
+              style={{ transformStyle: 'preserve-3d', transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}
             >
-              {/* Front */}
               <div
                 className="absolute inset-0 bg-white dark:bg-[#161622] rounded-2xl border border-gray-200 dark:border-[#2A2A40] p-8 flex items-center justify-center shadow-lg overflow-auto"
                 style={{ backfaceVisibility: 'hidden' }}
               >
                 <p className="text-center text-lg font-medium text-gray-900 dark:text-gray-100">{currentCard.front}</p>
               </div>
-
-              {/* Back */}
               <div
                 className="absolute inset-0 bg-gradient-to-br from-blue-50 to-purple-50 dark:from-[#161622] dark:to-[#1a1a30] rounded-2xl border border-blue-200 dark:border-blue-900/30 p-8 flex items-center justify-center shadow-lg overflow-auto"
                 style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
@@ -168,23 +180,28 @@ export default function FlashcardDeckPage() {
           </div>
 
           {!flipped && (
-            <p className="text-center text-xs text-gray-400">Click or press Space to flip</p>
+            <p className="text-center text-xs text-gray-400">Click or press Space to reveal</p>
           )}
 
           {flipped && (
-            <div className="flex justify-center gap-4 pt-2">
-              <button
-                onClick={() => handleReview(false)}
-                className="flex items-center gap-2 px-6 py-3 rounded-xl bg-rose-50 dark:bg-rose-900/15 border border-rose-200 dark:border-rose-800 text-rose-600 dark:text-rose-400 font-medium text-sm hover:bg-rose-100 dark:hover:bg-rose-900/25 transition-colors"
-              >
-                <X size={18} /> Incorrect
-              </button>
-              <button
-                onClick={() => handleReview(true)}
-                className="flex items-center gap-2 px-6 py-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/15 border border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400 font-medium text-sm hover:bg-emerald-100 dark:hover:bg-emerald-900/25 transition-colors"
-              >
-                <Check size={18} /> Correct
-              </button>
+            <div>
+              <p className="text-center text-[11px] text-white/35 mb-2">How well did you know this?</p>
+              <div className="grid grid-cols-4 gap-2">
+                {RATINGS.map(r => {
+                  const nextDays = sm2NextInterval(currentCard, r.quality);
+                  return (
+                    <button
+                      key={r.quality}
+                      onClick={() => handleReview(r.quality)}
+                      className={`flex flex-col items-center gap-1 px-3 py-2.5 rounded-xl border text-sm font-semibold transition-colors ${r.cls}`}
+                    >
+                      <span>{r.label}</span>
+                      <span className="text-[10px] font-normal opacity-70">{intervalLabel(nextDays)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-center text-[10px] text-white/25 mt-2">Keys: 1 · 2 · 3 · 4</p>
             </div>
           )}
         </div>
@@ -192,7 +209,7 @@ export default function FlashcardDeckPage() {
 
       {mode === 'review' && !currentCard && (
         <div className="text-center py-12">
-          <p className="text-gray-500 mb-4">All done! No more cards to review.</p>
+          <p className="text-gray-500 mb-4">All done! No more cards recommended for today.</p>
           <Button onClick={() => setMode('browse')}>Back to Deck</Button>
         </div>
       )}
@@ -233,13 +250,30 @@ export default function FlashcardDeckPage() {
       {/* Card list (browse) */}
       {mode === 'browse' && (
         <div className="space-y-2">
-          {(deck.cards || []).map((card) => (
-            <div key={card.id} className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-4 hover:shadow-sm transition-shadow">
-              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{card.front}</p>
-              <div className="w-full h-px bg-gray-100 dark:bg-[#2A2A40] my-2" />
-              <p className="text-xs text-gray-500 dark:text-gray-400">{card.back}</p>
-            </div>
-          ))}
+          {(deck.cards || []).map((card) => {
+            const due = isDue(card);
+            return (
+              <div key={card.id} className="bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] p-4 hover:shadow-sm transition-shadow">
+                <div className="flex items-start justify-between gap-3">
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{card.front}</p>
+                  {due && (
+                    <span className="flex-shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full border border-blue-500/30 bg-blue-500/10 text-blue-300">
+                      due
+                    </span>
+                  )}
+                </div>
+                <div className="w-full h-px bg-gray-100 dark:bg-[#2A2A40] my-2" />
+                <div className="flex items-end justify-between gap-2">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">{card.back}</p>
+                  {card.reps > 0 && (
+                    <span className="flex-shrink-0 text-[10px] text-white/30 tabular-nums">
+                      ×{card.reps}
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

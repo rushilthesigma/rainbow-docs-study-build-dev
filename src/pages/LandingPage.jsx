@@ -26,6 +26,7 @@ export default function LandingPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const [googleReady, setGoogleReady] = useState(false);
   const googleBtnRef = useRef(null);
   const scrollerRef = useRef(null);
 
@@ -50,6 +51,7 @@ export default function LandingPage() {
             width: 300,
           });
         }
+        setGoogleReady(true);
       }
     };
     document.body.appendChild(script);
@@ -70,15 +72,18 @@ export default function LandingPage() {
 
   function triggerGoogle() {
     if (!window.google?.accounts?.id) return;
-    // Call prompt() from within the user-gesture handler so Chrome's FedCM
-    // (used on Chromebooks) accepts it without needing a visible rendered button.
-    // If One Tap / FedCM is suppressed, fall back to clicking the rendered button.
-    window.google.accounts.id.prompt((notification) => {
-      if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-        const btn = googleBtnRef.current?.querySelector('div[role=button], button');
-        if (btn) btn.click();
-      }
-    });
+    // Click the rendered button synchronously while still in the user-gesture
+    // call stack. Safari / iOS and many mobile browsers block popups that are
+    // opened from async callbacks, so the old approach (prompt() → fallback
+    // btn.click() inside the notification callback) silently failed on those
+    // devices. Clicking directly here is always in-gesture.
+    const btn = googleBtnRef.current?.querySelector('div[role=button], button');
+    if (btn) {
+      btn.click();
+      return;
+    }
+    // No rendered button available yet — use One Tap / FedCM prompt as fallback.
+    window.google.accounts.id.prompt();
   }
 
   function scrollTo(idx) {
@@ -125,6 +130,7 @@ export default function LandingPage() {
         <QuizBowlAISection />
         <SignInSection
           loading={loading}
+          googleReady={googleReady}
           onSignIn={triggerGoogle}
           onWhyNotGpt={() => scrollTo(7)}
         />
@@ -550,7 +556,7 @@ function QuizBowlAISection() {
 // ===== Section 7: Sign-in =====
 //
 // Google OAuth is the only sign-in path.
-function SignInSection({ loading, onSignIn, onWhyNotGpt }) {
+function SignInSection({ loading, googleReady, onSignIn, onWhyNotGpt }) {
   return (
     <section
       data-section="signin"
@@ -577,7 +583,7 @@ function SignInSection({ loading, onSignIn, onWhyNotGpt }) {
         {/* Google OAuth - primary (and only) sign-in path */}
         <button
           onClick={onSignIn}
-          disabled={loading}
+          disabled={loading || !googleReady}
           className="mt-8 w-full py-3 rounded-lg bg-white hover:bg-white/95 active:scale-[0.98] text-[14px] font-semibold text-slate-800 transition-all disabled:opacity-50 inline-flex items-center justify-center gap-2.5"
         >
           {loading ? (
