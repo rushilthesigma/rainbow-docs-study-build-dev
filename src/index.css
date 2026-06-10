@@ -1,5 +1,15 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
+/* Server-side / data files: exclude from Tailwind's class scanning so the
+   10MB+ preset caches and 13k-line server.js don't slow scans or churn the
+   dev CSS pipeline when the backend rewrites them at runtime. */
+@source not "../server.js";
+@source not "../prompts.js";
+@source not "../presetBlocks.json";
+@source not "../data";
+@source not "../scripts";
+@source not "../electron";
+@source not "../build";
 
 @custom-variant dark (&:where(.dark, .dark *));
 

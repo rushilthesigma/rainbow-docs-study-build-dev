@@ -31,7 +31,9 @@ export async function apiFetch(path, options = {}) {
       err.planLimit = true;
       throw err;
     }
-    throw new Error(data.error || `Request failed: ${res.status}`);
+    const err = new Error(data.error || `Request failed: ${res.status}`);
+    err.status = res.status;
+    throw err;
   }
 
   return res.json();

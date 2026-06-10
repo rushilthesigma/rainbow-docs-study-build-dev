@@ -23,6 +23,17 @@
     <script>
       // Apply saved theme immediately to prevent flash
       (function(){var t=localStorage.getItem('covalent-theme');if(t!=='light')document.documentElement.classList.add('dark');})();
+      // Signed-out visitors land on the wallpapered welcome page. Start
+      // fetching the wallpaper now, at HTML parse time, instead of after
+      // the JS bundle mounts. URL must stay byte-identical to
+      // LANDING_WALLPAPER in src/pages/LandingPage.jsx for the cache hit.
+      (function(){
+        if (localStorage.getItem('covalent-token')) return;
+        var l = document.createElement('link');
+        l.rel = 'preload'; l.as = 'image';
+        l.href = 'https://images.unsplash.com/photo-1509773896068-7fd415d91e2e?w=2560&q=75';
+        document.head.appendChild(l);
+      })();
     </script>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>

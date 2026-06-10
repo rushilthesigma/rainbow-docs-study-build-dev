@@ -87,17 +87,23 @@ function DockIcon({ app, mouseX, isOpen, isActive, onClick, size, iconStyle }) {
           />
         </div>
       </button>
-      {/* macOS running-app indicator. 3px white pip below the icon, with
+      {/* macOS running-app indicator. Fixed 4px white pip below the icon, with
           reserved row height so the layout doesn't shift on open/close.
-          Active app gets a brighter, slightly larger pip. */}
+          Active app gets full opacity + full scale; inactive gets 0.7 opacity
+          + 0.75 scale (≈3px). Both transitions are compositor-only (opacity +
+          transform) so the Dock's backdrop-filter is never re-rasterized on
+          focus changes, preventing the one-frame wallpaper flash. */}
       <div className="h-1.5 mt-1 flex items-center justify-center">
         {isOpen && (
           <span
-            className={`rounded-full transition-all ${
-              isActive
-                ? 'w-[4px] h-[4px] bg-white'
-                : 'w-[3px] h-[3px] bg-white/70'
-            }`}
+            className="rounded-full bg-white block"
+            style={{
+              width: 4, height: 4,
+              opacity: isActive ? 1 : 0.7,
+              transform: `scale(${isActive ? 1 : 0.75}) translateZ(0)`,
+              transition: 'opacity 0.15s, transform 0.15s',
+              willChange: 'transform, opacity',
+            }}
           />
         )}
       </div>

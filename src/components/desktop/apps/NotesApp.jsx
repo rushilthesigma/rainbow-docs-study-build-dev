@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, FileText, Plus, Trash2, Pencil, Layout, Sparkles, Wand2, Loader2, BookOpen, Network, Folder, Layers, ChevronRight } from 'lucide-react';
+import { ArrowLeft, FileText, Plus, Trash2, Pencil, Layout, Sparkles, Wand2, Loader2, BookOpen, Network, Folder, Layers, ChevronRight, Share2 } from 'lucide-react';
 import { InlineProgress } from '../../shared/ProgressBar';
 import { listNotes, createNote, deleteNote, getNote, updateNote, generateCues, generateSummary,
          listNoteMaps, createNoteMap, deleteNoteMap, updateNoteMap,
@@ -11,6 +11,8 @@ import ViewFade from '../../shared/ViewFade';
 import Button from '../../shared/Button';
 import LoadingSpinner from '../../shared/LoadingSpinner';
 import Modal from '../../shared/Modal';
+import ShareDialog from '../../shared/ShareDialog';
+import SharedWithMeView from '../../library/SharedWithMeView';
 import useBrowserBack from '../../../hooks/useBrowserBack';
 import NoteActions from '../../notes/NoteActions';
 import NoteMap from '../../notes/NoteMap';
@@ -225,6 +227,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
   const [unfiled, setUnfiled] = useState(cachedTopics?.unfiled || 0);
   const [activeTopicId, setActiveTopicId] = useState(null);
   const [topicDialog, setTopicDialog] = useState(null);
+  const [shareTarget, setShareTarget] = useState(null);
   const [flashcardsNote, setFlashcardsNote] = useState(
     initialFlashcardsNoteId ? { id: initialFlashcardsNoteId, title: initialFlashcardsTitle || '' } : null,
   );
@@ -844,11 +847,18 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
                   <span className="truncate max-w-[90px]">{topic.name}</span>
                 </span>
               )}
+              <button onClick={e => { e.stopPropagation(); setShareTarget({ id: note.id, type: 'note', title: note.title }); }} className="p-1 rounded text-white/20 hover:text-blue-300 opacity-0 group-hover:opacity-100 transition-all" title="Share"><Share2 size={13} /></button>
               <button onClick={e => handleDelete(e, note.id)} className="p-1 rounded text-white/20 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={13} /></button>
             </div>
             );
           })}
         </div>
+      )}
+
+      <SharedWithMeView className="mt-8" />
+
+      {shareTarget && (
+        <ShareDialog item={shareTarget} onClose={() => setShareTarget(null)} />
       )}
 
       {topicDialog && (

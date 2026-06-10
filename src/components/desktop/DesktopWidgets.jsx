@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Flame, Play, Pause, RotateCcw, StickyNote, Calendar as CalendarIcon, Quote, Layers } from 'lucide-react';
 import { useWidgets } from '../../context/WidgetContext';
@@ -1348,7 +1348,13 @@ const WIDGET_MAP = {
   review:     ReviewWidget,
 };
 
-export default function DesktopWidgets() {
+// Memoized so MacOSContent re-renders (on every focusWindow / moveWindow /
+// etc.) don't cascade into widget shells. DesktopWidgets only re-renders
+// when WidgetContext state actually changes (drag, add, remove, resize).
+// Without memo: MacOSContent's context subscription caused all shells to
+// re-render on every focus change, forcing GPU layer repaints that made
+// the Dock/MenuBar backdrop-filter re-sample — the root of the flash.
+export default memo(function DesktopWidgets() {
   const { widgets } = useWidgets();
   return (
     <>
@@ -1385,4 +1391,4 @@ export default function DesktopWidgets() {
       })}
     </>
   );
-}
+});

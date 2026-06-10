@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, memo } from 'react';
 import { useUIPreference } from '../../context/UIPreferenceContext';
 
 function isDark() {
@@ -32,9 +32,15 @@ export const WALLPAPERS = {
 
 export const WALLPAPER_LIST = Object.entries(WALLPAPERS).map(([id, w]) => ({ id, label: w.label }));
 
-export default function DesktopBackground() {
+// Memoized so MacOSContent re-renders (on every focusWindow / moveWindow /
+// etc.) don't cascade into DesktopBackground. The background only needs to
+// update when the wallpaper preference or dark mode changes.
+export default memo(function DesktopBackground() {
   const { wallpaper } = useUIPreference();
   const [dark, setDark] = useState(isDark);
+  // Image wallpapers load over the network; fading in once decoded avoids
+  // the hard pop from blank to full image on boot and on wallpaper change.
+  const [loadedUrl, setLoadedUrl] = useState(null);
 
   useEffect(() => {
     const observer = new MutationObserver(() => setDark(isDark()));
@@ -46,10 +52,23 @@ export default function DesktopBackground() {
   const effectiveWallpaper = WALLPAPERS[wallpaper] ? wallpaper : 'lavender';
   const wp = WALLPAPERS[effectiveWallpaper] || WALLPAPERS.lavender;
 
+  useEffect(() => {
+    if (wp.type !== 'image') return;
+    let stale = false;
+    const img = new Image();
+    img.onload = () => { if (!stale) setLoadedUrl(wp.url); };
+    img.onerror = () => { if (!stale) setLoadedUrl(wp.url); };
+    img.src = wp.url;
+    return () => { stale = true; };
+  }, [wp.type, wp.url]);
+
   if (wp.type === 'image') {
     return (
-      <div className="fixed inset-0 z-0">
-        <div className="absolute inset-0 bg-cover bg-center bg-no-repeat" style={{ backgroundImage: `url(${wp.url})` }} />
+      <div className="fixed inset-0 z-0 bg-[#10131c]">
+        <div
+          className={`absolute inset-0 bg-cover bg-center bg-no-repeat transition-opacity duration-500 ${loadedUrl === wp.url ? 'opacity-100' : 'opacity-0'}`}
+          style={{ backgroundImage: `url(${wp.url})` }}
+        />
         <div className={`absolute inset-0 ${dark ? 'bg-black/20' : 'bg-white/5'}`} />
       </div>
     );
@@ -57,4 +76,4 @@ export default function DesktopBackground() {
 
   const style = dark ? wp.dark : wp.light;
   return <div className="fixed inset-0 z-0" style={style} />;
-}
+});

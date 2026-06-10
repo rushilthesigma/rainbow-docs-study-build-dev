@@ -5,6 +5,7 @@ import { listNotes, createNote, deleteNote } from '../api/notes';
 import Button from '../components/shared/Button';
 import LoadingSpinner from '../components/shared/LoadingSpinner';
 import Modal from '../components/shared/Modal';
+import SharedWithMeView from '../components/library/SharedWithMeView';
 
 export default function NotesPage() {
   const navigate = useNavigate();
@@ -109,6 +110,8 @@ export default function NotesPage() {
           ))}
         </div>
       )}
+
+      <SharedWithMeView className="mt-8" />
     </div>
   );
 }

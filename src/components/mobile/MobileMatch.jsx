@@ -37,24 +37,17 @@ function scaleRoster(bots, levelId) {
 
 function useWordReveal(text, startedAt, speedMs, frozen, frozenAt) {
   const [, setTick] = useState(0);
-  const frozenRef = useRef(frozen);
-  const frozenAtRef = useRef(frozenAt);
   const lockedIdxRef = useRef(null);
 
   useEffect(() => {
-    frozenRef.current = frozen;
-    frozenAtRef.current = frozenAt;
     if (!frozen) lockedIdxRef.current = null;
-  }, [frozen, frozenAt]);
+  }, [frozen]);
 
   useEffect(() => {
-    if (!text) return;
-    const id = setInterval(() => {
-      if (frozenRef.current) return;
-      setTick(t => (t + 1) | 0);
-    }, 50);
+    if (!text || frozen) return;
+    const id = setInterval(() => setTick(t => (t + 1) | 0), 50);
     return () => clearInterval(id);
-  }, [text, startedAt]);
+  }, [text, startedAt, frozen]);
 
   if (!text) return { revealed: '', wordIndex: 0, totalWords: 0, done: false };
   const words = text.split(/\s+/);

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, Plus, Sparkles, Loader2, BookOpen, ChevronDown, ChevronRight, CheckCircle2, Circle, Lock, ClipboardCheck, PenTool, FileText, Check, X, Trophy, Wand2, Paperclip, Upload, Calculator, GraduationCap, Atom, Sigma, Map as MapIcon, List, ListChecks } from 'lucide-react';
+import { ArrowLeft, Plus, Sparkles, Loader2, BookOpen, ChevronDown, ChevronRight, CheckCircle2, Circle, Lock, ClipboardCheck, PenTool, FileText, Check, X, Trophy, Wand2, Paperclip, Upload, Calculator, GraduationCap, Atom, Sigma, Map as MapIcon, List, ListChecks, Share2 } from 'lucide-react';
 import { listCurricula, generateCurriculum, getCurriculum, sendLessonMessage, getLessonHistory, editCurriculumWithAI, extractSourceUrl, extractFiles, refineCurriculum } from '../../../api/curriculum';
 import { peek, fetchOnce, bust } from '../../../api/cache';
 import ViewFade from '../../shared/ViewFade';
@@ -10,6 +10,7 @@ import { useDemoMode } from '../../../context/DemoModeContext';
 import { DEFAULT_SETTINGS, DIFFICULTY_OPTIONS, LEARNING_STYLE_OPTIONS } from '../../../utils/constants';
 import Button from '../../shared/Button';
 import Input from '../../shared/Input';
+import ShareDialog from '../../shared/ShareDialog';
 import PillGroup from '../../shared/PillGroup';
 import Toggle from '../../shared/Toggle';
 import LoadingSpinner from '../../shared/LoadingSpinner';
@@ -134,6 +135,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
 
   // Edit curriculum modal
   const [editOpen, setEditOpen] = useState(false);
+  const [shareTarget, setShareTarget] = useState(null);
 
   // PAUSD catalog browser state
   const [pausdCatalog, setPausdCatalog] = useState([]);
@@ -904,6 +906,13 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
                 <h3 className="text-sm font-medium text-white truncate">{c.title}</h3>
                 <p className="text-xs text-white/40 mt-0.5">{done}/{total} lessons · {units} unit{units === 1 ? '' : 's'}</p>
               </div>
+              <button
+                onClick={(e) => { e.stopPropagation(); setShareTarget({ id: c.id, type: 'curriculum', title: c.title }); }}
+                className="p-1.5 rounded-lg text-white/25 hover:text-blue-300 hover:bg-white/[0.06] transition-colors flex-shrink-0"
+                title="Share"
+              >
+                <Share2 size={15} />
+              </button>
             </div>
           );
         };
@@ -923,6 +932,10 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
           </div>
         );
       })()}
+
+      {shareTarget && (
+        <ShareDialog item={shareTarget} onClose={() => setShareTarget(null)} />
+      )}
     </ViewFade>
   );
 }

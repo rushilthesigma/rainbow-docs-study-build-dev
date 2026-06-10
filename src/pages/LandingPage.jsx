@@ -1,61 +1,93 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { googleLogin } from '../api/auth';
-import { WALLPAPERS } from '../components/desktop/DesktopBackground';
 import {
   Loader2 as Loader, Sparkles, X, Check, ChevronDown,
-  BookOpen, Brain, Zap, PenTool, Cpu, Repeat,
-  Lightbulb, Calculator, MessageSquare, Target, ClipboardCheck,
+  BookOpen, Brain, Zap, Repeat,
+  Lightbulb, Calculator, MessageSquare,
   Scale, Link2,
 } from 'lucide-react';
 
-// Two scroll-snap sections, Apple-homepage style:
-//   1. Hero    - big headline over the wallpaper, scroll cue
-//   2. Sign-in - macOS-style lock screen with "Why not GPT?" link
+// Scroll-snap sections over one fixed wallpaper:
+//   hero, how it works, what's inside, note map, quiz bowl,
+//   sign-in, why-not-gpt.
 //
-// The "Why not GPT?" link opens a full-screen modal with the
-// RushilAI vs ChatGPT comparison rather than living as its own
-// section in the scroll flow.
-//
-// The wallpaper stays fixed under everything (parallax effect - the
-// content sections slide up over it). CSS scroll-snap on the
-// container makes each section come to rest at the top of the
-// viewport when the user scrolls.
+// Layout rules for this page (per user spec):
+//   - No repeated kicker + italic-punchline header formula. Plain
+//     headers, one blue accent in the hero and nowhere else.
+//   - No glass card grids or boxes-in-boxes. Groups are hairline
+//     dividers on the window glass.
+//   - backdrop-blur only on the fixed menu bar. Blurred cards inside
+//     a snap scroller shimmer in Chromium while scrolling.
+//   - Copy avoids em dashes.
+
+// Locked to a nighttime sky; the user's wallpaper preference applies
+// after sign-in. Keep this URL byte-identical to the preload link in
+// index.html so the parse-time fetch is the one the page paints with.
+const LANDING_WALLPAPER = 'https://images.unsplash.com/photo-1509773896068-7fd415d91e2e?w=2560&q=75';
+
+const GSI_SRC = 'https://accounts.google.com/gsi/client';
+
+// True once the image has decoded, so the wallpaper can fade in rather
+// than pop from black at full opacity when the network fetch lands.
+function useImageReady(url) {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    let stale = false;
+    const img = new Image();
+    img.onload = () => { if (!stale) setReady(true); };
+    img.onerror = () => { if (!stale) setReady(true); };
+    img.src = url;
+    return () => { stale = true; };
+  }, [url]);
+  return ready;
+}
+
 export default function LandingPage() {
   const { login } = useAuth();
-  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [googleReady, setGoogleReady] = useState(false);
   const googleBtnRef = useRef(null);
   const scrollerRef = useRef(null);
+  const bgReady = useImageReady(LANDING_WALLPAPER);
 
   useEffect(() => {
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.onload = () => {
-      if (window.google) {
-        window.google.accounts.id.initialize({
-          client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID || '',
-          callback: handleGoogleResponse,
-          // Required for Chrome 116+ FedCM on Chromebooks: allows prompt() to
-          // trigger the browser-native account picker from a user-gesture handler
-          // without needing an on-screen rendered button element.
-          use_fedcm_for_prompt: true,
+    let cancelled = false;
+    const init = () => {
+      if (cancelled || !window.google?.accounts?.id) return;
+      window.google.accounts.id.initialize({
+        client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID || '',
+        callback: handleGoogleResponse,
+        // Required for Chrome 116+ FedCM on Chromebooks: allows prompt() to
+        // trigger the browser-native account picker from a user-gesture handler
+        // without needing an on-screen rendered button element.
+        use_fedcm_for_prompt: true,
+      });
+      if (googleBtnRef.current && !googleBtnRef.current.hasChildNodes()) {
+        window.google.accounts.id.renderButton(googleBtnRef.current, {
+          theme: 'filled_blue',
+          size: 'large',
+          width: 300,
         });
-        if (googleBtnRef.current) {
-          window.google.accounts.id.renderButton(googleBtnRef.current, {
-            theme: 'filled_blue',
-            size: 'large',
-            width: 300,
-          });
-        }
-        setGoogleReady(true);
       }
+      setGoogleReady(true);
     };
-    document.body.appendChild(script);
-    return () => { try { document.body.removeChild(script); } catch {} };
+    if (window.google?.accounts?.id) {
+      init();
+      return () => { cancelled = true; };
+    }
+    // Reuse a script tag if one is already in the DOM. The script stays
+    // mounted across unmounts on purpose: removing and re-appending it
+    // re-ran initialize() on every mount and spammed GSI warnings.
+    let script = document.querySelector(`script[src="${GSI_SRC}"]`);
+    if (!script) {
+      script = document.createElement('script');
+      script.src = GSI_SRC;
+      script.async = true;
+      document.body.appendChild(script);
+    }
+    script.addEventListener('load', init);
+    return () => { cancelled = true; script.removeEventListener('load', init); };
   }, []);
 
   async function handleGoogleResponse(response) {
@@ -64,7 +96,6 @@ export default function LandingPage() {
       const data = await googleLogin(response.credential);
       if (data.success) {
         login(data.user, data.token);
-        navigate('/dashboard');
       }
     } catch (err) { console.error('Login failed:', err); }
     setLoading(false);
@@ -82,30 +113,23 @@ export default function LandingPage() {
       btn.click();
       return;
     }
-    // No rendered button available yet — use One Tap / FedCM prompt as fallback.
+    // No rendered button available yet, so use One Tap / FedCM prompt as fallback.
     window.google.accounts.id.prompt();
   }
 
-  function scrollTo(idx) {
-    const el = scrollerRef.current;
-    if (!el) return;
-    const target = el.querySelectorAll('[data-section]')[idx];
-    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  function scrollToSection(name) {
+    const el = scrollerRef.current?.querySelector(`[data-section="${name}"]`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
-  // Pre-auth welcome screen is locked to a nighttime sky - the user's
-  // chosen wallpaper preference only kicks in once they're signed in.
-  // Keeps the welcome handshake aesthetically aligned with the
-  // Onboarding "Welcome" step's deep-blue gradient backdrop.
-  const wallpaperUrl = WALLPAPERS.milkyway?.url || WALLPAPERS.earthnight?.url || WALLPAPERS.aurora?.url;
-
   return (
-    <div className="relative h-screen w-full overflow-hidden bg-black text-white select-none">
-      {/* Fixed wallpaper layer - parallax bedrock for every section */}
+    <div className="relative h-screen w-full overflow-hidden bg-[#05070f] text-white select-none">
+      {/* Fixed wallpaper layer. Deep-navy base so the page never sits on
+          raw black while the image is still downloading. */}
       <div className="absolute inset-0 z-0">
         <div
-          className="absolute inset-0 bg-cover bg-center bg-no-repeat scale-110"
-          style={{ backgroundImage: `url(${wallpaperUrl})` }}
+          className={`absolute inset-0 bg-cover bg-center bg-no-repeat transition-opacity duration-700 ${bgReady ? 'opacity-100' : 'opacity-0'}`}
+          style={{ backgroundImage: `url(${LANDING_WALLPAPER})` }}
         />
         {/* Always a soft top gradient so the menu bar reads */}
         <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-black/55 to-transparent" />
@@ -113,26 +137,24 @@ export default function LandingPage() {
 
       <MenuBar />
 
-      {/* Scroll container. Snap-mandatory between sections, smooth.
-          Order: hero, how it works, features grid, numbers strip,
-          subject spotlight, sign-in. Wallpaper stays fixed under
-          everything. */}
       <div
         ref={scrollerRef}
+        data-scroll-root
         className="relative z-10 h-screen overflow-y-scroll snap-y snap-mandatory scrollbar-hide"
-        style={{ scrollBehavior: 'smooth' }}
       >
-        <HeroSection onNext={() => scrollTo(1)} />
+        <HeroSection
+          onSignIn={() => scrollToSection('signin')}
+          onTour={() => scrollToSection('how')}
+        />
         <HowItWorksSection />
-        <FeaturesGridSection />
-        <NumbersStrip />
+        <FeaturesSection />
         <NoteMapSection />
-        <QuizBowlAISection />
+        <QuizBowlSection />
         <SignInSection
           loading={loading}
           googleReady={googleReady}
           onSignIn={triggerGoogle}
-          onWhyNotGpt={() => scrollTo(7)}
+          onWhyNotGpt={() => scrollToSection('whynotgpt')}
         />
         <WhyNotGptSection />
       </div>
@@ -148,8 +170,48 @@ export default function LandingPage() {
   );
 }
 
-// ===== Section 1: Hero =====
-function HeroSection({ onNext }) {
+// Fade-up entrance keyed to scroll position in the snap container.
+// Triggers while the section is still 60% of a viewport below the
+// fold, so the animation runs during the snap transition instead of
+// after it. The old IntersectionObserver version waited until the
+// section was already on screen, which left a beat of empty black on
+// every transition (read as the page flashing between sections), and
+// IO callbacks can lag by seconds in throttled/background tabs.
+// Scroll events are synchronous everywhere, and the math is cheap.
+function FadeUp({ className = '', children }) {
+  const ref = useRef(null);
+  const reduced = typeof window !== 'undefined'
+    && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const [visible, setVisible] = useState(reduced);
+  useEffect(() => {
+    if (reduced) return;
+    const el = ref.current;
+    if (!el) return;
+    const scroller = el.closest('[data-scroll-root]');
+    if (!scroller) { setVisible(true); return; }
+    let detached = false;
+    const check = () => {
+      if (detached) return;
+      const buffer = scroller.clientHeight * 0.6;
+      if (el.getBoundingClientRect().top < scroller.getBoundingClientRect().bottom + buffer) {
+        detached = true;
+        scroller.removeEventListener('scroll', check);
+        setVisible(true);
+      }
+    };
+    check(); // sections already in (or near) view on mount
+    scroller.addEventListener('scroll', check, { passive: true });
+    return () => { detached = true; scroller.removeEventListener('scroll', check); };
+  }, [reduced]);
+  return (
+    <div ref={ref} className={`${visible ? (reduced ? '' : 'animate-fade-up') : 'opacity-0'} ${className}`}>
+      {children}
+    </div>
+  );
+}
+
+// ===== Hero =====
+function HeroSection({ onSignIn, onTour }) {
   return (
     <section
       data-section="hero"
@@ -158,7 +220,7 @@ function HeroSection({ onNext }) {
       {/* Subtle scrim so the headline reads against any wallpaper */}
       <div className="absolute inset-0 bg-black/35" />
 
-      <div className="relative z-10 max-w-4xl text-center animate-fade-up">
+      <FadeUp className="relative z-10 max-w-4xl text-center">
         <h1 className="text-[44px] sm:text-[68px] md:text-[88px] leading-[0.95] font-bold tracking-[-0.04em] text-white">
           Type a topic.
           <br />
@@ -171,223 +233,138 @@ function HeroSection({ onNext }) {
         </p>
 
         <button
-          onClick={onNext}
-          className="mt-10 inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-xl bg-blue-500 hover:bg-blue-400 active:scale-[0.98] text-white text-[14.5px] font-semibold tracking-[-0.005em] transition-colors"
+          onClick={onSignIn}
+          className="mt-10 inline-flex items-center justify-center px-7 py-3.5 rounded-xl bg-blue-500 hover:bg-blue-400 active:scale-[0.98] text-white text-[14.5px] font-semibold tracking-[-0.005em] transition-colors"
         >
-          Get started <ChevronDown size={15} />
+          Get started
         </button>
-      </div>
+      </FadeUp>
 
       {/* Scroll cue at the bottom */}
       <button
-        onClick={onNext}
+        onClick={onTour}
         aria-label="Scroll down"
         className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-1 text-white/65 hover:text-white transition-colors"
       >
-        <span className="text-[10px] font-bold uppercase tracking-[0.22em]">Scroll</span>
+        <span className="text-[10px] font-bold uppercase tracking-[0.16em]">Scroll</span>
         <ChevronDown size={16} className="animate-bounce-slow" strokeWidth={2.4} />
       </button>
     </section>
   );
 }
 
-// ===== Section 2: How it works =====
-//
-// Three numbered glass cards explaining the type-quiz-train loop.
-// All copy intentionally avoids em dashes per user spec.
+// ===== How it works =====
 function HowItWorksSection() {
   const STEPS = [
     {
-      n: '01',
-      icon: Sparkles,
-      title: 'Builds the course',
-      body: 'Name a topic like Calculus BC, AP Bio, or Roman history. You get back a real syllabus with units, lessons, a midterm, and a final.',
+      n: '1',
+      title: 'Build the course',
+      body: 'Name a topic like Calculus BC, AP Bio, or Roman history. You get a syllabus with units, lessons, a midterm, and a final.',
     },
     {
-      n: '02',
-      icon: ClipboardCheck,
-      title: 'Writes the quizzes',
-      body: 'Every lesson comes with a short quiz already written. Miss something and it gets logged by topic, so the next round knows where you need work.',
+      n: '2',
+      title: 'Take the quizzes',
+      body: 'Every lesson ends with a short quiz. Missed questions get logged by topic, so the app knows where you need work.',
     },
     {
-      n: '03',
-      icon: Target,
-      title: 'Targets your gaps',
-      body: 'Finals pull from your weak spots instead of a generic pool, and Quiz Bowl can spin up a weakness round any time.',
+      n: '3',
+      title: 'Close the gaps',
+      body: 'The final pulls from your weak spots instead of a generic pool, and Quiz Bowl can build a round out of them whenever you want.',
     },
   ];
   return (
     <section data-section="how" className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative">
       <div className="absolute inset-0 bg-black/35" />
-      <div className="relative z-10 max-w-6xl w-full animate-fade-up">
-        <p className="text-center text-[11px] font-bold uppercase tracking-[0.22em] text-white/55 mb-3">How it works</p>
-        <h2 className="text-center text-[34px] sm:text-[44px] md:text-[56px] leading-[1.05] font-bold tracking-[-0.025em] text-white mb-12">
-          One click,{' '}
-          <span className="text-blue-300 italic">
-            that&apos;s it.
-          </span>
+      <FadeUp className="relative z-10 w-full max-w-2xl">
+        <h2 className="text-[30px] sm:text-[38px] md:text-[44px] leading-[1.08] font-bold tracking-[-0.02em] text-white mb-8">
+          How it works
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {STEPS.map((s) => {
-            const Icon = s.icon;
+        <div className="divide-y divide-white/10 border-y border-white/10">
+          {STEPS.map((s) => (
+            <div key={s.n} className="flex gap-5 py-5">
+              <span className="shrink-0 w-6 text-[13px] font-mono text-white/40 pt-0.5">{s.n}</span>
+              <div>
+                <h3 className="text-[16px] font-semibold tracking-tight text-white">{s.title}</h3>
+                <p className="text-[13.5px] text-white/65 leading-relaxed mt-1">{s.body}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </FadeUp>
+    </section>
+  );
+}
+
+// ===== What's inside =====
+function FeaturesSection() {
+  const FEATURES = [
+    {
+      icon: BookOpen,
+      title: 'Curricula',
+      body: 'Type any topic and get a full course with units, lessons, a midterm, and a final. Everything stays editable.',
+    },
+    {
+      icon: Lightbulb,
+      title: 'Lessons',
+      body: 'Each lesson walks through the material and ends with a short quiz. Whatever you miss comes back later.',
+    },
+    {
+      icon: MessageSquare,
+      title: 'Study Mode',
+      body: "Chat through anything you're studying. Attach a curriculum or sources so the answers stay on topic.",
+    },
+    {
+      icon: Calculator,
+      title: 'Math Tutor',
+      body: 'Work through problems step by step on a canvas while the tutor checks your reasoning.',
+    },
+    {
+      icon: Zap,
+      title: 'Quiz Bowl',
+      body: 'Pyramidal tossups from a pool of 500+ questions. Practice solo or go head-to-head.',
+    },
+    {
+      icon: Scale,
+      title: 'Debate',
+      body: 'Pick a side against the AI or a friend, then get a scored verdict when you finish.',
+    },
+  ];
+  return (
+    <section data-section="features" className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative">
+      <div className="absolute inset-0 bg-black/35" />
+      <FadeUp className="relative z-10 w-full max-w-4xl">
+        <h2 className="text-[30px] sm:text-[38px] md:text-[44px] leading-[1.08] font-bold tracking-[-0.02em] text-white mb-2">
+          What&apos;s inside
+        </h2>
+        <p className="text-[14px] text-white/65 mb-8">
+          Eight apps share one account. Quiz results turn into flashcards, and notes come back as spaced review.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 sm:gap-x-14 border-t border-white/[0.08]">
+          {FEATURES.map((f) => {
+            const Icon = f.icon;
             return (
-              <div
-                key={s.n}
-                className="rounded-lg p-6 ring-1 ring-white/[0.10] bg-white/[0.05] backdrop-blur-md"
-              >
-                <div className="flex items-center justify-between mb-5">
-                  <span className="text-[11px] font-mono font-bold tracking-wider text-white/45">{s.n}</span>
-                  <span className="grid place-items-center w-9 h-9 rounded-full bg-white/15 border border-white/20">
-                    <Icon size={16} className="text-white" strokeWidth={2} />
-                  </span>
+              <div key={f.title} className="flex gap-4 py-5 border-b border-white/[0.08]">
+                <Icon size={17} className="text-white/85 mt-0.5 shrink-0" strokeWidth={2} />
+                <div>
+                  <h3 className="text-[15px] font-semibold tracking-tight text-white">{f.title}</h3>
+                  <p className="text-[12.5px] text-white/65 leading-relaxed mt-1">{f.body}</p>
                 </div>
-                <h3 className="text-[19px] font-bold tracking-tight text-white mb-2">{s.title}</h3>
-                <p className="text-[13.5px] text-white/70 leading-relaxed">{s.body}</p>
               </div>
             );
           })}
         </div>
-      </div>
+        <p className="text-[12px] text-white/45 mt-6">Runs on Gemini and Claude models.</p>
+      </FadeUp>
     </section>
   );
 }
 
-// ===== Section 3: Features bento =====
-function FeaturesGridSection() {
-  return (
-    <section data-section="features" className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative">
-      <div className="absolute inset-0 bg-black/35" />
-      <div className="relative z-10 max-w-6xl w-full animate-fade-up">
-        <p className="text-center text-[11px] font-bold uppercase tracking-[0.22em] text-white/55 mb-3">What&apos;s inside</p>
-        <h2 className="text-center text-[34px] sm:text-[44px] md:text-[56px] leading-[1.05] font-bold tracking-[-0.025em] text-white mb-10">
-          Everything{' '}
-          <span className="text-blue-300 italic">
-            in one place.
-          </span>
-        </h2>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          <FeatureTile
-            icon={BookOpen}
-            title="Curricula"
-            body="Type any topic and get a full course with units, lessons, a midterm, and a final. Everything stays editable."
-          />
-          <FeatureTile
-            icon={Lightbulb}
-            title="Lessons"
-            body="Each lesson walks through the material and ends with a short quiz. Whatever you miss comes back later."
-          />
-          <FeatureTile
-            icon={MessageSquare}
-            title="Study Mode"
-            body="Chat through anything you're studying. Attach a curriculum or sources so the answers stay on topic."
-          />
-          <FeatureTile
-            icon={Calculator}
-            title="Math Tutor"
-            body="Work through problems step by step on a canvas while the tutor checks your reasoning."
-          />
-          <FeatureTile
-            icon={Zap}
-            title="Quiz Bowl"
-            body="Pyramidal tossups from a pool of 500+ questions. Practice solo or go head-to-head."
-          />
-          <FeatureTile
-            icon={Scale}
-            title="Debate"
-            body="Pick a side against the AI or a friend, then get a scored verdict when you finish."
-          />
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function FeatureTile({ icon: Icon, title, body, tone, className = '', big = false }) {
-  return (
-    <div
-      className={`relative rounded-lg p-4 sm:p-5 ring-1 ring-white/[0.10] bg-white/[0.05] backdrop-blur-md overflow-hidden flex flex-col ${className}`}
-    >
-      <div className="relative z-10 flex flex-col h-full">
-        <span className="grid place-items-center w-9 h-9 rounded-xl bg-white/15 border border-white/20 mb-3">
-          <Icon size={16} className="text-white" strokeWidth={2} />
-        </span>
-        <h3 className={`font-bold tracking-tight text-white ${big ? 'text-[26px] sm:text-[30px]' : 'text-[16px]'}`}>
-          {title}
-        </h3>
-        <p className={`text-white/70 leading-relaxed mt-1 ${big ? 'text-[14px]' : 'text-[12px]'}`}>
-          {body}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ===== Section 4: Numbers strip =====
-function NumbersStrip() {
-  const STATS = [
-    { n: '8',   label: 'apps in one workspace' },
-    { n: '<5s', label: 'to draft a full curriculum' },
-    { n: '500+', label: 'tossups in the Quiz Bowl pool' },
-    { prefix: 'Up to', n: '1,048,576', label: 'tokens of context', highlight: true },
-  ];
-  return (
-    <section data-section="numbers" className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative">
-      <div className="absolute inset-0 bg-black/35" />
-      <div className="relative z-10 max-w-5xl w-full animate-fade-up">
-        <h2 className="text-center text-[28px] sm:text-[36px] md:text-[44px] leading-[1.05] font-bold tracking-[-0.025em] text-white mb-3">
-          By the{' '}
-          <span className="italic text-blue-300">
-            numbers.
-          </span>
-        </h2>
-        <p className="text-center text-[13px] sm:text-[15px] text-white/65 max-w-xl mx-auto mb-10">
-          Every app runs on the latest Gemini models. Pro for the hard problems, Flash for everyday work.
-        </p>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {STATS.map((s) => (
-            <div
-              key={s.label}
-              className={`group rounded-lg p-5 ring-1 bg-white/[0.05] backdrop-blur-md text-center transition-all duration-300 hover:-translate-y-0.5 hover:bg-white/[0.07] ${
-                s.highlight
-                  ? 'ring-blue-300/30 hover:ring-blue-300/50'
-                  : 'ring-white/[0.10] hover:ring-white/[0.18]'
-              }`}
-            >
-              {s.prefix && (
-                <div className="text-[10px] uppercase tracking-[0.2em] text-white/50 mb-1">
-                  {s.prefix}
-                </div>
-              )}
-              <div
-                className={`font-bold tracking-tight tabular-nums leading-none ${
-                  s.prefix ? 'text-[30px] sm:text-[36px]' : 'text-[34px] sm:text-[40px]'
-                } ${
-                  s.highlight
-                    ? 'text-blue-200'
-                    : 'text-white'
-                }`}
-              >
-                {s.n}
-              </div>
-              <p className="text-[11px] uppercase tracking-[0.18em] text-white/55 mt-2">{s.label}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-// ===== Section 5: Note Map =====
+// ===== Note Map =====
 //
-// Repurposed from the old sample-curricula grid. Shows off Note Map, the
-// Obsidian-style graph that lives inside the Notes app: each note is a
-// node you can drag and link, the AI can suggest related nodes, and you
-// can run spaced-repetition review over a map. Left side is a small
-// static graph illustration, right side is three plain feature rows
-// (no nested cards, to keep the chrome low). Copy avoids em dashes per
-// user spec.
+// Shows off Note Map, the graph view inside the Notes app: each note is
+// a node you can drag and link, the AI can suggest related nodes, and
+// you can run spaced-repetition review over a map. Left side is a small
+// static graph illustration, right side is three plain feature rows.
 function NoteMapSection() {
   // Illustration only. Positions are percentages of the panel; the SVG
   // edges below use the same numbers (x * 3.6, y * 2.8) so the lines land
@@ -408,26 +385,24 @@ function NoteMapSection() {
 
   const POINTS = [
     { icon: Link2, title: 'Link your notes', body: 'Every note becomes a node. Drag them around and connect the ones that belong together.' },
-    { icon: Sparkles, title: 'Let the AI fill gaps', body: 'Ask for related topics and it drops in new nodes, already wired to what you have.' },
-    { icon: Repeat, title: 'Review what slips', body: 'Run spaced-repetition review over a map, or turn any node into flashcards.' },
+    { icon: Sparkles, title: 'Ask for suggestions', body: 'Ask for related topics and the AI adds new nodes, linked to the ones you already have.' },
+    { icon: Repeat, title: 'Review from the map', body: 'Run spaced-repetition review over a map, or turn any node into flashcards.' },
   ];
 
   return (
     <section data-section="notemap" className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative">
       <div className="absolute inset-0 bg-black/35" />
-      <div className="relative z-10 w-full max-w-6xl animate-fade-up">
-        <p className="text-center text-[11px] font-bold uppercase tracking-[0.22em] text-white/55 mb-3">Inside Notes</p>
-        <h2 className="text-center text-[32px] sm:text-[40px] md:text-[50px] leading-[1.05] font-bold tracking-[-0.025em] text-white mb-3">
-          Your notes,{' '}
-          <span className="italic text-blue-300">on a map.</span>
+      <FadeUp className="relative z-10 w-full max-w-5xl">
+        <h2 className="text-[30px] sm:text-[38px] md:text-[44px] leading-[1.08] font-bold tracking-[-0.02em] text-white mb-2">
+          Note Map
         </h2>
-        <p className="text-center text-[13px] sm:text-[15px] text-white/65 max-w-xl mx-auto mb-10">
-          Note Map turns your notes into a graph. Related ideas sit next to each other instead of getting buried in a long list.
+        <p className="text-[14px] text-white/65 max-w-xl mb-10">
+          Your notes become a graph. Related ideas sit next to each other instead of getting buried in a long list.
         </p>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 items-center">
           {/* Graph illustration: one panel holding the SVG, no boxes inside it */}
-          <div className="relative w-full max-w-[460px] mx-auto lg:mx-0 aspect-[360/280] rounded-xl ring-1 ring-white/[0.10] bg-white/[0.04] backdrop-blur-md overflow-hidden">
+          <div className="relative w-full max-w-[460px] mx-auto lg:mx-0 aspect-[360/280] rounded-xl ring-1 ring-white/[0.10] bg-white/[0.04] overflow-hidden">
             <svg viewBox="0 0 360 280" preserveAspectRatio="xMidYMid meet" className="absolute inset-0 w-full h-full">
               {EDGES.map(([a, b], i) => (
                 <line
@@ -472,11 +447,9 @@ function NoteMapSection() {
               const Icon = p.icon;
               return (
                 <div key={p.title} className="flex gap-4 py-4 first:pt-0 last:pb-0">
-                  <span className="shrink-0 grid place-items-center w-9 h-9 rounded-xl bg-white/10 ring-1 ring-white/15">
-                    <Icon size={16} className="text-white" strokeWidth={2} />
-                  </span>
+                  <Icon size={16} className="text-white/85 mt-0.5 shrink-0" strokeWidth={2} />
                   <div>
-                    <h3 className="text-[15px] font-bold tracking-tight text-white">{p.title}</h3>
+                    <h3 className="text-[15px] font-semibold tracking-tight text-white">{p.title}</h3>
                     <p className="text-[13px] text-white/65 leading-relaxed mt-0.5">{p.body}</p>
                   </div>
                 </div>
@@ -484,27 +457,25 @@ function NoteMapSection() {
             })}
           </div>
         </div>
-      </div>
+      </FadeUp>
     </section>
   );
 }
 
-// ===== Section 6: Quiz Bowl vs AI =====
-function QuizBowlAISection() {
+// ===== Quiz Bowl =====
+function QuizBowlSection() {
   return (
     <section data-section="quizbowl" className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative">
       <div className="absolute inset-0 bg-black/35" />
-      <div className="relative z-10 max-w-5xl w-full animate-fade-up">
-        <p className="text-center text-[11px] font-bold uppercase tracking-[0.22em] text-white/55 mb-3">Quiz Bowl</p>
-        <h2 className="text-center text-[34px] sm:text-[44px] md:text-[56px] leading-[1.05] font-bold tracking-[-0.025em] text-white mb-4">
-          Buzz in before{' '}
-          <span className="text-blue-300 italic">the AI does.</span>
+      <FadeUp className="relative z-10 max-w-2xl w-full">
+        <h2 className="text-[30px] sm:text-[38px] md:text-[44px] leading-[1.08] font-bold tracking-[-0.02em] text-white mb-2">
+          Quiz Bowl
         </h2>
-        <p className="text-center text-[14px] sm:text-[16px] text-white/65 max-w-xl mx-auto mb-10">
-          Pyramidal tossups, a real buzzer, live scoreboard. Race an AI opponent that reads the same clues you do.
+        <p className="text-[14px] text-white/65 mb-8">
+          Pyramidal tossups with a buzzer and a live scoreboard. The AI opponent reads the same clues you do.
         </p>
 
-        <div className="rounded-xl ring-1 ring-white/[0.10] bg-white/[0.05] backdrop-blur-md overflow-hidden max-w-2xl mx-auto">
+        <div className="rounded-xl ring-1 ring-white/[0.10] bg-white/[0.05] overflow-hidden">
           {/* Scoreboard */}
           <div className="grid grid-cols-3 border-b border-white/[0.08]">
             <div className="flex flex-col items-center py-5">
@@ -513,7 +484,7 @@ function QuizBowlAISection() {
             </div>
             <div className="flex flex-col items-center justify-center border-x border-white/[0.08] gap-1">
               <Zap size={18} className="text-blue-300" strokeWidth={2.5} />
-              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/35">vs</span>
+              <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/35">vs</span>
             </div>
             <div className="flex flex-col items-center py-5">
               <span className="text-[11px] font-mono uppercase tracking-wider text-white/50 mb-1">AI</span>
@@ -523,7 +494,7 @@ function QuizBowlAISection() {
 
           {/* Live tossup */}
           <div className="p-5 border-b border-white/[0.08]">
-            <p className="text-[10px] font-mono uppercase tracking-wider text-white/35 mb-2.5">Tossup — Q4 of 20</p>
+            <p className="text-[10px] font-mono uppercase tracking-wider text-white/35 mb-2.5">Tossup, Q4 of 20</p>
             <p className="text-[13.5px] text-white/80 leading-relaxed">
               This mathematician lends his name to a function defined as the integral of{' '}
               <span className="font-mono text-blue-200">e&#8315;&#7511; t&#739;&#8315;&#185;</span>{' '}
@@ -545,15 +516,15 @@ function QuizBowlAISection() {
           </div>
         </div>
 
-        <p className="text-center text-[12px] text-white/40 mt-6">
-          Real packets. The AI buzzes from the same text you see, no shortcuts.
+        <p className="text-[12px] text-white/40 mt-6">
+          The questions come from real packets.
         </p>
-      </div>
+      </FadeUp>
     </section>
   );
 }
 
-// ===== Section 7: Sign-in =====
+// ===== Sign-in =====
 //
 // Google OAuth is the only sign-in path.
 function SignInSection({ loading, googleReady, onSignIn, onWhyNotGpt }) {
@@ -563,21 +534,13 @@ function SignInSection({ loading, googleReady, onSignIn, onWhyNotGpt }) {
       className="snap-start min-h-screen w-full flex flex-col items-center justify-center px-6 py-16 relative"
     >
       <div className="absolute inset-0 bg-black/35" />
-      <div
-        className="absolute inset-0"
-        style={{
-          background:
-            'radial-gradient(at 25% 25%, rgba(30,58,138,0.25) 0%, transparent 60%),' +
-            'radial-gradient(at 75% 75%, rgba(49,46,129,0.22) 0%, transparent 60%)',
-        }}
-      />
 
-      <div className="relative z-10 flex flex-col items-center w-full max-w-sm animate-fade-up">
-        <h1 className="text-[32px] sm:text-[40px] leading-[1.05] font-semibold tracking-[-0.02em] text-white">
+      <FadeUp className="relative z-10 flex flex-col items-center w-full max-w-sm text-center">
+        <h2 className="text-[32px] sm:text-[40px] leading-[1.05] font-semibold tracking-[-0.02em] text-white">
           Sign in
-        </h1>
+        </h2>
         <p className="mt-2 text-[14px] text-white/65">
-          Continue with your Google account to start learning.
+          Your courses, notes, and quiz history save to your Google account.
         </p>
 
         {/* Google OAuth - primary (and only) sign-in path */}
@@ -587,7 +550,7 @@ function SignInSection({ loading, googleReady, onSignIn, onWhyNotGpt }) {
           className="mt-8 w-full py-3 rounded-lg bg-white hover:bg-white/95 active:scale-[0.98] text-[14px] font-semibold text-slate-800 transition-all disabled:opacity-50 inline-flex items-center justify-center gap-2.5"
         >
           {loading ? (
-            <span className="inline-flex items-center gap-2"><Loader size={14} className="animate-spin" /> Working...</span>
+            <span className="inline-flex items-center gap-2"><Loader size={14} className="animate-spin" /> Signing in...</span>
           ) : (
             <>
               <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
@@ -601,7 +564,7 @@ function SignInSection({ loading, googleReady, onSignIn, onWhyNotGpt }) {
           )}
         </button>
 
-      </div>
+      </FadeUp>
 
       {/* Bottom links */}
       <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 flex items-center gap-5">
@@ -628,44 +591,38 @@ function SignInSection({ loading, googleReady, onSignIn, onWhyNotGpt }) {
   );
 }
 
-// ===== Section 8: Why not GPT? =====
+// ===== Why not GPT? =====
 function WhyNotGptSection() {
   const ROWS = [
     {
-      icon: BookOpen,
-      title: 'Course structure',
-      us: 'Type a topic and get a real course back. Units, lessons, quizzes, a midterm, and a final, in seconds.',
-      them: 'Spits out a wall of text. Organizing it into a course is on you.',
+      title: 'Courses',
+      us: 'Type a topic and get a course with units, lessons, quizzes, a midterm, and a final.',
+      them: 'You get one long answer, and turning it into a course is up to you.',
     },
     {
-      icon: Repeat,
       title: 'Memory',
       us: 'Wrong answers resurface on the next quiz. The final pulls directly from your weak spots.',
-      them: 'Forgets everything the moment the chat ends.',
+      them: 'It forgets the conversation once the chat ends.',
     },
     {
-      icon: Brain,
       title: 'Progress',
       us: 'Courses, lessons, and streaks are all saved. Open it next week and pick up right where you left off.',
-      them: 'Every chat starts from scratch. You track where you are.',
+      them: 'Every chat starts over, and you keep track of your own progress.',
     },
     {
-      icon: PenTool,
       title: 'Math',
-      us: 'Solve on a real canvas. Each line gets read and you find out exactly where you slipped.',
-      them: 'Gives you the answer. Wrong number, no explanation.',
+      us: 'Work each problem out on a canvas. The tutor reads every line and shows you where it went wrong.',
+      them: 'It gives you the final answer without checking your steps.',
     },
     {
-      icon: Zap,
       title: 'Quiz Bowl',
-      us: 'Head-to-head with a real buzzer. Pyramidal tossups, real packets, real scoreboard.',
-      them: 'Not possible. One person, one chat box.',
+      us: 'Live head-to-head matches with a buzzer, pyramidal tossups, and a scoreboard.',
+      them: 'A chat window can\'t run a live match.',
     },
     {
-      icon: Cpu,
       title: 'Purpose',
-      us: 'Built for studying from the ground up. Uses whichever model fits the job.',
-      them: 'One model, one chat box. That\'s the whole app.',
+      us: 'Made for studying and nothing else. Courses, quizzes, notes, and review are all connected.',
+      them: 'A general chatbot, not a study tool.',
     },
   ];
 
@@ -676,56 +633,36 @@ function WhyNotGptSection() {
     >
       <div className="absolute inset-0 bg-black/40" />
 
-      <div className="relative z-10 w-full max-w-3xl animate-fade-up">
-        <p className="text-center text-[11px] font-bold uppercase tracking-[0.22em] text-white/55 mb-3">RushilAI vs ChatGPT</p>
-        <h2 className="text-center text-[34px] sm:text-[44px] leading-[1.05] font-bold tracking-[-0.025em] text-white mb-3">
-          ChatGPT answers questions.
-          <br />
-          <span className="text-blue-300 italic">RushilAI teaches you.</span>
+      <FadeUp className="relative z-10 w-full max-w-3xl">
+        <h2 className="text-center text-[30px] sm:text-[38px] leading-[1.08] font-bold tracking-[-0.02em] text-white mb-3">
+          Why not just use ChatGPT?
         </h2>
         <p className="text-center text-[14px] text-white/55 max-w-md mx-auto mb-10">
-          One is a chatbot. The other walks you through a real course.
+          A chat box forgets you between sessions. RushilAI keeps track of what you miss and builds the next quiz around it.
         </p>
 
-        {/* Column labels */}
-        <div className="grid grid-cols-2 gap-3 mb-3">
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-400/[0.07] ring-1 ring-emerald-400/[0.14]">
-            <Check size={10} className="text-emerald-400 shrink-0" strokeWidth={3} />
-            <span className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-emerald-300">RushilAI</span>
+        {/* One table, hairline rows. Column headers inside the same frame. */}
+        <div className="rounded-xl ring-1 ring-white/[0.10] bg-white/[0.03] overflow-hidden">
+          <div className="grid grid-cols-[84px_1fr_1fr] sm:grid-cols-[120px_1fr_1fr]">
+            <span className="px-4 py-2.5" />
+            <span className="px-4 py-2.5 flex items-center gap-1.5 border-l border-white/[0.05]">
+              <Check size={10} className="text-emerald-400 shrink-0" strokeWidth={3} />
+              <span className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-emerald-300">RushilAI</span>
+            </span>
+            <span className="px-4 py-2.5 flex items-center gap-1.5 border-l border-white/[0.05]">
+              <X size={10} className="text-white/25 shrink-0" strokeWidth={2.5} />
+              <span className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-white/30">ChatGPT</span>
+            </span>
           </div>
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.03] ring-1 ring-white/[0.07]">
-            <X size={10} className="text-white/25 shrink-0" strokeWidth={2.5} />
-            <span className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-white/30">ChatGPT</span>
-          </div>
+          {ROWS.map((row) => (
+            <div key={row.title} className="grid grid-cols-[84px_1fr_1fr] sm:grid-cols-[120px_1fr_1fr] border-t border-white/[0.06]">
+              <span className="px-4 py-3.5 text-[12px] font-semibold text-white/80">{row.title}</span>
+              <p className="px-4 py-3.5 text-[12px] leading-relaxed text-white/70 border-l border-white/[0.05]">{row.us}</p>
+              <p className="px-4 py-3.5 text-[12px] leading-relaxed text-white/35 border-l border-white/[0.05]">{row.them}</p>
+            </div>
+          ))}
         </div>
-
-        {/* Comparison rows */}
-        <div className="space-y-2">
-          {ROWS.map((row) => {
-            const Icon = row.icon;
-            return (
-              <div key={row.title} className="rounded-lg ring-1 ring-white/[0.08] bg-white/[0.025] overflow-hidden">
-                <div className="flex items-center gap-2.5 px-4 py-2.5 border-b border-white/[0.06] bg-white/[0.02]">
-                  <span className="w-6 h-6 grid place-items-center rounded-md bg-white/[0.08] border border-white/[0.10]">
-                    <Icon size={13} className="text-blue-300" strokeWidth={2} />
-                  </span>
-                  <span className="text-[12.5px] font-semibold tracking-[-0.005em] text-white/85">{row.title}</span>
-                </div>
-                <div className="grid grid-cols-2">
-                  <div className="px-4 py-3 flex items-start gap-2 bg-emerald-400/[0.04] border-r border-white/[0.05]">
-                    <Check size={11} className="text-emerald-400 mt-[3px] shrink-0" strokeWidth={3} />
-                    <p className="text-[12px] leading-relaxed text-white/70">{row.us}</p>
-                  </div>
-                  <div className="px-4 py-3 flex items-start gap-2">
-                    <X size={11} className="text-white/20 mt-[3px] shrink-0" strokeWidth={2.5} />
-                    <p className="text-[12px] leading-relaxed text-white/35">{row.them}</p>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      </FadeUp>
     </section>
   );
 }

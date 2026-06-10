@@ -172,10 +172,13 @@ function TopicChips({ onPick, max = null, showCategories = false }) {
   );
 }
 
-export default function DebatePanel({ onBack, initialTopic = null, initialSide = null }) {
+export default function DebatePanel({ onBack, initialTopic = null, initialSide = null, initialContext = null }) {
   // Deep-link from study mode: drop straight into the solo setup screen
   // with topic + side preselected so the student is one click from the
   // first turn. side='pro' maps to FOR, 'con' to AGAINST.
+  // QBpedia passes initialContext (the article's facts): the setup screen
+  // then offers resolutions drawn from those facts and the AI opponent
+  // argues from them.
   const [mode, setMode] = useState(initialTopic ? 'single-setup' : 'menu');
   // Forced-timed flag: set when the user picks "Timed multiplayer" from
   // the menu so the lobby opens with the timed-mode toggle pre-checked.
@@ -271,6 +274,7 @@ export default function DebatePanel({ onBack, initialTopic = null, initialSide =
             onExit={() => selectMode('menu')}
             initialTopic={initialTopic}
             initialSide={initialSide === 'con' ? 'against' : initialSide === 'pro' ? 'for' : null}
+            initialContext={initialContext}
           />
         )}
         {(mode === 'mp-menu' || mode === 'mp-lobby' || mode === 'mp-game' || mode === 'mp-verdict') && (
@@ -578,13 +582,29 @@ function HistoryDetail({ entry, onBack }) {
 // =========================================================
 // SINGLEPLAYER
 // =========================================================
-function buildAdversarialSystem(side) {
+// `source` ({ title, text }) is the QBpedia handoff: when present, the
+// article's notes are the opponent's ENTIRE evidence base. The default
+// "pull web data" directive is swapped out — telling the model to search
+// the web is exactly how a notes debate drifts off the notes.
+function buildAdversarialSystem(side, source = null) {
   const opp = side === 'for' ? 'AGAINST' : 'FOR';
-  return `You are a sharp, openly adversarial debate opponent. The user is arguing ${side === 'for' ? 'FOR' : 'AGAINST'} the topic - you argue ${opp}. Your job is to make this hard for them.
+  const evidence = source?.text
+    ? `- Use THE SOURCE NOTES below and NOTHING else. Every fact, date, name, and number you cite must appear in the notes — no web knowledge, no outside examples, even ones you're sure of. Quote the notes directly ("The notes say…") and name the section when you can.
+- POLICE the source. When the user asserts a fact, check it against the notes: if the notes contradict it, quote the line that does; if the notes don't mention it, say so and refuse to grant the point until they ground it in the notes.
+- If the notes don't settle a point, attack the user's reading of the notes instead of importing outside facts.`
+    : `- Use REAL DATA. You have web search - pull specific numbers, studies, examples, dates. Cite them inline naturally (no separate Sources section - the UI shows one). If you can't find data, attack the user's lack of data instead.`;
+  return `You are a sharp, openly adversarial debate opponent. The user is arguing ${side === 'for' ? 'FOR' : 'AGAINST'} the topic - you argue ${opp}. Your job is to make this hard for them.${source?.text ? `
+
+This is a SOURCE-GROUNDED debate on the encyclopedia page "${source.title}". The notes below are the complete and only evidence base for both sides.
+
+SOURCE NOTES:
+"""
+${source.text}
+"""` : ''}
 
 How to debate (read this twice):
 - Be DIRECT and POINTED. Don't soften ("I see your point but…"). Open with a counter-claim, name the user's weakest assumption, and make them defend it.
-- Use REAL DATA. You have web search - pull specific numbers, studies, examples, dates. Cite them inline naturally (no separate Sources section - the UI shows one). If you can't find data, attack the user's lack of data instead.
+${evidence}
 - ATTACK the user's strongest argument first, not their weakest. Don't strawman; quote their actual claim and dismantle it.
 - DEMAND specifics when they hand-wave. "Which study?" "What time period?" "Compared to what baseline?" - push back hard on vagueness.
 - Keep responses TIGHT. 2-3 paragraphs max per turn. Lead with the strongest counter, support it, end with a question that puts them on the defensive.
@@ -1496,7 +1516,7 @@ function SnapshotPlayerRow({ player, score, won, matchFinished }) {
   );
 }
 
-function Singleplayer({ mode, setMode, onExit, initialTopic = null, initialSide = null }) {
+function Singleplayer({ mode, setMode, onExit, initialTopic = null, initialSide = null, initialContext = null }) {
   const [topic, setTopic] = useState(initialTopic || '');
   const [side, setSide] = useState(initialSide || null);
   const [messages, setMessages] = useState([]);
@@ -1506,6 +1526,31 @@ function Singleplayer({ mode, setMode, onExit, initialTopic = null, initialSide 
   const [verdictLoading, setVerdictLoading] = useState(false);
   const [error, setError] = useState(null);
   const systemRef = useRef('');
+
+  // QBpedia handoff: the page title is rarely a debatable claim on its
+  // own, so turn the article's facts into real resolutions. The first one
+  // replaces the prefilled title unless the user already typed their own.
+  const [pageTopics, setPageTopics] = useState(null);
+  const [pageTopicsBusy, setPageTopicsBusy] = useState(false);
+  const userEditedRef = useRef(false);
+  useEffect(() => {
+    if (!initialContext) return;
+    let alive = true;
+    setPageTopicsBusy(true);
+    apiFetch('/api/debate/suggest-topics', {
+      method: 'POST',
+      body: JSON.stringify({ theme: initialTopic || '', context: initialContext }),
+    })
+      .then(r => {
+        if (!alive) return;
+        const topics = Array.isArray(r.topics) ? r.topics : [];
+        setPageTopics(topics);
+        if (topics.length && !userEditedRef.current) setTopic(topics[0]);
+      })
+      .catch(() => { if (alive) setPageTopics([]); })
+      .finally(() => { if (alive) setPageTopicsBusy(false); });
+    return () => { alive = false; };
+  }, []);
 
   async function startDebate(t, s) {
     setError(null);
@@ -1520,7 +1565,10 @@ function Singleplayer({ mode, setMode, onExit, initialTopic = null, initialSide 
     setSide(s);
     setTopic(t);
     setMode('single-debate');
-    systemRef.current = buildAdversarialSystem(s);
+    systemRef.current = buildAdversarialSystem(
+      s,
+      initialContext ? { title: initialTopic || 'this topic', text: initialContext } : null,
+    );
     // Bootstrap turn: instructs the AI to open with its strongest counter.
     // Hidden from the visible transcript - the student didn't type it and
     // showing a system-style prompt as a "you" bubble was confusing.
@@ -1540,9 +1588,12 @@ function Singleplayer({ mode, setMode, onExit, initialTopic = null, initialSide 
     setStreamingContent(' ');
     try {
       const allMessages = [...messages, userMsg].map(m => ({ role: m.role, content: m.content }));
+      // Notes-grounded debates (QBpedia handoff) run with web search OFF -
+      // the article is the entire evidence base, and a searching opponent
+      // inevitably argues from the web instead of the notes.
       const result = await apiFetch('/api/chat', {
         method: 'POST',
-        body: JSON.stringify({ system: systemRef.current, messages: allMessages, max_tokens: 4096, sourced: true }),
+        body: JSON.stringify({ system: systemRef.current, messages: allMessages, max_tokens: 4096, sourced: !initialContext }),
       });
       const reply = result.content?.[0]?.text || 'I need a moment to formulate my argument...';
       const sources = Array.isArray(result.sources) ? result.sources : [];
@@ -1566,6 +1617,9 @@ function Singleplayer({ mode, setMode, onExit, initialTopic = null, initialSide 
         body: JSON.stringify({
           topic, userSide: side,
           transcript: messages.map(m => ({ role: m.role, content: m.content })),
+          // QBpedia handoff: the judge scores fidelity to the source notes,
+          // not general rhetoric, so it needs the notes too.
+          ...(initialContext ? { context: initialContext, sourceTitle: initialTopic || '' } : {}),
         }),
       });
       setVerdict(r.verdict);
@@ -1586,12 +1640,43 @@ function Singleplayer({ mode, setMode, onExit, initialTopic = null, initialSide 
         <h2 className="text-base font-bold text-gray-900 dark:text-white mb-3">Pick a topic</h2>
         <input
           value={topic}
-          onChange={e => setTopic(e.target.value)}
+          onChange={e => { userEditedRef.current = true; setTopic(e.target.value); }}
           placeholder="What do you want to debate?"
           className="w-full px-3 py-2 rounded-lg border border-blue-500/30 bg-white/50 dark:bg-white/[0.06] text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/60 mb-3"
         />
         <div className="mb-5">
-          <TopicChips onPick={setTopic} showCategories />
+          {initialContext ? (
+            <div className="space-y-1.5">
+              <p className="text-[11px] font-semibold text-blue-400/70 uppercase tracking-wider">
+                Resolutions from the QBpedia page{initialTopic ? ` on ${initialTopic}` : ''}
+              </p>
+              {pageTopicsBusy && (
+                <p className="inline-flex items-center gap-1.5 text-[11px] text-blue-300/60">
+                  <Loader2 size={10} className="animate-spin" /> Reading the article…
+                </p>
+              )}
+              {pageTopics?.length === 0 && !pageTopicsBusy && (
+                <p className="text-[11px] text-blue-300/60">Could not draft resolutions. Type your own claim about {initialTopic} above.</p>
+              )}
+              <div className="flex flex-wrap gap-1.5">
+                {(pageTopics || []).map(t => (
+                  <button
+                    key={t}
+                    onClick={() => { userEditedRef.current = true; setTopic(t); }}
+                    className={`px-2.5 py-1 rounded-md border text-[11px] font-medium transition-colors ${
+                      t === topic
+                        ? 'bg-blue-500/25 border-blue-400/60 text-blue-100'
+                        : 'bg-blue-500/10 border-blue-500/30 text-blue-300 hover:bg-blue-500/20 hover:border-blue-500/50 hover:text-blue-200'
+                    }`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <TopicChips onPick={setTopic} showCategories />
+          )}
         </div>
         {topic.trim() && (
           <>

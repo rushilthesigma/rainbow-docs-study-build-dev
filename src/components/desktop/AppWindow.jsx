@@ -3,8 +3,10 @@ import LessonsApp from './apps/LessonsApp';
 import NotesApp from './apps/NotesApp';
 import AdminApp from './apps/AdminApp';
 import QuizBowlApp from './apps/QuizBowlApp';
+import QBpediaApp from './apps/QBpediaApp';
 import MathTutorApp from './apps/MathTutorApp';
 import WidgetsApp from './apps/WidgetsApp';
+import GroupStudyApp from './apps/GroupStudyApp';
 import MobilePreview from '../admin/MobilePreview';
 import StudyPage from '../../pages/StudyPage';
 import SettingsPage from '../../pages/SettingsPage';
@@ -25,6 +27,8 @@ const APP_COMPONENTS = {
   notes: NotesApp,
   mathtutor: MathTutorApp,
   quizbowl: QuizBowlApp,
+  qbpedia: QBpediaApp,
+  groups: GroupStudyApp,
   admin: AdminApp,
   mobilepreview: MobilePreview,
   settings: SettingsPage,
@@ -33,7 +37,7 @@ const APP_COMPONENTS = {
 };
 
 // Apps that need flex container without scroll (they manage their own scrolling)
-const FLEX_APPS = new Set(['notes', 'study', 'debate', 'mathtutor', 'mobilepreview']);
+const FLEX_APPS = new Set(['notes', 'study', 'debate', 'mathtutor', 'mobilepreview', 'qbpedia', 'groups']);
 
 // Full-bleed apps (no padding, no overflow-hidden) - widgets gallery
 // owns its own internal padding, so the default p-4/p-5 wrapper would

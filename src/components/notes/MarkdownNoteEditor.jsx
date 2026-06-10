@@ -60,6 +60,8 @@ export default function MarkdownNoteEditor({
   // switching notes) can be told apart from our own edits — preventing a
   // setContent → onUpdate → setState feedback loop.
   const lastMd = useRef(value);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   const editor = useEditor({
     extensions: [
@@ -71,12 +73,30 @@ export default function MarkdownNoteEditor({
     content: value,
     autofocus: autoFocus ? 'end' : false,
     editorProps: { attributes: { class: EDITOR_CLASS, spellcheck: 'true' } },
-    onUpdate: ({ editor }) => {
+  });
+
+  // Edits are forwarded from an effect-time subscription, NOT a useEditor
+  // `onUpdate` option. useEditor constructs the editor during render, and
+  // construction itself can emit `update`: Placeholder's viewport plugin
+  // dispatches from its plugin-view constructor, and StarterKit's
+  // TrailingNode then appends a paragraph to any note that doesn't already
+  // end with one (most AI notes end with a list/quote/table). An `onUpdate`
+  // option is bound inside the constructor, so it forwarded that render-
+  // phase emission into the host's setState — React's "Cannot update a
+  // component (NoteEditor) while rendering a different component
+  // (MarkdownNoteEditor)" — and autosaved every such note the moment it was
+  // opened. Subscribing after render means construction-time transactions
+  // never reach the host.
+  useEffect(() => {
+    if (!editor) return;
+    const handleUpdate = ({ editor }) => {
       const md = editor.storage.markdown.getMarkdown();
       lastMd.current = md;
-      onChange?.(md);
-    },
-  });
+      onChangeRef.current?.(md);
+    };
+    editor.on('update', handleUpdate);
+    return () => { editor.off('update', handleUpdate); };
+  }, [editor]);
 
   useEffect(() => {
     if (!editor) return;

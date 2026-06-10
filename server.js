@@ -426,6 +426,7 @@ const STUDY_MODELS = {
 // (non-paid user requests Flash/Sonnet/Pro) still drop to the uncapped floor
 // model (Flash Lite) so they keep chatting for free.
 const DEFAULT_STUDY_MODEL = 'haiku';
+const DEFAULT_MATH_TUTOR_MODEL = 'flash-lite';
 const FALLBACK_STUDY_MODEL = 'flash-lite';
 const HAIKU_LIMIT_FALLBACK = 'flash-lite'; // model served when daily Haiku cap is hit
 
@@ -1120,7 +1121,11 @@ function extractActionJson(fullText, tag) {
 //   { type, id?, title, launch: { appId, meta } }
 // where `launch.meta` is what the desktop's openApp() spreads as props
 // onto the destination app.
-async function buildStudyArtifacts(fullText, userData) {
+//
+// sessionCtx: the session.context object ({ curriculumId, sources }).
+// When study text is available, quiz bowl questions are generated from
+// it so the student can start playing immediately rather than re-generating.
+async function buildStudyArtifacts(fullText, userData, sessionCtx = {}) {
   const out = [];
 
   // ── [MAKE_NOTE] - create a real note with the full markdown body ──
@@ -1148,18 +1153,77 @@ async function buildStudyArtifacts(fullText, userData) {
     });
   }
 
-  // ── [MAKE_QUIZBOWL] - no game pre-created; we deep-link the QB hub
-  //    pre-filled with topic + difficulty so the student can start. ──
+  // ── [MAKE_QUIZBOWL] - generate pyramidal tossup questions from the
+  //    student's study material, then deep-link QB with them pre-loaded
+  //    so play starts immediately. Falls back to topic-only deep-link
+  //    when no study text is available. ──
   const qbJson = extractActionJson(fullText, 'MAKE_QUIZBOWL');
   if (qbJson && qbJson.topic) {
     const topic = String(qbJson.topic).slice(0, 200);
     const difficulty = ['elementary', 'middle', 'high', 'college'].includes(qbJson.difficulty)
       ? qbJson.difficulty
       : 'high';
+    const count = Math.min(10, Math.max(3, parseInt(qbJson.count) || 8));
+
+    // Collect study text: attached sources first, then linked curriculum.
+    const textParts = [];
+    if (Array.isArray(sessionCtx.sources)) {
+      for (const s of sessionCtx.sources) {
+        if (s.content) textParts.push(`--- ${s.title || 'Source'} ---\n${s.content}`);
+      }
+    }
+    if (sessionCtx.curriculumId) {
+      const curriculum = (userData.curricula || []).find(c => c.id === sessionCtx.curriculumId);
+      for (const unit of curriculum?.units || []) {
+        if (unit.textbookContext) textParts.push(`--- ${unit.title || 'Unit'} ---\n${unit.textbookContext}`);
+      }
+    }
+    const studyText = textParts.join('\n\n').slice(0, 15000);
+
+    let initialQuestions = null;
+    if (studyText.trim()) {
+      const diffLabel = { elementary: 'easy/middle-school', middle: 'easy/middle-school', high: 'high-school varsity', college: 'college championship' }[difficulty] || 'high-school varsity';
+      const sys = `You are a quiz bowl question writer. Write pyramidal tossup questions based ONLY on the provided study material. Output ONLY valid JSON, no markdown.`;
+      const prompt = `Write ${count} pyramidal quiz bowl tossup questions about "${topic}" using ONLY facts from the study material below.
+
+RULES:
+- Each question is one paragraph: hardest/most-obscure clues first, easiest giveaway last
+- Embed exactly one NAQT power mark "(*)" about 60-70% through the question
+- Difficulty: ${diffLabel}
+- Every answer must be directly supported by the text
+
+STUDY MATERIAL:
+${studyText}
+
+Return JSON: {"questions":[{"text":"Hard clue. More clues. (*) Easier clue. Giveaway.","answer":"Answer"}]}`;
+      try {
+        const result = await callGemini(sys, [{ role: 'user', content: prompt }], DEFAULT_MODEL, 8192, { jsonMode: true, temperature: 0.7 });
+        if (result.success) {
+          const parsed = parseAIJson(result.data.content?.[0]?.text || '');
+          if (Array.isArray(parsed?.questions) && parsed.questions.length) {
+            initialQuestions = parsed.questions
+              .map(q => ({ text: String(q.text || '').trim(), answer: String(q.answer || '').trim() }))
+              .filter(q => q.text && q.answer);
+            if (!initialQuestions.length) initialQuestions = null;
+          }
+        }
+      } catch (e) {
+        console.error('QB generation from study text error:', e);
+      }
+    }
+
     out.push({
       type: 'quizbowl',
       title: topic,
-      launch: { appId: 'quizbowl', label: 'Quiz Bowl', meta: { initialTopic: topic, initialDifficulty: difficulty } },
+      launch: {
+        appId: 'quizbowl',
+        label: 'Quiz Bowl',
+        meta: {
+          initialTopic: topic,
+          initialDifficulty: difficulty,
+          ...(initialQuestions ? { initialQuestions } : {}),
+        },
+      },
     });
   }
 
@@ -2344,6 +2408,8 @@ async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096,
       const supports = gm.groundingSupports || [];
       const sources = [];
       const urlToIndex = new Map();
+      // Populated only with opts.skipCitationMarkers (see below).
+      let supportSegments = [];
 
       // Append [n] markers to text: walk supports ordered by their segment
       // endIndex (a UTF-8 byte offset) and splice in markers from right to left.
@@ -2369,6 +2435,23 @@ async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096,
           urlToIndex.set(url, idx);
           sources.push({ url, title: ch?.web?.title || ch?.retrievedContext?.title || url });
         }
+        if (opts.skipCitationMarkers) {
+          // Structured-output callers (QBpedia) re-attach markers AFTER
+          // parsing their JSON. Splicing by byte offset here corrupts
+          // structured responses: with multi-part grounded output the
+          // segment offsets don't line up with the concatenated text, and
+          // markers land mid-token ("s[3]ections") or between values.
+          supportSegments = supports.map(sup => {
+            const markers = [];
+            for (const ci of (sup?.groundingChunkIndices || [])) {
+              const ch = chunksMeta[ci];
+              const url = ch?.web?.uri || ch?.retrievedContext?.uri;
+              const idx = url ? urlToIndex.get(url) : null;
+              if (idx && !markers.includes(idx)) markers.push(idx);
+            }
+            return { text: sup?.segment?.text || '', markers };
+          }).filter(s => s.text && s.markers.length);
+        } else {
         // Now build insertions: (byte endIndex → char index) + marker list.
         const utf8 = Buffer.from(text, 'utf-8');
         const byteToCharIndex = (byteIdx) => utf8.slice(0, Math.min(byteIdx, utf8.length)).toString('utf-8').length;
@@ -2396,6 +2479,7 @@ async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096,
           withCitations = before + leadingSpace + ins.markers.join('') + after;
         }
         text = withCitations;
+        }
       } else if (opts.enableWebSearch) {
         // Tool was enabled but the model didn't search / returned no supports.
         // Still surface any raw chunks as a sources list (no inline markers).
@@ -2408,7 +2492,7 @@ async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096,
       }
       return {
         success: true,
-        data: { content: [{ type: 'text', text }], sources },
+        data: { content: [{ type: 'text', text }], sources, supports: supportSegments },
         model: resolved,
       };
     } catch (err) {
@@ -3094,11 +3178,23 @@ app.get('/api/curriculum', authMiddleware, (req, res) => {
 // Get single curriculum (full)
 app.get('/api/curriculum/:id', authMiddleware, (req, res) => {
   try {
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (!email) return res.status(404).json({ error: 'User not found' });
+    let users, email;
+    if (req.query.shareId) {
+      const access = resolveShareAccess(req, res, 'curriculum', req.params.id);
+      if (!access) return;
+      ({ users, email } = access);
+    } else {
+      users = loadUsers();
+      email = findEmailById(users, req.userId);
+      if (!email) return res.status(404).json({ error: 'User not found' });
+    }
     const curriculum = (users[email].data?.curricula || []).find(c => c.id === req.params.id);
     if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
+    if (req.query.shareId) {
+      // Shared recipients get course content, not the owner's private tutoring transcripts
+      const sanitized = JSON.parse(JSON.stringify(curriculum), (k, v) => k === 'chatHistory' ? [] : v);
+      return res.json({ curriculum: sanitized });
+    }
     res.json({ curriculum });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -3107,13 +3203,32 @@ app.get('/api/curriculum/:id', authMiddleware, (req, res) => {
 app.put('/api/curriculum/:id', authMiddleware, (req, res) => {
   try {
     const { updates } = req.body;
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (!email) return res.status(404).json({ error: 'User not found' });
+    let users, email, sharedWrite = false;
+    if (req.query.shareId) {
+      const access = resolveShareAccess(req, res, 'curriculum', req.params.id, { write: true });
+      if (!access) return;
+      ({ users, email } = access);
+      sharedWrite = true;
+    } else {
+      users = loadUsers();
+      email = findEmailById(users, req.userId);
+      if (!email) return res.status(404).json({ error: 'User not found' });
+    }
     const curricula = users[email].data?.curricula || [];
     const idx = curricula.findIndex(c => c.id === req.params.id);
     if (idx === -1) return res.status(404).json({ error: 'Curriculum not found' });
-    curricula[idx] = { ...curricula[idx], ...updates };
+    const safeUpdates = { ...(updates || {}) };
+    if (sharedWrite) {
+      // Shared editors cannot rewrite identity/ownership fields on the owner's record
+      delete safeUpdates.id;
+      delete safeUpdates.createdAt;
+      delete safeUpdates.studentId;
+    }
+    curricula[idx] = { ...curricula[idx], ...safeUpdates, updatedAt: new Date().toISOString() };
+    if (sharedWrite) {
+      curricula[idx].lastEditedBy = req.userId;
+      curricula[idx].lastEditedAt = curricula[idx].updatedAt;
+    }
     saveUsers(users);
     res.json({ curriculum: curricula[idx] });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -3126,8 +3241,10 @@ app.delete('/api/curriculum/:id', authMiddleware, (req, res) => {
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
     const curricula = users[email].data?.curricula || [];
+    const deleted = curricula.find(c => c.id === req.params.id);
     users[email].data.curricula = curricula.filter(c => c.id !== req.params.id);
     saveUsers(users);
+    if (deleted) cascadeDeleteSharesForItem(deleted.id, req.userId, deleted.title || deleted.subject, 'curriculum');
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -5245,7 +5362,7 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
       // and stream each as a metadata event so the panel can render the
       // card before the user sees the bubble finish.
       try {
-        const artifacts = await buildStudyArtifacts(fullContent, users[email].data);
+        const artifacts = await buildStudyArtifacts(fullContent, users[email].data, session.context || {});
         if (artifacts.length) {
           msg.artifacts = artifacts;
           for (const a of artifacts) {
@@ -5483,9 +5600,16 @@ app.post('/api/flashcards', authMiddleware, async (req, res) => {
 
 app.get('/api/flashcards/:deckId', authMiddleware, (req, res) => {
   try {
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (!email) return res.status(404).json({ error: 'User not found' });
+    let users, email;
+    if (req.query.shareId) {
+      const access = resolveShareAccess(req, res, 'flashcardDeck', req.params.deckId);
+      if (!access) return;
+      ({ users, email } = access);
+    } else {
+      users = loadUsers();
+      email = findEmailById(users, req.userId);
+      if (!email) return res.status(404).json({ error: 'User not found' });
+    }
     const deck = (users[email].data?.flashcardDecks || []).find(d => d.id === req.params.deckId);
     if (!deck) return res.status(404).json({ error: 'Deck not found' });
     res.json({ deck });
@@ -5495,12 +5619,25 @@ app.get('/api/flashcards/:deckId', authMiddleware, (req, res) => {
 app.put('/api/flashcards/:deckId', authMiddleware, (req, res) => {
   try {
     const { title } = req.body;
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (!email) return res.status(404).json({ error: 'User not found' });
+    let users, email, sharedWrite = false;
+    if (req.query.shareId) {
+      const access = resolveShareAccess(req, res, 'flashcardDeck', req.params.deckId, { write: true });
+      if (!access) return;
+      ({ users, email } = access);
+      sharedWrite = true;
+    } else {
+      users = loadUsers();
+      email = findEmailById(users, req.userId);
+      if (!email) return res.status(404).json({ error: 'User not found' });
+    }
     const deck = (users[email].data?.flashcardDecks || []).find(d => d.id === req.params.deckId);
     if (!deck) return res.status(404).json({ error: 'Deck not found' });
     if (title) deck.title = title;
+    deck.updatedAt = new Date().toISOString();
+    if (sharedWrite) {
+      deck.lastEditedBy = req.userId;
+      deck.lastEditedAt = deck.updatedAt;
+    }
     saveUsers(users);
     res.json({ deck });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -5511,8 +5648,10 @@ app.delete('/api/flashcards/:deckId', authMiddleware, (req, res) => {
     const users = loadUsers();
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
+    const deleted = (users[email].data?.flashcardDecks || []).find(d => d.id === req.params.deckId);
     users[email].data.flashcardDecks = (users[email].data.flashcardDecks || []).filter(d => d.id !== req.params.deckId);
     saveUsers(users);
+    if (deleted) cascadeDeleteSharesForItem(deleted.id, req.userId, deleted.title, 'flashcardDeck');
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -5648,9 +5787,16 @@ app.post('/api/notes', authMiddleware, (req, res) => {
 
 app.get('/api/notes/:nid', authMiddleware, (req, res) => {
   try {
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (!email) return res.status(404).json({ error: 'User not found' });
+    let users, email;
+    if (req.query.shareId) {
+      const access = resolveShareAccess(req, res, 'note', req.params.nid);
+      if (!access) return;
+      ({ users, email } = access);
+    } else {
+      users = loadUsers();
+      email = findEmailById(users, req.userId);
+      if (!email) return res.status(404).json({ error: 'User not found' });
+    }
     const note = (users[email].data?.notes || []).find(n => n.id === req.params.nid);
     if (!note) return res.status(404).json({ error: 'Note not found' });
     res.json({ note });
@@ -5660,20 +5806,33 @@ app.get('/api/notes/:nid', authMiddleware, (req, res) => {
 app.put('/api/notes/:nid', authMiddleware, (req, res) => {
   try {
     const { title, cues, mainNotes, summary, topicId } = req.body;
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (!email) return res.status(404).json({ error: 'User not found' });
+    let users, email, sharedWrite = false;
+    if (req.query.shareId) {
+      const access = resolveShareAccess(req, res, 'note', req.params.nid, { write: true });
+      if (!access) return;
+      ({ users, email } = access);
+      sharedWrite = true;
+    } else {
+      users = loadUsers();
+      email = findEmailById(users, req.userId);
+      if (!email) return res.status(404).json({ error: 'User not found' });
+    }
     const note = (users[email].data?.notes || []).find(n => n.id === req.params.nid);
     if (!note) return res.status(404).json({ error: 'Note not found' });
     if (title !== undefined) note.title = title;
     if (cues !== undefined) note.cues = cues;
     if (mainNotes !== undefined) note.mainNotes = mainNotes;
     if (summary !== undefined) note.summary = summary;
-    if (topicId !== undefined) {
+    if (topicId !== undefined && !sharedWrite) {
       // null clears the topic; otherwise must reference a real topic.
+      // Shared editors cannot refile the owner's note into a topic.
       note.topicId = topicId && (users[email].data.topics || []).some(t => t.id === topicId) ? topicId : null;
     }
     note.updatedAt = new Date().toISOString();
+    if (sharedWrite) {
+      note.lastEditedBy = req.userId;
+      note.lastEditedAt = note.updatedAt;
+    }
     saveUsers(users);
     res.json({ note });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -5684,8 +5843,10 @@ app.delete('/api/notes/:nid', authMiddleware, (req, res) => {
     const users = loadUsers();
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
+    const deleted = (users[email].data?.notes || []).find(n => n.id === req.params.nid);
     users[email].data.notes = (users[email].data.notes || []).filter(n => n.id !== req.params.nid);
     saveUsers(users);
+    if (deleted) cascadeDeleteSharesForItem(deleted.id, req.userId, deleted.title, 'note');
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -8592,7 +8753,14 @@ app.post('/api/social/profile', authMiddleware, (req, res) => {
     // Check handle uniqueness
     const existing = Object.values(social.profiles).find(p => p.handle.toLowerCase() === handle.toLowerCase() && p.userId !== req.userId);
     if (existing) return res.status(409).json({ error: 'Handle already taken' });
-    social.profiles[req.userId] = { userId: req.userId, handle, displayName, friends: social.profiles[req.userId]?.friends || [], createdAt: social.profiles[req.userId]?.createdAt || new Date().toISOString() };
+    // Preserve notifications across profile rewrites and absorb any entries
+    // that accumulated in the fallback bucket before the profile existed.
+    const pendingNotifications = [
+      ...(social.profiles[req.userId]?.notifications || []),
+      ...((social.notifications || {})[req.userId] || []),
+    ];
+    if (social.notifications) delete social.notifications[req.userId];
+    social.profiles[req.userId] = { userId: req.userId, handle, displayName, friends: social.profiles[req.userId]?.friends || [], notifications: pendingNotifications, createdAt: social.profiles[req.userId]?.createdAt || new Date().toISOString() };
     saveSocial(social);
     // Also save to user account for persistence
     try {
@@ -8830,6 +8998,796 @@ app.post('/api/social/groups/:id/send', authMiddleware, (req, res) => {
     if (group.messages.length > 500) group.messages = group.messages.slice(-500);
     saveSocial(social);
     res.json({ message: msg });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== SHARING =====
+
+// ShareStore: shares.json persists ShareRecord documents:
+// { id, itemId, itemType: 'note'|'flashcardDeck'|'curriculum', ownerId, recipientId,
+//   permissionLevel: 'view'|'edit', status: 'pending'|'accepted'|'declined'|'revoked', createdAt, updatedAt }
+const SHARES_FILE = join(DATA_DIR, 'shares.json');
+const SHARE_ITEM_TYPES = ['note', 'flashcardDeck', 'curriculum'];
+function loadShares() { try { return JSON.parse(readFileSync(SHARES_FILE, 'utf-8')); } catch { return []; } }
+function saveShares(shares) { writeFileSync(SHARES_FILE, JSON.stringify(shares, null, 2)); }
+
+function shareIsActive(s) { return s.status === 'pending' || s.status === 'accepted'; }
+
+function findOwnedItem(data, itemType, itemId) {
+  if (itemType === 'note') return (data.notes || []).find(n => n.id === itemId) || null;
+  if (itemType === 'flashcardDeck') return (data.flashcardDecks || []).find(d => d.id === itemId) || null;
+  if (itemType === 'curriculum') return (data.curricula || []).find(c => c.id === itemId) || null;
+  return null;
+}
+
+// Notifications live on the recipient's social profile record; a fallback bucket
+// covers recipients who haven't set up a social profile yet.
+function getNotificationList(social, userId) {
+  const profile = social.profiles[userId];
+  if (profile) {
+    if (!profile.notifications) profile.notifications = [];
+    return profile.notifications;
+  }
+  if (!social.notifications) social.notifications = {};
+  if (!social.notifications[userId]) social.notifications[userId] = [];
+  return social.notifications[userId];
+}
+
+function removeNotifications(list, pred) {
+  for (let i = list.length - 1; i >= 0; i--) if (pred(list[i])) list.splice(i, 1);
+}
+
+function shareDisplayName(social, users, userId) {
+  const profile = social.profiles[userId];
+  if (profile?.displayName) return profile.displayName;
+  const email = findEmailById(users, userId);
+  // Never fall back to the email address — it would leak it to the other party
+  return (email && users[email].name) || 'Covalent user';
+}
+
+// Cascade-delete all ShareRecords for an item when the owner deletes it.
+// Recipients with a pending or accepted share get an item-deleted notification;
+// pending invitation notifications for the item are removed (AC-FNS-004.5).
+function cascadeDeleteSharesForItem(itemId, actorUserId, itemTitle, itemType) {
+  try {
+    const shares = loadShares();
+    const affected = shares.filter(s => s.itemId === itemId);
+    if (!affected.length) return;
+    saveShares(shares.filter(s => s.itemId !== itemId));
+    const social = loadSocial();
+    const users = loadUsers();
+    const fromName = shareDisplayName(social, users, actorUserId);
+    for (const s of affected) {
+      const list = getNotificationList(social, s.recipientId);
+      removeNotifications(list, n => n.type === 'share_invitation' && n.shareId === s.id);
+      if (shareIsActive(s)) {
+        list.push({
+          id: crypto.randomUUID(), type: 'share_deleted', shareId: s.id,
+          itemId, itemType: itemType || s.itemType, itemTitle: itemTitle || 'an item',
+          fromUserId: actorUserId, fromName, createdAt: new Date().toISOString(), read: false,
+        });
+      }
+    }
+    saveSocial(social);
+  } catch (e) { console.error('Failed to cascade-delete shares for item', itemId, e.message); }
+}
+
+// Validates shared access to an item via ?shareId=. Returns { users, email, share }
+// resolved to the OWNER's record so reads/writes target the original item, or null
+// after sending an error response (revoked/declined shares fail here — AC-FNS-004.4).
+function resolveShareAccess(req, res, itemType, itemId, { write = false } = {}) {
+  const share = loadShares().find(s => s.id === req.query.shareId);
+  if (!share || share.recipientId !== req.userId || share.itemId !== itemId ||
+      share.itemType !== itemType || share.status !== 'accepted') {
+    res.status(403).json({ error: 'Access to this shared item has been removed' });
+    return null;
+  }
+  if (write && share.permissionLevel !== 'edit') {
+    res.status(403).json({ error: 'Edit permission required' });
+    return null;
+  }
+  const users = loadUsers();
+  const email = findEmailById(users, share.ownerId);
+  if (!email) { res.status(404).json({ error: 'Item owner not found' }); return null; }
+  return { users, email, share };
+}
+
+// ShareController: create share invitation
+app.post('/api/share', authMiddleware, (req, res) => {
+  try {
+    const { recipientId, itemId, itemType, permissionLevel } = req.body || {};
+    if (!recipientId || !itemId || !itemType) return res.status(400).json({ error: 'recipientId, itemId and itemType required' });
+    if (!SHARE_ITEM_TYPES.includes(itemType)) return res.status(400).json({ error: 'Invalid itemType' });
+    const level = permissionLevel || 'view';
+    if (!['view', 'edit'].includes(level)) return res.status(400).json({ error: 'permissionLevel must be view or edit' });
+    if (recipientId === req.userId) return res.status(400).json({ error: 'You cannot share an item with yourself' });
+    const users = loadUsers();
+    const recipientEmail = findEmailById(users, recipientId);
+    if (!recipientEmail) return res.status(404).json({ error: 'No account found for that user' });
+    const ownerEmail = findEmailById(users, req.userId);
+    if (!ownerEmail) return res.status(404).json({ error: 'User not found' });
+    const item = findOwnedItem(users[ownerEmail].data || {}, itemType, itemId);
+    if (!item) return res.status(404).json({ error: 'Item not found in your library' });
+    const shares = loadShares();
+    if (shares.some(s => s.itemId === itemId && s.recipientId === recipientId && shareIsActive(s))) {
+      return res.status(409).json({ error: 'This item is already shared with that user' });
+    }
+    const now = new Date().toISOString();
+    const share = {
+      id: crypto.randomUUID(), itemId, itemType, ownerId: req.userId, recipientId,
+      permissionLevel: level, status: 'pending', createdAt: now, updatedAt: now,
+    };
+    shares.push(share);
+    saveShares(shares);
+    const social = loadSocial();
+    getNotificationList(social, recipientId).push({
+      id: crypto.randomUUID(), type: 'share_invitation', shareId: share.id,
+      itemId, itemType, itemTitle: item.title || 'Untitled',
+      fromUserId: req.userId, fromName: shareDisplayName(social, users, req.userId),
+      permissionLevel: level, createdAt: now, read: false,
+    });
+    saveSocial(social);
+    res.json({ share });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// List pending and accepted invitations for the requesting user
+app.get('/api/share/incoming', authMiddleware, (req, res) => {
+  try {
+    const shares = loadShares().filter(s => s.recipientId === req.userId && shareIsActive(s));
+    const users = loadUsers();
+    const social = loadSocial();
+    const enriched = shares.map(s => {
+      const ownerEmail = findEmailById(users, s.ownerId);
+      const item = ownerEmail ? findOwnedItem(users[ownerEmail].data || {}, s.itemType, s.itemId) : null;
+      return {
+        ...s,
+        ownerName: shareDisplayName(social, users, s.ownerId),
+        ownerHandle: social.profiles[s.ownerId]?.handle || null,
+        itemTitle: item?.title || 'Untitled',
+        itemExists: !!item,
+        itemUpdatedAt: item?.updatedAt || null,
+      };
+    });
+    res.json({ shares: enriched });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// List recipients and permission levels for an item (owner only)
+app.get('/api/share/outgoing/:itemId', authMiddleware, (req, res) => {
+  try {
+    const shares = loadShares().filter(s =>
+      s.itemId === req.params.itemId && s.ownerId === req.userId && s.status !== 'revoked');
+    const users = loadUsers();
+    const social = loadSocial();
+    const enriched = shares.map(s => ({
+      ...s,
+      recipientName: shareDisplayName(social, users, s.recipientId),
+      recipientHandle: social.profiles[s.recipientId]?.handle || null,
+    }));
+    res.json({ shares: enriched });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Accept a share invitation (recipient only)
+app.post('/api/share/:id/accept', authMiddleware, (req, res) => {
+  try {
+    const shares = loadShares();
+    const share = shares.find(s => s.id === req.params.id && s.recipientId === req.userId);
+    if (!share || share.status !== 'pending') return res.status(404).json({ error: 'Invitation not found' });
+    share.status = 'accepted';
+    share.updatedAt = new Date().toISOString();
+    saveShares(shares);
+    const social = loadSocial();
+    removeNotifications(getNotificationList(social, req.userId), n => n.type === 'share_invitation' && n.shareId === share.id);
+    saveSocial(social);
+    res.json({ share });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Decline a share invitation (recipient only)
+app.post('/api/share/:id/decline', authMiddleware, (req, res) => {
+  try {
+    const shares = loadShares();
+    const share = shares.find(s => s.id === req.params.id && s.recipientId === req.userId);
+    if (!share || share.status !== 'pending') return res.status(404).json({ error: 'Invitation not found' });
+    share.status = 'declined';
+    share.updatedAt = new Date().toISOString();
+    saveShares(shares);
+    const social = loadSocial();
+    removeNotifications(getNotificationList(social, req.userId), n => n.type === 'share_invitation' && n.shareId === share.id);
+    saveSocial(social);
+    res.json({ share });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Update permission level (owner only)
+app.patch('/api/share/:id', authMiddleware, (req, res) => {
+  try {
+    const { permissionLevel } = req.body || {};
+    if (!['view', 'edit'].includes(permissionLevel)) return res.status(400).json({ error: 'permissionLevel must be view or edit' });
+    const shares = loadShares();
+    const share = shares.find(s => s.id === req.params.id && s.ownerId === req.userId);
+    if (!share || !shareIsActive(share)) return res.status(404).json({ error: 'Share not found' });
+    share.permissionLevel = permissionLevel;
+    share.updatedAt = new Date().toISOString();
+    saveShares(shares);
+    // Keep a still-pending invitation notification in sync with the new level
+    const social = loadSocial();
+    const note = getNotificationList(social, share.recipientId).find(n => n.type === 'share_invitation' && n.shareId === share.id);
+    if (note) { note.permissionLevel = permissionLevel; saveSocial(social); }
+    res.json({ share });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Revoke access (owner only). Pending invitations are cancelled and their
+// notification removed from the recipient (AC-FNS-002.4).
+app.delete('/api/share/:id', authMiddleware, (req, res) => {
+  try {
+    const shares = loadShares();
+    const share = shares.find(s => s.id === req.params.id && s.ownerId === req.userId);
+    if (!share || !shareIsActive(share)) return res.status(404).json({ error: 'Share not found' });
+    const wasPending = share.status === 'pending';
+    share.status = 'revoked';
+    share.updatedAt = new Date().toISOString();
+    saveShares(shares);
+    if (wasPending) {
+      const social = loadSocial();
+      removeNotifications(getNotificationList(social, share.recipientId), n => n.type === 'share_invitation' && n.shareId === share.id);
+      saveSocial(social);
+    }
+    res.json({ share });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== STUDY GROUPS =====
+
+// StudyGroupStore: StudyGroup documents persist in social.json under the
+// studyGroups key (the blueprint's `groups` key is already occupied by the
+// chat-groups feature, whose record shape is incompatible — documented drift).
+// StudyGroup: { id, name, description, adminIds: string[], memberIds: string[],
+//   library: GroupLibraryItem[], sessions: SessionSummary[], invitations: GroupInvitation[], createdAt }
+// GroupLibraryItem: { id, itemType, itemId, title, contributorId, contributedAt, snapshot }
+// GroupInvitation: { id, userId, invitedBy, status: 'pending'|'declined', createdAt, respondedAt? }
+function getStudyGroups(social) {
+  if (!social.studyGroups) social.studyGroups = {};
+  return social.studyGroups;
+}
+function findStudyGroup(social, id) { return getStudyGroups(social)[id] || null; }
+function isGroupAdmin(group, userId) { return group.adminIds.includes(userId); }
+function isGroupMember(group, userId) { return group.memberIds.includes(userId); }
+
+// Deep-copy snapshot for group library contributions (Group Study ADR-002):
+// self-contained copy, personal metadata stripped, original never referenced again.
+function snapshotItemForGroup(item, itemType) {
+  const snap = JSON.parse(JSON.stringify(item), (k, v) => k === 'chatHistory' ? [] : v);
+  delete snap.topicId;
+  delete snap.linkedCurriculumId;
+  delete snap.linkedLessonId;
+  delete snap.lastEditedBy;
+  delete snap.lastEditedAt;
+  if (itemType === 'flashcardDeck' && Array.isArray(snap.cards)) {
+    // Strip the contributor's personal SM-2 scheduling state
+    for (const c of snap.cards) {
+      delete c.ease; delete c.interval; delete c.reps; delete c.lapses;
+      delete c.nextDue; delete c.lastReviewed;
+    }
+  }
+  return snap;
+}
+
+// Removes a departing user from a group's member/admin lists. Returns an error
+// string when the last-admin guard blocks the operation (key contract: a group
+// must always have at least one admin). successorId may name a member to
+// promote first.
+function removeUserFromGroup(group, userId, successorId) {
+  const remainingMembers = group.memberIds.filter(m => m !== userId);
+  const remainingAdmins = group.adminIds.filter(a => a !== userId);
+  if (remainingMembers.length > 0 && remainingAdmins.length === 0) {
+    if (!successorId || !remainingMembers.includes(successorId)) {
+      return 'A new admin must be assigned before the last admin can leave';
+    }
+    group.adminIds = [successorId];
+  } else {
+    group.adminIds = remainingAdmins;
+  }
+  group.memberIds = remainingMembers;
+  return null;
+}
+
+// StudyGroupController: create group (creator becomes admin)
+app.post('/api/study-groups', authMiddleware, (req, res) => {
+  try {
+    const { name, description } = req.body || {};
+    const trimmed = (name || '').trim();
+    if (!trimmed) return res.status(400).json({ error: 'Group name is required' });
+    if (trimmed.length > 100) return res.status(400).json({ error: 'Group name must be 100 characters or fewer' });
+    const social = loadSocial();
+    const group = {
+      id: crypto.randomUUID(), name: trimmed, description: (description || '').trim(),
+      adminIds: [req.userId], memberIds: [req.userId],
+      library: [], sessions: [], invitations: [],
+      createdAt: new Date().toISOString(),
+    };
+    getStudyGroups(social)[group.id] = group;
+    saveSocial(social);
+    res.json({ group });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// List groups for the current user (plus their pending invitations)
+app.get('/api/study-groups', authMiddleware, (req, res) => {
+  try {
+    const social = loadSocial();
+    const all = Object.values(getStudyGroups(social));
+    const groups = all.filter(g => isGroupMember(g, req.userId)).map(g => ({
+      id: g.id, name: g.name, description: g.description,
+      memberCount: g.memberIds.length, role: isGroupAdmin(g, req.userId) ? 'admin' : 'member',
+      libraryCount: g.library.length,
+      activeSession: (() => {
+        const s = findActiveSessionForGroup(g.id);
+        return s ? { sessionId: s.sessionId, hostId: s.hostId, libraryItemId: s.libraryItemId, itemTitle: s.itemTitle, mode: s.mode } : null;
+      })(),
+      createdAt: g.createdAt,
+    }));
+    const invitations = [];
+    let usersForNames = null;
+    for (const g of all) {
+      for (const inv of g.invitations) {
+        if (inv.userId === req.userId && inv.status === 'pending') {
+          if (!usersForNames) usersForNames = loadUsers();
+          invitations.push({
+            id: inv.id, groupId: g.id, groupName: g.name,
+            invitedBy: inv.invitedBy, invitedByName: shareDisplayName(social, usersForNames, inv.invitedBy),
+            memberCount: g.memberIds.length, createdAt: inv.createdAt,
+          });
+        }
+      }
+    }
+    res.json({ groups, invitations });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Group detail with members, roles, library, invitations
+app.get('/api/study-groups/:id', authMiddleware, (req, res) => {
+  try {
+    const social = loadSocial();
+    const group = findStudyGroup(social, req.params.id);
+    if (!group || !isGroupMember(group, req.userId)) return res.status(404).json({ error: 'Group not found' });
+    const users = loadUsers();
+    const members = group.memberIds.map(mid => ({
+      userId: mid,
+      name: shareDisplayName(social, users, mid),
+      handle: social.profiles[mid]?.handle || null,
+      role: isGroupAdmin(group, mid) ? 'admin' : 'member',
+    }));
+    const invitations = group.invitations.map(inv => ({
+      ...inv, userName: shareDisplayName(social, users, inv.userId),
+    }));
+    res.json({ group: { ...group, members, invitations } });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Invite a user to the group (admin only)
+app.post('/api/study-groups/:id/invite', authMiddleware, (req, res) => {
+  try {
+    const { userId } = req.body || {};
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    const social = loadSocial();
+    const group = findStudyGroup(social, req.params.id);
+    if (!group || !isGroupMember(group, req.userId)) return res.status(404).json({ error: 'Group not found' });
+    if (!isGroupAdmin(group, req.userId)) return res.status(403).json({ error: 'Only group admins can invite members' });
+    const users = loadUsers();
+    if (!findEmailById(users, userId)) return res.status(404).json({ error: 'No account found for that user' });
+    if (isGroupMember(group, userId)) return res.status(409).json({ error: 'User is already a member' });
+    if (group.invitations.some(i => i.userId === userId && i.status === 'pending')) {
+      return res.status(409).json({ error: 'User already has a pending invitation' });
+    }
+    const now = new Date().toISOString();
+    const invitation = { id: crypto.randomUUID(), userId, invitedBy: req.userId, status: 'pending', createdAt: now };
+    group.invitations.push(invitation);
+    getNotificationList(social, userId).push({
+      id: crypto.randomUUID(), type: 'group_invitation', invitationId: invitation.id,
+      groupId: group.id, groupName: group.name,
+      fromUserId: req.userId, fromName: shareDisplayName(social, users, req.userId),
+      memberCount: group.memberIds.length, createdAt: now, read: false,
+    });
+    saveSocial(social);
+    res.json({ invitation });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Accept a group invitation
+app.post('/api/study-groups/:id/join', authMiddleware, (req, res) => {
+  try {
+    const social = loadSocial();
+    const group = findStudyGroup(social, req.params.id);
+    if (!group) return res.status(404).json({ error: 'Group not found' });
+    const inv = group.invitations.find(i => i.userId === req.userId && i.status === 'pending');
+    if (!inv) return res.status(404).json({ error: 'No pending invitation for this group' });
+    group.invitations = group.invitations.filter(i => i.id !== inv.id);
+    if (!group.memberIds.includes(req.userId)) group.memberIds.push(req.userId);
+    removeNotifications(getNotificationList(social, req.userId), n => n.type === 'group_invitation' && n.invitationId === inv.id);
+    saveSocial(social);
+    res.json({ group: { id: group.id, name: group.name, memberCount: group.memberIds.length } });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Decline a group invitation (kept with declined status so the admin sees it)
+app.post('/api/study-groups/:id/decline', authMiddleware, (req, res) => {
+  try {
+    const social = loadSocial();
+    const group = findStudyGroup(social, req.params.id);
+    if (!group) return res.status(404).json({ error: 'Group not found' });
+    const inv = group.invitations.find(i => i.userId === req.userId && i.status === 'pending');
+    if (!inv) return res.status(404).json({ error: 'No pending invitation for this group' });
+    inv.status = 'declined';
+    inv.respondedAt = new Date().toISOString();
+    removeNotifications(getNotificationList(social, req.userId), n => n.type === 'group_invitation' && n.invitationId === inv.id);
+    saveSocial(social);
+    res.json({ invitation: inv });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Contribute a material snapshot to the group library
+app.post('/api/study-groups/:id/library', authMiddleware, (req, res) => {
+  try {
+    const { itemType, itemId } = req.body || {};
+    if (!itemType || !itemId) return res.status(400).json({ error: 'itemType and itemId required' });
+    if (!SHARE_ITEM_TYPES.includes(itemType)) return res.status(400).json({ error: 'Invalid itemType' });
+    const social = loadSocial();
+    const group = findStudyGroup(social, req.params.id);
+    if (!group || !isGroupMember(group, req.userId)) return res.status(404).json({ error: 'Group not found' });
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const item = findOwnedItem(users[email].data || {}, itemType, itemId);
+    if (!item) return res.status(404).json({ error: 'Item not found in your library' });
+    if (group.library.some(l => l.itemId === itemId && l.contributorId === req.userId)) {
+      return res.status(409).json({ error: 'You have already contributed this item to the group' });
+    }
+    const entry = {
+      id: crypto.randomUUID(), itemType, itemId,
+      title: item.title || 'Untitled', contributorId: req.userId,
+      contributedAt: new Date().toISOString(),
+      snapshot: snapshotItemForGroup(item, itemType),
+    };
+    group.library.push(entry);
+    saveSocial(social);
+    res.json({ item: entry });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Remove a contribution (contributor or admin; personal copy unaffected)
+app.delete('/api/study-groups/:id/library/:itemId', authMiddleware, (req, res) => {
+  try {
+    const social = loadSocial();
+    const group = findStudyGroup(social, req.params.id);
+    if (!group || !isGroupMember(group, req.userId)) return res.status(404).json({ error: 'Group not found' });
+    const entry = group.library.find(l => l.id === req.params.itemId);
+    if (!entry) return res.status(404).json({ error: 'Library item not found' });
+    if (entry.contributorId !== req.userId && !isGroupAdmin(group, req.userId)) {
+      return res.status(403).json({ error: 'Only the contributor or a group admin can remove this item' });
+    }
+    group.library = group.library.filter(l => l.id !== entry.id);
+    saveSocial(social);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Remove a member (admin) or leave the group (self). Last-admin guard applies.
+app.delete('/api/study-groups/:id/members/:userId', authMiddleware, (req, res) => {
+  try {
+    const targetId = req.params.userId;
+    const isSelf = targetId === req.userId;
+    const social = loadSocial();
+    const group = findStudyGroup(social, req.params.id);
+    if (!group || !isGroupMember(group, req.userId)) return res.status(404).json({ error: 'Group not found' });
+    if (!isSelf && !isGroupAdmin(group, req.userId)) return res.status(403).json({ error: 'Only group admins can remove members' });
+    if (!isGroupMember(group, targetId)) return res.status(404).json({ error: 'User is not a member of this group' });
+    const guardError = removeUserFromGroup(group, targetId, (req.body || {}).successorId);
+    if (guardError) return res.status(422).json({ error: guardError });
+    // Departing members lose session access immediately (AC-GS-003.2).
+    // If the departing member hosts the active session, the session ends —
+    // remaining members would otherwise be locked out of host-only controls.
+    const activeSession = findActiveSessionForGroup(group.id);
+    if (activeSession) {
+      if (activeSession.hostId === targetId) {
+        terminateSessionsForGroup(group.id);
+      } else if (activeSession.streams.has(targetId)) {
+        detachSessionStream(activeSession, targetId);
+      }
+    }
+    if (group.memberIds.length === 0) {
+      // Last member left — group dissolves (and any session with it)
+      terminateSessionsForGroup(group.id);
+      delete getStudyGroups(social)[group.id];
+    } else if (!isSelf) {
+      getNotificationList(social, targetId).push({
+        id: crypto.randomUUID(), type: 'group_removed',
+        groupId: group.id, groupName: group.name,
+        fromUserId: req.userId, fromName: shareDisplayName(social, loadUsers(), req.userId),
+        createdAt: new Date().toISOString(), read: false,
+      });
+    }
+    saveSocial(social);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Promote a member to admin (admin only)
+app.post('/api/study-groups/:id/members/:userId/promote', authMiddleware, (req, res) => {
+  try {
+    const social = loadSocial();
+    const group = findStudyGroup(social, req.params.id);
+    if (!group || !isGroupMember(group, req.userId)) return res.status(404).json({ error: 'Group not found' });
+    if (!isGroupAdmin(group, req.userId)) return res.status(403).json({ error: 'Only group admins can promote members' });
+    const targetId = req.params.userId;
+    if (!isGroupMember(group, targetId)) return res.status(404).json({ error: 'User is not a member of this group' });
+    if (!group.adminIds.includes(targetId)) group.adminIds.push(targetId);
+    saveSocial(social);
+    res.json({ group: { id: group.id, adminIds: group.adminIds } });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Disband the group (admin only). The last-admin rule applies when other
+// members remain: a sole admin must name a successor (who is promoted) for
+// the request to proceed — the frontend prompts for this (AC-GS-003.4/.5).
+app.delete('/api/study-groups/:id', authMiddleware, (req, res) => {
+  try {
+    const social = loadSocial();
+    const group = findStudyGroup(social, req.params.id);
+    if (!group || !isGroupMember(group, req.userId)) return res.status(404).json({ error: 'Group not found' });
+    if (!isGroupAdmin(group, req.userId)) return res.status(403).json({ error: 'Only group admins can disband the group' });
+    const otherMembers = group.memberIds.filter(m => m !== req.userId);
+    const soleAdmin = group.adminIds.length === 1 && group.adminIds[0] === req.userId;
+    if (soleAdmin && otherMembers.length > 0) {
+      // Deliberate confirmation gate (WO-2/AC-GS-003.4): a sole admin must name
+      // a valid successor for the disband to proceed. The group is deleted
+      // below, so no promotion is recorded.
+      const successorId = (req.body || {}).successorId;
+      if (!successorId || !otherMembers.includes(successorId)) {
+        return res.status(422).json({ error: 'Assign a new admin before disbanding, or name a successor' });
+      }
+    }
+    const now = new Date().toISOString();
+    const users = loadUsers();
+    const fromName = shareDisplayName(social, users, req.userId);
+    for (const mid of otherMembers) {
+      removeNotifications(getNotificationList(social, mid), n => n.type === 'group_invitation' && n.groupId === group.id);
+      getNotificationList(social, mid).push({
+        id: crypto.randomUUID(), type: 'group_disbanded',
+        groupId: group.id, groupName: group.name,
+        fromUserId: req.userId, fromName, createdAt: now, read: false,
+      });
+    }
+    // Cancel pending invitations' notifications for non-members too
+    for (const inv of group.invitations) {
+      if (inv.status === 'pending') {
+        removeNotifications(getNotificationList(social, inv.userId), n => n.type === 'group_invitation' && n.invitationId === inv.id);
+      }
+    }
+    // Active sessions are terminated when the group is disbanded (key contract)
+    terminateSessionsForGroup(group.id);
+    // Library entries are deleted with the group; personal originals untouched.
+    delete getStudyGroups(social)[group.id];
+    saveSocial(social);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== GROUP STUDY SESSIONS (SessionManager) =====
+
+// SessionManager: in-memory registry of active StudySessions (Group Study
+// ADR-001 — SSE fan-out; a server restart terminates all sessions by design).
+// SessionEvent: { type: 'state'|'advance'|'join'|'leave'|'end', sessionId,
+//   currentIndex, totalItems, participantIds, scores }
+// SessionSummary (persisted on end): { sessionId, hostId, itemId, itemType,
+//   totalItems, scores, startedAt, endedAt }
+const activeSessions = new Map();
+
+function findActiveSessionForGroup(groupId) {
+  for (const s of activeSessions.values()) if (s.groupId === groupId) return s;
+  return null;
+}
+
+function sessionEventPayload(session, type) {
+  return {
+    type, sessionId: session.sessionId,
+    currentIndex: session.currentIndex, totalItems: session.totalItems,
+    participantIds: [...session.participantIds], scores: { ...session.scores },
+  };
+}
+
+function writeSessionEvent(res, eventId, payload) {
+  try {
+    res.write(`id: ${eventId}\ndata: ${JSON.stringify(payload)}\n\n`);
+    res.flush?.();
+  } catch {}
+}
+
+function broadcastSessionEvent(session, type) {
+  session.eventId += 1;
+  const payload = sessionEventPayload(session, type);
+  for (const res of session.streams.values()) writeSessionEvent(res, session.eventId, payload);
+}
+
+function detachSessionStream(session, userId, { broadcastLeave = true } = {}) {
+  const interval = session.keepalives.get(userId);
+  if (interval) clearInterval(interval);
+  session.keepalives.delete(userId);
+  const res = session.streams.get(userId);
+  session.streams.delete(userId);
+  if (res) { try { res.end(); } catch {} }
+  session.participantIds = session.participantIds.filter(p => p !== userId);
+  if (broadcastLeave) broadcastSessionEvent(session, 'leave');
+}
+
+// Terminates every active session for a group (disband / member-removal hooks).
+function terminateSessionsForGroup(groupId) {
+  for (const session of [...activeSessions.values()]) {
+    if (session.groupId !== groupId) continue;
+    broadcastSessionEvent(session, 'end');
+    for (const uid of [...session.streams.keys()]) detachSessionStream(session, uid, { broadcastLeave: false });
+    activeSessions.delete(session.sessionId);
+  }
+}
+
+function sessionTotalItems(entry) {
+  const snap = entry.snapshot || {};
+  if (entry.itemType === 'flashcardDeck') return Math.max(1, (snap.cards || []).length);
+  if (entry.itemType === 'curriculum') {
+    const lessons = (snap.units || []).reduce((n, u) => n + ((u.lessons || []).length), 0);
+    return Math.max(1, lessons);
+  }
+  return 1;
+}
+
+// Start a session: caller becomes Session Host (AC-GS-005.1)
+app.post('/api/study-groups/:id/sessions', authMiddleware, (req, res) => {
+  try {
+    const { libraryItemId, mode } = req.body || {};
+    if (!libraryItemId) return res.status(400).json({ error: 'libraryItemId required' });
+    const social = loadSocial();
+    const group = findStudyGroup(social, req.params.id);
+    if (!group || !isGroupMember(group, req.userId)) return res.status(404).json({ error: 'Group not found' });
+    const entry = group.library.find(l => l.id === libraryItemId);
+    if (!entry) return res.status(404).json({ error: 'Material not found in the group library' });
+    if (findActiveSessionForGroup(group.id)) return res.status(409).json({ error: 'This group already has an active session' });
+    const now = new Date().toISOString();
+    const session = {
+      sessionId: crypto.randomUUID(), groupId: group.id, hostId: req.userId,
+      libraryItemId: entry.id, itemId: entry.itemId, itemType: entry.itemType,
+      itemTitle: entry.title, mode: String(mode || 'flashcards').slice(0, 50),
+      totalItems: sessionTotalItems(entry), currentIndex: 0,
+      participantIds: [req.userId], scores: {}, startedAt: now,
+      eventId: 0, streams: new Map(), keepalives: new Map(),
+    };
+    // Notify every other member with a join action (AC-GS-005.2 / AC-GS-006.2).
+    // Members who join the group later must join explicitly (AC-GS-005.7).
+    const users = loadUsers();
+    const hostName = shareDisplayName(social, users, req.userId);
+    const sessionName = `${entry.title} (${session.mode})`;
+    for (const mid of group.memberIds) {
+      if (mid === req.userId) continue;
+      getNotificationList(social, mid).push({
+        id: crypto.randomUUID(), type: 'session_started',
+        groupId: group.id, groupName: group.name,
+        sessionId: session.sessionId, sessionName,
+        fromUserId: req.userId, fromName: hostName,
+        createdAt: now, read: false,
+      });
+    }
+    saveSocial(social);
+    // Register only after the notification write succeeds, so a failed save
+    // cannot leave the group 409-locked by a session the client never saw.
+    activeSessions.set(session.sessionId, session);
+    res.json({ session: { sessionId: session.sessionId, groupId: group.id, hostId: session.hostId, libraryItemId: entry.id, itemTitle: session.itemTitle, itemType: session.itemType, mode: session.mode, totalItems: session.totalItems, currentIndex: 0, startedAt: now } });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// SSE stream for a session participant. Membership is validated before the
+// stream is established (blueprint key contract). On connect (fresh join or
+// Last-Event-ID reconnect) the current state is replayed — never history
+// (AC-GS-005.3 / AC-GS-005.5).
+app.get('/api/study-groups/:id/sessions/:sessionId/stream', authMiddleware, (req, res) => {
+  try {
+    const social = loadSocial();
+    const group = findStudyGroup(social, req.params.id);
+    if (!group || !isGroupMember(group, req.userId)) return res.status(404).json({ error: 'Group not found' });
+    const session = activeSessions.get(req.params.sessionId);
+    if (!session || session.groupId !== group.id) return res.status(404).json({ error: 'Session not found or has ended' });
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    // Replace any stale connection for this user without a leave broadcast
+    if (session.streams.has(req.userId)) detachSessionStream(session, req.userId, { broadcastLeave: false });
+
+    session.streams.set(req.userId, res);
+    if (!session.participantIds.includes(req.userId)) session.participantIds.push(req.userId);
+
+    // Current state to the new connection, join to everyone else
+    session.eventId += 1;
+    writeSessionEvent(res, session.eventId, sessionEventPayload(session, 'state'));
+    for (const [uid, stream] of session.streams) {
+      if (uid === req.userId) continue;
+      writeSessionEvent(stream, session.eventId, sessionEventPayload(session, 'join'));
+    }
+
+    const keepalive = setInterval(() => {
+      try { res.write(`: keepalive ${Date.now()}\n\n`); res.flush?.(); } catch {}
+    }, 8000);
+    session.keepalives.set(req.userId, keepalive);
+
+    req.on('close', () => {
+      // Only detach if this response is still the registered stream (a
+      // reconnect may have already replaced it).
+      if (session.streams.get(req.userId) === res) {
+        detachSessionStream(session, req.userId);
+      } else {
+        clearInterval(keepalive);
+      }
+    });
+  } catch (e) {
+    // Headers may already be flushed (SSE); end the stream rather than hang it
+    try { res.status(500).json({ error: e.message }); } catch { try { res.end(); } catch {} }
+  }
+});
+
+// Host advances to the next item; all participant views update in sync
+// (AC-GS-005.4). The host may attach { scores: { userId: number } } — SSE is
+// one-way, so quiz scoring flows through the host's advance calls.
+app.post('/api/study-groups/:id/sessions/:sessionId/advance', authMiddleware, (req, res) => {
+  try {
+    const session = activeSessions.get(req.params.sessionId);
+    if (!session || session.groupId !== req.params.id) return res.status(404).json({ error: 'Session not found or has ended' });
+    if (session.hostId !== req.userId) return res.status(403).json({ error: 'Only the session host can advance' });
+    // Host must still be a group member (covers removal mid-session)
+    const groupNow = findStudyGroup(loadSocial(), session.groupId);
+    if (!groupNow || !isGroupMember(groupNow, req.userId)) return res.status(404).json({ error: 'Group not found' });
+    const { scores } = req.body || {};
+    if (scores && typeof scores === 'object') {
+      for (const [uid, val] of Object.entries(scores)) {
+        if (Number.isFinite(val) && (session.participantIds.includes(uid) || uid in session.scores)) session.scores[uid] = val;
+      }
+    }
+    if (session.currentIndex < session.totalItems - 1) session.currentIndex += 1;
+    broadcastSessionEvent(session, 'advance');
+    res.json({ session: sessionEventPayload(session, 'state') });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Host ends the session: broadcast end (participants render the summary from
+// this final event — AC-GS-005.6), persist SessionSummary, close streams.
+app.delete('/api/study-groups/:id/sessions/:sessionId', authMiddleware, (req, res) => {
+  try {
+    const session = activeSessions.get(req.params.sessionId);
+    if (!session || session.groupId !== req.params.id) return res.status(404).json({ error: 'Session not found or has ended' });
+    if (session.hostId !== req.userId) return res.status(403).json({ error: 'Only the session host can end the session' });
+    // Host must still be a group member (covers removal mid-session)
+    const groupCheck = findStudyGroup(loadSocial(), session.groupId);
+    if (!groupCheck || !isGroupMember(groupCheck, req.userId)) return res.status(404).json({ error: 'Group not found' });
+    const endedAt = new Date().toISOString();
+    const summary = {
+      sessionId: session.sessionId, hostId: session.hostId,
+      itemId: session.itemId, itemType: session.itemType,
+      totalItems: session.totalItems, scores: { ...session.scores },
+      startedAt: session.startedAt, endedAt,
+    };
+    broadcastSessionEvent(session, 'end');
+    for (const uid of [...session.streams.keys()]) detachSessionStream(session, uid, { broadcastLeave: false });
+    activeSessions.delete(session.sessionId);
+    const social = loadSocial();
+    const group = findStudyGroup(social, session.groupId);
+    if (group) {
+      group.sessions.push(summary);
+      saveSocial(social);
+    }
+    res.json({ summary });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -9736,7 +10694,7 @@ app.post('/api/math-tutor/chat', authMiddleware, requireMessageQuota, async (req
     const planMT = getPlan(users[email], email);
     const requestedMT = STUDY_MODELS[req.body?.model]
       ? req.body.model
-      : (users[email].data.preferences?.mathTutorModel || DEFAULT_STUDY_MODEL);
+      : (users[email].data.preferences?.mathTutorModel || DEFAULT_MATH_TUTOR_MODEL);
     const r = resolveStudyModel(requestedMT, users[email], email);
     const billHaiku = r.key === 'haiku' && !PAID_TIERS.has(planMT);
     if (STUDY_MODELS[req.body?.model] && studyModelAllowed(req.body.model, planMT)) {
@@ -12910,18 +13868,23 @@ app.get('/api/debate/my-active-tournament', authMiddleware, (req, res) => {
 });
 
 // POST /api/debate/suggest-topics - return 6 fresh AI-picked debate
-// topics. Optional body { theme: string, exclude: string[] } to bias the
-// suggestions. Used by every debate setup screen (solo, 1v1, tournament).
+// topics. Optional body { theme: string, exclude: string[], context: string }
+// to bias the suggestions. `context` carries source material (e.g. a QBpedia
+// article) so every resolution is grounded in its actual facts. Used by
+// every debate setup screen (solo, 1v1, tournament) and the QBpedia handoff.
 app.post('/api/debate/suggest-topics', authMiddleware, async (req, res) => {
   try {
     const theme = String(req.body?.theme || '').trim().slice(0, 120);
+    // 12k matches the QBpedia digest cap - the notes are the sole source
+    // for grounded resolutions, so don't starve them.
+    const context = String(req.body?.context || '').trim().slice(0, 12000);
     const exclude = Array.isArray(req.body?.exclude) ? req.body.exclude.slice(0, 20).map(s => String(s).slice(0, 200)) : [];
     const sys = `You generate single-sentence debate resolutions. Output STRICT JSON only.
 
 Each topic should:
 - Be debatable from both sides with real arguments.
 - Be short (under 12 words).
-- Mix categories: tech, education, ethics, policy, culture, science.
+- ${context ? 'Hinge on a SPECIFIC fact, claim, event, or assessment stated in the provided source notes - never on general knowledge of the broader category. Someone who only read the notes must be able to argue both sides; reading the resolution should tell you which line of the notes it came from.' : 'Mix categories: tech, education, ethics, policy, culture, science.'}
 - Avoid loaded language; phrase as a claim ("X should Y") or a question.
 - Be fresh - DON'T repeat any of the user's excluded topics or near-duplicates.`;
     const usr = `Return JSON exactly:
@@ -12930,6 +13893,7 @@ Each topic should:
 Constraints:
 - 6 topics, no more, no less
 - ${theme ? `Loosely themed around: ${theme}` : 'Mix of categories'}
+${context ? `- Build every resolution from these source notes (the only permitted material):\n${context}` : ''}
 ${exclude.length ? `- Avoid these (and close paraphrases): ${exclude.map(e => `"${e}"`).join(', ')}` : ''}`;
 
     // disableThinking=true: this is a short generative task, no reasoning
@@ -12950,17 +13914,27 @@ ${exclude.length ? `- Avoid these (and close paraphrases): ${exclude.map(e => `"
 
 app.post('/api/debate/singleplayer/verdict', authMiddleware, async (req, res) => {
   try {
-    const { topic, userSide, transcript } = req.body || {};
+    const { topic, userSide, transcript, context, sourceTitle } = req.body || {};
     if (!topic || !userSide || !Array.isArray(transcript)) {
       return res.status(400).json({ error: 'topic, userSide, transcript[] required' });
     }
-    const sys = `You are a debate judge. Read the full transcript and declare a winner. Output STRICT JSON only.`;
+    // Notes-grounded debates (QBpedia handoff) pass `context`: the judge
+    // then scores fidelity to the source notes, not general rhetoric.
+    const sourceNotes = String(context || '').trim().slice(0, 12000);
+    const sys = sourceNotes
+      ? `You are a debate judge for a SOURCE-GROUNDED debate: both sides were required to argue only from the provided source notes. Read the full transcript and declare a winner. Weigh accuracy above rhetoric - arguments built on facts actually stated in the notes score high; claims that contradict the notes or import outside facts score low, however eloquent. Output STRICT JSON only.`
+      : `You are a debate judge. Read the full transcript and declare a winner. Output STRICT JSON only.`;
     const lines = transcript.map((m, i) =>
       `Turn ${i + 1} - ${m.role === 'user' ? `STUDENT (${userSide.toUpperCase()})` : `AI (${userSide === 'for' ? 'AGAINST' : 'FOR'})`}: ${(m.content || '').slice(0, 1500)}`
     ).join('\n\n');
     const usr = `Topic: "${topic}"
 Student argued ${userSide.toUpperCase()}; AI argued the opposite.
-
+${sourceNotes ? `
+SOURCE NOTES${sourceTitle ? ` (encyclopedia page "${String(sourceTitle).slice(0, 200)}")` : ''} - the only evidence base both sides were allowed to use:
+"""
+${sourceNotes}
+"""
+` : ''}
 Transcript:
 ${lines}
 
@@ -13654,6 +14628,666 @@ app.post('/api/admin/users/:uid/curricula/:cid/exams/unlock', authMiddleware, ad
     saveUsers(users);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// =========================================================
+// QBPEDIA — Quiz Bowl encyclopedia
+// Pages are AI-generated on first request then cached to disk.
+// =========================================================
+
+// Articles must survive reboots — /tmp gets wiped, which made already-opened
+// pages silently regenerate. The project root won't work either: every view
+// bump rewrites the file, and Vite watches the root, so the whole dev UI
+// full-reloads on each article open. Use a stable dir outside both.
+const QBPEDIA_DIR = DATA_DIR === '/tmp/covalent-data'
+  ? join(process.env.HOME || '/tmp', '.covalent-data')
+  : DATA_DIR;
+const QBPEDIA_FILE = join(QBPEDIA_DIR, 'qbpedia.json');
+try {
+  if (!existsSync(QBPEDIA_DIR)) mkdirSync(QBPEDIA_DIR, { recursive: true });
+  // One-time migration from older storage spots (project root, then /tmp)
+  if (!existsSync(QBPEDIA_FILE)) {
+    for (const old of [join(__dirname, 'qbpedia.json'), '/tmp/covalent-data/qbpedia.json']) {
+      if (old !== QBPEDIA_FILE && existsSync(old)) {
+        writeFileSync(QBPEDIA_FILE, readFileSync(old, 'utf-8'));
+        break;
+      }
+    }
+  }
+} catch {}
+
+function loadQBpedia() {
+  try {
+    if (existsSync(QBPEDIA_FILE)) return JSON.parse(readFileSync(QBPEDIA_FILE, 'utf-8'));
+  } catch {}
+  return { pages: {}, reports: [] };
+}
+
+function saveQBpedia(data) {
+  try { writeFileSync(QBPEDIA_FILE, JSON.stringify(data, null, 2)); } catch (e) {
+    console.error('FAILED to save qbpedia:', e.message);
+  }
+}
+
+function qbpediaSlugify(text) {
+  return text.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+}
+
+const QBPEDIA_SYSTEM_BASE = `You are QBpedia, a Quiz Bowl-optimized encyclopedia. Write articles in Wikipedia format.
+
+CRITICAL: Bold (using **term**) EVERY piece of information that a quiz bowl player needs to memorize:
+- All proper nouns: people, places, organizations, battles, treaties, events
+- Key dates and years
+- Titles of works: books, paintings, musical compositions, scientific papers
+- Technical terms and domain-specific vocabulary
+- Lesser-known facts and distinguishing details that separate experts from beginners
+- Nicknames, epithets, and alternate names
+
+The bolded terms should be DENSE — a student scanning only the highlighted text should get all the essential QB facts.`;
+
+const QBPEDIA_SYSTEM = `${QBPEDIA_SYSTEM_BASE}
+
+Return ONLY valid JSON. No markdown code fences.`;
+
+// Grounded generations use a line-labeled plain-text format instead of JSON:
+// grounded multi-part responses come back with chunks missing (the SDK skips
+// interleaved thought parts), which is fatal to JSON but only cosmetic to
+// labeled prose. The ungrounded fallback keeps strict jsonMode.
+const QBPEDIA_SYSTEM_PROSE = `${QBPEDIA_SYSTEM_BASE}
+
+Output plain text in the exact TITLE:/LEAD:/SECTION:/RELATED: line format the user specifies. No JSON, no commentary before or after the article.`;
+
+function qbpediaPrompt(title) {
+  return `Write a QBpedia article about: "${title}"
+
+Return this exact JSON structure:
+{
+  "title": "canonical title",
+  "lead": "2-3 sentence lead paragraph with dense **bold** QB clues",
+  "sections": [
+    { "title": "Section Name", "content": "Paragraph with **bold** QB clues. 3-5 sentences." }
+  ],
+  "relatedTopics": ["Topic A", "Topic B", "Topic C", "Topic D", "Topic E"]
+}
+
+Requirements:
+- 4-6 sections (Early Life/Background, Major Contributions/Events, Key Works/Battles/Discoveries, Legacy/Impact, and other relevant sections)
+- Each section 3-5 sentences, dense with bolded QB facts
+- relatedTopics: 5-8 closely related QB topics
+- title should be the canonical/formal name`;
+}
+
+function qbpediaProsePrompt(title) {
+  return `Write a QBpedia article about: "${title}"
+
+Output PLAIN TEXT in EXACTLY this line format (no JSON, no markdown headings, no code fences):
+
+TITLE: the canonical/formal name
+LEAD: a 2-3 sentence lead paragraph with dense **bold** QB clues
+SECTION: First Section Name
+One paragraph for this section, 3-5 sentences, dense with **bold** QB facts.
+SECTION: Next Section Name
+One paragraph.
+RELATED: Topic A | Topic B | Topic C | Topic D | Topic E
+
+Requirements:
+- 4-6 SECTION blocks (Early Life/Background, Major Contributions/Events, Key Works/Battles/Discoveries, Legacy/Impact, and other relevant sections)
+- RELATED is one line: 5-8 closely related QB topics separated by " | "
+- The labels TITLE:, LEAD:, SECTION:, RELATED: must each start their own line exactly as shown`;
+}
+
+// Tolerant parser for the line-labeled format. Unlabeled lines attach to the
+// current LEAD/SECTION block, so a dropped chunk shortens a paragraph instead
+// of killing the page.
+function parseQBpediaProse(text) {
+  const lines = String(text || '').replace(/```[a-z]*\n?/gi, '').split('\n');
+  const page = { title: '', lead: '', sections: [], relatedTopics: [] };
+  let mode = null;
+  let current = null;
+  for (const raw of lines) {
+    const m = raw.match(/^\s*\**\s*(TITLE|LEAD|SECTION|RELATED)\s*\**\s*:\s*(.*)$/i);
+    if (m) {
+      const key = m[1].toUpperCase();
+      const rest = m[2].trim();
+      if (key === 'TITLE') { page.title = rest; mode = null; }
+      else if (key === 'LEAD') { page.lead = rest; mode = 'lead'; }
+      else if (key === 'SECTION') { current = { title: rest, content: '' }; page.sections.push(current); mode = 'section'; }
+      else if (key === 'RELATED') { page.relatedTopics = rest.split('|').map(s => s.trim()).filter(Boolean); mode = null; }
+      continue;
+    }
+    const t = raw.trim();
+    if (!t) continue;
+    if (mode === 'lead') page.lead += (page.lead ? ' ' : '') + t;
+    else if (mode === 'section' && current) current.content += (current.content ? ' ' : '') + t;
+  }
+  page.sections = page.sections.filter(s => s.title && s.content);
+  if (!page.title || !page.lead) throw new Error('Invalid page structure from AI');
+  return page;
+}
+
+// Appended to grounded attempts only — the ungrounded fallback has no tool,
+// and telling a tool-less model to use one degrades the output.
+const QBPEDIA_SEARCH_MANDATE = `
+
+MANDATORY: Before writing anything, use the google_search tool. Run at least two searches on this topic and base every name, date, title, and fact on the search results, not on memory. An article written without searching is unacceptable.
+
+Do NOT use Wikipedia or any Wikimedia property as a source — QBpedia exists to replace Wikipedia, so it can never cite it. Ground facts in other references instead: Britannica, academic/.edu pages, museums, libraries, archives, primary sources. Wikipedia-backed results are discarded after the fact, so an article grounded only in Wikipedia ends up with no citations at all.`;
+
+// QBpedia's premise is "not Wikipedia", so its citations must not be
+// Wikipedia either. Grounding URLs are opaque vertex redirects; the chunk
+// title carries the source domain, so match on both fields.
+function isWikipediaSource(s) {
+  return /wikipedia|wikimedia|wiktionary/i.test(`${s?.url || ''} ${s?.title || ''}`);
+}
+
+// Drop Wikipedia entries from a page's source list and renumber the inline
+// [n] markers in the prose to match. Single-pass replace so renumbering
+// can't collide (e.g. [3]→[2] while the old [2] is being removed). Mutates
+// `page` (lead/sections) and returns the filtered source list.
+function dropWikipediaCitations(page, sources) {
+  const keep = [];
+  const remap = new Map(); // old 1-based marker → new 1-based marker
+  (sources || []).forEach((s, i) => {
+    if (isWikipediaSource(s)) return;
+    keep.push(s);
+    remap.set(String(i + 1), String(keep.length));
+  });
+  if (keep.length === (sources || []).length) return { changed: false, sources: sources || [] };
+  const rewrite = (t) => typeof t === 'string'
+    ? t.replace(/\s*\[(\d+)\]/g, (m, n) => (remap.has(n) ? m.replace(n, remap.get(n)) : ''))
+    : t;
+  page.lead = rewrite(page.lead);
+  (page.sections || []).forEach(sec => { sec.content = rewrite(sec.content); });
+  return { changed: true, sources: keep };
+}
+
+// callGemini's grounding injector splices [n] markers into the raw response
+// by byte offset. Usually they land inside JSON string values (fine — those
+// are the inline citations), but when a grounding segment ends exactly at a
+// value boundary the marker lands OUTSIDE the string ("NBA" [1],) and breaks
+// JSON.parse — that was why some topics cited fine and others came back
+// sourceless. This walks the text and drops [digits] tokens outside strings;
+// in-string markers stay. Safe for this schema: no QBpedia field is an array
+// of bare numbers.
+function stripMarkersOutsideStrings(text) {
+  let out = '';
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      out += ch;
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; out += ch; continue; }
+    if (ch === '[') {
+      let j = i + 1;
+      while (j < text.length && text[j] >= '0' && text[j] <= '9') j++;
+      if (j > i + 1 && text[j] === ']') { i = j; continue; }
+    }
+    out += ch;
+  }
+  return out;
+}
+
+// The model wraps or trails its JSON often enough (markdown fences, stray
+// text after the closing brace -- seen even in jsonMode) that a greedy
+// first-{-to-last-} regex misfires on trailing junk. Parse as-is first;
+// failing that, scan from the first { to its balanced closing brace,
+// string- and escape-aware, and parse just that slice.
+function qbpediaExtractJson(text) {
+  try { return JSON.parse(text); } catch (firstErr) {
+    const start = text.indexOf('{');
+    if (start === -1) throw firstErr;
+    let depth = 0, inStr = false, esc = false;
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (esc) { esc = false; continue; }
+      if (inStr) {
+        if (ch === '\\') esc = true;
+        else if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') inStr = true;
+      else if (ch === '{') depth++;
+      else if (ch === '}') {
+        depth--;
+        if (!depth) return JSON.parse(text.slice(start, i + 1));
+      }
+    }
+    throw firstErr;
+  }
+}
+
+// Re-attach inline [n] markers to a parsed article: for each grounding
+// segment, find its text inside the lead or a section and append the marker
+// right after the match. Matching is by literal text (with JSON-unescaped
+// variants tried), so a segment that spanned structural JSON syntax simply
+// doesn't match and is skipped — a lost marker beats corrupted JSON.
+function attachInlineCites(page, supports) {
+  if (!supports?.length) return;
+  const fields = [{ get: () => page.lead, set: v => { page.lead = v; } }];
+  (page.sections || []).forEach(sec => {
+    fields.push({ get: () => sec.content, set: v => { sec.content = v; } });
+  });
+  for (const sup of supports) {
+    const raw = String(sup.text || '');
+    const candidates = [raw, raw.replace(/\\"/g, '"').replace(/\\n/g, '\n')];
+    let placed = false;
+    for (const f of fields) {
+      const hay = f.get() || '';
+      for (const cand of candidates) {
+        const t = cand.trim();
+        if (t.length < 12) continue; // too short to place confidently
+        const at = hay.indexOf(t);
+        if (at < 0) continue;
+        const end = at + t.length;
+        const markers = sup.markers.map(n => `[${n}]`).join('');
+        if (!hay.slice(end, end + markers.length + 2).includes(markers)) {
+          f.set(hay.slice(0, end) + ' ' + markers + hay.slice(end));
+        }
+        placed = true;
+        break;
+      }
+      if (placed) break;
+    }
+  }
+}
+
+// One generation attempt: call the model, parse, validate shape.
+// Grounded attempts use the line-labeled prose format (JSON proved fragile:
+// multi-part grounded responses lose interleaved chunks, and byte-offset
+// marker splicing corrupted what survived). callGemini runs in segment mode
+// (skipCitationMarkers) so the text comes back untouched, then
+// attachInlineCites places the [n] markers on the parsed fields.
+// Ungrounded attempts have no tool and no markers, so strict jsonMode is
+// safe and stays — qbpediaExtractJson handles stray fences/trailing junk.
+async function qbpediaCallAndParse(prompt, { grounded }) {
+  const result = await callGemini(
+    grounded ? QBPEDIA_SYSTEM_PROSE : QBPEDIA_SYSTEM,
+    [{ role: 'user', content: grounded ? prompt + QBPEDIA_SEARCH_MANDATE : prompt }],
+    GEMINI_PRO,
+    8192,
+    grounded ? { enableWebSearch: true, skipCitationMarkers: true } : { jsonMode: true }
+  );
+  if (!result.success) throw new Error(result.error || 'AI call failed');
+  const raw = result.data?.content?.[0]?.text || '';
+  let parsed;
+  if (grounded) {
+    parsed = parseQBpediaProse(raw);
+  } else {
+    parsed = qbpediaExtractJson(stripMarkersOutsideStrings(raw));
+    if (!parsed?.title || !parsed?.lead) {
+      console.warn('QBpedia bad structure, response head:', raw.slice(0, 240).replace(/\s+/g, ' '));
+      throw new Error('Invalid page structure from AI');
+    }
+  }
+  // Citation markers belong in body text only — scrub strays from fields
+  // that render as chips, headers, or window titles.
+  const stripMarks = (s) => typeof s === 'string' ? s.replace(/\s*\[\d+\]/g, '') : s;
+  parsed.title = stripMarks(parsed.title);
+  parsed.relatedTopics = (parsed.relatedTopics || []).map(stripMarks);
+  (parsed.sections || []).forEach(s => { s.title = stripMarks(s.title); });
+  attachInlineCites(parsed, result.data?.supports);
+  // Despite the mandate, grounding sometimes still leans on Wikipedia —
+  // enforce the rule here so no caller can cache a Wikipedia citation.
+  const filtered = dropWikipediaCitations(parsed, result.data?.sources || []);
+  return { parsed, sources: filtered.sources };
+}
+
+// Pages are written by Gemini Pro with Google Search grounding so facts are
+// verified and cited. Sources are REQUIRED: even with the mandate, the model
+// sometimes answers from memory and returns zero grounding chunks (seen on
+// "NBA"), so a sourceless grounded result gets one full retry. Only when both
+// grounded attempts come back empty do we accept a sourceless article (some
+// topics genuinely have nothing to ground), and only when the grounded path
+// hard-errors do we regenerate ungrounded.
+async function generateQBpediaContent(title, extraNote = '') {
+  const note = extraNote ? `\n\n${extraNote}` : '';
+  let sourceless = null;
+  let lastErr = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const r = await qbpediaCallAndParse(qbpediaProsePrompt(title) + note, { grounded: true });
+      if (r.sources.length) return r;
+      sourceless = sourceless || r;
+      console.warn(`QBpedia grounded attempt ${attempt + 1} for "${title}" returned no sources`);
+    } catch (e) {
+      lastErr = e;
+      console.warn(`QBpedia grounded attempt ${attempt + 1} for "${title}" failed:`, e.message);
+    }
+  }
+  if (sourceless) return sourceless;
+  console.warn('QBpedia grounding unavailable, generating ungrounded:', lastErr?.message);
+  return await qbpediaCallAndParse(qbpediaPrompt(title) + note, { grounded: false });
+}
+
+// Admin AI edit: apply a targeted instruction to an existing page and return
+// the revised page, WITHOUT saving. Unlike report-resolve's 'ai' path (a full
+// grounded regeneration), this edits the text the page already has, so
+// untouched sections come back verbatim and existing [n] markers stay aligned
+// with the page's numbered source list. Ungrounded on purpose: no search tool
+// means jsonMode is safe (see qbpediaCallAndParse).
+async function qbpediaAiEdit(page, instruction) {
+  const sourceList = (page.sources || [])
+    .map((s, i) => `[${i + 1}] ${s.title || s.url}`)
+    .join('\n');
+  const prompt = `You are editing an existing QBpedia article. Apply the editor's instruction and return the FULL revised article as JSON in this exact structure:
+{
+  "title": "...",
+  "lead": "...",
+  "sections": [ { "title": "...", "content": "..." } ],
+  "relatedTopics": ["..."]
+}
+
+Rules:
+- Apply ONLY the instruction. Every part of the article it does not touch must be returned word-for-word unchanged.
+- Keep the **bold** QB-clue markers; any new text you write should be just as dense with bolded clues.
+- Inline [n] markers cite the numbered source list below. Keep existing markers attached to the facts they cite. Never invent a marker number that is not on the list; new text that no listed source supports carries no marker.
+
+EDITOR'S INSTRUCTION: ${instruction}
+
+CURRENT ARTICLE (JSON):
+${JSON.stringify({ title: page.title, lead: page.lead, sections: page.sections || [], relatedTopics: page.relatedTopics || [] }, null, 2)}
+${sourceList ? `\nNUMBERED SOURCES:\n${sourceList}` : ''}`;
+
+  const { parsed } = await qbpediaCallAndParse(prompt, { grounded: false });
+  return {
+    title: parsed.title,
+    lead: parsed.lead,
+    sections: (parsed.sections || []).map(s => ({ title: String(s?.title ?? ''), content: String(s?.content ?? '') })),
+    relatedTopics: (parsed.relatedTopics || []).map(t => String(t)),
+  };
+}
+
+// In-flight generation map so concurrent requests for the same slug don't trigger double-gen
+const qbpediaGenerating = new Set();
+// Failed generations: slug -> error message. Without this, the client's poll
+// re-triggered a fresh generation every 2.5s after a failure, forever.
+const qbpediaFailed = new Map();
+
+async function generateQBpediaPage(slug, title) {
+  if (qbpediaGenerating.has(slug)) return;
+  qbpediaGenerating.add(slug);
+  qbpediaFailed.delete(slug);
+  try {
+    const { parsed, sources } = await generateQBpediaContent(title);
+    const data = loadQBpedia();
+    data.pages[slug] = {
+      slug,
+      title: parsed.title,
+      lead: parsed.lead,
+      sections: parsed.sections || [],
+      relatedTopics: parsed.relatedTopics || [],
+      sources,
+      generatedAt: new Date().toISOString(),
+      views: 0,
+      version: 1,
+    };
+    saveQBpedia(data);
+  } catch (e) {
+    console.error('QBpedia generation failed for', slug, e.message);
+    qbpediaFailed.set(slug, e.message || 'Generation failed');
+  } finally {
+    qbpediaGenerating.delete(slug);
+  }
+}
+
+// Pages cached before citations shipped have no `sources`. When one is
+// opened, rewrite it in the background (the stale copy keeps being served
+// meanwhile) and swap in the cited version when it lands. One attempt per
+// slug per boot, and a still-sourceless rewrite is discarded rather than
+// churning content the student may already have studied.
+const qbpediaRefreshAttempted = new Set();
+async function refreshQBpediaSources(slug, title) {
+  if (qbpediaGenerating.has(slug) || qbpediaRefreshAttempted.has(slug)) return;
+  qbpediaRefreshAttempted.add(slug);
+  qbpediaGenerating.add(slug);
+  try {
+    const { parsed, sources } = await generateQBpediaContent(title);
+    if (!sources.length) return;
+    const data = loadQBpedia();
+    const old = data.pages[slug];
+    if (!old || (old.sources || []).length) return;
+    data.pages[slug] = {
+      ...old,
+      title: parsed.title,
+      lead: parsed.lead,
+      sections: parsed.sections || [],
+      relatedTopics: parsed.relatedTopics || [],
+      sources,
+      generatedAt: new Date().toISOString(),
+      version: (old.version || 1) + 1,
+    };
+    saveQBpedia(data);
+  } catch (e) {
+    console.warn('QBpedia source refresh failed for', slug, e.message);
+  } finally {
+    qbpediaGenerating.delete(slug);
+  }
+}
+
+// GET /api/wiki/pages — list recently generated pages
+app.get('/api/wiki/pages', authMiddleware, (req, res) => {
+  const data = loadQBpedia();
+  const pages = Object.values(data.pages)
+    .sort((a, b) => new Date(b.generatedAt) - new Date(a.generatedAt))
+    .slice(0, 50)
+    .map(({ slug, title, lead, generatedAt, views }) => ({ slug, title, lead, generatedAt, views }));
+  res.json({ pages });
+});
+
+// GET /api/wiki/titles — slug + title of every cached page. Feeds the
+// wiki-style interlinks inside article text, so no 50-page cap here.
+app.get('/api/wiki/titles', authMiddleware, (req, res) => {
+  const data = loadQBpedia();
+  const titles = Object.values(data.pages).map(({ slug, title }) => ({ slug, title }));
+  res.json({ titles });
+});
+
+// GET /api/wiki/search?q= — full text search over cached pages
+app.get('/api/wiki/search', authMiddleware, (req, res) => {
+  const q = (req.query.q || '').toLowerCase().trim();
+  if (!q) return res.json({ results: [] });
+  const data = loadQBpedia();
+  const results = Object.values(data.pages)
+    .filter(p => {
+      const hay = `${p.title} ${p.lead} ${(p.sections || []).map(s => s.content).join(' ')}`.toLowerCase();
+      return hay.includes(q) || p.slug.includes(q.replace(/\s+/g, '-'));
+    })
+    .slice(0, 20)
+    .map(({ slug, title, lead, generatedAt, views }) => ({ slug, title, lead, generatedAt, views }));
+  res.json({ results });
+});
+
+// GET /api/wiki/:slug — get or trigger generation of a page
+app.get('/api/wiki/:slug', authMiddleware, async (req, res) => {
+  const slug = qbpediaSlugify(req.params.slug);
+  const data = loadQBpedia();
+
+  // Exact slug match, or an existing page whose canonical title slugifies to
+  // this slug (e.g. "french-revolution" -> page titled "The French Revolution").
+  // An already-generated article must never be generated a second time.
+  const page = data.pages[slug]
+    || Object.values(data.pages).find(p => qbpediaSlugify(p.title) === slug);
+  if (page) {
+    // Pages cached before the no-Wikipedia rule may still cite it — scrub
+    // on serve (runs once per page; afterwards `changed` stays false). If
+    // the scrub empties the source list, the backfill below regenerates
+    // the article under the new mandate.
+    const scrub = dropWikipediaCitations(page, page.sources);
+    if (scrub.changed) {
+      page.sources = scrub.sources;
+      saveQBpedia(data);
+    }
+    // Increment view count (fire-and-forget) — but not for background polls
+    // (the source-backfill poll would otherwise bump views every few seconds
+    // and rewrite the json file each time).
+    if (req.query.poll !== '1') {
+      page.views = (page.views || 0) + 1;
+      saveQBpedia(data);
+    }
+    // Pre-citation pages get their sources backfilled in the background;
+    // `refreshing` tells the client to keep polling and swap the page in.
+    let refreshing = false;
+    if (!(page.sources || []).length) {
+      refreshQBpediaSources(page.slug, page.title); // async, don't await
+      refreshing = qbpediaGenerating.has(page.slug);
+    }
+    return res.json({ page, generating: false, refreshing });
+  }
+
+  if (qbpediaGenerating.has(slug)) {
+    return res.json({ page: null, generating: true });
+  }
+
+  // A previous attempt failed — report it instead of silently regenerating
+  // on every poll. The client retries explicitly with ?retry=1.
+  if (qbpediaFailed.has(slug) && req.query.retry !== '1') {
+    return res.json({ page: null, generating: false, failed: true, error: qbpediaFailed.get(slug) });
+  }
+
+  // Not cached — kick off generation and return generating:true
+  const title = slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  generateQBpediaPage(slug, title); // async, don't await
+  res.json({ page: null, generating: true });
+});
+
+// POST /api/wiki/:slug/report — submit an error report
+app.post('/api/wiki/:slug/report', authMiddleware, (req, res) => {
+  const slug = qbpediaSlugify(req.params.slug);
+  const { reason } = req.body;
+  if (!reason?.trim()) return res.status(400).json({ error: 'Reason required' });
+  const data = loadQBpedia();
+  const page = data.pages[slug];
+  if (!data.reports) data.reports = [];
+  data.reports.push({
+    id: crypto.randomBytes(8).toString('hex'),
+    slug,
+    pageTitle: page?.title || slug,
+    reportedBy: req.userEmail,
+    reason: reason.trim(),
+    createdAt: new Date().toISOString(),
+    resolved: false,
+    resolution: null,
+  });
+  saveQBpedia(data);
+  res.json({ ok: true });
+});
+
+// GET /api/admin/wiki/reports — list open reports
+app.get('/api/admin/wiki/reports', authMiddleware, adminMiddleware, (req, res) => {
+  const data = loadQBpedia();
+  const reports = (data.reports || [])
+    .filter(r => !r.resolved)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.json({ reports });
+});
+
+// POST /api/admin/wiki/reports/:id/resolve — AI rewrite or mark resolved
+app.post('/api/admin/wiki/reports/:id/resolve', authMiddleware, adminMiddleware, async (req, res) => {
+  const { id } = req.params;
+  const { resolution, manualContent } = req.body; // resolution: 'ai' | 'manual' | 'dismiss'
+  const data = loadQBpedia();
+  if (!data.reports) return res.status(404).json({ error: 'No reports' });
+  const report = data.reports.find(r => r.id === id);
+  if (!report) return res.status(404).json({ error: 'Report not found' });
+
+  try {
+    if (resolution === 'ai') {
+      const page = data.pages[report.slug];
+      const title = page?.title || report.slug.replace(/-/g, ' ');
+      const { parsed, sources } = await generateQBpediaContent(
+        title,
+        `Note: A user reported this error: "${report.reason}". Please fix it in your rewrite.`
+      );
+      data.pages[report.slug] = {
+        ...(data.pages[report.slug] || {}),
+        slug: report.slug,
+        title: parsed.title,
+        lead: parsed.lead,
+        sections: parsed.sections || [],
+        relatedTopics: parsed.relatedTopics || [],
+        sources,
+        generatedAt: new Date().toISOString(),
+        version: ((data.pages[report.slug]?.version) || 1) + 1,
+      };
+    } else if (resolution === 'manual' && manualContent) {
+      // manualContent is the full page JSON from the admin editor
+      const page = data.pages[report.slug];
+      data.pages[report.slug] = {
+        ...(page || {}),
+        ...manualContent,
+        slug: report.slug,
+        version: ((page?.version) || 1) + 1,
+        generatedAt: new Date().toISOString(),
+      };
+    }
+    report.resolved = true;
+    report.resolution = resolution;
+    report.resolvedAt = new Date().toISOString();
+    saveQBpedia(data);
+    res.json({ ok: true, page: data.pages[report.slug] || null });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /api/admin/wiki/pages/:slug — admin edits a page in place
+app.put('/api/admin/wiki/pages/:slug', authMiddleware, adminMiddleware, (req, res) => {
+  const slug = qbpediaSlugify(req.params.slug);
+  const data = loadQBpedia();
+  const page = data.pages[slug];
+  if (!page) return res.status(404).json({ error: 'Page not found' });
+  const { title, lead, sections, relatedTopics } = req.body || {};
+  if (typeof title === 'string' && title.trim()) page.title = title.trim();
+  if (typeof lead === 'string') page.lead = lead;
+  if (Array.isArray(sections)) {
+    page.sections = sections
+      .filter(s => s && typeof s.title === 'string' && typeof s.content === 'string')
+      .map(s => ({ title: s.title.trim(), content: s.content }))
+      .filter(s => s.title || s.content.trim());
+  }
+  if (Array.isArray(relatedTopics)) {
+    page.relatedTopics = relatedTopics.map(t => String(t).trim()).filter(Boolean);
+  }
+  page.version = (page.version || 1) + 1;
+  page.editedAt = new Date().toISOString();
+  page.editedBy = req.userEmail;
+  saveQBpedia(data);
+  res.json({ ok: true, page });
+});
+
+// POST /api/admin/wiki/pages/:slug/ai-edit — AI applies the admin's
+// instruction to the current page and returns a draft. Nothing is saved here:
+// the draft lands in the editor for review and commits via the PUT above, so
+// every write still goes through one path (version bump, editedAt, editedBy).
+app.post('/api/admin/wiki/pages/:slug/ai-edit', authMiddleware, adminMiddleware, async (req, res) => {
+  const slug = qbpediaSlugify(req.params.slug);
+  const instruction = String(req.body?.instruction || '').trim();
+  if (!instruction) return res.status(400).json({ error: 'Instruction required' });
+  const data = loadQBpedia();
+  const page = data.pages[slug];
+  if (!page) return res.status(404).json({ error: 'Page not found' });
+  try {
+    const draft = await qbpediaAiEdit(page, instruction.slice(0, 2000));
+    res.json({ draft });
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'AI edit failed' });
+  }
+});
+
+// DELETE /api/admin/wiki/pages/:slug — delete a cached page
+app.delete('/api/admin/wiki/pages/:slug', authMiddleware, adminMiddleware, (req, res) => {
+  const slug = qbpediaSlugify(req.params.slug);
+  const data = loadQBpedia();
+  if (!data.pages[slug]) return res.status(404).json({ error: 'Page not found' });
+  delete data.pages[slug];
+  saveQBpedia(data);
+  res.json({ ok: true });
 });
 
 // SPA fallback (Express 5 syntax)

@@ -38,7 +38,12 @@ export default function useBrowserBack(active, onBack) {
       if (handlingRef.current) return;
       // Swallow the popstate caused by our own cleanup history.back() (see note
       // at top) so a deep-linked / already-active mount doesn't snap back.
-      if (Date.now() < ignoreNextPopUntil) { ignoreNextPopUntil = 0; return; }
+      // Don't reset the guard here: every active instance receives this same
+      // popstate (multiple open windows each register a listener), so the
+      // first one consuming the guard would leave the rest treating it as a
+      // real Back - which snapped deep-linked windows (QBpedia -> Quiz Bowl)
+      // to their default view on mount. The 150ms TTL expires it instead.
+      if (Date.now() < ignoreNextPopUntil) return;
       handlingRef.current = true;
       pushedRef.current = false;
       try { onBackRef.current?.(); } catch {}

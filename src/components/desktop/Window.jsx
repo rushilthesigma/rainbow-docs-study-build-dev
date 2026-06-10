@@ -19,7 +19,7 @@ function MacTitleBar({ windowId, isActive, title, onDragStart, onDoubleClick, ti
   return (
     // position:relative + zIndex:1 keeps this above the dedicated blur layer below it.
     <div className="h-8 flex items-center flex-shrink-0 select-none" style={{ ...barStyle, position: 'relative', zIndex: 1 }} onPointerDown={onDragStart} onDoubleClick={onDoubleClick} data-titlebar={windowId}>
-      <div className="flex items-center gap-[7px] px-3" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+      <div className="flex items-center gap-[7px] px-3" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onPointerDown={e => e.stopPropagation()}>
         <button onClick={e => { e.stopPropagation(); closeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FF5F57] hover:brightness-90 flex items-center justify-center" title="Close"><X size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#4a0002]" /></button>
         <button onClick={e => { e.stopPropagation(); minimizeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#FEBC2E] hover:brightness-90 flex items-center justify-center" title="Minimize"><Minus size={hovered ? 8 : 0} strokeWidth={2.5} className="text-[#5a3e00]" /></button>
         <button onClick={e => { e.stopPropagation(); maximizeWindow(windowId); }} className="w-3 h-3 rounded-full bg-[#28C840] hover:brightness-90 flex items-center justify-center" title="Zoom - fills the desktop. ⌘⇧P for true fullscreen."><Maximize2 size={hovered ? 7 : 0} strokeWidth={2.5} className="text-[#005200]" /></button>
@@ -196,14 +196,22 @@ function Window({ win, isActive, children, focusWindow, moveWindow, resizeWindow
           : isActive
             ? '0 25px 50px -12px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.1)'
             : '0 10px 30px -8px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.05)',
+        // box-shadow is intentionally NOT in this transition list.
+        // When focus changes, every open window is a separate GPU compositor
+        // layer. A 0.15s box-shadow transition means ~9 frames of sustained
+        // repaint across 2 windows per focus event. Each repaint forces the
+        // Dock/MenuBar backdrop-filter to re-composite ALL N window layers —
+        // the more windows are open, the heavier that composite and the more
+        // likely the compositor misses vsync → one-frame wallpaper flash.
+        // Snapping the shadow instantly (no transition) reduces that to a
+        // single composite on the first frame, eliminating the sustained load.
         transition:
           'left 0.25s cubic-bezier(0.22, 1, 0.36, 1),' +
           ' top 0.25s cubic-bezier(0.22, 1, 0.36, 1),' +
           ' width 0.25s cubic-bezier(0.22, 1, 0.36, 1),' +
           ' height 0.25s cubic-bezier(0.22, 1, 0.36, 1),' +
           ' transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),' +
-          ' opacity 0.2s ease-in-out,' +
-          ' box-shadow 0.15s',
+          ' opacity 0.2s ease-in-out',
       }}
       aria-hidden={minimized}
       onPointerDown={() => focusWindow(win.id)}

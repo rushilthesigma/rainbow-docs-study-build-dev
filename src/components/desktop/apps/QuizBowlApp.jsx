@@ -32,6 +32,7 @@ const SYSTEM_PROMPT = `You are a quiz bowl question writer. Write pyramidal quiz
 RULES:
 - Each question is a single paragraph that starts with hard clues and progressively gets easier
 - The answer should be guessable from the first few clues by experts, but obvious by the end
+- NEVER state the answer inside the question text - clues describe it without naming it, and the question does not end with "What is X?"
 - Include exactly one NAQT-style power mark "(*)" placed roughly 60-70% through the question (after the hard clues, before the giveaway). Buzzing before (*) earns +15, after earns +10.
 - Write exactly the number of questions requested
 - Output ONLY valid JSON, no markdown
@@ -39,13 +40,36 @@ RULES:
 Format:
 {"questions":[{"text":"Hard opening clue. More obscure clues. (*) Easier middle clue. Giveaway clue.","answer":"Answer"}]}`;
 
-function generatePrompt(category, difficulty, count, customInstructions) {
+// `source` ({ title, text }) is the QBpedia handoff: when present the notes
+// are the ONLY permitted fact base — the prompt flips from "write about a
+// category" to "write from this text", because framing the article as a mere
+// instruction let the model fall back on its own knowledge of the topic.
+function generatePrompt(category, difficulty, count, customInstructions, source = null) {
   const difficultyGuide = {
     Easy: 'Use well-known facts. Giveaway clue should be very obvious. Target: high school students.',
     Medium: 'Mix of common and uncommon knowledge. Standard college quiz bowl level.',
     Hard: 'Use obscure clues early. Require deep subject expertise. Only the giveaway should be accessible to non-experts.',
     Tournament: 'NAQT/ACF Nationals level. Opening clues should be nearly impossible except for top players. Use extremely obscure references, secondary works, lesser-known facts. Questions should be 5-7 sentences. Even the giveaway should require solid knowledge.',
   };
+  if (source?.text) {
+    return `Generate ${count} pyramidal quiz bowl tossup questions sourced ENTIRELY from the source notes below.
+Difficulty: ${difficulty}
+${difficultyGuide[difficulty] || ''}
+
+SOURCE NOTES on "${source.title}" — the only permitted fact base:
+"""
+${source.text}
+"""
+
+HARD RULES (these override everything above):
+- Every clue in every question must restate a fact that is stated in the source notes. Use NO outside knowledge — no extra dates, names, works, numbers, or events, even ones you are certain are true.
+- Every answer must be "${source.title}" itself or a person, work, place, event, or term named in the source notes.
+- Vary the answers when the notes name enough distinct entities - a set where every answer is "${source.title}" is guessable after question one.
+- Pyramidal means within the notes: open with the notes' most obscure details, end with the giveaway built from the notes' most famous fact.
+- If the notes cannot support ${count} fully distinct questions, reuse different facts and angles from the notes rather than inventing material.
+${customInstructions ? `- Additional instructions from the user: ${customInstructions}` : ''}
+Return JSON: {"questions":[{"text":"...","answer":"..."}]}`;
+  }
   return `Generate ${count} pyramidal quiz bowl tossup questions.
 Category: ${category}
 Difficulty: ${difficulty}
@@ -114,7 +138,7 @@ function useWordReveal(text, speed = 140, active = false) {
   return { revealed, done, wordIndex, totalWords: words.length, stop };
 }
 
-export default function QuizBowlApp({ initialTopic = null, initialDifficulty = null } = {}) {
+export default function QuizBowlApp({ initialTopic = null, initialDifficulty = null, initialQuestions = null, initialContext = null, autoStart = false } = {}) {
   const { openApp } = useWindowManager();
   function openLessonFor(topic) {
     if (!topic) return;
@@ -123,14 +147,17 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   }
   // 'hub' is the new landing screen (stats + recommendations + history).
   // 'custom' is the old setup form, still available for fine control.
-  // When deep-linked from study mode with a topic, jump straight to the
-  // custom form so the student can hit Start without hunting.
-  const [view, setView] = useState(initialTopic ? 'custom' : 'hub');
+  // When deep-linked from study mode with pre-generated questions, jump
+  // straight to playing. With just a topic, jump to the custom form.
+  const hasPreloaded = Array.isArray(initialQuestions) && initialQuestions.length > 0;
+  const [view, setView] = useState(hasPreloaded ? 'playing' : initialTopic ? 'custom' : 'hub');
   const [aiLobbyInitial, setAiLobbyInitial] = useState('lobby');
   const [replaySet, setReplaySet] = useState(null);
   useBrowserBack(view !== 'hub', () => { setView('hub'); setReplaySet(null); });
   const { user } = useAuth();
-  const [questions, setQuestions] = useState([]);
+  const [questions, setQuestions] = useState(() =>
+    hasPreloaded ? initialQuestions.map(q => ({ ...q, ...parseTossupText(q.text || '') })) : []
+  );
   const [currentQ, setCurrentQ] = useState(0);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState(null);
@@ -145,7 +172,9 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   const [questionCount, setQuestionCount] = useState(10);
   const [customInstructions, setCustomInstructions] = useState(initialTopic ? `Focus on: ${initialTopic}` : '');
   const [revealSpeedMs, setRevealSpeedMs] = useState(140);
-  const [questionSource, setQuestionSource] = useState('qbreader');
+  // Topic deep-links (QBpedia, study mode) need the AI source — the custom
+  // "Focus on" instructions only apply to generated questions, not qbreader.
+  const [questionSource, setQuestionSource] = useState(initialTopic ? 'ai' : 'qbreader');
   const [playingSource, setPlayingSource] = useState('ai');
 
   // Hub: history + recommendations from the server. Loaded on first
@@ -161,7 +190,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   const [patterns, setPatterns] = useState(cachedPats?.patterns || null);
   const [sm2Due, setSm2Due] = useState(cachedSm2?.dueCategories || []);
   const [hubLoading, setHubLoading] = useState(!(cachedHist && cachedRecs && cachedPats));
-  const setStartedAtRef = useRef(null);     // ms timestamp when current set began
+  const setStartedAtRef = useRef(hasPreloaded ? Date.now() : null);
   const savedSetIdRef = useRef(null);       // guard so we save each set exactly once
 
   async function loadHub() {
@@ -190,6 +219,25 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   // (instead of returning the stale "before this set" data).
   function bustHubCache() { bustPrefix('qb:'); }
   useEffect(() => { loadHub(); }, []);
+
+  // QBpedia handoff: start the game immediately instead of parking on the
+  // setup form. The article rides along as the sole fact source — the
+  // tossups are built from the page's text, never from the model's own
+  // knowledge of the topic. Manual retries from the form keep the same
+  // grounding (sourceNotes below) so a regenerate can't drift off-page.
+  const sourceNotes = initialContext ? { title: initialTopic || 'this topic', text: initialContext } : null;
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (!autoStart || !initialTopic || hasPreloaded || autoStartedRef.current) return;
+    autoStartedRef.current = true;
+    launchSet({
+      category: 'Mixed',
+      difficulty,
+      source: 'ai',
+      customInstructions: sourceNotes ? '' : `Focus on: ${initialTopic}`,
+      notes: sourceNotes,
+    });
+  }, []);
 
   const [buzzed, setBuzzed] = useState(false);
   const [answer, setAnswer] = useState('');
@@ -225,8 +273,11 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   // Launch a set with explicit category/difficulty/source - used by the
   // hub's "Train weakness" / "Recommended" / "Replay last" CTAs so the
   // user can skip the setup form when the choice is already implied.
-  // Pass `customInstructions` to focus AI-generated questions on a niche topic.
-  async function launchSet({ category: cat, difficulty: diff, source = 'qbreader', customInstructions: customInstr = '' }) {
+  // Pass `customInstructions` to focus AI-generated questions on a niche
+  // topic. Pass `notes` ({ title, text }) to ground generation entirely in
+  // source material — only the QBpedia handoff does; hub CTAs must not, or
+  // a category drill after an article game would stay pinned to the article.
+  async function launchSet({ category: cat, difficulty: diff, source = 'qbreader', customInstructions: customInstr = '', notes = null }) {
     setCategory(cat);
     setDifficulty(diff);
     setQuestionSource(source);
@@ -245,7 +296,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
           method: 'POST',
           body: JSON.stringify({
             system: SYSTEM_PROMPT,
-            messages: [{ role: 'user', content: generatePrompt(cat, diff, 10, customInstr) }],
+            messages: [{ role: 'user', content: generatePrompt(cat, diff, 10, customInstr, notes) }],
             max_tokens: 8192,
           }),
         });
@@ -293,7 +344,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
         method: 'POST',
         body: JSON.stringify({
           system: SYSTEM_PROMPT,
-          messages: [{ role: 'user', content: generatePrompt(category, difficulty, questionCount, customInstructions) }],
+          messages: [{ role: 'user', content: generatePrompt(category, difficulty, questionCount, customInstructions, sourceNotes) }],
           max_tokens: 8192,
         }),
       });

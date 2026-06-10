@@ -17,3 +17,4 @@ parties.json
 # JimmyQRG games mirror, pulled by scripts/fetch-jimmyqrg.sh, ~450MB.
 # Do NOT commit; rerun the script to restore locally.
 games/
+.write-test

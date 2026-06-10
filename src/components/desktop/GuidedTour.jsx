@@ -87,15 +87,6 @@ const QB_STEPS = [
     advanceOn: 'click',
   },
   {
-    id: 'qb-buzz',
-    target: '[data-tour="qb-buzz"]',
-    title: 'Buzz when you know',
-    body: 'Words appear one at a time. Hit Buzz the instant you recognize the answer — bots are doing the same, so be fast.',
-    advanceOn: 'next',
-    waitingTitle: 'Loading questions…',
-    waitingBody: 'Hold tight — pulling tossups now.',
-  },
-  {
     id: 'qb-wrap',
     target: null,
     title: "You're in",

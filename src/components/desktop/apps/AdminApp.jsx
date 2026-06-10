@@ -4,13 +4,14 @@ import {
   MessageSquare, Lightbulb, Trophy, CreditCard, Search, Crown, Calendar,
   RefreshCw, ChevronRight, Zap, ClipboardList, BarChart3, X, Check,
   Swords, Activity, ChevronDown, Sparkles, TrendingDown, Clock,
-  Lock, Unlock, GraduationCap,
+  Lock, Unlock, GraduationCap, Globe, AlertTriangle, Wand2, Edit3,
 } from 'lucide-react';
 import {
   checkAdmin, listUsers, getUser, toggleBan, deleteUser,
   getStudySession, getStandaloneLesson, getCurriculumLesson, getUserQuizBowl,
   unlockExam,
 } from '../../../api/admin';
+import { listWikiReports, resolveWikiReport, deleteWikiPage } from '../../../api/wiki';
 import { ownerGrantPro, ownerRevokePro } from '../../../api/billing';
 import LoadingSpinner from '../../shared/LoadingSpinner';
 import AdvisorBadge from '../../shared/AdvisorBadge';
@@ -27,7 +28,7 @@ export default function AdminApp() {
   const [canBan, setCanBan] = useState(false);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState('list'); // list | analytics | detail | chat
+  const [view, setView] = useState('list'); // list | analytics | detail | chat | wiki
   const [selectedUser, setSelectedUser] = useState(null);
   const [conv, setConv] = useState(null);
 
@@ -203,6 +204,14 @@ export default function AdminApp() {
     );
   }
 
+  if (view === 'wiki') {
+    return (
+      <ViewFade viewKey="wiki" className="h-full flex flex-col">
+        <WikiReportsPanel onClose={() => setView('list')} />
+      </ViewFade>
+    );
+  }
+
   return (
     <ViewFade viewKey="list" className="h-full flex flex-col">
     <UserList
@@ -215,6 +224,7 @@ export default function AdminApp() {
       onOpen={openUser}
       onRefresh={refreshList}
       onAnalytics={() => setView('analytics')}
+      onWiki={() => setView('wiki')}
     />
     </ViewFade>
   );
@@ -246,7 +256,7 @@ function activenessScore(u) {
 }
 
 /* ====================== USER LIST ====================== */
-function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, sort, setSort, includeDemo, setIncludeDemo, onOpen, onRefresh, onAnalytics }) {
+function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, sort, setSort, includeDemo, setIncludeDemo, onOpen, onRefresh, onAnalytics, onWiki }) {
   const DAY = 86_400_000;
   const HOUR = 3_600_000;
   const now = Date.now();
@@ -292,6 +302,13 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
             />
             Demo
           </label>
+          <button
+            onClick={onWiki}
+            className="flex items-center gap-1 text-white/35 hover:text-white/75 px-2.5 py-1.5 rounded-lg hover:bg-white/[0.06] transition-colors text-[11px] font-medium"
+            title="QBpedia Reports"
+          >
+            <Globe size={13} /> Wiki
+          </button>
           <button
             onClick={onAnalytics}
             className="flex items-center gap-1 text-white/35 hover:text-white/75 px-2.5 py-1.5 rounded-lg hover:bg-white/[0.06] transition-colors text-[11px] font-medium"
@@ -1682,6 +1699,143 @@ function ConversationViewer({ conv, onBack }) {
             <div className="text-xs text-white/80 whitespace-pre-wrap break-words">{m.content}</div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+/* =====================================================================
+ * WIKI REPORTS PANEL
+ * Lists open QBpedia error reports. Admin can AI-rewrite or dismiss.
+ * ===================================================================*/
+function WikiReportsPanel({ onClose }) {
+  const [reports, setReports] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [resolving, setResolving] = useState({});
+  const [expanded, setExpanded] = useState(null);
+  const toast = useToast();
+
+  useEffect(() => {
+    setLoading(true);
+    listWikiReports()
+      .then(d => setReports(d.reports || []))
+      .catch(e => toast.error(e.message || 'Failed to load'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function resolve(id, resolution) {
+    setResolving(prev => ({ ...prev, [id]: resolution }));
+    try {
+      await resolveWikiReport(id, resolution);
+      setReports(prev => prev.filter(r => r.id !== id));
+      toast.success(resolution === 'ai' ? 'Page rewritten by AI' : 'Report dismissed');
+    } catch (e) {
+      toast.error(e.message || 'Failed to resolve');
+    }
+    setResolving(prev => ({ ...prev, [id]: null }));
+  }
+
+  async function handleDeletePage(slug) {
+    try {
+      await deleteWikiPage(slug);
+      toast.success('Page deleted — will regenerate on next visit');
+    } catch (e) {
+      toast.error(e.message || 'Failed to delete');
+    }
+  }
+
+  return (
+    <div className="h-full overflow-y-auto">
+      <div className="p-5 pb-8">
+        <button onClick={onClose} className="flex items-center gap-2 text-sm text-white/40 hover:text-white/70 mb-4 transition-colors">
+          <ArrowLeft size={16} /> Admin Panel
+        </button>
+
+        <div className="flex items-center gap-2 mb-4">
+          <div className="w-8 h-8 rounded-xl bg-violet-500/15 border border-violet-500/30 flex items-center justify-center text-violet-300 flex-shrink-0">
+            <Globe size={15} />
+          </div>
+          <div>
+            <h2 className="text-[15px] font-bold text-white/90">QBpedia Reports</h2>
+            <p className="text-[10.5px] text-white/40">{reports.length} open report{reports.length !== 1 ? 's' : ''}</p>
+          </div>
+        </div>
+
+        {loading && (
+          <div className="flex items-center justify-center py-12">
+            <LoadingSpinner size={20} />
+          </div>
+        )}
+
+        {!loading && reports.length === 0 && (
+          <div className="rounded-2xl border border-dashed border-white/[0.08] bg-white/[0.02] p-8 text-center">
+            <Check size={22} className="text-emerald-400 mx-auto mb-2" />
+            <p className="text-[13px] font-semibold text-white/70">All clear</p>
+            <p className="text-[11px] text-white/35 mt-1">No open QBpedia reports.</p>
+          </div>
+        )}
+
+        <div className="space-y-2">
+          {reports.map(r => {
+            const busy = resolving[r.id];
+            const isOpen = expanded === r.id;
+            return (
+              <div key={r.id} className="rounded-xl border border-white/[0.08] bg-white/[0.03] overflow-hidden">
+                <button
+                  onClick={() => setExpanded(isOpen ? null : r.id)}
+                  className="w-full flex items-start gap-3 px-3.5 py-3 text-left"
+                >
+                  <div className="w-7 h-7 rounded-lg bg-amber-500/15 border border-amber-400/25 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <AlertTriangle size={12} className="text-amber-300" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-semibold text-white/90 truncate">{r.pageTitle}</p>
+                    <p className="text-[11px] text-white/45 line-clamp-1 mt-0.5">{r.reason}</p>
+                    <p className="text-[10px] text-white/25 mt-0.5">
+                      {r.reportedBy} · {new Date(r.createdAt).toLocaleString()}
+                    </p>
+                  </div>
+                  <ChevronDown size={14} className={`text-white/30 transition-transform flex-shrink-0 mt-1 ${isOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {isOpen && (
+                  <div className="border-t border-white/[0.05] bg-black/20 px-3.5 py-3 space-y-3">
+                    <div className="rounded-lg bg-amber-500/[0.07] border border-amber-400/20 px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-wider font-bold text-amber-300/70 mb-1">Report</p>
+                      <p className="text-[12px] text-white/75 leading-relaxed">{r.reason}</p>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => resolve(r.id, 'ai')}
+                        disabled={!!busy}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-violet-500/20 border border-violet-400/30 text-violet-200 hover:bg-violet-500/30 disabled:opacity-40 transition-colors"
+                      >
+                        {busy === 'ai' ? <RefreshCw size={11} className="animate-spin" /> : <Wand2 size={11} />}
+                        AI Rewrite
+                      </button>
+                      <button
+                        onClick={() => resolve(r.id, 'dismiss')}
+                        disabled={!!busy}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-white/[0.05] border border-white/[0.10] text-white/55 hover:bg-white/[0.09] disabled:opacity-40 transition-colors"
+                      >
+                        {busy === 'dismiss' ? <RefreshCw size={11} className="animate-spin" /> : <X size={11} />}
+                        Dismiss
+                      </button>
+                      <button
+                        onClick={() => handleDeletePage(r.slug)}
+                        disabled={!!busy}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-rose-500/[0.10] border border-rose-400/25 text-rose-300 hover:bg-rose-500/[0.18] disabled:opacity-40 transition-colors"
+                      >
+                        <Trash2 size={11} /> Delete page
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

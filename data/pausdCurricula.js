@@ -14,10 +14,11 @@
 // teaches each lesson at PAUSD-honors rigor. Science courses follow
 // the NGSS California Integrated 1/2/3 sequence.
 //
-// The Africa Geography elective is generated from the user's IGC Africa study
-// notes (one unit per country, grounded in the notes via textbookContext) and
-// lives in its own module.
+// The Africa and Europe Geography electives are generated from the user's IGC
+// study notes (one unit per country, grounded in the notes via textbookContext)
+// and live in their own modules.
 import { AFRICA_GEOGRAPHY_COURSE } from './africaGeography.js';
+import { EUROPE_GEOGRAPHY_COURSE } from './europeGeography.js';
 
 export const PAUSD_CATALOG = [
   // =====================================================================
@@ -901,10 +902,12 @@ export const PAUSD_CATALOG = [
   },
 
   // =====================================================================
-  // GEOGRAPHY - "Africa Geography", generated from the user's IGC Africa
-  // study notes. Country-by-country units + a cumulative final exam.
+  // GEOGRAPHY - "Africa Geography" and "Europe Geography", generated from
+  // the user's IGC study notes. Country-by-country units + a cumulative
+  // final exam each.
   // =====================================================================
   AFRICA_GEOGRAPHY_COURSE,
+  EUROPE_GEOGRAPHY_COURSE,
 ];
 
 // Helper: get a single template by slug.

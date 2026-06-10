@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, Layers, Plus, RotateCcw, Check, X, Trash2, ArrowRight, Loader2, Sparkles, Edit3 } from 'lucide-react';
+import { ArrowLeft, Layers, Plus, RotateCcw, Check, X, Trash2, ArrowRight, Loader2, Sparkles, Edit3, Share2 } from 'lucide-react';
 import { listDecks, createDeck, getDeck, deleteDeck, submitReview, addCards } from '../../../api/flashcards';
 import LoadingSpinner from '../../shared/LoadingSpinner';
 import { peek, fetchOnce, bust } from '../../../api/cache';
 import ViewFade from '../../shared/ViewFade';
+import ShareDialog from '../../shared/ShareDialog';
 
 const inputCls = 'w-full rounded-xl border border-white/[0.08] bg-white/[0.04] px-3.5 py-2.5 text-[13px] text-white/85 placeholder:text-white/25 focus:outline-none focus:border-white/[0.20] focus:bg-white/[0.07] transition-colors';
 
@@ -27,6 +28,7 @@ export default function FlashcardsApp() {
   const [addTab, setAddTab] = useState('ai');
   const [manualFront, setManualFront] = useState('');
   const [manualBack, setManualBack] = useState('');
+  const [shareTarget, setShareTarget] = useState(null);
 
   useEffect(() => {
     fetchOnce('flashcards:list', listDecks)
@@ -112,10 +114,23 @@ export default function FlashcardsApp() {
           >
             <ArrowLeft size={13} /> Decks
           </button>
-          <button onClick={handleDeleteDeck} className="text-white/20 hover:text-rose-400 transition-colors">
-            <Trash2 size={14} />
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShareTarget({ id: deck.id, type: 'flashcardDeck', title: deck.title })}
+              className="text-white/20 hover:text-blue-300 transition-colors"
+              title="Share deck"
+            >
+              <Share2 size={14} />
+            </button>
+            <button onClick={handleDeleteDeck} className="text-white/20 hover:text-rose-400 transition-colors">
+              <Trash2 size={14} />
+            </button>
+          </div>
         </div>
+
+        {shareTarget && (
+          <ShareDialog item={shareTarget} onClose={() => setShareTarget(null)} />
+        )}
 
         <h2 className="text-[18px] font-bold text-white/90 mb-0.5 shrink-0">{deck.title}</h2>
         <p className="text-[12px] text-white/35 mb-4 shrink-0">{deck.cards?.length || 0} cards · {dueCards.length} due</p>

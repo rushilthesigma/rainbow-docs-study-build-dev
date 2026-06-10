@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useAuth } from './AuthContext';
 import { syncData } from '../api/auth';
 
@@ -41,9 +41,30 @@ const DEFAULTS = {
 // available - there's nowhere to persist to without a session.
 export function UIPreferenceProvider({ children }) {
   const { user, fetchUser } = useAuth();
-  const prefs = user?.data?.preferences || {};
+  const serverPrefs = user?.data?.preferences || {};
 
-  // Resolve effective values - server pref first, defaults second.
+  // Optimistic overrides applied immediately on setX calls, before the
+  // server round-trip completes. Cleared once fetchUser resolves.
+  const [optimisticPrefs, setOptimisticPrefs] = useState({});
+
+  // Merge: optimistic wins over server, server wins over defaults.
+  const prefs = useMemo(() => ({ ...serverPrefs, ...optimisticPrefs }), [serverPrefs, optimisticPrefs]);
+
+  // Drop optimistic keys once the server data catches up.
+  useEffect(() => {
+    if (!Object.keys(optimisticPrefs).length) return;
+    setOptimisticPrefs(prev => {
+      const next = { ...prev };
+      let changed = false;
+      for (const key of Object.keys(prev)) {
+        if (serverPrefs[key] === prev[key]) { delete next[key]; changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverPrefs]);
+
+  // Resolve effective values - merged pref first, defaults second.
   const rawWallpaper = prefs.wallpaper || DEFAULTS.wallpaper;
   const wallpaper = RETIRED_WALLPAPERS.has(rawWallpaper) ? DEFAULTS.wallpaper : rawWallpaper;
   // Theme is locked to dark - light mode is not supported.
@@ -74,18 +95,18 @@ export function UIPreferenceProvider({ children }) {
   // sequence of setX calls (theme then wallpaper, say) doesn't race -
   // each call merges into the latest snapshot, not the stale user.data.
   const latestPrefs = useRef(prefs);
-  useEffect(() => { latestPrefs.current = user?.data?.preferences || {}; }, [user]);
+  useEffect(() => { latestPrefs.current = { ...serverPrefs, ...optimisticPrefs }; }, [serverPrefs, optimisticPrefs]);
 
   const setPref = useCallback(async (key, value) => {
     if (!user) return;
+    // Apply immediately so the UI reacts without waiting for the server.
+    setOptimisticPrefs(prev => ({ ...prev, [key]: value }));
     const next = { ...latestPrefs.current, [key]: value };
     latestPrefs.current = next;
     try {
       await syncData({ preferences: next });
       await fetchUser();
     } catch (err) {
-      // Soft-fail - the local optimistic update is already applied to
-      // the ref but the server didn't accept. Worth surfacing later.
       console.error('Failed to sync preferences:', err);
     }
   }, [user, fetchUser]);
