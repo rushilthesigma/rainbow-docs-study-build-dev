@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, Plus, Sparkles, Loader2, BookOpen, ChevronDown, ChevronRight, CheckCircle2, Circle, Lock, ClipboardCheck, PenTool, FileText, Check, X, Trophy, Wand2, Paperclip, Upload, Calculator, GraduationCap, Atom, Sigma, Map as MapIcon, List, ListChecks, Share2 } from 'lucide-react';
-import { listCurricula, generateCurriculum, getCurriculum, sendLessonMessage, getLessonHistory, editCurriculumWithAI, extractSourceUrl, extractFiles, refineCurriculum } from '../../../api/curriculum';
+import { ArrowLeft, Plus, Loader2, BookOpen, ChevronDown, ChevronRight, CheckCircle2, Circle, Lock, ClipboardCheck, PenTool, FileText, Check, X, Trophy, Wand2, Paperclip, Upload, Calculator, GraduationCap, Atom, Sigma, Map as MapIcon, List, ListChecks, Share2, Users, BarChart3 } from 'lucide-react';
+import { listCurricula, generateCurriculum, getCurriculum, sendLessonMessage, getLessonHistory, editCurriculumWithAI, extractSourceUrl, extractFiles, refineCurriculum, generateLessonBlocks, generateFinalQuiz, gradeQuizBlock, gradeOpenBlock, completeLessonBlock, getCurriculumGradebook } from '../../../api/curriculum';
+import { getSharedItem, listOutgoing } from '../../../api/share';
+import { useSharing } from '../../../context/SharingContext';
 import { peek, fetchOnce, bust } from '../../../api/cache';
 import ViewFade from '../../shared/ViewFade';
 import { useToast } from '../../shared/Toast';
@@ -23,6 +25,7 @@ import MathText from '../../shared/MathText';
 import MathTutorApp from './MathTutorApp';
 import TrailView from '../../curriculum/TrailView';
 import BlockLessonView from '../../lesson/BlockLessonView';
+import GradebookView from '../../curriculum/GradebookView';
 import ExamBlock from '../../lesson/ExamBlock';
 import QuizBlock from '../../lesson/QuizBlock';
 import { useAuth } from '../../../context/AuthContext';
@@ -32,6 +35,16 @@ import { InlineProgress } from '../../shared/ProgressBar';
 
 const TYPE_ICONS = { lesson: BookOpen, math_tutor: Calculator, practice: PenTool, problem_set: ListChecks, essay: FileText, unit_test: ClipboardCheck };
 const TYPE_COLORS = { lesson: 'text-white/50', math_tutor: 'text-white/50', practice: 'text-white/50', problem_set: 'text-white/50', essay: 'text-amber-400', unit_test: 'text-rose-400' };
+
+// Course-grade / score pill color by percentage. Semantic, matching the
+// gradebook: emerald = strong, sky = solid, amber = shaky, rose = failing.
+function gradePillClass(pct) {
+  if (pct == null) return 'border-white/15 bg-white/5 text-white/50';
+  if (pct >= 90) return 'border-emerald-400/30 bg-emerald-500/10 text-emerald-300';
+  if (pct >= 80) return 'border-sky-400/30 bg-sky-500/10 text-sky-300';
+  if (pct >= 70) return 'border-amber-400/30 bg-amber-500/10 text-amber-300';
+  return 'border-rose-400/30 bg-rose-500/10 text-rose-300';
+}
 
 // When opened from another app (e.g. NotesApp's "Build Curriculum from
 // note" action), the window-manager `meta` is spread as props. We use
@@ -64,6 +77,17 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
   const [curricula, setCurricula] = useState(() => cachedCurricula?.curricula || []);
   const [loading, setLoading] = useState(!cachedCurricula);
   const [selectedCurriculum, setSelectedCurriculum] = useState(null);
+  // Curriculum sharing. `activeShare` is set while viewing a curriculum that
+  // was shared WITH me (all reads/writes then carry its shareId and resolve
+  // to the owner's copy). `outgoingPartners` holds the accepted recipients
+  // of MY selected curriculum - non-empty means co-study chat is on for its
+  // lessons. Incoming invites render in the list view's "Shared with you".
+  const { incomingShares, acceptShare, declineShare } = useSharing();
+  const [activeShare, setActiveShare] = useState(null);
+  const [outgoingPartners, setOutgoingPartners] = useState([]);
+  // Shared-curriculum gradebook (owner + accepted recipients' performance).
+  const [gradebook, setGradebook] = useState(null);
+  const [gradebookLoading, setGradebookLoading] = useState(false);
   // WindowManager is optional - the desktop shell provides it, but if this
   // component is ever rendered outside of one (mobile, for instance) we
   // just skip the math-tutor handoff rather than crashing.
@@ -80,6 +104,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
     if (view === 'lesson') setView('detail');
     else if (view === 'assessment') setView('detail');
     else if (view === 'math_tutor') setView('detail');
+    else if (view === 'gradebook') setView('detail');
     else setView('list');
   });
 
@@ -292,12 +317,85 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
     setSources(prev => prev.filter(s => s.id !== id));
   }
 
-  async function openCurriculum(id) {
-    setView('detail');
+  // Re-fetch the open curriculum in place (without changing the view), so a
+  // freshly graded unit test reflects its score, completion check, and the
+  // updated course grade as soon as the student returns to the detail view.
+  async function refreshSelectedCurriculum(id) {
+    if (!id) return;
     try { const data = await getCurriculum(id); setSelectedCurriculum(data.curriculum); } catch {}
   }
 
+  async function openCurriculum(id) {
+    setView('detail');
+    setActiveShare(null);
+    setOutgoingPartners([]);
+    try { const data = await getCurriculum(id); setSelectedCurriculum(data.curriculum); } catch {}
+    // Anyone with an accepted share studies this curriculum WITH me - their
+    // names label the co-study chat rail in the lesson view.
+    try {
+      const shares = await listOutgoing(id);
+      setOutgoingPartners((shares || []).filter(s => s.status === 'accepted').map(s => s.recipientName || 'Study partner'));
+    } catch {}
+  }
+
+  // A curriculum someone shared with me: same detail view, but every lesson
+  // call resolves to the OWNER's copy via the shareId, so we study the same
+  // live object together.
+  async function openSharedCurriculum(share) {
+    setView('detail');
+    setActiveShare(share);
+    setOutgoingPartners([]);
+    setSelectedCurriculum(null);
+    try {
+      const curriculum = await getSharedItem('curriculum', share.itemId, share.id);
+      setSelectedCurriculum(curriculum);
+    } catch (e) {
+      toast.error(e.message || "Couldn't open the shared curriculum.");
+      setActiveShare(null);
+      setView('list');
+    }
+  }
+
+  // Open the shared-curriculum gradebook. Works for the owner (sees everyone
+  // they shared with) and for recipients (the shared group's progress).
+  async function openGradebook() {
+    const cid = selectedCurriculum?.id;
+    if (!cid) return;
+    setView('gradebook');
+    setGradebook(null);
+    setGradebookLoading(true);
+    try {
+      const data = await getCurriculumGradebook(cid);
+      setGradebook(data);
+    } catch (e) {
+      toast.error(e.message || "Couldn't load the gradebook.");
+      setView('detail');
+    } finally {
+      setGradebookLoading(false);
+    }
+  }
+
+  async function refreshGradebook() {
+    const cid = gradebook?.curriculum?.id || selectedCurriculum?.id;
+    if (!cid) return;
+    setGradebookLoading(true);
+    try {
+      const data = await getCurriculumGradebook(cid);
+      setGradebook(data);
+    } catch (e) {
+      toast.error(e.message || "Couldn't refresh the gradebook.");
+    } finally {
+      setGradebookLoading(false);
+    }
+  }
+
   async function openLesson(lesson, curriculumId) {
+    // Shared curricula support the standard block lessons only - the other
+    // flows (math tutor, assessments, essays) don't carry the shareId yet.
+    if (activeShare && lesson.type && lesson.type !== 'lesson') {
+      toast.info('Only standard lessons are available in a shared curriculum for now.');
+      return;
+    }
     setCurrentLesson({ ...lesson, curriculumId });
     // Unit-test typed lessons go to a real assessment quiz, not the chat tutor.
     if (lesson.type === 'unit_test' || lesson.type === 'essay') {
@@ -391,7 +489,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
         <AssessmentView
           lesson={currentLesson}
           curriculum={selectedCurriculum}
-          onBack={() => setView('detail')}
+          onBack={() => { refreshSelectedCurriculum(selectedCurriculum?.id || currentLesson.curriculumId); setView('detail'); }}
         />
       </ViewFade>
     );
@@ -405,8 +503,16 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
   if (view === 'math_tutor' && currentLesson) {
     const isPractice = currentLesson.type === 'practice';
     const isProblemSet = currentLesson.type === 'problem_set';
+    const concepts = Array.isArray(currentLesson.practiceConcepts) ? currentLesson.practiceConcepts : [];
     const seed = currentLesson.practiceTopic || currentLesson.title;
     const label = isProblemSet ? 'Problem Set' : isPractice ? 'Practice' : 'Math Tutor';
+    // The unit Math Tutor is the middle of the Lesson -> Math Tutor -> Unit
+    // Test loop. When it carries the unit's concept list, seed it as a pre-test
+    // review that drills exactly what the unit taught before the test.
+    const conceptLine = concepts.length ? ` Cover these concepts from the unit: ${concepts.join('; ')}.` : '';
+    const reviewSeed = `Review session for "${seed}" - my warm-up right before the unit test.${conceptLine} Teach each idea briefly, then give me one problem at a time on the canvas, starting moderate and escalating. Give step-by-step feedback when I tap Get feedback, and grade me when I ask whether I'm ready for the test.`;
+    const practiceSeed = `Practice problems on ${seed}. Give me one problem at a time on the canvas - start at moderate difficulty and escalate.`;
+    const seedTopic = isPractice ? practiceSeed : (concepts.length ? reviewSeed : seed);
     return (
       <ViewFade viewKey={`math_tutor:${currentLesson.id}`} className="h-full flex flex-col min-h-0">
         <div className="flex items-center gap-2 mb-3 flex-shrink-0">
@@ -422,7 +528,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
           <MathTutorApp
             {...(isProblemSet
               ? { seedProblemSet: { topic: seed, count: currentLesson.problemCount || 5, problems: currentLesson.problems?.length ? currentLesson.problems : null } }
-              : { seedTopic: isPractice ? `Practice problems on ${seed}. Give me one problem at a time on the canvas - start at moderate difficulty and escalate.` : seed })}
+              : { seedTopic })}
             onBack={() => setView('detail')}
           />
         </div>
@@ -435,12 +541,36 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
     // Plain "lesson" type uses the new Claudius-style 4R/4Q block view
     // with SRS. Math / essay / unit_test still go through their own flows.
     if (currentLesson.type === 'lesson' || !currentLesson.type) {
+      // Shared curriculum: route every block call through the shareId so it
+      // resolves to the owner's copy, and light up the co-study chat rail.
+      // The owner gets the rail too once someone has accepted their share.
+      const shareId = activeShare?.id || null;
+      const coStudy = (activeShare || outgoingPartners.length > 0)
+        ? {
+            shareId,
+            partnerNames: activeShare
+              ? [activeShare.ownerName || 'Study partner']
+              : outgoingPartners,
+          }
+        : null;
+      const cid = selectedCurriculum?.id;
+      const sharedApi = shareId
+        ? {
+            generateBlocks: () => generateLessonBlocks(cid, currentLesson.id, shareId),
+            generateFinalQuiz: () => generateFinalQuiz(cid, currentLesson.id, shareId),
+            gradeBlock: (bid, resp) => gradeQuizBlock(cid, currentLesson.id, bid, resp, shareId),
+            gradeOpenBlock: (bid, text) => gradeOpenBlock(cid, currentLesson.id, bid, text, shareId),
+            completeBlock: (bid) => completeLessonBlock(cid, currentLesson.id, bid, shareId),
+          }
+        : undefined;
       return (
         <ViewFade viewKey={`lesson:${currentLesson.id}`} className="h-full flex flex-col">
           <BlockLessonView
-            curriculumId={selectedCurriculum?.id}
+            curriculumId={cid}
             lesson={currentLesson}
             onBack={() => setView('detail')}
+            api={sharedApi}
+            coStudy={coStudy}
           />
         </ViewFade>
       );
@@ -527,6 +657,20 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
     );
   }
 
+  // Gradebook view - shared-curriculum performance for everyone studying it.
+  if (view === 'gradebook') {
+    return (
+      <ViewFade viewKey={`gradebook:${selectedCurriculum?.id || ''}`}>
+        <GradebookView
+          gradebook={gradebook}
+          loading={gradebookLoading}
+          onBack={() => setView('detail')}
+          onRefresh={refreshGradebook}
+        />
+      </ViewFade>
+    );
+  }
+
   // Detail view
   if (view === 'detail' && selectedCurriculum) {
     const c = selectedCurriculum;
@@ -536,11 +680,28 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
     return (
       <ViewFade viewKey={`detail:${selectedCurriculum.id}`}>
         <div className="flex items-center justify-between mb-4">
-          <button onClick={() => { setView('list'); setSelectedCurriculum(null); }} className="flex items-center gap-2 text-sm text-white/50 hover:text-white/90">
+          <button onClick={() => { setView('list'); setSelectedCurriculum(null); setActiveShare(null); }} className="flex items-center gap-2 text-sm text-white/50 hover:text-white/90">
             <ArrowLeft size={16} /> All Curricula
           </button>
           <div className="flex items-center gap-2">
-            {isBeta && (
+            {(activeShare || outgoingPartners.length > 0) && (
+              <button
+                onClick={openGradebook}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-sky-400/25 bg-sky-500/[0.08] text-xs font-semibold text-sky-200/90 hover:border-sky-400/45 hover:bg-sky-500/[0.14] transition-colors"
+                title="See everyone's performance on this shared curriculum"
+              >
+                <BarChart3 size={13} /> Gradebook
+                {!activeShare && outgoingPartners.length > 0 && (
+                  <span className="text-[10px] font-bold text-sky-200/70 tabular-nums">{outgoingPartners.length + 1}</span>
+                )}
+              </button>
+            )}
+            {activeShare && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-sky-400/25 bg-sky-500/[0.08] text-[11px] font-semibold text-sky-200/90">
+                <Users size={11} /> Shared by {activeShare.ownerName || 'a study partner'}
+              </span>
+            )}
+            {!activeShare && isBeta && (
               <button
                 onClick={toggleTrail}
                 className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
@@ -555,13 +716,15 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
                 <span className="text-[9px] font-bold uppercase tracking-wider opacity-70">BETA</span>
               </button>
             )}
-            <button
-              onClick={() => setEditOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 text-xs font-medium text-white/50 hover:border-white/25 hover:text-white/80 transition-colors"
-              title="Edit with AI"
-            >
-              <Wand2 size={12} /> Edit with AI
-            </button>
+            {!activeShare && (
+              <button
+                onClick={() => setEditOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 text-xs font-medium text-white/50 hover:border-white/25 hover:text-white/80 transition-colors"
+                title="Edit curriculum"
+              >
+                <Wand2 size={12} /> Edit
+              </button>
+            )}
           </div>
         </div>
         {!trailMode && (
@@ -572,9 +735,21 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
               <ProgressBar value={completedLessons} max={totalLessons} className="flex-1" />
               <span className="text-xs text-gray-500 tabular-nums flex-shrink-0">{completedLessons}/{totalLessons}</span>
             </div>
+            {/* Course grade - the AI's rolled-up grade from every unit test the
+                student has taken (and any graded essays). Appears once at least
+                one piece of graded work is in. */}
+            {c.graded && c.courseGrade?.percent != null && (
+              <div className="flex items-center gap-2 mb-4 -mt-1">
+                <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/35">Course grade</span>
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold tabular-nums border ${gradePillClass(c.courseGrade.percent)}`}>
+                  {c.courseGrade.letter} · {c.courseGrade.percent}%
+                </span>
+                <span className="text-[11px] text-white/30">{c.courseGrade.gradedCount} graded</span>
+              </div>
+            )}
           </>
         )}
-        {trailMode && isBeta ? (
+        {trailMode && isBeta && !activeShare ? (
           <TrailView curriculum={c} onOpenLesson={(l) => openLesson(l, c.id)} />
         ) : (
           <div className="space-y-3">
@@ -586,10 +761,13 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
               />
             ))}
 
-            {/* Course-level midterm + final, with spaced repetition */}
-            <div className="pt-4">
-              <ExamBlock curriculumId={c.id} />
-            </div>
+            {/* Course-level midterm + final, with spaced repetition.
+                Exams stay owner-only - their endpoints don't carry a shareId. */}
+            {!activeShare && (
+              <div className="pt-4">
+                <ExamBlock curriculumId={c.id} />
+              </div>
+            )}
           </div>
         )}
 
@@ -617,91 +795,76 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
         <button onClick={() => setView('list')} className="flex items-center gap-2 text-sm text-white/40 hover:text-white/90 mb-4"><ArrowLeft size={16} /> Back</button>
         <h2 className="text-lg font-bold text-white mb-4">New curriculum</h2>
         {generating && genPhase === 'questions' ? (
-          <div className="py-6 px-2 max-w-xl mx-auto w-full">
-            <div className="rounded-2xl border border-blue-400/[0.20] bg-gradient-to-b from-blue-500/[0.07] to-blue-500/[0.02] backdrop-blur-sm p-5">
-              <div className="flex items-center gap-2.5 mb-1">
-                <div className="w-7 h-7 rounded-lg bg-blue-500/20 border border-blue-400/35 grid place-items-center">
-                  <Wand2 size={13} className="text-blue-200" />
-                </div>
-                <h3 className="text-sm font-semibold text-white">A few quick questions</h3>
+          <div className="py-8 px-2 max-w-lg mx-auto w-full">
+            <div className="mb-8">
+              <h3 className="text-[22px] font-bold text-white tracking-tight">A few quick questions</h3>
+            </div>
+            {genError && (
+              <div className="px-3 py-2 mb-4 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-300">
+                {genError}
               </div>
-              <p className="text-[12px] text-blue-100/55 mb-4 pl-9">
-                So the curriculum for <span className="text-blue-100/85 font-medium">{settings.topic}</span> matches what you actually want - pick the option that fits, or skip the ones you don't have an opinion on.
-              </p>
-              {genError && (
-                <div className="px-3 py-2 mb-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-300">
-                  {genError}
-                </div>
-              )}
-              {refineQuestions.length === 0 ? (
-                <div className="flex items-center gap-2 text-[12px] text-blue-200/65 py-4">
-                  <Loader2 size={14} className="animate-spin text-blue-300" />
-                  Thinking of good questions to ask…
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {refineQuestions.map((q, qi) => {
-                    const isOpen = q.type === 'open';
-                    return (
-                      <div key={q.id} className="rounded-xl border border-blue-400/[0.12] bg-blue-500/[0.04] p-3.5">
-                        <p className="text-[13px] text-white/85 mb-2.5 flex items-start gap-2">
-                          <span className="flex-shrink-0 w-5 h-5 rounded-md bg-blue-500/20 border border-blue-400/35 text-[10px] font-bold text-blue-200 grid place-items-center mt-0.5">
-                            {qi + 1}
-                          </span>
-                          <span className="flex-1">{q.question}</span>
-                        </p>
-                        {isOpen ? (
-                          <div className="pl-7">
-                            <textarea
-                              value={refineAnswers[q.id] || ''}
-                              onChange={(e) => setRefineAnswers(p => ({ ...p, [q.id]: e.target.value }))}
-                              placeholder={q.placeholder || 'Type your answer…'}
-                              rows={2}
-                              className="w-full px-2.5 py-1.5 rounded-md bg-blue-500/[0.04] text-[12px] text-white/90 border border-blue-400/[0.16] placeholder:text-blue-200/35 hover:border-blue-400/[0.40] focus:border-blue-400/60 focus:outline-none focus:bg-blue-500/[0.08] resize-none transition-colors"
-                            />
-                          </div>
-                        ) : (
-                          <div className="flex flex-wrap gap-1.5 pl-7">
-                            {q.options.map(opt => {
-                              const active = refineAnswers[q.id] === opt;
-                              return (
-                                <button
-                                  key={opt}
-                                  onClick={() => setRefineAnswers(p => ({ ...p, [q.id]: opt }))}
-                                  className={`px-2.5 py-1 rounded-md text-[11px] border transition-colors ${
-                                    active
-                                      ? 'bg-blue-500 text-white border-blue-400/55'
-                                      : 'bg-blue-500/[0.04] text-blue-100/65 border-blue-400/[0.16] hover:text-white hover:border-blue-400/[0.40] hover:bg-blue-500/[0.10]'
-                                  }`}
-                                >
-                                  {opt}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                  <div className="flex items-center justify-between pt-2">
-                    <p className="text-[10px] text-blue-200/45">
-                      {Object.values(refineAnswers).filter(a => a && String(a).trim()).length}/{refineQuestions.length} answered - unanswered questions are skipped.
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={cancelGenerate}
-                        className="px-3 py-1.5 rounded-lg text-[12px] text-blue-200/55 hover:text-blue-100 transition-colors"
-                      >
-                        Cancel
-                      </button>
-                      <Button onClick={runBuild}>
-                        <Sparkles size={14} /> Build curriculum
-                      </Button>
+            )}
+            {refineQuestions.length === 0 ? (
+              <div className="flex items-center gap-2 text-[12px] text-white/40 py-6">
+                <Loader2 size={14} className="animate-spin text-blue-400" />
+                Thinking of good questions to ask…
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {refineQuestions.map((q, qi) => {
+                  const isOpen = q.type === 'open';
+                  return (
+                    <div key={q.id}>
+                      <p className="text-[13px] font-medium text-white/80 mb-2.5">{q.question}</p>
+                      {isOpen ? (
+                        <textarea
+                          value={refineAnswers[q.id] || ''}
+                          onChange={(e) => setRefineAnswers(p => ({ ...p, [q.id]: e.target.value }))}
+                          placeholder={q.placeholder || 'Type your answer…'}
+                          rows={2}
+                          className="w-full px-3 py-2 rounded-lg bg-white/[0.04] text-[12px] text-white/90 border border-white/[0.10] placeholder:text-white/25 hover:border-white/20 focus:border-blue-500 focus:outline-none focus:bg-blue-500/[0.06] resize-none transition-colors"
+                        />
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          {q.options.map(opt => {
+                            const active = refineAnswers[q.id] === opt;
+                            return (
+                              <button
+                                key={opt}
+                                onClick={() => setRefineAnswers(p => ({ ...p, [q.id]: opt }))}
+                                className={`px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-all ${
+                                  active
+                                    ? 'bg-blue-500 text-white border-blue-500 shadow-[0_0_12px_rgba(59,130,246,0.35)]'
+                                    : 'bg-white/[0.05] text-white/55 border-white/[0.10] hover:bg-white/[0.09] hover:text-white/80 hover:border-white/20'
+                                }`}
+                              >
+                                {opt}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
+                  );
+                })}
+                <div className="flex items-center justify-between pt-2 border-t border-white/[0.06]">
+                  <p className="text-[10px] text-white/25 tabular-nums">
+                    {Object.values(refineAnswers).filter(a => a && String(a).trim()).length}/{refineQuestions.length} answered
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={cancelGenerate}
+                      className="px-3 py-1.5 rounded-lg text-[12px] text-white/35 hover:text-white/65 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <Button onClick={runBuild}>
+                      Build curriculum
+                    </Button>
                   </div>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         ) : generating ? (
           <div className="py-10 px-2 max-w-xl mx-auto w-full">
@@ -788,7 +951,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
               {sources.length > 0 && (
                 <div className="mt-3 space-y-1.5">
                   {sources.map(s => {
-                    const Icon = s.kind === 'url' ? Sparkles : FileText;
+                    const Icon = FileText;
                     return (
                       <div key={s.id} className="group flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-white/[0.04] border border-white/10">
                         <div className={`w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 ${s.kind === 'url' ? 'bg-white/[0.08] text-white/50' : 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'}`}>
@@ -812,7 +975,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
               )}
             </div>
 
-            <Button onClick={handleGenerate} disabled={!settings.topic.trim()} data-tour="curriculum-generate-button"><Sparkles size={16} /> Generate Curriculum</Button>
+            <Button onClick={handleGenerate} disabled={!settings.topic.trim()} data-tour="curriculum-generate-button">Generate Curriculum</Button>
           </div>
         )}
       </ViewFade>
@@ -868,6 +1031,52 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
         </div>
         <ChevronRight size={16} className="text-white/30 flex-shrink-0" />
       </button>
+
+      {/* Shared with you - curriculum invites + accepted shared courses.
+          Accepting puts the course here (one live copy, studied together
+          with the owner), not a duplicate in "your" list below. */}
+      {(() => {
+        const pendingShares = incomingShares.filter(s => s.itemType === 'curriculum' && s.status === 'pending');
+        const acceptedShares = incomingShares.filter(s => s.itemType === 'curriculum' && s.status === 'accepted' && s.itemExists !== false);
+        if (pendingShares.length === 0 && acceptedShares.length === 0) return null;
+        return (
+          <div className="mb-5">
+            <div className="flex items-center gap-2 mb-2 px-1">
+              <h2 className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 inline-flex items-center gap-1.5">
+                <Users size={12} /> Shared with you
+              </h2>
+              <span className="text-[10px] text-white/25 tabular-nums">{pendingShares.length + acceptedShares.length}</span>
+            </div>
+            <div className="space-y-2">
+              {pendingShares.map((s) => (
+                <div key={s.id} className="flex items-center gap-3 rounded-xl border border-sky-400/25 bg-sky-500/[0.06] px-4 py-3">
+                  <div className="w-9 h-9 rounded-lg bg-sky-500/15 flex items-center justify-center flex-shrink-0"><BookOpen size={16} className="text-sky-300" /></div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-sm font-medium text-white truncate">{s.itemTitle}</h3>
+                    <p className="text-xs text-white/45 mt-0.5">{s.ownerName} wants to study this with you</p>
+                  </div>
+                  <Button size="sm" onClick={() => acceptShare(s.id).catch((e) => toast.error(e.message || "Couldn't accept the invite."))}>
+                    <Check size={13} /> Accept
+                  </Button>
+                  <Button size="sm" variant="ghost" aria-label="Decline" onClick={() => declineShare(s.id).catch(() => {})}>
+                    <X size={13} />
+                  </Button>
+                </div>
+              ))}
+              {acceptedShares.map((s) => (
+                <div key={s.id} onClick={() => openSharedCurriculum(s)} className="flex items-center gap-4 bg-white/[0.06] backdrop-blur-sm rounded-xl border border-white/10 px-4 py-3 cursor-pointer hover:border-white/25 hover:bg-white/10 transition-colors">
+                  <div className="w-9 h-9 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0"><Users size={16} className="text-sky-300/80" /></div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-sm font-medium text-white truncate">{s.itemTitle}</h3>
+                    <p className="text-xs text-white/40 mt-0.5">Studying together with {s.ownerName}</p>
+                  </div>
+                  <ChevronRight size={16} className="text-white/30 flex-shrink-0" />
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {curricula.length === 0 ? (
         <div className="text-center py-12">
@@ -971,6 +1180,9 @@ function UnitSection({ unit, onOpenLesson }) {
               >
                 {lesson.isCompleted ? <CheckCircle2 size={14} className="text-white/40 flex-shrink-0" /> : lesson.chatHistory?.length > 0 ? <Circle size={14} className="text-white/35 flex-shrink-0" /> : <TypeIcon size={14} className="text-white/35 flex-shrink-0" />}
                 <span className={`text-sm flex-1 truncate ${lesson.isCompleted ? 'text-white/25 line-through' : 'text-white/60 group-hover:text-white'}`}>{lesson.title}</span>
+                {typeof lesson.score === 'number' && (lesson.type === 'unit_test' || lesson.type === 'essay') && (
+                  <span className={`flex-shrink-0 text-[10px] font-bold tabular-nums px-1.5 py-0.5 rounded-md border ${gradePillClass(lesson.score)}`}>{lesson.score}%</span>
+                )}
               </button>
             );
           })}
@@ -1070,6 +1282,19 @@ function AssessmentView({ lesson, curriculum, onBack }) {
       body: JSON.stringify({ assessment, answers: answersByIdx }),
     });
     setResult(r.result);
+    // Persist the test score onto the curriculum lesson and mark it complete,
+    // so it rolls into the course grade (computeCourseGrade reads unit-test
+    // lesson scores). The grade endpoint records the score rather than
+    // toggling, so retakes update the grade.
+    const cid = curriculum?.id || lesson.curriculumId;
+    if (cid) {
+      try {
+        await apiFetch(`/api/curriculum/${cid}/lesson/${lesson.id}/complete`, {
+          method: 'POST',
+          body: JSON.stringify({ score: r.result?.percentage || 0 }),
+        });
+      } catch {}
+    }
     const blockResults = block.questions.map((bq, i) => ({
       qid: bq.id,
       correct: !!r.result?.details?.[i]?.correct,
@@ -1088,6 +1313,15 @@ function AssessmentView({ lesson, curriculum, onBack }) {
         body: JSON.stringify({ assessment, answers: { essay: essayText } }),
       });
       setResult(r.result);
+      const cid = curriculum?.id || lesson.curriculumId;
+      if (cid) {
+        try {
+          await apiFetch(`/api/curriculum/${cid}/lesson/${lesson.id}/complete`, {
+            method: 'POST',
+            body: JSON.stringify({ score: r.result?.percentage || 0 }),
+          });
+        } catch {}
+      }
     } catch (e) { setError(e.message); }
     setGrading(false);
   }
@@ -1438,7 +1672,7 @@ function EditCurriculumModal({ curriculum, onClose, onUpdated }) {
             disabled={!instruction.trim() || submitting}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white/[0.10] hover:bg-white/[0.15] border border-white/[0.12] text-white text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {submitting ? <><InlineProgress active /> Applying…</> : <><Sparkles size={12} /> Apply edit</>}
+            {submitting ? <><InlineProgress active /> Applying…</> : <>Apply edit</>}
           </button>
         </div>
       </div>
