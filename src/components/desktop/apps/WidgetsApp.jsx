@@ -7,9 +7,9 @@ import {
 import { useWidgets } from '../../../context/WidgetContext';
 
 // ── Widget catalog ──────────────────────────────────────────────────
-// The set of built-in widget types the user can add. AI-generated
-// widgets bypass this list - they live under `custom_*` types and
-// surface in the "AI Created" group.
+// The set of built-in widget types the user can add. Any legacy
+// `custom_*` widgets (from the retired AI generator) still render on the
+// desktop and can be removed from the "My Widgets" tab.
 const WIDGET_CATALOG = [
   { type: 'clock',      label: 'Clock',        icon: Clock,        desc: 'Date & time' },
   { type: 'streak',     label: 'Study Streak', icon: Flame,        desc: 'Daily streak count' },
@@ -163,66 +163,14 @@ function ToggleSwitch({ checked, onChange }) {
 export default function WidgetsApp() {
   const { widgets, addWidget, removeWidget, updateWidget, snapGrid, toggleSnapGrid } = useWidgets();
   const [editingType, setEditingType] = useState(null);
-  const [aiPrompt, setAiPrompt] = useState('');
-  const [aiGenerating, setAiGenerating] = useState(false);
-  const [aiError, setAiError] = useState('');
   const [appFilter, setAppFilter] = useState('all');
   const activeWidgetMap = Object.fromEntries(widgets.filter(w => !w.type?.startsWith('custom_')).map(w => [w.type, w]));
-  const customWidgets = widgets.filter(w => w.type?.startsWith('custom_'));
-
-  async function generateWidget() {
-    const prompt = aiPrompt.trim();
-    if (!prompt || aiGenerating) return;
-    setAiGenerating(true);
-    setAiError('');
-    try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: [{ role: 'user', content: `Create a desktop widget: ${prompt}` }],
-          system: `You output a JSON object only. No markdown, no prose, no self-correction, no explanation. Start with { and end with }.
-
-Schema:
-{
-  "label": string (max 18 chars),
-  "width": number (160-280),
-  "blocks": array of block objects
-}
-
-Block types (pick the ones that fit):
-- { "type": "heading",   "text": string }
-- { "type": "subtext",   "text": string }
-- { "type": "note",      "text": string }
-- { "type": "stat",      "value": string, "label": string }
-- { "type": "countdown", "target": "YYYY-MM-DD", "label": string }
-- { "type": "progress",  "label": string, "percent": number }
-- { "type": "list",      "items": string[] (max 5) }
-
-Today is ${new Date().toISOString().slice(0, 10)}. Output the JSON now.`,
-          max_tokens: 900,
-          jsonMode: true,
-          disableThinking: true,
-        }),
-      });
-      const data = await res.json();
-      const text = (data?.content?.[0]?.text || data?.text || '').trim();
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error('bad response');
-      const config = JSON.parse(jsonMatch[0]);
-      if (!config.label || !Array.isArray(config.blocks)) throw new Error('invalid schema');
-      addWidget(`custom_${Date.now()}`, { config });
-      setAiPrompt('');
-      setAppFilter('mine');
-    } catch {
-      setAiError('Could not generate widget - try rephrasing.');
-    } finally {
-      setAiGenerating(false);
-    }
-  }
 
   return (
     <div className="h-full flex flex-col bg-[#131316] text-white">
+     {/* Centered content column: dark bg stays full-bleed, the gallery sits
+         in a max-width column so it reads as a real app, not a stretched picker. */}
+     <div className="w-full max-w-3xl mx-auto flex flex-col flex-1 min-h-0">
       {/* Top row - title + snap-to-grid toggle */}
       <div className="flex items-center justify-between px-4 pt-3 pb-2 flex-shrink-0">
         <span className="text-[11px] font-semibold text-white/70 tracking-wide">Widget Gallery</span>
@@ -260,7 +208,7 @@ Today is ${new Date().toISOString().slice(0, 10)}. Output the JSON now.`,
               onClick={() => setAppFilter(g.appId)}
               className={`px-2 py-0.5 rounded-md text-[10px] border transition-colors ${
                 isActive
-                  ? 'bg-white/[0.10] text-white/85 border-white/[0.18]'
+                  ? 'bg-blue-500/90 text-white border-blue-500/90'
                   : 'bg-white/[0.02] text-white/40 border-white/[0.06] hover:text-white/65 hover:border-white/15'
               }`}
             >
@@ -276,7 +224,7 @@ Today is ${new Date().toISOString().slice(0, 10)}. Output the JSON now.`,
           <div>
             <p className="text-[8.5px] font-bold uppercase tracking-[0.18em] text-white/30 mb-1.5 pl-0.5">Active on your desktop</p>
             {widgets.length === 0 && (
-              <p className="text-[11px] text-white/35 italic px-1 py-2">No widgets yet. Pick one from a tab above or describe one below.</p>
+              <p className="text-[11px] text-white/35 italic px-1 py-2">No widgets yet. Pick one from a tab above.</p>
             )}
             <div className="space-y-1">
               {widgets.map(w => {
@@ -309,7 +257,7 @@ Today is ${new Date().toISOString().slice(0, 10)}. Output the JSON now.`,
               <p className="text-[8.5px] font-bold uppercase tracking-[0.18em] text-white/30 mb-1.5 pl-0.5">
                 {group.label}
               </p>
-              <div className="grid grid-cols-2 gap-1.5">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-1.5">
                 {group.types.map(t => WIDGET_CATALOG.find(w => w.type === t)).filter(Boolean).map(({ type, label, desc }) => {
                   const active = !!activeWidgetMap[type];
                   const editing = editingType === type;
@@ -355,7 +303,7 @@ Today is ${new Date().toISOString().slice(0, 10)}. Output the JSON now.`,
                           ) : (
                             <button
                               onClick={() => addWidget(type)}
-                              className="flex items-center justify-center gap-1 px-2 py-0.5 rounded-md text-[10px] bg-white/[0.08] text-white/60 hover:bg-white/[0.14] hover:text-white/90 transition-colors w-full"
+                              className="flex items-center justify-center gap-1 px-2 py-0.5 rounded-md text-[10px] bg-blue-500/90 text-white hover:bg-blue-500 transition-colors w-full"
                             >
                               <Plus size={9} />
                               Add
@@ -445,50 +393,9 @@ Today is ${new Date().toISOString().slice(0, 10)}. Output the JSON now.`,
           ))
         )}
 
-        {/* Custom AI widgets under the catalog when not on "mine" */}
-        {appFilter !== 'mine' && customWidgets.length > 0 && (
-          <div>
-            <p className="text-[8.5px] font-bold uppercase tracking-[0.18em] text-white/30 mb-1.5 pl-0.5">AI Created</p>
-            <div className="space-y-1">
-              {customWidgets.map(w => (
-                <div key={w.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-white/[0.07] bg-white/[0.02]">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[11.5px] font-semibold text-white/75 truncate">{w.config?.label || 'Custom Widget'}</p>
-                  </div>
-                  <button
-                    onClick={() => removeWidget(w.id)}
-                    className="text-white/20 hover:text-red-400/70 transition-colors flex-shrink-0"
-                  >
-                    <X size={11} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* AI Create - pinned to the bottom */}
-      <div className="border-t border-white/[0.07] px-3 pt-2.5 pb-3 flex-shrink-0">
-        <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-white/25 mb-1.5">AI Create</p>
-        <div className="flex gap-1.5">
-          <input
-            value={aiPrompt}
-            onChange={e => setAiPrompt(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') generateWidget(); }}
-            placeholder="Describe a widget…"
-            className="flex-1 bg-white/[0.05] border border-white/[0.09] rounded-lg px-2.5 py-1 text-[11.5px] text-white/75 placeholder:text-white/22 outline-none focus:border-white/[0.20] transition-colors"
-          />
-          <button
-            onClick={generateWidget}
-            disabled={aiGenerating || !aiPrompt.trim()}
-            className="px-2.5 py-1 rounded-lg bg-white/[0.07] text-white/50 hover:bg-white/[0.13] hover:text-white/80 disabled:opacity-30 disabled:cursor-default transition-colors text-[12px] flex-shrink-0"
-          >
-            {aiGenerating ? '…' : '→'}
-          </button>
-        </div>
-        {aiError && <p className="text-[10px] text-red-400/60 mt-1">{aiError}</p>}
-      </div>
+     </div>
     </div>
   );
 }

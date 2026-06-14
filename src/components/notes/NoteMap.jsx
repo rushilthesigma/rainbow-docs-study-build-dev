@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Sparkles, Plus, Trash2, RotateCw, Wand2, Link2, X, FileText, Lightbulb, Pencil, ArrowLeft, Focus, StickyNote, Loader2, Brain, Layers } from 'lucide-react';
+import { Sparkles, Plus, Trash2, RotateCw, Wand2, Link2, X, FileText, Lightbulb, Pencil, ArrowLeft, Focus, StickyNote, Loader2, Brain, Layers, Share2 } from 'lucide-react';
 import {
   listNotes,
   getNoteGraph, saveNoteGraph,
@@ -10,8 +10,8 @@ import {
 import { apiFetch } from '../../api/client';
 import Button from '../shared/Button';
 import LoadingSpinner from '../shared/LoadingSpinner';
-import Modal from '../shared/Modal';
 import NoteMapReview from './NoteMapReview';
+import ShareDialog from '../shared/ShareDialog';
 
 // Obsidian-style note map. Each existing note becomes a graph node; the
 // user can drag nodes, link them with edges, add free-form topic nodes,
@@ -87,7 +87,7 @@ function edgeKey(a, b) {
   return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
 
-export default function NoteMap({ onOpenNote, mapId }) {
+export default function NoteMap({ onOpenNote, mapId, mapName }) {
   // When a mapId is supplied, every read/write is scoped to that map.
   // Without a mapId we fall back to the legacy single-graph endpoints,
   // which now alias to the default map server-side.
@@ -141,6 +141,7 @@ export default function NoteMap({ onOpenNote, mapId }) {
   const [srs, setSrs] = useState(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [genNodeId, setGenNodeId] = useState(null);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const svgRef = useRef(null);
   const draggingRef = useRef(null);
@@ -361,6 +362,7 @@ export default function NoteMap({ onOpenNote, mapId }) {
   // Open the picker. Loads the user's notes and excludes any already on
   // the current map so the list shows only candidates worth pulling in.
   async function openPullNotes() {
+    setAiOpen(false);
     setPullOpen(true);
     setPullSelected(new Set());
     setPullQuery('');
@@ -647,115 +649,21 @@ export default function NoteMap({ onOpenNote, mapId }) {
           <Button size="sm" variant={dueCount > 0 ? 'secondary' : 'ghost'} onClick={() => setReviewOpen(true)}>
             <Brain size={13} /> Review
             {dueCount > 0 && (
-              <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-blue-500/30 text-blue-100 text-[10px] font-semibold leading-none">{dueCount}</span>
+              <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-white/15 text-white/80 text-[10px] font-semibold leading-none">{dueCount}</span>
             )}
           </Button>
-          <Button size="sm" variant="ghost" onClick={openPullNotes}>
+          <Button size="sm" variant={pullOpen ? 'secondary' : 'ghost'} onClick={openPullNotes}>
             <FileText size={13} /> Pull from notes
           </Button>
           <Button size="sm" variant="ghost" onClick={createNewNoteOnMap} disabled={creatingNoteFromId === '__new__'}>
             <StickyNote size={13} /> {creatingNoteFromId === '__new__' ? 'Adding…' : 'Note'}
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => { setAiError(null); setAiOpen(true); }}>
+          <Button size="sm" variant={aiOpen ? 'secondary' : 'ghost'} onClick={() => { setAiError(null); setPullOpen(false); setAiOpen(true); }}>
             <Wand2 size={13} /> AI
           </Button>
           {!focusedNode && <Button size="sm" variant="ghost" onClick={relaxLayout}><RotateCw size={13} /> Relax</Button>}
         </div>
       </div>
-
-      <Modal open={pullOpen} onClose={() => setPullOpen(false)} title="Pull notes into this map">
-        <div className="flex flex-col gap-3">
-          <input
-            value={pullQuery}
-            onChange={e => setPullQuery(e.target.value)}
-            placeholder="Search notes…"
-            className="w-full px-3 py-2 rounded-xl border border-white/[0.06] bg-white/[0.04] text-sm text-white/85 placeholder-white/30 outline-none"
-            autoFocus
-          />
-          <div className="max-h-72 overflow-y-auto rounded-xl border border-white/[0.06] bg-white/[0.02] p-1.5">
-            {pullLoading ? (
-              <div className="flex items-center justify-center py-6 text-xs text-white/30">
-                <Loader2 size={14} className="animate-spin mr-2" /> Loading notes…
-              </div>
-            ) : pullNotes.length === 0 ? (
-              <p className="text-[11px] text-white/35 italic p-3 text-center">
-                {nodes.some(n => n.source === 'note')
-                  ? 'All of your notes are already on this map.'
-                  : "You don't have any notes yet."}
-              </p>
-            ) : (
-              pullNotes
-                .filter(n => !pullQuery.trim() || (n.title || '').toLowerCase().includes(pullQuery.trim().toLowerCase()))
-                .map(n => {
-                  const checked = pullSelected.has(n.id);
-                  return (
-                    <label
-                      key={n.id}
-                      className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer transition-colors ${checked ? 'bg-blue-500/10' : 'hover:bg-white/[0.04]'}`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => togglePullNote(n.id)}
-                        className="w-3.5 h-3.5 accent-white"
-                      />
-                      <FileText size={13} className="text-white/40 shrink-0" />
-                      <span className="text-[13px] text-white/80 truncate">{n.title || 'Untitled'}</span>
-                    </label>
-                  );
-                })
-            )}
-          </div>
-          <div className="flex items-center justify-between">
-            <div className="text-[11px] text-white/40">
-              {pullSelected.size} selected
-            </div>
-            <div className="flex gap-2">
-              <Button size="sm" variant="ghost" onClick={() => setPullOpen(false)}>Cancel</Button>
-              <Button size="sm" onClick={confirmPullNotes} disabled={pullSelected.size === 0}>
-                <Plus size={12} /> Add {pullSelected.size || ''}
-              </Button>
-            </div>
-          </div>
-        </div>
-      </Modal>
-
-      {/* AI note generator. Topic in, note out - drops on the map and
-          wires to the focused node (if any). */}
-      <Modal
-        open={aiOpen}
-        onClose={() => { if (!aiBusy) { setAiOpen(false); setAiError(null); } }}
-        title="Generate a note with AI"
-        size="sm"
-      >
-        <form
-          onSubmit={(e) => { e.preventDefault(); generateNoteWithAI(); }}
-          className="flex flex-col gap-3"
-        >
-          <div className="flex items-start gap-2 rounded-xl border border-blue-400/20 bg-blue-500/[0.06] px-3 py-2 text-[12px] text-blue-100/85 leading-relaxed">
-            <Sparkles size={12} className="text-blue-300 mt-0.5 flex-shrink-0" />
-            <span>The AI writes a short, organized study note for the topic you type. It drops onto the map and connects to whatever node you're focused on.</span>
-          </div>
-          <input
-            autoFocus
-            value={aiTopic}
-            onChange={e => setAiTopic(e.target.value)}
-            placeholder="e.g. Photosynthesis, Roman Republic, Eigenvectors"
-            className="w-full px-3.5 py-2.5 rounded-xl border border-white/[0.10] bg-white/[0.04] text-[14px] text-white/90 placeholder-white/30 outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20"
-            disabled={aiBusy}
-          />
-          {aiError && (
-            <p className="text-[12px] text-rose-300/90 bg-rose-500/[0.08] border border-rose-400/[0.20] rounded-lg px-3 py-2">{aiError}</p>
-          )}
-          <div className="flex gap-2 justify-end">
-            <Button type="button" variant="ghost" size="sm" onClick={() => { if (!aiBusy) { setAiOpen(false); setAiError(null); } }} disabled={aiBusy}>Cancel</Button>
-            <Button type="submit" size="sm" disabled={!aiTopic.trim()} loading={aiBusy}>
-              {!aiBusy && <Wand2 size={12} />}
-              {aiBusy ? 'Generating…' : 'Generate'}
-            </Button>
-          </div>
-        </form>
-      </Modal>
 
       <div className="relative flex flex-1 min-h-0 gap-3">
         {/* Canvas */}
@@ -895,9 +803,111 @@ export default function NoteMap({ onOpenNote, mapId }) {
 
         {/* Side panel - selected-node editor takes the full height. */}
         <div className="w-[300px] flex-shrink-0 flex flex-col gap-3">
-          {/* Selected node panel - fills the column */}
+          {shareOpen && mapId ? (
+            <div className="flex-1 flex flex-col min-h-[260px]">
+              <ShareDialog
+                item={{ id: mapId, type: 'noteMap', title: mapName || 'Note map' }}
+                onClose={() => setShareOpen(false)}
+                asPanel
+              />
+            </div>
+          ) : (
           <div className="bg-white/[0.03] rounded-2xl border border-white/[0.07] flex-1 min-h-[260px] flex flex-col overflow-hidden">
-            {selectedNode ? (
+            {pullOpen ? (
+              /* Pull-from-notes picker - lives in the side tab instead of a
+                 centered modal so it shares the note panel's real estate. */
+              <div className="flex flex-col flex-1 min-h-0">
+                <div className="px-3 pt-3 pb-2 flex items-center justify-between gap-2 flex-shrink-0 border-b border-white/[0.04]">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <FileText size={13} className="text-white/55 flex-shrink-0" />
+                    <span className="text-[11px] font-semibold text-white/75 uppercase tracking-wide truncate">Pull from notes</span>
+                  </div>
+                  <button onClick={() => setPullOpen(false)} className="text-white/35 hover:text-white/80 flex-shrink-0" title="Close"><X size={13} /></button>
+                </div>
+                <div className="px-3 pt-2.5 flex-shrink-0">
+                  <input
+                    value={pullQuery}
+                    onChange={e => setPullQuery(e.target.value)}
+                    placeholder="Search notes…"
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-white/[0.06] bg-white/[0.04] text-[12px] text-white/85 placeholder-white/30 outline-none focus:border-white/[0.12]"
+                    autoFocus
+                  />
+                </div>
+                <div className="flex-1 min-h-0 overflow-y-auto px-2 py-2">
+                  {pullLoading ? (
+                    <div className="flex items-center justify-center py-6 text-xs text-white/30">
+                      <Loader2 size={14} className="animate-spin mr-2" /> Loading notes…
+                    </div>
+                  ) : pullNotes.length === 0 ? (
+                    <p className="text-[11px] text-white/35 italic p-3 text-center">
+                      {nodes.some(n => n.source === 'note')
+                        ? 'All of your notes are already on this map.'
+                        : "You don't have any notes yet."}
+                    </p>
+                  ) : (
+                    pullNotes
+                      .filter(n => !pullQuery.trim() || (n.title || '').toLowerCase().includes(pullQuery.trim().toLowerCase()))
+                      .map(n => {
+                        const checked = pullSelected.has(n.id);
+                        return (
+                          <label
+                            key={n.id}
+                            className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer transition-colors ${checked ? 'bg-blue-500/10' : 'hover:bg-white/[0.04]'}`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => togglePullNote(n.id)}
+                              className="w-3.5 h-3.5 accent-white"
+                            />
+                            <FileText size={13} className="text-white/40 shrink-0" />
+                            <span className="text-[13px] text-white/80 truncate">{n.title || 'Untitled'}</span>
+                          </label>
+                        );
+                      })
+                  )}
+                </div>
+                <div className="px-3 py-2.5 flex items-center justify-between gap-2 flex-shrink-0 border-t border-white/[0.06]">
+                  <span className="text-[11px] text-white/40">{pullSelected.size} selected</span>
+                  <Button size="sm" onClick={confirmPullNotes} disabled={pullSelected.size === 0}>
+                    <Plus size={12} /> Add {pullSelected.size || ''}
+                  </Button>
+                </div>
+              </div>
+            ) : aiOpen ? (
+              /* AI note generator - also rendered in the side tab. Topic in,
+                 note out; drops on the map and wires to the focused node. */
+              <div className="flex flex-col flex-1 min-h-0">
+                <div className="px-3 pt-3 pb-2 flex items-center justify-between gap-2 flex-shrink-0 border-b border-white/[0.04]">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Wand2 size={13} className="text-white/55 flex-shrink-0" />
+                    <span className="text-[11px] font-semibold text-white/75 uppercase tracking-wide truncate">Generate with AI</span>
+                  </div>
+                  <button onClick={() => { if (!aiBusy) { setAiOpen(false); setAiError(null); } }} disabled={aiBusy} className="text-white/35 hover:text-white/80 flex-shrink-0 disabled:opacity-40" title="Close"><X size={13} /></button>
+                </div>
+                <form onSubmit={(e) => { e.preventDefault(); generateNoteWithAI(); }} className="flex-1 min-h-0 flex flex-col gap-2.5 px-3 pt-2.5 pb-3 overflow-y-auto">
+                  <div className="flex items-start gap-2 rounded-xl border border-blue-400/20 bg-blue-500/[0.06] px-2.5 py-2 text-[11px] text-blue-100/85 leading-relaxed">
+                    <Sparkles size={12} className="text-blue-300 mt-0.5 flex-shrink-0" />
+                    <span>The AI writes a short, organized study note for your topic. It drops onto the map and connects to whatever node you're focused on.</span>
+                  </div>
+                  <input
+                    autoFocus
+                    value={aiTopic}
+                    onChange={e => setAiTopic(e.target.value)}
+                    placeholder="e.g. Photosynthesis, Eigenvectors"
+                    className="w-full px-2.5 py-2 rounded-lg border border-white/[0.10] bg-white/[0.04] text-[13px] text-white/90 placeholder-white/30 outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20"
+                    disabled={aiBusy}
+                  />
+                  {aiError && (
+                    <p className="text-[11px] text-rose-300/90 bg-rose-500/[0.08] border border-rose-400/[0.20] rounded-lg px-2.5 py-2">{aiError}</p>
+                  )}
+                  <Button type="submit" size="sm" disabled={!aiTopic.trim()} loading={aiBusy}>
+                    {!aiBusy && <Wand2 size={12} />}
+                    {aiBusy ? 'Generating…' : 'Generate'}
+                  </Button>
+                </form>
+              </div>
+            ) : selectedNode ? (
               <div className="flex flex-col flex-1 min-h-0">
                 {/* Header */}
                 <div className="px-3 pt-3 pb-2 flex items-center justify-between gap-2 flex-shrink-0 border-b border-white/[0.04]">
@@ -1066,12 +1076,23 @@ export default function NoteMap({ onOpenNote, mapId }) {
                 )}
               </div>
             ) : (
-              <div className="text-center text-white/35 py-8 px-4">
-                <p className="text-[11px] mb-1">No node selected</p>
-                <p className="text-[10px]">Click a node to inspect or write. Double-click to drill in.</p>
+              <div className="flex flex-col items-center justify-center flex-1 gap-3 py-8 px-4 text-center">
+                <div>
+                  <p className="text-[11px] text-white/35 mb-1">No node selected</p>
+                  <p className="text-[10px] text-white/25">Click a node to inspect or write. Double-click to drill in.</p>
+                </div>
+                {mapId && (
+                  <button
+                    onClick={() => setShareOpen(true)}
+                    className="flex items-center gap-1.5 text-[11px] text-white/35 hover:text-white/65 transition-colors border border-white/[0.07] rounded-lg px-3 py-1.5"
+                  >
+                    <Share2 size={12} /> Share map
+                  </button>
+                )}
               </div>
             )}
           </div>
+          )}
 
         </div>
 

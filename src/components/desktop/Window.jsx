@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useCallback, memo } from 'react';
 import { X, Minus, Maximize2 } from 'lucide-react';
 import { useUIPreference } from '../../context/UIPreferenceContext';
+import { WindowFrameContext } from '../../context/WindowFrameContext';
 
 // macOS traffic lights. Green button = in-app "zoom" (full window inside
 // the macOS shell - covers the dock area but stays inside the browser
@@ -256,7 +257,9 @@ function Window({ win, isActive, children, focusWindow, moveWindow, resizeWindow
             : `rgba(255,255,255,${(windowOpacity ?? 100) / 100})`
         }}
       >
-        {children}
+        <WindowFrameContext.Provider value={true}>
+          {children}
+        </WindowFrameContext.Provider>
       </div>
 
       {!maxed && !isFullscreen && !win.fixedSize && <>

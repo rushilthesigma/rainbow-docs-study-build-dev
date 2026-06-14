@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, RotateCcw, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, RotateCcw, Plus, Trash2, ListChecks } from 'lucide-react';
 import { getDeck, deleteDeck, submitReview, addCards } from '../api/flashcards';
 import { isDue, intervalLabel, sm2NextInterval } from '../utils/sm2';
 import Button from '../components/shared/Button';
@@ -30,6 +30,11 @@ export default function FlashcardDeckPage() {
   const [manualFront, setManualFront] = useState('');
   const [manualBack, setManualBack] = useState('');
   const [addTab, setAddTab] = useState('ai');
+  const [quizQuestions, setQuizQuestions] = useState([]);
+  const [quizIndex, setQuizIndex] = useState(0);
+  const [quizSelected, setQuizSelected] = useState(null);
+  const [quizConfirmed, setQuizConfirmed] = useState(false);
+  const [quizScore, setQuizScore] = useState(0);
 
   useEffect(() => {
     getDeck(id).then(d => { setDeck(d.deck); setLoading(false); }).catch(() => setLoading(false));
@@ -82,6 +87,24 @@ export default function FlashcardDeckPage() {
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, [mode, flipped, handleReview]);
+
+  function startQuiz() {
+    const cards = deck?.cards || [];
+    if (cards.length < 4) return;
+    const shuffled = [...cards].sort(() => Math.random() - 0.5);
+    const questions = shuffled.map(card => {
+      const others = cards.filter(c => c.id !== card.id);
+      const distractors = [...others].sort(() => Math.random() - 0.5).slice(0, 3).map(c => c.back);
+      const choices = [...distractors, card.back].sort(() => Math.random() - 0.5);
+      return { question: card.front, answer: card.back, choices };
+    });
+    setQuizQuestions(questions);
+    setQuizIndex(0);
+    setQuizSelected(null);
+    setQuizConfirmed(false);
+    setQuizScore(0);
+    setMode('quiz');
+  }
 
   async function handleAddCards(e) {
     e.preventDefault();
@@ -139,6 +162,9 @@ export default function FlashcardDeckPage() {
         <div className="flex gap-2 mb-6">
           <Button onClick={() => { setMode('review'); setReviewIndex(0); setFlipped(false); }} disabled={dueCards.length === 0}>
             <RotateCcw size={16} /> Review ({dueCards.length})
+          </Button>
+          <Button variant="secondary" onClick={startQuiz} disabled={(deck?.cards?.length || 0) < 4} title={(deck?.cards?.length || 0) < 4 ? 'Add at least 4 cards to quiz' : undefined}>
+            <ListChecks size={16} /> Quiz
           </Button>
           <Button variant="secondary" onClick={() => setMode('add')}>
             <Plus size={16} /> Add Cards
@@ -211,6 +237,89 @@ export default function FlashcardDeckPage() {
         <div className="text-center py-12">
           <p className="text-gray-500 mb-4">All done! No more cards recommended for today.</p>
           <Button onClick={() => setMode('browse')}>Back to Deck</Button>
+        </div>
+      )}
+
+      {/* Quiz mode */}
+      {mode === 'quiz' && quizIndex < quizQuestions.length && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between text-sm text-gray-400 mb-2">
+            <span>{quizIndex + 1} / {quizQuestions.length}</span>
+            <button onClick={() => setMode('browse')} className="hover:text-gray-600 dark:hover:text-gray-300">Exit</button>
+          </div>
+
+          <div className="w-full h-1.5 bg-gray-200 dark:bg-[#2A2A40] rounded-full overflow-hidden">
+            <div className="h-full bg-blue-500 rounded-full transition-all duration-300" style={{ width: `${(quizIndex / quizQuestions.length) * 100}%` }} />
+          </div>
+
+          <div className="flex justify-end">
+            <span className="text-xs text-white/40 tabular-nums">{quizScore} correct</span>
+          </div>
+
+          <div className="bg-white dark:bg-[#161622] rounded-2xl border border-gray-200 dark:border-[#2A2A40] p-8 text-center min-h-[120px] flex items-center justify-center">
+            <p className="text-lg font-medium text-gray-900 dark:text-gray-100">{quizQuestions[quizIndex]?.question}</p>
+          </div>
+
+          <div className="space-y-2">
+            {(quizQuestions[quizIndex]?.choices || []).map((choice, i) => {
+              const isCorrect = choice === quizQuestions[quizIndex]?.answer;
+              const isSelected = choice === quizSelected;
+              let cls = 'w-full p-3.5 rounded-xl border text-sm font-medium transition-colors text-left';
+              if (!quizConfirmed) {
+                cls += isSelected
+                  ? ' border-blue-500/60 bg-blue-500/10 text-blue-300'
+                  : ' border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622] text-gray-700 dark:text-gray-300 hover:border-blue-400/40 hover:bg-blue-500/5 cursor-pointer';
+              } else {
+                if (isCorrect) cls += ' border-emerald-500/50 bg-emerald-500/10 text-emerald-300';
+                else if (isSelected) cls += ' border-rose-500/50 bg-rose-500/10 text-rose-300';
+                else cls += ' border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622] text-gray-500 opacity-50';
+              }
+              return (
+                <button key={i} disabled={quizConfirmed} onClick={() => setQuizSelected(choice)} className={cls}>
+                  {choice}
+                </button>
+              );
+            })}
+          </div>
+
+          {quizSelected && !quizConfirmed && (
+            <Button onClick={() => {
+              if (quizSelected === quizQuestions[quizIndex]?.answer) setQuizScore(s => s + 1);
+              setQuizConfirmed(true);
+            }}>
+              Confirm
+            </Button>
+          )}
+
+          {quizConfirmed && (
+            <Button onClick={() => {
+              if (quizIndex + 1 < quizQuestions.length) {
+                setQuizIndex(i => i + 1);
+                setQuizSelected(null);
+                setQuizConfirmed(false);
+              } else {
+                setMode('quiz-done');
+              }
+            }}>
+              {quizIndex + 1 < quizQuestions.length ? 'Next Question' : 'See Results'}
+            </Button>
+          )}
+        </div>
+      )}
+
+      {/* Quiz results */}
+      {mode === 'quiz-done' && (
+        <div className="text-center py-12 space-y-5">
+          <p className="text-4xl font-bold text-gray-900 dark:text-white">{quizScore}/{quizQuestions.length}</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            {quizScore === quizQuestions.length
+              ? 'Perfect score!'
+              : `${Math.round((quizScore / quizQuestions.length) * 100)}% correct`}
+          </p>
+          <div className="flex justify-center gap-2">
+            <Button onClick={startQuiz}>Try Again</Button>
+            <Button variant="secondary" onClick={() => setMode('browse')}>Back to Deck</Button>
+          </div>
         </div>
       )}
 

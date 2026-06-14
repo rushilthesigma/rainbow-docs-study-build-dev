@@ -277,8 +277,10 @@ body {
   from { transform: translateY(100%); }
   to   { transform: translateY(0); }
 }
-.animate-fade-in  { animation: mobile-fade-in 0.18s ease-out forwards; }
-.animate-slide-up { animation: mobile-slide-up 0.28s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+.animate-fade-in    { animation: mobile-fade-in 0.18s ease-out forwards; }
+.animate-slide-up   { animation: mobile-slide-up 0.28s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+@keyframes slide-in-right { from { transform: translateX(100%); } to { transform: translateX(0); } }
+.animate-slide-in-right { animation: slide-in-right 0.26s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
 
 /* Three-dot typing indicator used by the mobile chat while waiting
    for the first streamed token. No literal "..." in the content. */

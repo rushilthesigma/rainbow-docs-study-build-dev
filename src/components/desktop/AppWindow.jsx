@@ -6,7 +6,6 @@ import QuizBowlApp from './apps/QuizBowlApp';
 import QBpediaApp from './apps/QBpediaApp';
 import MathTutorApp from './apps/MathTutorApp';
 import WidgetsApp from './apps/WidgetsApp';
-import GroupStudyApp from './apps/GroupStudyApp';
 import MobilePreview from '../admin/MobilePreview';
 import StudyPage from '../../pages/StudyPage';
 import SettingsPage from '../../pages/SettingsPage';
@@ -20,6 +19,7 @@ import { useUIPreference } from '../../context/UIPreferenceContext';
 // Dev Forum was also retired - the AI-collaboration board got removed
 // along with its server endpoints.
 // Slides was axed too - the deck-builder is no longer mounted here.
+// Study Groups was removed entirely (feature deleted).
 const APP_COMPONENTS = {
   curricula: CurriculaApp,
   lessons: LessonsApp,
@@ -28,7 +28,6 @@ const APP_COMPONENTS = {
   mathtutor: MathTutorApp,
   quizbowl: QuizBowlApp,
   qbpedia: QBpediaApp,
-  groups: GroupStudyApp,
   admin: AdminApp,
   mobilepreview: MobilePreview,
   settings: SettingsPage,
@@ -37,7 +36,7 @@ const APP_COMPONENTS = {
 };
 
 // Apps that need flex container without scroll (they manage their own scrolling)
-const FLEX_APPS = new Set(['notes', 'study', 'debate', 'mathtutor', 'mobilepreview', 'qbpedia', 'groups']);
+const FLEX_APPS = new Set(['notes', 'study', 'debate', 'mathtutor', 'mobilepreview', 'qbpedia']);
 
 // Full-bleed apps (no padding, no overflow-hidden) - widgets gallery
 // owns its own internal padding, so the default p-4/p-5 wrapper would

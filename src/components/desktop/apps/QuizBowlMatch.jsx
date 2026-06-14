@@ -1,10 +1,17 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Zap, Users, Copy, Check, X, Trophy, Play, LogOut, ArrowLeft, Flag, Bot } from 'lucide-react';
+import { useWindowManager } from '../../../context/WindowManagerContext';
+import { Zap, Users, Copy, Check, X, Trophy, Play, LogOut, ArrowLeft, Flag, Bot, Loader2, BookOpen } from 'lucide-react';
 import ProgressBar, { InlineProgress } from '../../shared/ProgressBar';
 import {
   createMatch, joinMatch, startMatch, buzzMatch, answerMatch, nextMatchQuestion,
   endMatch, leaveMatch, streamMatch, botBuzz, botAnswer,
 } from '../../../api/quizMatch';
+import { AnswerResultPanel } from '../../trial/TrialSession';
+import MatchComparison from '../../shared/MatchComparison';
+
+// Mirrors the server's QUIZBOWL_BUZZ_ANSWER_MS. Only used to scale the
+// countdown bar; the actual deadline comes from the server buzz event.
+const BUZZ_WINDOW_MS = 9000;
 
 const BOT_ROSTER = [
   { id: 'biscuit', name: 'Player 2', buzzAt: 0.90, accuracy: 0.40, thinkMs: 3000 },
@@ -90,7 +97,15 @@ function useWordReveal(text, startedAt, speedMs, frozen, frozenAt) {
   };
 }
 
-export default function QuizBowlMatch({ user, onExit }) {
+// Optional integration props (group study sessions embed this component):
+//   initialJoinCode — auto-join this match on mount instead of showing the
+//                     create/join menu
+//   embedded        — hosted inside another view (group SessionView): no
+//                     create-new path, friendlier blocked states
+//   onMatchEnd      — called with the final scores map when the match ends
+//                     (the group session host persists them to the summary)
+export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, embedded = false, onMatchEnd = null, onMatchReplay = null }) {
+  const { state } = useWindowManager();
   const [view, setView] = useState('menu');
   const [code, setCode] = useState('');
   const [joinCodeInput, setJoinCodeInput] = useState('');
@@ -109,6 +124,8 @@ export default function QuizBowlMatch({ user, onExit }) {
   const [answer, setAnswer] = useState('');
   const [answerResult, setAnswerResult] = useState(null);
   const [autoAdvanceDeadline, setAutoAdvanceDeadline] = useState(null);
+  const [answerDeadline, setAnswerDeadline] = useState(null);
+  const [comparison, setComparison] = useState(null);
   const [lockedOut, setLockedOut] = useState([]);
   const [wrongFlash, setWrongFlash] = useState(null);
   const [abandoned, setAbandoned] = useState(null);
@@ -168,7 +185,13 @@ export default function QuizBowlMatch({ user, onExit }) {
         setMatch(m);
         if (m.state === 'playing' && m.currentQuestion) {
           setQuestion(m.currentQuestion);
-          if (m.buzzWinner) setBuzz({ userId: m.buzzWinner, buzzAt: m.buzzAt });
+          if (m.buzzWinner) {
+            setBuzz({ userId: m.buzzWinner, buzzAt: m.buzzAt });
+            // Resume the same countdown a reconnecting client missed.
+            setAnswerDeadline((m.buzzAt || Date.now()) + (m.answerWindowMs || BUZZ_WINDOW_MS));
+          } else {
+            setAnswerDeadline(null);
+          }
           setAnswerResult(null);
           setView('playing');
         } else if (m.state === 'generating') {
@@ -176,6 +199,7 @@ export default function QuizBowlMatch({ user, onExit }) {
         } else if (m.state === 'waiting') {
           setView('lobby');
         } else if (m.state === 'finished') {
+          if (m.comparison) setComparison(m.comparison);
           setView('finished');
         }
       },
@@ -190,6 +214,7 @@ export default function QuizBowlMatch({ user, onExit }) {
         setAnswer('');
         setAnswerResult(null);
         setAutoAdvanceDeadline(null);
+        setAnswerDeadline(null);
         setLockedOut([]);
         setWrongFlash(null);
         setView('playing');
@@ -213,8 +238,9 @@ export default function QuizBowlMatch({ user, onExit }) {
           }
         }
       },
-      onBuzz: ({ userId, buzzAt }) => {
+      onBuzz: ({ userId, buzzAt, answerWindowMs }) => {
         setBuzz({ userId, buzzAt });
+        setAnswerDeadline((buzzAt || Date.now()) + (answerWindowMs || BUZZ_WINDOW_MS));
         if (isHostRef.current) {
           // Cancel remaining buzz timers; if a bot buzzed, schedule its answer.
           for (const t of Object.values(botEngRef.current.buzzTimers)) clearTimeout(t);
@@ -232,12 +258,13 @@ export default function QuizBowlMatch({ user, onExit }) {
           }
         }
       },
-      onWrongAnswer: ({ userId, answer: wrongAns, lockedOut: lock, questionStartedAt: newStart, scores }) => {
+      onWrongAnswer: ({ userId, answer: wrongAns, lockedOut: lock, questionStartedAt: newStart, scores, timedOut }) => {
         setBuzz(null);
         setAnswer('');
+        setAnswerDeadline(null);
         setLockedOut(lock || []);
         if (newStart && question) setQuestion(q => q ? { ...q, startedAt: newStart } : q);
-        setWrongFlash({ userId, answer: wrongAns });
+        setWrongFlash({ userId, answer: wrongAns, timedOut });
         if (scores) setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: scores[p.userId] || 0 })) } : prev);
         setTimeout(() => setWrongFlash(null), 1800);
         // Bot engine: re-schedule non-locked bots after the question resumes.
@@ -267,24 +294,50 @@ export default function QuizBowlMatch({ user, onExit }) {
       },
       onAnswerResult: (data) => {
         setAnswerResult(data);
+        setAnswerDeadline(null);
         setAutoAdvanceDeadline(data.autoAdvanceInMs ? Date.now() + data.autoAdvanceInMs : null);
         setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: data.scores[p.userId] || 0 })) } : prev);
         if (isHostRef.current) clearBotTimers();
       },
-      onMatchEnd: ({ scores, abandoned: wasAbandoned, leftBy, reason }) => {
+      onMatchEnd: ({ scores, abandoned: wasAbandoned, leftBy, reason, comparison: cmp }) => {
         setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: scores[p.userId] || 0 })) } : prev);
         setQuestion(null); setBuzz(null); setAnswer(''); setAnswerResult(null);
-        setAutoAdvanceDeadline(null); setWrongFlash(null);
+        setAutoAdvanceDeadline(null); setAnswerDeadline(null); setWrongFlash(null);
+        if (cmp) setComparison(cmp);
         if (wasAbandoned) setAbandoned({ leftBy, reason });
         setView('finished');
         clearBotTimers();
         botEngRef.current.bots = [];
+        try { onMatchEnd?.(scores || {}); } catch {}
       },
       onError: (err) => setError(err),
     });
     abortRef.current = abort;
     return () => { try { abort(); } catch {} };
   }, [code]);
+
+  // Group-session embed: join the pre-created match immediately instead of
+  // showing the create/join menu. The server's join endpoint is idempotent
+  // for existing players, so the host (already on the roster) lands in the
+  // lobby the same way.
+  const autoJoinedRef = useRef(false);
+  useEffect(() => {
+    if (!initialJoinCode || autoJoinedRef.current) return;
+    autoJoinedRef.current = true;
+    (async () => {
+      setBusy(true); setError(null);
+      try {
+        const c = initialJoinCode.toUpperCase();
+        const res = await joinMatch(c);
+        setCode(c);
+        setMatch(res.match);
+        setView('lobby');
+      } catch (e) {
+        setError(e.message || 'Could not join the match');
+      }
+      setBusy(false);
+    })();
+  }, [initialJoinCode]);
 
   async function handleCreate() {
     if (busy) return;
@@ -345,7 +398,9 @@ export default function QuizBowlMatch({ user, onExit }) {
     if (!question || buzz) return;
     if (lockedOut.includes(myId)) return;
     setBuzz({ userId: user?.id || 'me', buzzAt: Date.now(), _optimistic: true });
-    try { await buzzMatch(code); } catch {}
+    // Start the answer clock instantly; onBuzz refines it to the server time.
+    setAnswerDeadline(Date.now() + BUZZ_WINDOW_MS);
+    try { await buzzMatch(code); } catch { setBuzz(null); setAnswerDeadline(null); }
   }, [question, buzz, code, user?.id, lockedOut, myId]);
 
   async function handleSubmitAnswer() {
@@ -360,25 +415,54 @@ export default function QuizBowlMatch({ user, onExit }) {
   async function handleLeave() {
     try { await leaveMatch(code); } catch {}
     setCode(''); setMatch(null); setQuestion(null); setBuzz(null); setAnswerResult(null);
-    setAbandoned(null);
+    setAbandoned(null); setAnswerDeadline(null); setComparison(null);
     setView('menu');
     onExit?.();
   }
 
+  // Keep refs current so the keydown listener (registered only on view change)
+  // always reads the latest state without stale-closure gaps from re-registration.
+  const _mpBuzzRef = useRef(buzz);          _mpBuzzRef.current = buzz;
+  const _mpHandleBuzzRef = useRef(handleBuzz); _mpHandleBuzzRef.current = handleBuzz;
+  const _mpIsActiveRef = useRef(false);     _mpIsActiveRef.current = state.windows[state.activeWindowId]?.appId === 'quizbowl';
+
   useEffect(() => {
     if (view !== 'playing') return;
     function onKey(e) {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-      if (e.key === ' ' && !buzz) { e.preventDefault(); handleBuzz(); }
+      if (!_mpIsActiveRef.current) return;
+      if (e.key === ' ' && !_mpBuzzRef.current) { e.preventDefault(); _mpHandleBuzzRef.current(); }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [view, buzz, handleBuzz]);
+  }, [view]);
 
   const iBuzzed = buzz && buzz.userId === myId;
   const isHost = match?.hostId === myId;
 
   // ============ MENU ============
+  if (view === 'menu' && initialJoinCode) {
+    // Embedded auto-join in flight (or blocked: match already started/full).
+    return (
+      <div className="h-full flex items-center justify-center">
+        <div className="max-w-sm mx-auto text-center px-6 py-8 rounded-2xl border border-blue-500/[0.15] bg-white/[0.03]">
+          {error ? (
+            <>
+              <p className="text-sm text-rose-300 mb-1">{error}</p>
+              <p className="text-[11.5px] text-blue-300/50 mb-4">The game may have already started — you can join the next one.</p>
+              <button onClick={onExit} className="px-4 py-2 rounded-xl bg-blue-500 text-white text-sm font-semibold hover:bg-blue-400 transition-colors">
+                Back
+              </button>
+            </>
+          ) : (
+            <>
+              <Loader2 size={20} className="animate-spin text-blue-300/70 mx-auto mb-2" />
+              <p className="text-sm text-blue-200/80">Joining match {initialJoinCode}…</p>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
   if (view === 'menu') {
     return (
       <div className="h-full overflow-y-auto bg-transparent">
@@ -670,14 +754,29 @@ export default function QuizBowlMatch({ user, onExit }) {
             </div>
           )}
 
+          {/* Group study matches are pinned to their material — no category. */}
+          {match?.studyTitle && (
+            <div className="mb-4 flex items-center gap-2 rounded-xl border border-blue-500/25 bg-blue-500/[0.07] px-3 py-2.5">
+              <BookOpen size={14} className="text-blue-300/80 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70">Questions from</p>
+                <p className="text-[12.5px] text-blue-100 font-medium truncate">{match.studyTitle}</p>
+              </div>
+            </div>
+          )}
+
           {/* Settings - host only, at least 2 players present (or bots will fill) */}
           {(fillWithBots || !waiting) && isHost && (
             <>
-              <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2">Category</p>
-              <div className="mb-3">
-                <MatchSelector value={category} onChange={setCategory}
-                  options={['Science','History','Literature','Geography','Math','Art','Music','Philosophy','Pop Culture','Mixed']} />
-              </div>
+              {!match?.studyTitle && (
+                <>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2">Category</p>
+                  <div className="mb-3">
+                    <MatchSelector value={category} onChange={setCategory}
+                      options={['Science','History','Literature','Geography','Math','Art','Music','Philosophy','Pop Culture','Mixed']} />
+                  </div>
+                </>
+              )}
               <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2">Difficulty</p>
               <div className="mb-3">
                 <MatchSelector value={difficulty} onChange={setDifficulty}
@@ -780,6 +879,7 @@ export default function QuizBowlMatch({ user, onExit }) {
       iBuzzed={iBuzzed} isHost={isHost} myId={myId}
       lockedOut={lockedOut} wrongFlash={wrongFlash}
       autoAdvanceDeadline={autoAdvanceDeadline}
+      answerDeadline={answerDeadline}
       revealSpeedMs={match.revealSpeedMs || 140}
     />;
   }
@@ -811,6 +911,18 @@ export default function QuizBowlMatch({ user, onExit }) {
               </div>
             ))}
           </div>
+          {comparison?.questions?.length > 0 && (
+            <div className="pt-1">
+              <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2 text-left">Compare &amp; contrast</p>
+              <MatchComparison comparison={comparison} myUserId={myId} />
+            </div>
+          )}
+          {onMatchReplay && code && (
+            <button onClick={() => onMatchReplay(code)}
+              className="w-full py-2.5 rounded-2xl border border-blue-500/30 bg-blue-500/[0.07] text-[13px] font-medium text-blue-300/80 hover:text-blue-200 hover:border-blue-500/50 transition-colors">
+              View Replay
+            </button>
+          )}
           <button onClick={handleLeave}
             className="w-full py-2.5 rounded-2xl border border-white/[0.06] bg-white/[0.03] text-[13px] font-medium text-white/50 hover:text-white/70 transition-colors">
             Back
@@ -827,11 +939,72 @@ export default function QuizBowlMatch({ user, onExit }) {
   );
 }
 
+// ===== PLAYER CARD (sidebar scoreboard) =====
+// Exported so the match replay (QuizBowlApp) renders the exact same
+// scoreboard as the live game.
+export function PlayerCard({ player, isMe, buzz, lockedOut, answerResult, maxScore }) {
+  const score = player.score || 0;
+  const pct = maxScore > 0 ? Math.min(100, (score / maxScore) * 100) : 0;
+
+  const isAnswering = buzz && buzz.userId === player.userId && !answerResult;
+  const gotIt = answerResult?.userId === player.userId && answerResult.correct;
+  const isLocked = lockedOut.includes(player.userId);
+
+  const dotClass = isAnswering
+    ? 'bg-amber-400 animate-pulse'
+    : gotIt
+    ? 'bg-emerald-400'
+    : isLocked
+    ? 'bg-rose-400/60'
+    : 'bg-white/15';
+
+  const statusText = isAnswering ? 'Answering…'
+    : gotIt ? '✓ Correct'
+    : isLocked ? 'Locked out'
+    : 'Listening';
+
+  return (
+    <div className={`rounded-xl border p-2.5 ${isMe ? 'bg-blue-500/[0.08] border-blue-500/30' : 'bg-white/[0.04] border-white/[0.08]'}`}>
+      <div className="flex items-center gap-1.5 mb-1">
+        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotClass}`} />
+        <span className={`font-semibold text-[11px] flex-1 truncate ${isMe ? 'text-blue-300' : 'text-white/65'}`}>
+          {player.name}
+        </span>
+        <span className={`text-xs font-bold tabular-nums ${isMe ? 'text-blue-300' : 'text-white/60'}`}>
+          {score}
+        </span>
+      </div>
+      <div className="h-1 bg-white/[0.06] rounded-full overflow-hidden mb-1.5">
+        <div
+          className={`h-full rounded-full transition-all duration-700 ${isMe ? 'bg-blue-400' : 'bg-white/30'}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <div className="text-white/35 text-[10px]">{statusText}</div>
+    </div>
+  );
+}
+
 // ===== PLAYING VIEW =====
-function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, onBuzz, onSubmitAnswer, onNext, onLeave, onEndMatch, iBuzzed, isHost, myId, lockedOut = [], wrongFlash, autoAdvanceDeadline, revealSpeedMs }) {
+function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, onBuzz, onSubmitAnswer, onNext, onLeave, onEndMatch, iBuzzed, isHost, myId, lockedOut = [], wrongFlash, autoAdvanceDeadline, answerDeadline, revealSpeedMs }) {
   const frozen = !!buzz || !!answerResult;
   const frozenAt = buzz?.buzzAt || answerResult?.buzzAt || null;
   const { revealed, wordIndex, totalWords } = useWordReveal(question?.text || '', question?.startedAt || 0, revealSpeedMs, frozen, frozenAt);
+
+  // Live answer-clock tick: only runs while a buzz is awaiting an answer.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  const countingDown = !!answerDeadline && !!buzz && !answerResult;
+  useEffect(() => {
+    if (!countingDown) return;
+    const id = setInterval(() => setNowTick(Date.now()), 100);
+    return () => clearInterval(id);
+  }, [countingDown, answerDeadline]);
+  // Clamp to the window so minor client/server clock skew never shows "10s".
+  const answerMsLeft = countingDown ? Math.max(0, Math.min(BUZZ_WINDOW_MS, answerDeadline - nowTick)) : null;
+  const answerSecs = answerMsLeft != null ? Math.ceil(answerMsLeft / 1000) : null;
+  const answerPct = answerMsLeft != null ? Math.max(0, Math.min(100, (answerMsLeft / BUZZ_WINDOW_MS) * 100)) : 0;
+  const answerUrgent = answerMsLeft != null && answerMsLeft <= 3000;
+  const timeUp = answerMsLeft === 0;
 
   if (!match || !Array.isArray(match.players)) {
     return <div className="p-5 text-center text-[12px] text-white/30 bg-transparent h-full"><InlineProgress active /> Loading…</div>;
@@ -841,23 +1014,35 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
   const buzzerName = buzz ? (players.find(p => p.userId === buzz.userId)?.name || 'Opponent') : '';
   const wrongName = wrongFlash ? (players.find(p => p.userId === wrongFlash.userId)?.name || 'Opponent') : '';
   const iAmLocked = lockedOut.includes(myId);
+  const myScore = players.find(p => p.userId === myId)?.score || 0;
+  const maxScore = Math.max(1, ...players.map(p => p.score || 0));
+  const progressPct = totalWords > 0 ? Math.min(100, ((wordIndex + 1) / totalWords) * 100) : 0;
+
+  const resultCorrect = answerResult
+    ? (answerResult.correct ? true : (answerResult.timeout || !answerResult.userId) ? null : false)
+    : null;
+  const resultMeta = answerResult
+    ? (answerResult.correct
+        ? (answerResult.userId === myId ? 'Correct!' : `${buzzerName} got it`)
+        : (answerResult.timeout || !answerResult.userId) ? 'No one got it'
+        : (answerResult.userId === myId ? 'Wrong!' : `${buzzerName} was wrong`))
+    : '';
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-transparent">
-      {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-white/[0.04] flex-shrink-0">
-        <Zap size={13} className="text-amber-500/70" />
-        <span className="text-[12px] font-semibold text-white/50 tabular-nums">
+      {/* Header — matches TrialSession style */}
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/[0.04] flex-shrink-0">
+        <Zap size={14} className="text-white/50" />
+        <span className="text-[13px] font-bold text-white tabular-nums">
           Q{(match.currentIdx || 0) + 1}/{match.totalQuestions}
         </span>
-        <div className="flex-1 flex items-center gap-2 justify-center flex-wrap">
-          {players.map(p => (
-            <div key={p.userId} className={`flex items-center gap-1.5 px-2 py-1 rounded-xl text-[11px] border ${p.userId === myId ? 'bg-white/[0.06] border-white/[0.10] text-white/60' : 'bg-white/[0.03] border-white/[0.05] text-white/35'}`}>
-              <span className="font-medium">{p.name}{p.userId === myId ? ' ·' : ''}</span>
-              <span className="font-bold tabular-nums">{p.score || 0}</span>
-            </div>
-          ))}
-        </div>
+        <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-white/[0.08] text-white/50">
+          Match
+        </span>
+        <div className="flex-1" />
+        <span className={`text-[12px] font-bold tabular-nums ${myScore > 0 ? 'text-emerald-400' : 'text-white/40'}`}>
+          {myScore}
+        </span>
         {isHost && (
           <button onClick={onEndMatch} title="End match early"
             className="inline-flex items-center gap-1 text-[10px] font-semibold text-rose-400/70 hover:text-rose-300 px-2 py-1 rounded-md border border-rose-500/20 hover:border-rose-500/40 bg-rose-500/[0.05] transition-colors">
@@ -867,82 +1052,121 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
         <button onClick={onLeave} className="text-white/20 hover:text-rose-400/60 transition-colors"><LogOut size={12} /></button>
       </div>
 
-      {/* Question */}
-      <div className="flex-1 overflow-y-auto p-5">
-        <p className="text-[15px] leading-relaxed text-white/85 font-light">
-          {revealed}
-          {!frozen && wordIndex < totalWords - 1 && (
-            <span className="inline-block w-0.5 h-4 bg-white/30 animate-pulse ml-1 align-middle rounded-sm" />
-          )}
-        </p>
-        {buzz && !answerResult && (
-          <p className="text-[11px] text-amber-400/60 mt-3">
-            <Zap size={9} className="inline mr-0.5" />
-            {iBuzzed ? 'You buzzed' : `${buzzerName} buzzed`}
-          </p>
-        )}
-      </div>
-
-      {/* Action bar */}
-      <div className="px-4 py-3 border-t border-white/[0.04] flex-shrink-0 space-y-2">
-        {wrongFlash && !buzz && !answerResult && (
-          <div className="px-3 py-1.5 rounded-2xl bg-rose-500/[0.08] border border-rose-500/15 text-[11px] text-rose-400/70 text-center">
-            {wrongFlash.userId === myId ? 'Wrong' : `${wrongName} was wrong`}
-            {wrongFlash.answer ? ` - "${wrongFlash.answer}"` : ''} · continues
-          </div>
-        )}
-        {!buzz && !answerResult && !iAmLocked && (
-          <>
-            <button onClick={onBuzz}
-              className="w-full py-4 rounded-2xl bg-red-600/80 hover:bg-red-500/80 backdrop-blur-sm text-white text-[15px] font-bold uppercase tracking-[0.15em] active:scale-[0.98] transition-all">
-              BUZZ
-            </button>
-            <p className="text-[10px] text-white/20 text-center">Space to buzz</p>
-          </>
-        )}
-        {!buzz && !answerResult && iAmLocked && (
-          <div className="w-full py-3 rounded-2xl border border-white/[0.05] bg-white/[0.02] text-center text-[11px] text-white/25">
-            Locked out - wait for next question
-          </div>
-        )}
-        {buzz && !answerResult && iBuzzed && (
-          <div className="flex gap-2">
-            <input
-              autoFocus value={answer} onChange={e => setAnswer(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && answer.trim() && onSubmitAnswer()}
-              placeholder="Answer…"
-              className="flex-1 px-4 py-3 rounded-2xl border border-white/[0.08] bg-white/[0.04] text-[14px] text-white/85 placeholder-white/20 outline-none focus:border-white/15 transition-colors"
-            />
-            <button onClick={onSubmitAnswer} disabled={!answer.trim()}
-              className="px-5 py-3 rounded-2xl bg-white/[0.07] hover:bg-white/[0.11] border border-white/[0.08] text-white/60 hover:text-white/80 text-[13px] font-semibold disabled:opacity-30 transition-colors">
-              →
-            </button>
-          </div>
-        )}
-        {buzz && !answerResult && !iBuzzed && (
-          <div className="w-full py-3 rounded-2xl border border-white/[0.05] bg-white/[0.02] text-center text-[11px] text-white/30 inline-flex items-center justify-center gap-2">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full rounded-full bg-amber-400/50 animate-ping" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500/50" />
-            </span>
-            {buzzerName} is answering…
-          </div>
-        )}
-        {answerResult && (
-          <>
-            <div className={`p-3 rounded-2xl text-center border ${answerResult.correct ? 'bg-emerald-500/[0.08] border-emerald-500/25' : (answerResult.timeout || !answerResult.userId) ? 'bg-white/[0.03] border-white/[0.06]' : 'bg-rose-500/[0.08] border-rose-500/25'}`}>
-              <p className={`text-[13px] font-bold ${answerResult.correct ? 'text-emerald-400/80' : (answerResult.timeout || !answerResult.userId) ? 'text-white/40' : 'text-rose-400/80'}`}>
-                {answerResult.correct
-                  ? (answerResult.userId === myId ? '✓ Correct' : `${buzzerName} got it`)
-                  : (answerResult.timeout || !answerResult.userId)
-                    ? 'No one got it'
-                    : (answerResult.userId === myId ? '✗ Wrong' : `${buzzerName} was wrong`)}
+      <div className="flex flex-1 min-h-0">
+        {/* Question + action bar */}
+        <div className="flex-1 flex flex-col min-h-0">
+          <div className="flex-1 overflow-y-auto p-5">
+            <div className="min-h-[120px]">
+              <p className="text-[15px] leading-relaxed text-white/90 font-light">
+                {revealed}
+                {!frozen && wordIndex < totalWords - 1 && (
+                  <span className="inline-block w-0.5 h-4 bg-white/30 animate-pulse ml-1 align-middle rounded-sm" />
+                )}
               </p>
-              <p className="text-[11px] text-white/40 mt-1"><strong className="text-white/60">{answerResult.correctAnswer}</strong></p>
             </div>
-            <AutoAdvanceCountdown deadline={autoAdvanceDeadline} isHost={isHost} onNext={onNext} />
-          </>
-        )}
+          </div>
+
+          {/* Action bar */}
+          <div className="px-4 py-3 border-t border-white/[0.04] flex-shrink-0 space-y-2">
+            {wrongFlash && !buzz && !answerResult && (
+              <div className="px-3 py-1.5 rounded-2xl bg-rose-500/[0.08] border border-rose-500/15 text-[11px] text-rose-400/70 text-center">
+                {wrongFlash.userId === myId ? 'Wrong' : `${wrongName} was wrong`}
+                {wrongFlash.timedOut ? ' — ran out of time' : wrongFlash.answer ? ` — "${wrongFlash.answer}"` : ''} · continues
+              </div>
+            )}
+            {!buzz && !answerResult && !iAmLocked && (
+              <>
+                <button onClick={onBuzz}
+                  className="w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white text-[15px] font-bold uppercase tracking-[0.15em] active:scale-[0.98] transition-all">
+                  BUZZ
+                </button>
+                <p className="text-[10px] text-white/35 text-center">Space to buzz</p>
+              </>
+            )}
+            {!buzz && !answerResult && iAmLocked && (
+              <div className="w-full py-3 rounded-2xl border border-white/[0.05] bg-white/[0.02] text-center text-[11px] text-white/25">
+                Locked out · wait for next question
+              </div>
+            )}
+            {buzz && !answerResult && iBuzzed && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className={`text-[11px] font-medium ${answerUrgent ? 'text-rose-300' : 'text-white/45'}`}>
+                    {timeUp ? "Time's up" : 'Answer before the timer runs out'}
+                  </span>
+                  <span className={`text-[13px] font-bold tabular-nums ${answerUrgent ? 'text-rose-300' : 'text-white/70'}`}>{answerSecs ?? 0}s</span>
+                </div>
+                <div className="h-1 rounded-full bg-white/[0.06] overflow-hidden">
+                  <div className={`h-full transition-all duration-100 ${answerUrgent ? 'bg-rose-500' : 'bg-amber-400'}`} style={{ width: `${answerPct}%` }} />
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    autoFocus value={answer} onChange={e => setAnswer(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && answer.trim() && !timeUp && onSubmitAnswer()}
+                    placeholder={timeUp ? "Time's up…" : 'Answer…'}
+                    disabled={timeUp}
+                    className="flex-1 px-4 py-3 rounded-2xl border border-white/[0.08] bg-white/[0.04] text-[14px] text-white/85 placeholder-white/20 outline-none focus:border-white/15 transition-colors disabled:opacity-50"
+                  />
+                  <button onClick={onSubmitAnswer} disabled={!answer.trim() || timeUp}
+                    className="px-5 py-3 rounded-2xl bg-white/[0.07] hover:bg-white/[0.11] border border-white/[0.08] text-white/60 hover:text-white/80 text-[13px] font-semibold disabled:opacity-30 transition-colors">
+                    →
+                  </button>
+                </div>
+              </div>
+            )}
+            {buzz && !answerResult && !iBuzzed && (
+              <div className="w-full py-3 rounded-2xl border border-white/[0.05] bg-white/[0.02] text-center text-[11px] text-white/30 inline-flex items-center justify-center gap-2">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-amber-400/50 animate-ping" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500/50" />
+                </span>
+                {buzzerName} is answering
+                {answerSecs != null && (
+                  <span className={`font-bold tabular-nums ${answerUrgent ? 'text-rose-300' : 'text-white/55'}`}>{answerSecs}s</span>
+                )}
+              </div>
+            )}
+            {answerResult && (
+              <>
+                <AnswerResultPanel
+                  correct={resultCorrect}
+                  officialAnswer={answerResult.correctAnswer}
+                  meta={resultMeta}
+                />
+                <AutoAdvanceCountdown deadline={autoAdvanceDeadline} isHost={isHost} onNext={onNext} />
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Sidebar — player scorecards, matches TrialSession sidebar */}
+        <div className="w-44 flex-shrink-0 border-l border-white/[0.04] p-3 flex flex-col gap-1.5 overflow-y-auto">
+          <div className="flex items-center gap-1.5 mb-1 flex-shrink-0">
+            <Users size={11} className="text-white/25" />
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-white/25">
+              Match · {players.length}P
+            </span>
+          </div>
+          {players.map(p => (
+            <PlayerCard
+              key={p.userId}
+              player={p}
+              isMe={p.userId === myId}
+              buzz={buzz}
+              lockedOut={lockedOut}
+              answerResult={answerResult}
+              maxScore={maxScore}
+            />
+          ))}
+          <div className="mt-auto pt-2 border-t border-white/[0.04] flex-shrink-0">
+            <div className="flex justify-between text-[10px] text-white/25 mb-1">
+              <span>Read</span><span>{Math.round(progressPct)}%</span>
+            </div>
+            <div className="h-1 bg-white/[0.05] rounded-full overflow-hidden">
+              <div className="h-full bg-white/20 rounded-full transition-all" style={{ width: `${progressPct}%` }} />
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

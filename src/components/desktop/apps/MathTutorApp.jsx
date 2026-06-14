@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Calculator, Pen, Eraser, Undo2, Trash2, Sparkles, Check,
+  Calculator, Pen, Eraser, Undo2, Trash2, Check,
   ArrowLeft, ClipboardCheck, Settings, MessageSquare, Layers, RotateCcw,
   Play, ChevronLeft, ChevronRight, ListChecks, Cpu, ChevronDown, Lock,
 } from 'lucide-react';
@@ -11,6 +11,7 @@ import ChatContainer from '../../chat/ChatContainer';
 import { errorChatMessage } from '../../../utils/aiErrors';
 import useBrowserBack from '../../../hooks/useBrowserBack';
 import { InlineProgress } from '../../shared/ProgressBar';
+import Button from '../../shared/Button';
 import { useAuth } from '../../../context/AuthContext';
 import { planFromUser } from '../../billing/modelAccess';
 import { syncData } from '../../../api/auth';
@@ -20,6 +21,18 @@ import {
 
 const STORAGE_KEY = 'covalent-math-tutor-state-v1';
 const PEN_SIZES = { thin: 2, medium: 4, thick: 7 };
+
+// QBpedia-style surfaces — flat, notes-like rather than glassy: subtle fields
+// with a blue focus ring, uppercase-tracked section labels, neutral buttons
+// whose identity lives in a colored icon, and quiet icon-only header actions.
+const FIELD_CLS =
+  'w-full px-3.5 py-2.5 rounded-lg border border-white/[0.10] bg-white/[0.04] text-sm text-white/90 placeholder-white/30 outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20 transition-colors';
+const LABEL_CLS =
+  'text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 flex items-center gap-1.5';
+export const NEUTRAL_BTN =
+  'inline-flex items-center justify-center gap-1.5 rounded-lg font-medium border border-white/[0.06] bg-white/[0.03] text-white/65 hover:text-white/90 hover:bg-white/[0.06] hover:border-white/[0.12] transition-colors';
+const HEADER_ICON_BTN =
+  'p-1.5 rounded-md text-white/35 hover:text-white/70 hover:bg-white/[0.05] transition-colors';
 
 
 function loadState() {
@@ -226,9 +239,9 @@ export function TutorCanvas({ onCaptureReady, initialStrokes = null, onStrokesCh
   );
 
   return (
-    <div className="flex flex-col h-full border border-white/10 rounded-2xl overflow-hidden bg-black/30 backdrop-blur-sm">
+    <div className="flex flex-col h-full border border-white/[0.08] rounded-xl overflow-hidden bg-black/20">
       {/* Canvas toolbar */}
-      <div className="flex items-center gap-1 px-3 py-2 border-b border-white/8 bg-black/20 flex-shrink-0">
+      <div className="flex items-center gap-1 px-3 py-2 border-b border-white/[0.06] bg-black/10 flex-shrink-0">
         {iconBtn(tool === 'pen',    () => setTool('pen'),    <Pen    size={13} />, 'Pen')}
         {iconBtn(tool === 'eraser', () => setTool('eraser'), <Eraser size={13} />, 'Eraser')}
         <div className="w-px h-4 bg-white/10 mx-1" />
@@ -522,94 +535,85 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
   // ─── Setup view ─────────────────────────────────────────────────────────────
   if (view === 'setup') {
     return (
-      <div key="mt-setup" className="h-full overflow-y-auto bg-transparent animate-view-fade">
-        <div className="max-w-md mx-auto px-6 py-10 space-y-5">
-          {/* Icon + title */}
-          <div className="text-center">
-            <h1 className="text-white text-[17px] font-semibold tracking-tight">Math Tutor</h1>
-          </div>
+      <div key="mt-setup" className="h-full overflow-y-auto bg-transparent animate-view-fade flex flex-col justify-center">
+        <div className="max-w-sm mx-auto w-full space-y-3 px-1 pb-4">
+          {/* Quiet header */}
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/30">Math Tutor</p>
 
           {/* Topic */}
-          <div>
-            <label className="text-[11px] font-medium text-white/65 uppercase tracking-widest block mb-2">Topic</label>
-            <input
-              value={topic}
-              onChange={e => setTopic(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && topic.trim() && handleSetupStart()}
-              placeholder="Quadratic equations, integrals, etc."
-              className="w-full px-3 py-2.5 rounded-xl border border-white/10 bg-white/10 backdrop-blur-sm text-sm text-white outline-none focus:border-white/25 placeholder:text-white/25 transition-colors"
-              autoFocus
-            />
-          </div>
+          <input
+            value={topic}
+            onChange={e => setTopic(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && topic.trim() && handleSetupStart()}
+            placeholder="Topic — quadratics, integrals, vectors…"
+            className={FIELD_CLS}
+            autoFocus
+          />
 
-          {/* Custom instructions - collapsed by default */}
-          <div>
-            <button
-              onClick={() => setShowSettings(s => !s)}
-              className="flex items-center gap-1.5 text-[11px] font-medium text-white/55 hover:text-white/85 uppercase tracking-widest transition-colors"
-            >
-              <Settings size={11} />
-              {showSettings ? 'Hide' : 'Custom instructions'}
-            </button>
-            {showSettings && (
-              <textarea
-                value={customInstructions}
-                onChange={e => setCustomInstructions(e.target.value)}
-                rows={3}
-                placeholder="How should the tutor teach you?"
-                className="mt-2 w-full px-3 py-2.5 rounded-xl border border-white/10 bg-white/10 backdrop-blur-sm text-sm text-white outline-none focus:border-white/25 resize-none placeholder:text-white/25 transition-colors animate-fade-in"
-              />
-            )}
-          </div>
+          {/* Format + problem count inline */}
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 bg-white/[0.03] border border-white/[0.07] rounded-lg p-0.5">
+              {[
+                { id: 'tutor',      label: 'Tutor',   Icon: MessageSquare },
+                { id: 'problemset', label: 'Problems', Icon: ListChecks },
+              ].map(o => (
+                <button
+                  key={o.id}
+                  onClick={() => setSetupKind(o.id)}
+                  className={`inline-flex items-center gap-1 px-2.5 h-7 rounded-md text-[11px] font-medium transition-colors ${
+                    setupKind === o.id
+                      ? 'bg-blue-500/20 text-blue-300 ring-1 ring-blue-400/30'
+                      : 'text-white/40 hover:text-white/70'
+                  }`}
+                >
+                  <o.Icon size={11} /> {o.label}
+                </button>
+              ))}
+            </div>
 
-          {/* Kind: guided tutor vs problem set */}
-          <div className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-xl p-1">
-            {[
-              { id: 'tutor',      label: 'Guided tutor', Icon: Sparkles },
-              { id: 'problemset', label: 'Problem set',  Icon: ListChecks },
-            ].map(o => (
-              <button
-                key={o.id}
-                onClick={() => setSetupKind(o.id)}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[12px] font-semibold transition-colors ${
-                  setupKind === o.id ? 'bg-white/15 text-white' : 'text-white/40 hover:text-white/70'
-                }`}
-              >
-                <o.Icon size={12} /> {o.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Problem count (problem set only) */}
-          {setupKind === 'problemset' && (
-            <div className="flex items-center justify-between px-1 animate-fade-in">
-              <span className="text-[11px] text-white/50">Number of problems</span>
-              <div className="flex items-center gap-1">
+            {setupKind === 'problemset' && (
+              <div className="flex items-center gap-1 animate-fade-in">
                 {[3, 5, 8].map(n => (
                   <button
                     key={n}
                     onClick={() => setPsCount(n)}
-                    className={`w-8 h-7 rounded-lg text-[12px] font-semibold transition-colors ${
-                      psCount === n ? 'bg-blue-500 text-white' : 'bg-white/5 text-white/50 hover:text-white/80'
+                    className={`w-8 h-8 rounded-lg border text-[11px] font-semibold transition-colors ${
+                      psCount === n
+                        ? 'bg-blue-500/20 border-blue-400/30 text-blue-300'
+                        : 'bg-white/[0.03] border-white/[0.06] text-white/40 hover:text-white/70 hover:bg-white/[0.06]'
                     }`}
                   >
                     {n}
                   </button>
                 ))}
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Start button */}
-          <button
-            onClick={handleSetupStart}
-            disabled={!topic.trim()}
-            className="w-full py-2.5 rounded-xl bg-blue-500 hover:bg-blue-400 border border-blue-400/40 text-white text-sm font-semibold disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all"
-          >
-            {setupKind === 'problemset'
-              ? <><ListChecks size={13} className="text-white" /> Start problem set</>
-              : <><Sparkles size={13} className="text-white" /> Start</>}
-          </button>
+            <div className="flex-1" />
+            <Button onClick={handleSetupStart} disabled={!topic.trim()} size="sm">
+              {setupKind === 'problemset' ? <><ListChecks size={13} /> Start</> : <>Start</>}
+            </Button>
+          </div>
+
+          {/* Custom instructions - collapsed by default */}
+          <div className="space-y-2">
+            <button
+              onClick={() => setShowSettings(s => !s)}
+              className={`${LABEL_CLS} hover:text-white/60 transition-colors`}
+            >
+              <Settings size={11} />
+              {showSettings ? 'Hide instructions' : 'Custom instructions'}
+            </button>
+            {showSettings && (
+              <textarea
+                value={customInstructions}
+                onChange={e => setCustomInstructions(e.target.value)}
+                rows={2}
+                placeholder="How should the tutor teach you?"
+                className={`${FIELD_CLS} resize-none leading-relaxed animate-fade-in`}
+              />
+            )}
+          </div>
         </div>
       </div>
     );
@@ -663,22 +667,22 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
 
   return (
     <div key="mt-tutor" className="flex flex-col h-full bg-transparent animate-view-fade" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif' }}>
-      {/* Header */}
-      <div className="flex items-center gap-2.5 mx-2 mt-2 px-4 py-2.5 rounded-2xl flex-shrink-0 bg-white/8 border border-white/10 backdrop-blur-sm">
+      {/* Header — notes-style: inline back link + topic, quiet icon actions */}
+      <div className="flex items-center gap-2.5 mb-3 flex-shrink-0">
         <button
           onClick={() => setView('setup')}
-          className="w-7 h-7 rounded-lg flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-colors"
-          title="Back"
+          className="flex items-center gap-2 text-sm text-white/35 hover:text-white/60 transition-colors flex-shrink-0"
         >
-          <ArrowLeft size={14} />
+          <ArrowLeft size={16} /> Math Tutor
         </button>
-        <span className="text-white font-semibold text-[14px] tracking-tight truncate">{topic}</span>
+        <span className="w-1 h-1 rounded-full bg-white/20 flex-shrink-0" />
+        <span className="text-sm font-bold text-white/90 truncate">{topic}</span>
         <div className="flex-1" />
 
         <MathModelPicker active={model} plan={plan} onPick={pickModel} disabled={streaming} />
 
         {/* Mode toggle */}
-        <div className="flex items-center gap-0.5 bg-white/5 border border-white/10 rounded-lg p-0.5">
+        <div className="flex items-center gap-0.5 bg-white/[0.04] border border-white/[0.08] rounded-lg p-0.5">
           {[
             { id: 'tutor',  Icon: MessageSquare, label: 'Tutor only' },
             { id: 'both',   Icon: Layers,        label: 'Tutor + Canvas' },
@@ -689,7 +693,7 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
               onClick={() => setMode(o.id)}
               title={o.label}
               className={`w-7 h-7 rounded-md flex items-center justify-center transition-colors ${
-                mode === o.id ? 'bg-white/15 text-white' : 'text-white/30 hover:text-white/70'
+                mode === o.id ? 'bg-white/10 text-white' : 'text-white/30 hover:text-white/70'
               }`}
             >
               <o.Icon size={12} />
@@ -700,40 +704,40 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
         <button
           onClick={() => setShowSettings(s => !s)}
           title="Custom instructions"
-          className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
-            showSettings ? 'bg-white/15 text-white' : 'text-white/30 hover:text-white/70 hover:bg-white/10'
+          className={`p-1.5 rounded-md transition-colors ${
+            showSettings ? 'bg-white/[0.08] text-white/70' : 'text-white/35 hover:text-white/70 hover:bg-white/[0.05]'
           }`}
         >
-          <Settings size={13} />
+          <Settings size={14} />
         </button>
         <button
           onClick={handleReset}
           title="New session"
-          className="w-7 h-7 rounded-lg flex items-center justify-center text-white/30 hover:text-white/70 hover:bg-white/10 transition-colors"
+          className={HEADER_ICON_BTN}
         >
-          <RotateCcw size={13} />
+          <RotateCcw size={14} />
         </button>
       </div>
 
       {showSettings && (
-        <div className="px-4 py-3 border-b border-white/10 glass-header flex-shrink-0 animate-fade-in">
-          <label className="text-[10px] font-semibold text-white/30 uppercase tracking-widest block mb-2">Custom instructions (live)</label>
+        <div className="mb-3 flex-shrink-0 animate-fade-in space-y-2">
+          <label className={LABEL_CLS}><Settings size={11} /> Custom instructions (live)</label>
           <textarea
             value={customInstructions}
             onChange={e => setCustomInstructions(e.target.value)}
             rows={2}
             placeholder="Changes apply to the next message"
-            className="w-full px-3 py-2 rounded-xl border border-white/10 bg-white/10 backdrop-blur-sm text-xs text-white outline-none resize-none placeholder:text-white/25"
+            className={`${FIELD_CLS} resize-none`}
           />
         </div>
       )}
 
       {/* Main split */}
-      <div className={`flex-1 min-h-0 grid gap-2 p-2 bg-transparent ${
+      <div className={`flex-1 min-h-0 grid gap-3 bg-transparent ${
         mode === 'both' ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'
       }`}>
         {/* Chat column */}
-        <div className={`flex flex-col min-h-0 border border-white/10 rounded-2xl overflow-hidden bg-black/10 backdrop-blur-sm ${
+        <div className={`flex flex-col min-h-0 border border-white/[0.08] rounded-xl overflow-hidden bg-white/[0.02] ${
           mode === 'canvas' ? 'hidden' : ''
         }`}>
           <div className="flex-1 min-h-0 overflow-hidden">
@@ -749,54 +753,52 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
             />
           </div>
 
-          {/* Input area */}
-          <div className="p-2.5 flex-shrink-0">
-            <div className="bg-white/8 border border-white/10 rounded-2xl overflow-hidden backdrop-blur-sm">
-              <div className="flex items-center gap-2 px-4 py-3">
-                <input
-                  value={input}
-                  onChange={e => setInput(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(input); } }}
-                  placeholder={streaming ? 'Thinking…' : 'Ask…'}
-                  disabled={streaming}
-                  className="flex-1 bg-transparent border-none outline-none text-white text-[14px] placeholder:text-white/25"
-                />
-                {streaming ? (
-                  <button
-                    onClick={handleStop}
-                    className="text-[#f87171] hover:text-red-400 text-[13px] font-medium transition-colors flex items-center gap-1.5"
-                  >
-                    <InlineProgress active /> Stop
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => handleSend(input)}
-                    disabled={!input.trim()}
-                    className="text-white/35 hover:text-white text-[13px] font-medium disabled:opacity-0 transition-colors"
-                  >
-                    Send ↗
-                  </button>
-                )}
-              </div>
-              {/* Canvas action strip */}
-              <div className="flex gap-2 px-2.5 pb-2.5 pt-1">
+          {/* Input area — flat composer field + neutral canvas actions */}
+          <div className="p-2.5 flex-shrink-0 space-y-2">
+            <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-lg border border-white/[0.10] bg-white/[0.04] focus-within:border-blue-400/50 focus-within:ring-2 focus-within:ring-blue-400/20 transition-colors">
+              <input
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(input); } }}
+                placeholder={streaming ? 'Thinking…' : 'Ask…'}
+                disabled={streaming}
+                className="flex-1 bg-transparent border-none outline-none text-white text-[14px] placeholder:text-white/30"
+              />
+              {streaming ? (
                 <button
-                  onClick={handleFeedback}
-                  disabled={streaming}
-                  className="flex-1 py-2 rounded-lg bg-blue-500 hover:bg-blue-400 text-white border border-blue-400/40 text-[12px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-all"
+                  onClick={handleStop}
+                  className="text-[#f87171] hover:text-red-400 text-[13px] font-medium transition-colors flex items-center gap-1.5"
                 >
-                  <Check size={12} /> Get feedback
+                  <InlineProgress active /> Stop
                 </button>
+              ) : (
                 <button
-                  onClick={handleGrade}
-                  disabled={streaming}
-                  className="flex-1 py-2 rounded-lg bg-blue-500 hover:bg-blue-400 text-white border border-blue-400/40 text-[12px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-all"
+                  onClick={() => handleSend(input)}
+                  disabled={!input.trim()}
+                  className="text-white/35 hover:text-white text-[13px] font-medium disabled:opacity-0 transition-colors"
                 >
-                  <ClipboardCheck size={12} /> Grade my work
+                  Send ↗
                 </button>
-              </div>
+              )}
             </div>
-            {error && <p className="text-[11px] text-[#f87171] px-1 mt-1.5 animate-fade-in">{error}</p>}
+            {/* Canvas actions — blue accent buttons */}
+            <div className="flex gap-1.5">
+              <button
+                onClick={handleFeedback}
+                disabled={streaming}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg font-medium flex-1 px-2.5 py-2 text-[12px] disabled:opacity-50 disabled:cursor-not-allowed bg-blue-500 hover:bg-blue-400 text-white transition-colors"
+              >
+                <Check size={12} /> Get feedback
+              </button>
+              <button
+                onClick={handleGrade}
+                disabled={streaming}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg font-medium flex-1 px-2.5 py-2 text-[12px] disabled:opacity-50 disabled:cursor-not-allowed bg-blue-500 hover:bg-blue-400 text-white transition-colors"
+              >
+                <ClipboardCheck size={12} /> Grade my work
+              </button>
+            </div>
+            {error && <p className="text-[11px] text-[#f87171] px-1 animate-fade-in">{error}</p>}
           </div>
         </div>
 

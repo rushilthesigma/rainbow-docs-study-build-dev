@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Zap, Play, Check, X, Loader2, Lightbulb, Users, BookOpen, Sparkles, Settings, ArrowRight, Target, TrendingDown, Clock, History, Flame, ChevronRight, Trophy, Swords, RefreshCw, Eye } from 'lucide-react';
+import { Zap, Play, Check, X, Loader2, Lightbulb, Users, BookOpen, Sparkles, Settings, ArrowRight, Target, TrendingDown, Clock, History, Flame, ChevronRight, ArrowLeft, Trophy, Swords, RefreshCw, Eye } from 'lucide-react';
 import TrialSession, { AnswerResultPanel } from '../../trial/TrialSession';
 import { apiFetch } from '../../../api/client';
-import { fetchQBReaderTossups, saveQuizBowlSet, fetchQuizBowlHistory, fetchQuizBowlRecommendations, fetchQuizBowlPatterns, fetchQuizBowlSm2Due } from '../../../api/quizMatch';
+import { fetchQBReaderTossups, saveQuizBowlSet, fetchQuizBowlHistory, fetchQuizBowlRecommendations, fetchQuizBowlPatterns, fetchQuizBowlSm2Due, fetchQuizBowlMatches, saveAiMatchReplay } from '../../../api/quizMatch';
 import { intervalLabel } from '../../../utils/sm2';
 import { peek, fetchOnce, bustPrefix } from '../../../api/cache';
 import ViewFade from '../../shared/ViewFade';
@@ -10,7 +10,7 @@ import { useWindowManager } from '../../../context/WindowManagerContext';
 import { setPendingLesson } from '../../../utils/pendingLesson';
 import useBrowserBack from '../../../hooks/useBrowserBack';
 import { useAuth } from '../../../context/AuthContext';
-import QuizBowlMatch from './QuizBowlMatch';
+import QuizBowlMatch, { PlayerCard } from './QuizBowlMatch';
 import ProgressBar, { InlineProgress } from '../../shared/ProgressBar';
 
 const DIFFICULTIES = ['Easy', 'Medium', 'Hard', 'Tournament'];
@@ -139,7 +139,7 @@ function useWordReveal(text, speed = 140, active = false) {
 }
 
 export default function QuizBowlApp({ initialTopic = null, initialDifficulty = null, initialQuestions = null, initialContext = null, autoStart = false } = {}) {
-  const { openApp } = useWindowManager();
+  const { openApp, state } = useWindowManager();
   function openLessonFor(topic) {
     if (!topic) return;
     setPendingLesson({ topic, difficulty: 'beginner' });
@@ -153,7 +153,8 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   const [view, setView] = useState(hasPreloaded ? 'playing' : initialTopic ? 'custom' : 'hub');
   const [aiLobbyInitial, setAiLobbyInitial] = useState('lobby');
   const [replaySet, setReplaySet] = useState(null);
-  useBrowserBack(view !== 'hub', () => { setView('hub'); setReplaySet(null); });
+  const [matchReplayRec, setMatchReplayRec] = useState(null);
+  useBrowserBack(view !== 'hub', () => { setView('hub'); setReplaySet(null); setMatchReplayRec(null); });
   const { user } = useAuth();
   const [questions, setQuestions] = useState(() =>
     hasPreloaded ? initialQuestions.map(q => ({ ...q, ...parseTossupText(q.text || '') })) : []
@@ -185,10 +186,12 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   const cachedRecs = peek('qb:recs');
   const cachedPats = peek('qb:patterns');
   const cachedSm2  = peek('qb:sm2due');
+  const cachedMatches = peek('qb:matches');
   const [history, setHistory] = useState(cachedHist || null);
   const [recs, setRecs] = useState(cachedRecs?.recommendations || []);
   const [patterns, setPatterns] = useState(cachedPats?.patterns || null);
   const [sm2Due, setSm2Due] = useState(cachedSm2?.dueCategories || []);
+  const [matchList, setMatchList] = useState(cachedMatches?.matches || []);
   const [hubLoading, setHubLoading] = useState(!(cachedHist && cachedRecs && cachedPats));
   const setStartedAtRef = useRef(hasPreloaded ? Date.now() : null);
   const savedSetIdRef = useRef(null);       // guard so we save each set exactly once
@@ -198,7 +201,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
     // refresh in the background and keep the stale data on screen.
     if (!peek('qb:history')) setHubLoading(true);
     try {
-      const [h, r, p, s] = await Promise.all([
+      const [h, r, p, s, m] = await Promise.all([
         fetchOnce('qb:history', fetchQuizBowlHistory)
           .catch(() => ({ sets: [], stats: { sets: 0, accuracy: 0, studyMs: 0, categoryStats: {} } })),
         fetchOnce('qb:recs', fetchQuizBowlRecommendations)
@@ -207,18 +210,29 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
           .catch(() => ({ patterns: null })),
         fetchOnce('qb:sm2due', fetchQuizBowlSm2Due)
           .catch(() => ({ dueCategories: [] })),
+        fetchOnce('qb:matches', fetchQuizBowlMatches)
+          .catch(() => ({ matches: [] })),
       ]);
       setHistory(h);
       setRecs(r.recommendations || []);
       setPatterns(p.patterns || null);
       setSm2Due(s.dueCategories || []);
+      setMatchList(m.matches || []);
     } finally { setHubLoading(false); }
   }
 
-  // After a completed set, bust the hub caches so loadHub() re-fetches
-  // (instead of returning the stale "before this set" data).
+  // After a completed set or match, bust the hub caches so loadHub() re-fetches.
   function bustHubCache() { bustPrefix('qb:'); }
   useEffect(() => { loadHub(); }, []);
+
+  async function openMatchReplay(code) {
+    try {
+      const data = await fetchQuizBowlMatches();
+      setMatchList(data.matches || []);
+      const rec = (data.matches || []).find(m => m.code === code);
+      if (rec) { setMatchReplayRec(rec); setView('match-replay'); }
+    } catch {}
+  }
 
   // QBpedia handoff: start the game immediately instead of parking on the
   // setup form. The article rides along as the sole fact source — the
@@ -259,6 +273,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   const _buzzedRef    = useRef(buzzed);    _buzzedRef.current    = buzzed;
   const _readingRef   = useRef(reading);   _readingRef.current   = reading;
   const _showResultRef= useRef(showResult);_showResultRef.current= showResult;
+  const _isActiveRef  = useRef(false);    _isActiveRef.current  = state.windows[state.activeWindowId]?.appId === 'quizbowl';
   const _stopRef      = useRef(stop);      _stopRef.current      = stop;
   const _submitRef    = useRef(null);
   const _nextQRef     = useRef(null);
@@ -398,7 +413,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   }, [category, difficulty, view, playingSource, currentQ]);
 
   function handleBuzz() {
-    if (buzzed || !reading) return;
+    if (buzzed) return;
     setBuzzed(true); setReading(false); stop();
   }
 
@@ -512,12 +527,13 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   useEffect(() => {
     if (view !== 'playing') return;
     function onKey(e) {
+      if (!_isActiveRef.current) return;
       const buzzed     = _buzzedRef.current;
       const reading    = _readingRef.current;
       const showResult = _showResultRef.current;
-      if (e.key === ' ' && !buzzed && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+      if (e.key === ' ' && !buzzed) {
         e.preventDefault();
-        if (!buzzed && reading) { setBuzzed(true); setReading(false); _stopRef.current?.(); }
+        if (!buzzed) { setBuzzed(true); setReading(false); _stopRef.current?.(); }
       }
       if (e.key === 'Enter' && buzzed && !showResult) { e.preventDefault(); _submitRef.current?.(); }
       else if (e.key === 'Enter' && showResult) { e.preventDefault(); _nextQRef.current?.(); }
@@ -555,7 +571,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
           </div>
           <div className="space-y-1.5 mb-5">
             {scores.map((s, i) => (
-              <div key={i} className={`rounded-2xl px-3.5 py-2.5 border flex items-start gap-2.5 ${s.correct ? 'bg-emerald-500/8 border-emerald-500/20' : 'bg-rose-500/8 border-rose-500/20'}`}>
+              <div key={i} className={`rounded-lg px-3.5 py-2.5 border flex items-start gap-2.5 ${s.correct ? 'bg-emerald-500/8 border-emerald-500/20' : 'bg-rose-500/8 border-rose-500/20'}`}>
                 <div className={`mt-0.5 shrink-0 ${s.correct ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {s.correct ? <Check size={13} /> : <X size={13} />}
                 </div>
@@ -588,8 +604,8 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
             ))}
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <button onClick={() => { setView('setup'); setQuestions([]); setScores([]); }} className="py-2.5 rounded-2xl border border-white/10 bg-white/5 text-[13px] font-semibold text-white/70 hover:bg-white/8">New set</button>
-            <button onClick={() => { setCurrentQ(0); setBuzzed(false); setShowResult(false); setReading(true); setScores([]); setAnswer(''); setView('playing'); }} className="py-2.5 rounded-2xl bg-white/[0.09] hover:bg-white/[0.13] text-white/70 text-[13px] font-semibold">Replay</button>
+            <button onClick={() => { setView('setup'); setQuestions([]); setScores([]); }} className="py-2.5 rounded-lg border border-white/[0.08] bg-white/[0.03] text-[13px] font-semibold text-white/70 hover:bg-white/[0.06]">New set</button>
+            <button onClick={() => { setCurrentQ(0); setBuzzed(false); setShowResult(false); setReading(true); setScores([]); setAnswer(''); setView('playing'); }} className="py-2.5 rounded-lg bg-white/[0.09] hover:bg-white/[0.13] text-white/70 text-[13px] font-semibold">Replay</button>
           </div>
         </div>
       </div>
@@ -632,16 +648,16 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
             </>
           )}
           {isInfinite && settingsOpen && (
-            <div className="absolute right-2 top-full mt-1 w-72 z-20 rounded-2xl border border-white/15 bg-gradient-to-b from-white/[0.10] to-white/[0.03] backdrop-blur-2xl backdrop-saturate-150 p-3.5 space-y-3">
+            <div className="absolute right-2 top-full mt-1 w-72 z-20 rounded-lg border border-white/[0.12] bg-black/70 backdrop-blur-xl p-3.5 space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-white/55">Settings</span>
+                <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Settings</span>
                 <button onClick={() => setSettingsOpen(false)} className="text-white/45 hover:text-white/75"><X size={12} /></button>
               </div>
               <div>
                 <div className="grid grid-cols-3 gap-1">
                   {CATEGORIES.map(c => (
                     <button key={c} onClick={() => setCategory(c)}
-                      className={`px-2 py-1 rounded-xl text-[10px] font-semibold transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400/60 ${category === c ? 'bg-blue-500/20 text-white border border-blue-400/50' : 'bg-white/[0.04] text-white/55 border border-transparent hover:bg-white/[0.08] hover:text-white/75'}`}>
+                      className={`px-2 py-1 rounded-lg text-[10px] font-semibold transition-colors focus:outline-none ${category === c ? 'bg-blue-500/[0.18] text-blue-100 border border-blue-400/[0.40]' : 'bg-white/[0.03] text-white/55 border border-white/[0.06] hover:bg-white/[0.06] hover:text-white/75'}`}>
                       {c}
                     </button>
                   ))}
@@ -650,7 +666,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
               <div className="grid grid-cols-2 gap-1">
                 {DIFFICULTIES.map(d => (
                   <button key={d} onClick={() => setDifficulty(d)}
-                    className={`px-2 py-1.5 rounded-xl text-[11px] font-semibold transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400/60 ${difficulty === d ? 'bg-blue-500/20 text-white border border-blue-400/50' : 'bg-white/[0.04] text-white/55 border border-transparent hover:bg-white/[0.08] hover:text-white/75'}`}>
+                    className={`px-2 py-1.5 rounded-lg text-[11px] font-semibold transition-colors focus:outline-none ${difficulty === d ? 'bg-blue-500/[0.18] text-blue-100 border border-blue-400/[0.40]' : 'bg-white/[0.03] text-white/55 border border-white/[0.06] hover:bg-white/[0.06] hover:text-white/75'}`}>
                     {d}
                   </button>
                 ))}
@@ -680,7 +696,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
           {!buzzed && (
             <>
               <button onClick={handleBuzz} data-tour="qb-buzz"
-                className="w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white text-[15px] font-bold uppercase tracking-[0.15em] active:scale-[0.98] transition-all">
+                className="w-full py-4 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[15px] font-bold uppercase tracking-[0.15em] active:scale-[0.98] transition-all">
                 BUZZ
               </button>
               <p className="text-[10px] text-white/35 text-center">Space to buzz</p>
@@ -689,9 +705,9 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
           {buzzed && !showResult && (
             <div className="flex gap-2">
               <input value={answer} onChange={e => setAnswer(e.target.value)} placeholder="Answer…" autoFocus
-                className="flex-1 px-4 py-3 rounded-2xl border border-white/10 bg-white/5 text-[14px] text-white placeholder-white/25 outline-none focus:border-white/[0.15] transition-colors" />
+                className="flex-1 px-4 py-3 rounded-lg border border-white/[0.10] bg-white/[0.05] text-[14px] text-white placeholder-white/25 outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20 transition-colors" />
               <button onClick={handleSubmit} disabled={!answer.trim()}
-                className="px-5 py-3 rounded-2xl bg-white/[0.09] hover:bg-white/[0.13] text-white/70 text-[13px] font-bold disabled:opacity-30 transition-colors">
+                className="px-5 py-3 rounded-lg bg-white/[0.09] hover:bg-white/[0.13] text-white/70 text-[13px] font-bold disabled:opacity-30 transition-colors">
                 <ArrowRight size={16} />
               </button>
             </div>
@@ -712,7 +728,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
               />
               <div className="flex gap-2">
                 <button onClick={() => openLessonFor(q.answer)}
-                  className="flex-1 py-3 rounded-2xl border border-white/[0.10] bg-white/[0.04] text-white/55 text-[12px] font-semibold hover:bg-white/[0.08] hover:text-white/75 inline-flex items-center justify-center gap-1.5 transition-colors">
+                  className="flex-1 py-3 rounded-lg border border-white/[0.10] bg-white/[0.04] text-white/55 text-[12px] font-semibold hover:bg-white/[0.08] hover:text-white/75 inline-flex items-center justify-center gap-1.5 transition-colors">
                   <Lightbulb size={13} /> Lesson
                 </button>
                 {(() => {
@@ -720,7 +736,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
                   const showLoading = outOfBuffer && refilling;
                   return (
                     <button onClick={nextQuestion} disabled={outOfBuffer}
-                      className="flex-1 py-3 rounded-2xl bg-white/[0.09] hover:bg-white/[0.13] text-white/70 text-[13px] font-semibold disabled:opacity-40 inline-flex items-center justify-center gap-2 transition-colors">
+                      className="flex-1 py-3 rounded-lg bg-white/[0.09] hover:bg-white/[0.13] text-white/70 text-[13px] font-semibold disabled:opacity-40 inline-flex items-center justify-center gap-2 transition-colors">
                       {showLoading ? <><InlineProgress active /> Loading…</> : 'Next →'}
                     </button>
                   );
@@ -746,7 +762,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   if (view === 'multiplayer') {
     return (
       <ViewFade viewKey="multiplayer" className="h-full flex flex-col">
-        <QuizBowlMatch user={user} onExit={() => setView('hub')} />
+        <QuizBowlMatch user={user} onExit={() => { bustHubCache(); setView('hub'); }} onMatchReplay={openMatchReplay} />
       </ViewFade>
     );
   }
@@ -756,11 +772,11 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
     return (
       <div className="h-full overflow-y-auto bg-transparent">
         <div className="p-5 pb-8 space-y-3">
-          <button onClick={() => setView('hub')} className="text-[11px] text-white/40 hover:text-white/70 inline-flex items-center gap-1 mb-1">
-            <ChevronRight size={12} className="rotate-180" /> Hub
+          <button onClick={() => setView('hub')} className="flex items-center gap-2 text-sm text-white/35 hover:text-white/60 transition-colors mb-1">
+            <ArrowLeft size={16} /> Hub
           </button>
 
-          {error && <p className="text-[11px] text-rose-400 px-3 py-2 rounded-xl bg-rose-500/10 border border-rose-500/20 text-center">{error}</p>}
+          {error && <p className="text-[11px] text-rose-400 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-center">{error}</p>}
 
           {/* Source */}
           <div className="grid grid-cols-2 gap-2">
@@ -782,7 +798,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
           {questionSource === 'ai' && (
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[10px] text-white/50 uppercase tracking-wider">Questions</span>
+                <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Questions</span>
                 <span className="text-[11px] font-mono text-white/70">{questionCount}</span>
               </div>
               <input type="range" min="5" max="30" step="5" value={questionCount}
@@ -793,7 +809,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
           {/* Speed */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[10px] text-white/50 uppercase tracking-wider">Speed</span>
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Speed</span>
               <span className="text-[11px] font-mono text-white/70">{revealSpeedMs}ms</span>
             </div>
             <input type="range" min="60" max="400" step="10" value={revealSpeedMs}
@@ -804,12 +820,12 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
           {questionSource === 'ai' && (
             <textarea value={customInstructions} onChange={e => setCustomInstructions(e.target.value)}
               placeholder="Custom instructions…" rows={2}
-              className="w-full px-3 py-2.5 rounded-xl border border-white/8 bg-white/[0.04] text-[12px] text-white/80 placeholder-white/20 resize-none outline-none focus:border-white/15 transition-colors" />
+              className="w-full px-3 py-2.5 rounded-lg border border-white/[0.08] bg-white/[0.04] text-[12px] text-white/80 placeholder-white/20 resize-none outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20 transition-colors" />
           )}
 
           {/* Start */}
           <button onClick={handleGenerate} disabled={generating} data-tour="qb-generate"
-            className="w-full py-3.5 rounded-2xl bg-blue-500 hover:bg-blue-400 backdrop-blur-sm disabled:opacity-40 text-white text-[14px] font-bold inline-flex items-center justify-center gap-2 transition-all border border-blue-400/40">
+            className="w-full py-3.5 rounded-lg bg-blue-500 hover:bg-blue-400 disabled:opacity-40 text-white text-[14px] font-bold inline-flex items-center justify-center gap-2 transition-all border border-blue-400/40">
             {generating
               ? <><InlineProgress active /> {questionSource === 'qbreader' ? 'Loading…' : 'Generating…'}</>
               : <><Play size={15} /> Start</>}
@@ -842,9 +858,28 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
     );
   }
 
-  // ===== REPLAY - watch back a saved set question by question =====
+  // ===== REPLAY - watch back a saved solo set question by question =====
   if (view === 'replay' && replaySet) {
-    return <ReplayView set={replaySet} onExit={() => { setReplaySet(null); setView('hub'); }} />;
+    return <ReplayView set={replaySet} onExit={() => { setReplaySet(null); setView('replays'); }} />;
+  }
+
+  // ===== MATCH REPLAY - watch back a saved multiplayer match =====
+  if (view === 'match-replay' && matchReplayRec) {
+    return <MatchReplayView rec={matchReplayRec} myUserId={user?.id} onExit={() => { setMatchReplayRec(null); setView('replays'); }} />;
+  }
+
+  // ===== REPLAYS - full history browser =====
+  if (view === 'replays') {
+    return (
+      <ReplaysView
+        sets={history?.sets || []}
+        matchList={matchList}
+        myUserId={user?.id}
+        onReplaySolo={(s) => { setReplaySet(s); setView('replay'); }}
+        onReplayMatch={(rec) => { setMatchReplayRec(rec); setView('match-replay'); }}
+        onBack={() => setView('hub')}
+      />
+    );
   }
 
   // ===== HUB (default) - stats, recommendations, history =====
@@ -856,6 +891,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
       recs={recs}
       patterns={patterns}
       sm2Due={sm2Due}
+      matchList={matchList}
       error={error}
       generating={generating}
       onLaunch={launchSet}
@@ -863,6 +899,8 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
       onCustom={() => setView('custom')}
       onAILobby={() => { setAiLobbyInitial('lobby'); setView('ai-lobby'); }}
       onReplay={(s) => { setReplaySet(s); setView('replay'); }}
+      onReplayMatch={(rec) => { setMatchReplayRec(rec); setView('match-replay'); }}
+      onReplays={() => setView('replays')}
     />
     </ViewFade>
   );
@@ -871,7 +909,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
 // ============================================================
 // HUB
 // ============================================================
-function QuizBowlHub({ hubLoading, history, recs, patterns, sm2Due = [], error, generating, onLaunch, onMultiplayer, onCustom, onAILobby, onReplay }) {
+function QuizBowlHub({ hubLoading, history, recs, patterns, sm2Due = [], matchList = [], error, generating, onLaunch, onMultiplayer, onCustom, onAILobby, onReplay, onReplayMatch, onReplays }) {
   const stats = history?.stats || { sets: 0, accuracy: 0, studyMs: 0, categoryStats: {} };
   const sets = history?.sets || [];
 
@@ -889,14 +927,19 @@ function QuizBowlHub({ hubLoading, history, recs, patterns, sm2Due = [], error, 
   return (
     <div className="h-full overflow-y-auto bg-transparent">
       <div className="p-5 pb-8 space-y-4">
-        {/* Top stat row */}
-        <div className="grid grid-cols-3 gap-2">
-          <HubStat icon={<Target size={12} />} label="Sets" value={stats.sets} />
-          <HubStat icon={<TrendingDown size={12} />} label="Accuracy" value={`${stats.accuracy}%`} accent={stats.accuracy >= 75 ? 'emerald' : stats.accuracy >= 50 ? 'amber' : 'rose'} />
-          <HubStat icon={<Clock size={12} />} label="Study time" value={formatDuration(stats.studyMs)} />
+        {/* Header */}
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-lg font-bold text-white/90">Quiz Bowl</h2>
         </div>
 
-        {error && <p className="text-[11px] text-rose-400 px-3 py-2 rounded-xl bg-rose-500/10 border border-rose-500/20 text-center">{error}</p>}
+        {/* Top stat row */}
+        <div className="grid grid-cols-3 gap-2">
+          <HubStat label="Sets" value={stats.sets} />
+          <HubStat label="Accuracy" value={`${stats.accuracy}%`} accent={stats.accuracy >= 75 ? 'emerald' : stats.accuracy >= 50 ? 'amber' : 'rose'} />
+          <HubStat label="Study time" value={formatDuration(stats.studyMs)} />
+        </div>
+
+        {error && <p className="text-[11px] text-rose-400 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-center">{error}</p>}
 
         {/* Buzz patterns - shows when there's enough data */}
         {patterns && <BuzzPatterns patterns={patterns} />}
@@ -906,13 +949,12 @@ function QuizBowlHub({ hubLoading, history, recs, patterns, sm2Due = [], error, 
           <button
             onClick={() => onLaunch({ category: weaknesses[0].cat, difficulty: 'Medium', source: 'qbreader' })}
             disabled={generating}
-            className="w-full text-left rounded-2xl border border-rose-400/30 bg-gradient-to-br from-rose-500/20 via-rose-500/10 to-transparent p-4 hover:border-rose-400/55 hover:from-rose-500/30 transition-all disabled:opacity-40"
+            className="w-full text-left rounded-lg border border-white/[0.08] bg-white/[0.03] p-4 hover:bg-white/[0.06] hover:border-white/[0.14] transition-all disabled:opacity-40"
           >
-            <div className="flex items-center gap-2 mb-1">
-              <span className="inline-flex w-7 h-7 rounded-lg bg-rose-500/25 border border-rose-400/40 items-center justify-center"><Flame size={14} className="text-rose-300" /></span>
-              <span className="text-[10px] uppercase tracking-[0.18em] font-bold text-rose-300/90">Train weaknesses</span>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Train weaknesses</span>
             </div>
-            <p className="text-[15px] font-bold text-white/95 mb-0.5">Practice {weaknesses[0].cat}</p>
+            <p className="text-[14px] font-bold text-white/90 mb-0.5">Practice {weaknesses[0].cat}</p>
             <p className="text-[11px] text-white/55">
               You're at <span className="text-rose-300 font-semibold">{weaknesses[0].acc}%</span> over {weaknesses[0].total} questions. The AI will keep feeding you {weaknesses[0].cat} tossups until you climb back.
             </p>
@@ -923,25 +965,28 @@ function QuizBowlHub({ hubLoading, history, recs, patterns, sm2Due = [], error, 
         <button
           onClick={onAILobby}
           data-tour="qb-ai-lobby"
-          className="w-full text-left rounded-2xl border border-blue-500/30 bg-gradient-to-br from-blue-500/20 via-blue-500/10 to-transparent p-4 hover:border-blue-400/55 hover:from-blue-500/30 transition-all"
+          className="w-full text-left rounded-lg border border-white/[0.08] bg-white/[0.03] p-4 hover:bg-white/[0.06] hover:border-white/[0.14] transition-all"
         >
-          <div className="flex items-center gap-2 mb-1">
-            <span className="inline-flex w-7 h-7 rounded-lg bg-blue-500/25 border border-blue-400/40 items-center justify-center"><Users size={14} className="text-blue-300" /></span>
-            <span className="text-[10px] uppercase tracking-[0.18em] font-bold text-blue-300/90">Play vs AI</span>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Play vs AI</span>
           </div>
-          <p className="text-[15px] font-bold text-white/95 mb-0.5">Compete in a Lobby</p>
+          <p className="text-[14px] font-bold text-white/90 mb-0.5">Compete in a Lobby</p>
           <p className="text-[11px] text-white/55">Join a lobby of 8 or go 1v1. Buzz against AI opponents with real tournament timing across niche history and more.</p>
         </button>
 
-        {/* Quick access: head-to-head + custom set */}
-        <div className="grid grid-cols-2 gap-2">
+        {/* Quick access: head-to-head + custom set + replays */}
+        <div className="grid grid-cols-3 gap-2">
           <button onClick={onMultiplayer}
-            className="py-2.5 rounded-2xl border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] text-white/70 hover:text-white/95 text-[12px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
-            <Users size={13} /> Head-to-head
+            className="py-2.5 rounded-lg border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] text-white/70 hover:text-white/95 text-[12px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
+            Multiplayer
           </button>
           <button onClick={onCustom} data-tour="qb-custom-set"
-            className="py-2.5 rounded-2xl border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] text-white/70 hover:text-white/95 text-[12px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
-            <Settings size={13} /> Custom set
+            className="py-2.5 rounded-lg border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] text-white/70 hover:text-white/95 text-[12px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
+            Custom
+          </button>
+          <button onClick={onReplays}
+            className="py-2.5 rounded-lg border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] text-white/70 hover:text-white/95 text-[12px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
+            Replays
           </button>
         </div>
 
@@ -950,27 +995,22 @@ function QuizBowlHub({ hubLoading, history, recs, patterns, sm2Due = [], error, 
         {sm2Due.length > 0 && (
           <div>
             <div className="flex items-center gap-1.5 mb-1.5">
-              <RefreshCw size={11} className="text-blue-400/70" />
-              <span className="text-[10px] uppercase tracking-[0.16em] font-bold text-blue-400/70">Recommended today</span>
-              <span className="text-[9px] text-white/25 ml-0.5">· spaced repetition</span>
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Recommended today</span>
+              <span className="text-[10px] text-white/25 ml-0.5">· spaced repetition</span>
             </div>
             <div className="space-y-1.5">
               {sm2Due.map((d, i) => (
                 <button key={i}
                   onClick={() => onLaunch({ category: d.category, difficulty: 'Medium', source: 'qbreader' })}
                   disabled={generating}
-                  className="group w-full text-left rounded-xl border border-blue-500/20 bg-blue-500/[0.05] hover:bg-blue-500/[0.12] hover:border-blue-500/35 p-3 transition-colors disabled:opacity-40 flex items-center gap-3"
+                  className="group w-full text-left rounded-lg border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] hover:border-white/[0.14] p-3 transition-colors disabled:opacity-40 flex items-center gap-3"
                 >
-                  <span className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-blue-500/15 text-blue-300 border border-blue-400/30">
-                    <RefreshCw size={13} />
-                  </span>
                   <div className="flex-1 min-w-0">
                     <p className="text-[13px] font-semibold text-white/90">{d.category}</p>
                     <p className="text-[10px] text-white/40">
                       {d.reps} review{d.reps !== 1 ? 's' : ''} · interval was {intervalLabel(d.interval)} · due now
                     </p>
                   </div>
-                  <ChevronRight size={14} className="text-white/25 group-hover:text-white/55 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
                 </button>
               ))}
             </div>
@@ -981,27 +1021,15 @@ function QuizBowlHub({ hubLoading, history, recs, patterns, sm2Due = [], error, 
         {recs.length > 0 && (
           <div>
             <div className="flex items-center gap-1.5 mb-1.5">
-              <Sparkles size={11} className="text-white/40" />
-              <span className="text-[10px] uppercase tracking-[0.16em] font-bold text-white/40">Recommended for you</span>
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Recommended for you</span>
             </div>
             <div className="space-y-1.5">
               {recs.map((r, i) => (
                 <button key={i}
                   onClick={() => onLaunch({ category: r.category, difficulty: r.difficulty, source: r.source || 'qbreader', customInstructions: r.customInstructions || '' })}
                   disabled={generating}
-                  className="group w-full text-left rounded-xl border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.07] hover:border-white/[0.16] p-3 transition-colors disabled:opacity-40 flex items-center gap-3"
+                  className="group w-full text-left rounded-lg border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] hover:border-white/[0.14] p-3 transition-colors disabled:opacity-40 flex items-center gap-3"
                 >
-                  <span className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                    r.kind === 'niche'         ? 'bg-violet-500/15 text-violet-300 border border-violet-400/30' :
-                    r.kind === 'train-weakness'? 'bg-rose-500/15 text-rose-300 border border-rose-400/30' :
-                    r.kind === 'explore'       ? 'bg-blue-500/15 text-blue-300 border border-blue-400/30' :
-                                                 'bg-amber-500/15 text-amber-300 border border-amber-400/30'
-                  }`}>
-                    {r.kind === 'niche'          ? <Sparkles size={14} /> :
-                     r.kind === 'train-weakness' ? <Target size={14} /> :
-                     r.kind === 'explore'        ? <Sparkles size={14} /> :
-                                                   <Play size={14} />}
-                  </span>
                   <div className="flex-1 min-w-0">
                     <p className="text-[13px] font-semibold text-white/90">
                       {r.topic || r.category}
@@ -1011,7 +1039,6 @@ function QuizBowlHub({ hubLoading, history, recs, patterns, sm2Due = [], error, 
                       {r.topic && <span className="text-white/25">{r.category} · </span>}{r.reason}
                     </p>
                   </div>
-                  <ChevronRight size={14} className="text-white/25 group-hover:text-white/55 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
                 </button>
               ))}
             </div>
@@ -1022,9 +1049,9 @@ function QuizBowlHub({ hubLoading, history, recs, patterns, sm2Due = [], error, 
         {sets.length > 0 && (
           <div>
             <div className="flex items-center gap-1.5 mb-1.5">
-              <History size={11} className="text-white/40" />
-              <span className="text-[10px] uppercase tracking-[0.16em] font-bold text-white/40">Past sets</span>
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Past sets</span>
               <span className="text-[10px] text-white/30">· {sets.length}</span>
+              <button onClick={onReplays} className="ml-auto text-[10px] text-white/30 hover:text-white/60 transition-colors">See all →</button>
             </div>
             <div className="space-y-1">
               {sets.slice(0, 10).map((s) => {
@@ -1036,7 +1063,7 @@ function QuizBowlHub({ hubLoading, history, recs, patterns, sm2Due = [], error, 
                   : 'text-rose-300 bg-rose-500/10 border-rose-500/25';
                 return (
                   <div key={s.id} onClick={() => onReplay?.(s)}
-                    className="flex items-center gap-3 rounded-lg px-3 py-2 bg-white/[0.02] border border-white/[0.05] hover:border-white/[0.14] hover:bg-white/[0.05] transition-colors cursor-pointer group">
+                    className="flex items-center gap-3 px-2 py-2.5 border-b border-white/[0.06] last:border-b-0 cursor-pointer hover:bg-white/[0.03] rounded-md transition-colors group">
                     <div className={`min-w-[44px] px-2 py-1 rounded-md border text-center text-[11px] font-bold tabular-nums ${scoreCls}`}>
                       {hasPoints ? `${s.points} pts` : `${s.score}/${s.total}`}
                     </div>
@@ -1044,7 +1071,6 @@ function QuizBowlHub({ hubLoading, history, recs, patterns, sm2Due = [], error, 
                       <p className="text-[12px] font-medium text-white/85 truncate">{s.category} <span className="text-white/35">· {s.difficulty}</span></p>
                       <p className="text-[10px] text-white/35">{ago} · {s.source === 'ai' ? 'AI' : 'QBReader'} · {formatDuration(s.durationMs)} · {s.score}/{s.total} correct</p>
                     </div>
-                    <Eye size={12} className="text-white/20 group-hover:text-white/50 flex-shrink-0 transition-colors" />
                   </div>
                 );
               })}
@@ -1056,8 +1082,7 @@ function QuizBowlHub({ hubLoading, history, recs, patterns, sm2Due = [], error, 
         {weaknesses.length > 0 && (
           <div>
             <div className="flex items-center gap-1.5 mb-1.5">
-              <TrendingDown size={11} className="text-white/40" />
-              <span className="text-[10px] uppercase tracking-[0.16em] font-bold text-white/40">By category</span>
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">By category</span>
             </div>
             <div className="space-y-1">
               {Object.entries(stats.categoryStats || {})
@@ -1083,12 +1108,43 @@ function QuizBowlHub({ hubLoading, history, recs, patterns, sm2Due = [], error, 
           </div>
         )}
 
+        {/* Past multiplayer matches */}
+        {matchList.length > 0 && (
+          <div>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Past matches</span>
+              <span className="text-[10px] text-white/30">· {matchList.length}</span>
+              <button onClick={onReplays} className="ml-auto text-[10px] text-white/30 hover:text-white/60 transition-colors">See all →</button>
+            </div>
+            <div className="space-y-1">
+              {matchList.slice(0, 6).map((m) => {
+                const ago = formatRelative(Date.now() - new Date(m.finishedAt).getTime());
+                const myScore = m.players?.find(p => p.userId === m.myUserId)?.finalScore ?? 0;
+                const sorted = [...(m.players || [])].sort((a, b) => (b.finalScore || 0) - (a.finalScore || 0));
+                const myRank = sorted.findIndex(p => p.userId === m.myUserId) + 1;
+                const won = myRank === 1;
+                return (
+                  <div key={m.id} onClick={() => onReplayMatch?.(m)}
+                    className="flex items-center gap-3 px-2 py-2.5 border-b border-white/[0.06] last:border-b-0 cursor-pointer hover:bg-white/[0.03] rounded-md transition-colors group">
+                    <div className={`min-w-[36px] px-1.5 py-1 rounded-md border text-center text-[10px] font-bold ${won ? 'text-amber-300 bg-amber-500/10 border-amber-500/25' : 'text-white/50 bg-white/[0.04] border-white/[0.10]'}`}>
+                      #{myRank}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[12px] font-medium text-white/85 truncate">{m.category} <span className="text-white/35">· {m.difficulty}</span></p>
+                      <p className="text-[10px] text-white/35">{ago} · {m.questions?.length || 0}Q · {m.players?.filter(p => !p.isBot).length || 1}v{(m.players?.length || 2) - 1} · {myScore} pts</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Empty state for new players */}
         {hubLoading ? (
           <div className="py-6 text-center text-[11px] text-white/35">Loading your stats…</div>
         ) : sets.length === 0 && (
-          <div className="rounded-2xl border border-dashed border-white/[0.10] bg-white/[0.02] p-5 text-center">
-            <Zap size={22} className="text-white/30 mx-auto mb-2" />
+          <div className="rounded-lg border border-dashed border-white/[0.10] bg-white/[0.02] p-5 text-center">
             <p className="text-[13px] font-semibold text-white/80">No sets yet</p>
             <p className="text-[11px] text-white/40 mt-1 mb-3">Start a recommended round above, or pick your own filters in Custom.</p>
           </div>
@@ -1098,17 +1154,14 @@ function QuizBowlHub({ hubLoading, history, recs, patterns, sm2Due = [], error, 
   );
 }
 
-function HubStat({ icon, label, value, accent }) {
+function HubStat({ label, value, accent }) {
   const accentCls = accent === 'emerald' ? 'text-emerald-300'
     : accent === 'amber' ? 'text-amber-300'
     : accent === 'rose' ? 'text-rose-300'
     : 'text-white/90';
   return (
-    <div className="rounded-xl border border-white/[0.07] bg-white/[0.03] px-3 py-2.5">
-      <div className="flex items-center gap-1.5 text-[9.5px] uppercase tracking-[0.16em] font-bold text-white/35 mb-1">
-        <span className="text-white/45">{icon}</span>
-        <span>{label}</span>
-      </div>
+    <div className="rounded-lg border border-white/[0.07] bg-white/[0.03] px-3 py-2.5">
+      <div className="text-[9.5px] uppercase tracking-[0.16em] font-bold text-white/35 mb-1">{label}</div>
       <div className={`text-[17px] font-bold tabular-nums leading-none ${accentCls}`}>{value}</div>
     </div>
   );
@@ -1144,13 +1197,10 @@ function BuzzPatterns({ patterns }) {
   }
 
   return (
-    <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] overflow-hidden">
+    <div className="rounded-lg border border-white/[0.08] bg-white/[0.02] overflow-hidden">
       {/* Header */}
       <div className="px-4 pt-3 pb-2 flex items-center gap-2">
-        <span className="w-6 h-6 rounded-lg bg-violet-500/20 border border-violet-400/30 grid place-items-center">
-          <Zap size={12} className="text-violet-300" />
-        </span>
-        <span className="text-[11px] uppercase tracking-[0.16em] font-bold text-white/50">Buzz Patterns</span>
+        <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Buzz Patterns</span>
         <div className="flex-1" />
         <span className="text-[10px] text-white/30 tabular-nums">{p.totalBuzzes} buzzes</span>
       </div>
@@ -1297,10 +1347,10 @@ function formatRelative(deltaMs) {
 function GlassTile({ active, icon, label, sub, onClick }) {
   return (
     <button onClick={onClick}
-      className={`text-left rounded-2xl border p-3 transition-all backdrop-blur-sm ${
+      className={`text-left rounded-lg border p-2.5 transition-all ${
         active
           ? 'border-blue-400/45 bg-blue-500/15 text-white'
-          : 'border-white/[0.08] bg-white/[0.03] text-white/60 hover:bg-white/[0.07] hover:text-white/80'
+          : 'border-white/[0.08] bg-white/[0.03] text-white/60 hover:bg-white/[0.06] hover:text-white/80'
       }`}>
       <div className="flex items-center gap-1.5 mb-0.5">
         {icon}
@@ -1314,10 +1364,10 @@ function GlassTile({ active, icon, label, sub, onClick }) {
 function GlassPill({ active, onClick, children }) {
   return (
     <button onClick={onClick}
-      className={`px-3 py-1.5 rounded-xl text-[11px] font-semibold transition-all whitespace-nowrap backdrop-blur-sm ${
+      className={`px-2.5 py-1 rounded-lg text-[12px] font-semibold transition-all whitespace-nowrap ${
         active
-          ? 'bg-blue-500/20 text-white border border-blue-400/50'
-          : 'bg-white/[0.05] border border-white/[0.08] text-white/55 hover:bg-white/[0.09] hover:text-white/80'
+          ? 'bg-blue-500/[0.18] text-blue-100 border border-blue-400/[0.40]'
+          : 'bg-white/[0.03] border border-white/[0.06] text-white/55 hover:text-white/80 hover:bg-white/[0.06]'
       }`}>
       {children}
     </button>
@@ -1512,6 +1562,20 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
     saveBotPresets(next);
   }
 
+  // Pending replay save - kicked off the moment the game ends so it's
+  // usually done before the player clicks through the results screen.
+  // Awaited on exit so the hub refetch sees the new replay.
+  const replaySaveRef = useRef(null);
+
+  function handleMatchFinished(replay) {
+    replaySaveRef.current = saveAiMatchReplay({
+      ...replay,
+      category,
+      difficulty: diffMap[difficulty],
+      scoringFormat: scoringFormat.id,
+    }).catch(() => {});
+  }
+
   async function startSession() {
     setError(null);
     setScreen('loading');
@@ -1566,8 +1630,8 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
     return (
       <div className="h-full flex flex-col">
         <div className="px-5 pt-4 pb-2 flex-shrink-0">
-          <button onClick={onExit} className="text-[11px] text-white/40 hover:text-white/70 inline-flex items-center gap-1">
-            <ChevronRight size={12} className="rotate-180" /> Hub
+          <button onClick={onExit} className="flex items-center gap-2 text-sm text-white/35 hover:text-white/60 transition-colors">
+            <ArrowLeft size={16} /> Hub
           </button>
         </div>
         <div className="flex-1 flex flex-col items-center justify-center px-5">
@@ -1595,7 +1659,8 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
           lobbyMode={lobbyMode}
           botNames={botNames}
           scoringFormat={scoringFormat}
-          onComplete={onExit}
+          onMatchFinished={handleMatchFinished}
+          onComplete={async () => { await replaySaveRef.current; onExit(); }}
         />
       </div>
     );
@@ -1612,43 +1677,43 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
   return (
     <div className="h-full overflow-y-auto bg-transparent">
       <div className="p-5 pb-8 space-y-4">
-        <button onClick={onExit} className="text-[11px] text-white/40 hover:text-white/70 inline-flex items-center gap-1">
-          <ChevronRight size={12} className="rotate-180" /> Hub
+        <button onClick={onExit} className="flex items-center gap-2 text-sm text-white/35 hover:text-white/60 transition-colors">
+          <ArrowLeft size={16} /> Hub
         </button>
 
         {/* ── Mode ── */}
         <div className="grid grid-cols-2 gap-2">
           <button onClick={() => setLobbyType('lobby')}
-            className={`rounded-2xl border p-3 text-left transition-all ${lobbyType === 'lobby' ? 'border-blue-500/40 bg-blue-500/15 ring-1 ring-white/10' : 'border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06]'}`}>
+            className={`rounded-lg border p-3 text-left transition-all ${lobbyType === 'lobby' ? 'border-blue-400/45 bg-blue-500/15' : 'border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06]'}`}>
             <Users size={15} className={`mb-1.5 ${lobbyType === 'lobby' ? 'text-blue-400' : 'text-white/30'}`} />
-            <div className={`font-semibold text-[12px] ${lobbyType === 'lobby' ? 'text-blue-300' : 'text-white/60'}`}>vs AI Lobby</div>
+            <div className={`font-semibold text-[12px] ${lobbyType === 'lobby' ? 'text-white' : 'text-white/60'}`}>vs AI Lobby</div>
             <div className="text-[10px] text-white/35 mt-0.5">8 bots · tournament</div>
           </button>
           <button onClick={() => setLobbyType('head-to-head')}
-            className={`rounded-2xl border p-3 text-left transition-all ${lobbyType === 'head-to-head' ? 'border-blue-500/40 bg-blue-500/15 ring-1 ring-white/10' : 'border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06]'}`}>
+            className={`rounded-lg border p-3 text-left transition-all ${lobbyType === 'head-to-head' ? 'border-blue-400/45 bg-blue-500/15' : 'border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06]'}`}>
             <Swords size={15} className={`mb-1.5 ${lobbyType === 'head-to-head' ? 'text-blue-400' : 'text-white/30'}`} />
-            <div className={`font-semibold text-[12px] ${lobbyType === 'head-to-head' ? 'text-blue-300' : 'text-white/60'}`}>Head to Head</div>
+            <div className={`font-semibold text-[12px] ${lobbyType === 'head-to-head' ? 'text-white' : 'text-white/60'}`}>Head to Head</div>
             <div className="text-[10px] text-white/35 mt-0.5">1v1 · AI or real player</div>
           </button>
         </div>
 
         {/* ── Head to Head: sub-toggle for AI Bot vs Real Player ── */}
         {lobbyType === 'head-to-head' && (
-          <div className="rounded-2xl border border-blue-500/20 bg-blue-500/[0.04] p-4 space-y-3">
+          <div className="rounded-lg border border-white/[0.08] bg-white/[0.02] p-4 space-y-3">
             <div className="grid grid-cols-2 gap-1.5">
               <button onClick={() => setH2hOpponent('ai')}
-                className={`py-2 rounded-xl text-[11px] font-semibold border transition-all ${
+                className={`py-2 rounded-lg text-[11px] font-semibold border transition-all ${
                   h2hOpponent === 'ai'
-                    ? 'bg-blue-500/20 text-blue-200 border-blue-400/50'
-                    : 'bg-white/[0.03] text-white/50 border-white/[0.08] hover:text-white/70 hover:border-white/[0.15]'
+                    ? 'bg-blue-500/[0.18] text-blue-100 border-blue-400/[0.40]'
+                    : 'bg-white/[0.03] text-white/50 border-white/[0.06] hover:text-white/70 hover:bg-white/[0.06]'
                 }`}>
                 vs AI Bot
               </button>
               <button onClick={() => setH2hOpponent('real')}
-                className={`py-2 rounded-xl text-[11px] font-semibold border transition-all ${
+                className={`py-2 rounded-lg text-[11px] font-semibold border transition-all ${
                   h2hOpponent === 'real'
-                    ? 'bg-blue-500/20 text-blue-200 border-blue-400/50'
-                    : 'bg-white/[0.03] text-white/50 border-white/[0.08] hover:text-white/70 hover:border-white/[0.15]'
+                    ? 'bg-blue-500/[0.18] text-blue-100 border-blue-400/[0.40]'
+                    : 'bg-white/[0.03] text-white/50 border-white/[0.06] hover:text-white/70 hover:bg-white/[0.06]'
                 }`}>
                 vs Real Player
               </button>
@@ -1661,7 +1726,7 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
                 </p>
                 <button
                   onClick={() => setScreen('real')}
-                  className="w-full py-3 rounded-2xl bg-blue-500 hover:bg-blue-400 text-white text-[13px] font-bold inline-flex items-center justify-center gap-2 transition-all border border-blue-400/40">
+                  className="w-full py-3 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[13px] font-bold inline-flex items-center justify-center gap-2 transition-all border border-blue-400/40">
                   <Users size={14} /> Enter Lobby
                 </button>
               </div>
@@ -1671,17 +1736,17 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
 
         {/* ── Lobby: room level + player preview ── */}
         {lobbyType === 'lobby' && (
-          <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4 space-y-3">
+          <div className="rounded-lg border border-white/[0.08] bg-white/[0.02] p-4 space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/40">Competition level</span>
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Competition level</span>
             </div>
             <div className="grid grid-cols-4 gap-1.5" data-tour="qb-room-level">
               {ROOM_LEVELS.map(l => (
                 <button key={l.id} onClick={() => setRoomLevel(l.id)}
-                  className={`py-1.5 rounded-xl text-[11px] font-semibold transition-all border ${
+                  className={`py-1.5 rounded-lg text-[11px] font-semibold transition-all border ${
                     roomLevel === l.id
-                      ? 'bg-blue-500/20 text-blue-200 border-blue-400/50'
-                      : 'bg-white/[0.04] text-white/50 border-transparent hover:bg-white/[0.08] hover:text-white/70'
+                      ? 'bg-blue-500/[0.18] text-blue-100 border-blue-400/[0.40]'
+                      : 'bg-white/[0.03] text-white/50 border-white/[0.06] hover:bg-white/[0.06] hover:text-white/70'
                   }`}>
                   {l.label}
                 </button>
@@ -1745,11 +1810,11 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
           <div className="space-y-3">
             {/* Preset picker */}
             <div>
-              <p className="text-[10px] text-white/35 uppercase tracking-widest mb-2 font-medium">Opponent</p>
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 mb-2">Opponent</p>
               <div className="grid grid-cols-2 gap-1.5">
                 {BOT_ROSTER.map((bot, i) => (
                   <button key={bot.id} onClick={() => setSelectedBotIdx(i)}
-                    className={`rounded-xl border p-2.5 text-left transition-all ${selectedBotIdx === i ? 'border-blue-400/40 bg-blue-500/10 ring-1 ring-white/10' : 'border-white/[0.07] bg-white/[0.02] hover:border-white/[0.14]'}`}>
+                    className={`rounded-lg border p-2.5 text-left transition-all ${selectedBotIdx === i ? 'border-blue-400/45 bg-blue-500/15' : 'border-white/[0.07] bg-white/[0.02] hover:border-white/[0.14] hover:bg-white/[0.04]'}`}>
                     <div className="flex items-center justify-between">
                       <span className="text-[12px] font-semibold text-white/80">{bot.label}</span>
                       <span className="text-[9px] text-white/25">{'★'.repeat(bot.stars)}</span>
@@ -1763,8 +1828,8 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
             </div>
 
             {/* Fine-tune sliders */}
-            <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4 space-y-3.5">
-              <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/40">Fine-tune</span>
+            <div className="rounded-lg border border-white/[0.08] bg-white/[0.02] p-4 space-y-3.5">
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Fine-tune</span>
 
               {/* Buzz timing */}
               <div>
@@ -1837,7 +1902,7 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
           </div>
 
           <div>
-            <p className="text-[10px] text-white/35 uppercase tracking-widest mb-2 font-medium">Question difficulty</p>
+            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 mb-2">Question difficulty</p>
             <div className="grid grid-cols-3 gap-1.5">
               {[['easy', 'Easy'], ['medium', 'Medium'], ['hard', 'Hard']].map(([id, label]) => (
                 <GlassPill key={id} active={difficulty === id} onClick={() => setDifficulty(id)}>{label}</GlassPill>
@@ -1846,18 +1911,18 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
           </div>
 
           <div>
-            <p className="text-[10px] text-white/35 uppercase tracking-widest mb-2 font-medium">Scoring format</p>
+            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 mb-2">Scoring format</p>
             <div className="grid grid-cols-2 gap-1.5">
               {AI_LOBBY_SCORING_FORMATS.map(f => {
                 const sel = scoringFormat.id === f.id;
                 return (
                   <button key={f.id} onClick={() => setScoringFormat(f)}
-                    className={`rounded-xl border p-2.5 text-left transition-all focus:outline-none ${
+                    className={`rounded-lg border p-2.5 text-left transition-all focus:outline-none ${
                       sel
-                        ? 'bg-amber-500/12 border-amber-500/40 ring-1 ring-amber-500/25'
-                        : 'bg-white/[0.02] border-white/[0.06] hover:border-white/[0.14]'
+                        ? 'bg-blue-500/[0.18] border-blue-400/[0.40]'
+                        : 'bg-white/[0.02] border-white/[0.06] hover:border-white/[0.14] hover:bg-white/[0.05]'
                     }`}>
-                    <div className={`text-[12px] font-semibold ${sel ? 'text-amber-200' : 'text-white/80'}`}>{f.label}</div>
+                    <div className={`text-[12px] font-semibold ${sel ? 'text-white' : 'text-white/80'}`}>{f.label}</div>
                     <div className="text-[10px] text-white/35 mt-0.5">{f.desc}</div>
                   </button>
                 );
@@ -1866,36 +1931,36 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
           </div>
 
           <div>
-            <p className="text-[10px] text-white/35 uppercase tracking-widest mb-1.5 font-medium">
-              Topic <span className="normal-case tracking-normal text-white/20 font-normal">(optional)</span>
+            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 mb-1.5">
+              Topic <span className="normal-case tracking-normal text-white/20 font-normal text-[10px]">(optional)</span>
             </p>
             <input type="text" value={topic} onChange={e => setTopic(e.target.value)}
               placeholder="e.g. French Revolution, Thermodynamics, Shakespeare…"
-              className="w-full px-3 py-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-[12px] text-white/80 placeholder-white/20 outline-none focus:border-white/[0.15] transition-colors"
+              className="w-full px-3 py-2.5 rounded-lg border border-white/[0.08] bg-white/[0.03] text-[12px] text-white/80 placeholder-white/20 outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20 transition-colors"
             />
           </div>
 
           {source === 'ai' && (
             <div>
-              <p className="text-[10px] text-white/35 uppercase tracking-widest mb-1.5 font-medium">
-                Custom instructions <span className="normal-case tracking-normal text-white/20 font-normal">(optional)</span>
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 mb-1.5">
+                Custom instructions <span className="normal-case tracking-normal text-white/20 font-normal text-[10px]">(optional)</span>
               </p>
               <textarea value={lobbyCustomInstr} onChange={e => setLobbyCustomInstr(e.target.value)}
                 placeholder="e.g. Focus on 20th century events, avoid questions about leaders…"
                 rows={2}
-                className="w-full px-3 py-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] text-[12px] text-white/80 placeholder-white/20 resize-none outline-none focus:border-white/[0.15] transition-colors"
+                className="w-full px-3 py-2.5 rounded-lg border border-white/[0.08] bg-white/[0.03] text-[12px] text-white/80 placeholder-white/20 resize-none outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20 transition-colors"
               />
             </div>
           )}
         </>}
 
-        {error && <p className="text-[11px] text-rose-400 px-3 py-2 rounded-xl bg-rose-500/10 border border-rose-500/20 text-center">{error}</p>}
+        {error && <p className="text-[11px] text-rose-400 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-center">{error}</p>}
 
         {/* ── Presets panel (AI modes only) ── */}
         {!(lobbyType === 'head-to-head' && h2hOpponent === 'real') && (
-          <div className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-3.5 space-y-2.5">
+          <div className="rounded-lg border border-white/[0.07] bg-white/[0.02] p-3.5 space-y-2.5">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/35">Presets</span>
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Presets</span>
               {!savingPreset && (
                 <button
                   onClick={() => setSavingPreset(true)}
@@ -1913,7 +1978,7 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
                   onChange={e => setPresetName(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') handleSavePreset(); if (e.key === 'Escape') setSavingPreset(false); }}
                   placeholder="Preset name…"
-                  className="flex-1 px-2.5 py-1.5 rounded-lg border border-white/[0.10] bg-white/[0.05] text-[11px] text-white/80 placeholder-white/25 outline-none focus:border-white/[0.20] transition-colors"
+                  className="flex-1 px-2.5 py-1.5 rounded-lg border border-white/[0.10] bg-white/[0.05] text-[11px] text-white/80 placeholder-white/25 outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20 transition-colors"
                 />
                 <button onClick={handleSavePreset} className="px-3 py-1.5 rounded-lg bg-white/[0.08] hover:bg-white/[0.13] text-[11px] text-white/70 font-semibold transition-colors">Save</button>
                 <button onClick={() => setSavingPreset(false)} className="px-2 py-1.5 rounded-lg text-white/35 hover:text-white/60 transition-colors"><X size={12} /></button>
@@ -1943,7 +2008,7 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
 
         {!(lobbyType === 'head-to-head' && h2hOpponent === 'real') && (
           <button onClick={startSession} data-tour="qb-enter-lobby"
-            className="w-full py-3.5 rounded-2xl text-white text-[14px] font-bold inline-flex items-center justify-center gap-2 transition-all border bg-blue-500 hover:bg-blue-400 border-blue-400/40">
+            className="w-full py-3.5 rounded-lg text-white text-[14px] font-bold inline-flex items-center justify-center gap-2 transition-all border bg-blue-500 hover:bg-blue-400 border-blue-400/40">
             {lobbyType === 'lobby' ? <><Users size={15} /> Enter Lobby</> : <><Swords size={15} /> Start Match</>}
           </button>
         )}
@@ -1957,6 +2022,399 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
 // animating the word reveal up to the buzz point, then showing
 // the result. Works for any set in history; questions without a
 // stored text field show only the result card.
+// ============================================================
+// REPLAYS VIEW — full history browser: two tabs (Matches / Solo sets).
+// Each row opens the corresponding replay.
+// ============================================================
+function ReplaysView({ sets, matchList, myUserId, onReplaySolo, onReplayMatch, onBack }) {
+  // One chronological list: matches and solo sets interleaved, newest first.
+  const items = [
+    ...matchList.map(m => ({ kind: 'match', ts: new Date(m.finishedAt).getTime() || 0, rec: m })),
+    ...sets.map(s => ({ kind: 'solo', ts: new Date(s.finishedAt).getTime() || 0, rec: s })),
+  ].sort((a, b) => b.ts - a.ts);
+
+  const matchRow = (m) => {
+    const ago = formatRelative(Date.now() - new Date(m.finishedAt).getTime());
+    const myScore = m.players?.find(p => p.userId === m.myUserId)?.finalScore ?? 0;
+    const sortedP = [...(m.players || [])].sort((a, b) => (b.finalScore || 0) - (a.finalScore || 0));
+    const myRank = sortedP.findIndex(p => p.userId === m.myUserId) + 1;
+    const won = myRank === 1;
+    const humanCount = (m.players || []).filter(p => !p.isBot).length;
+    const totalCount = (m.players || []).length;
+    return (
+      <div key={`match-${m.id}`} onClick={() => onReplayMatch(m)}
+        className="flex items-center gap-3 px-2 py-2.5 border-b border-white/[0.06] last:border-b-0 cursor-pointer hover:bg-white/[0.03] rounded-md transition-colors group">
+        <div className={`min-w-[44px] text-center text-[12px] font-bold tabular-nums ${won ? 'text-amber-300' : 'text-white/35'}`}>
+          #{myRank}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[12px] font-medium text-white/85 truncate">
+            {m.category} <span className="text-white/35 font-normal">· {m.difficulty}</span>
+          </p>
+          <p className="text-[10px] text-white/35 truncate">
+            Match · {ago} · {m.questions?.length || 0}Q · {humanCount}v{totalCount - humanCount} · {myScore} pts · <span className="font-mono">{m.code}</span>
+          </p>
+        </div>
+        <ChevronRight size={13} className="text-white/20 group-hover:text-white/55 flex-shrink-0 transition-colors" />
+      </div>
+    );
+  };
+
+  const soloRow = (s) => {
+    const pct = s.total ? Math.round((s.score / s.total) * 100) : 0;
+    const ago = formatRelative(Date.now() - new Date(s.finishedAt).getTime());
+    const hasPoints = typeof s.points === 'number';
+    const canReplay = s.perQuestion?.some(q => q.text);
+    const scoreCls = pct >= 75 ? 'text-emerald-300'
+      : pct >= 50 ? 'text-white/60'
+      : 'text-rose-300';
+    return (
+      <div key={`solo-${s.id}`} onClick={canReplay ? () => onReplaySolo(s) : undefined}
+        className={`flex items-center gap-3 px-2 py-2.5 border-b border-white/[0.06] last:border-b-0 rounded-md transition-colors group ${canReplay ? 'hover:bg-white/[0.03] cursor-pointer' : 'opacity-50 cursor-default'}`}>
+        <div className={`text-[12px] font-bold tabular-nums min-w-[44px] text-center ${scoreCls}`}>
+          {hasPoints ? `${s.points}` : `${s.score}/${s.total}`}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[12px] font-medium text-white/85 truncate">
+            {s.category} <span className="text-white/35 font-normal">· {s.difficulty}</span>
+          </p>
+          <p className="text-[10px] text-white/35">
+            Solo · {ago} · {s.source === 'ai' ? 'AI' : 'QBReader'} · {pct}% · {formatDuration(s.durationMs)}
+            {!canReplay && <span className="ml-1 text-white/25">(no text)</span>}
+          </p>
+        </div>
+        {canReplay && <ChevronRight size={13} className="text-white/20 group-hover:text-white/55 flex-shrink-0 transition-colors" />}
+      </div>
+    );
+  };
+
+  return (
+    <div className="h-full flex flex-col bg-transparent overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-white/[0.04] flex-shrink-0">
+        <button onClick={onBack}
+          className="flex items-center gap-2 text-sm text-white/35 hover:text-white/60 transition-colors">
+          <ArrowLeft size={16} /> Hub
+        </button>
+        <span className="text-lg font-bold text-white/90">Replays</span>
+        <span className="text-[11px] text-white/25 tabular-nums ml-auto">{items.length}</span>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto">
+        {items.length === 0 ? (
+          <div className="py-12 text-center">
+            <History size={22} className="text-white/20 mx-auto mb-2" />
+            <p className="text-[12px] font-semibold text-white/50">No replays yet</p>
+            <p className="text-[11px] text-white/30 mt-1">Finish a solo set, an AI game, or a multiplayer match to record one.</p>
+          </div>
+        ) : (
+          <div className="p-3 space-y-1.5">
+            {items.map(item => item.kind === 'match' ? matchRow(item.rec) : soloRow(item.rec))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// MATCH REPLAY VIEW — plays a saved match back through the same layout
+// as the live match screen (PlayingView): word-by-word reveal, the
+// PlayerCard sidebar scoreboard, and an action bar that re-enacts each
+// buzz in order. A wrong buzz locks that player out and the reading
+// continues, exactly like the real game, until someone gets it (or
+// nobody does). Scores accumulate per buzz so the scoreboard moves the
+// way it did live.
+// ============================================================
+const REPLAY_WORD_MS = 110;
+const REPLAY_BUZZ_PAUSE_MS = 1100;
+const REPLAY_WRONG_PAUSE_MS = 1600;
+
+function MatchReplayView({ rec, myUserId, onExit }) {
+  const [qIdx, setQIdx] = useState(0);
+  const [revealedUpTo, setRevealedUpTo] = useState(-1);
+  const [buzzPtr, setBuzzPtr] = useState(0);      // next buzz event to play
+  const [stage, setStage] = useState('reading');  // reading | buzzing | wrong | done
+
+  const totalQ = rec?.questions?.length || 0;
+  const q = rec?.questions?.[qIdx] || null;
+  const words = useMemo(() => (q?.text ? q.text.split(/\s+/).filter(Boolean) : []), [q?.text]);
+
+  // Buzz events in the order they happened (the record is chronological —
+  // a correct buzz always ends the question). Clamp buzz words into range
+  // so a malformed record can't stall the playback.
+  const buzzes = useMemo(() => (q?.buzzes || []).map(b => ({
+    ...b,
+    buzzWord: typeof b.buzzWord === 'number' && b.buzzWord >= 0
+      ? Math.min(b.buzzWord, Math.max(0, words.length - 1))
+      : 0,
+  })), [q, words.length]);
+  const winnerIdx = buzzes.findIndex(b => b.correct);
+  const winner = winnerIdx >= 0 ? buzzes[winnerIdx] : null;
+
+  // Reset playback whenever the question changes.
+  useEffect(() => {
+    setRevealedUpTo(-1);
+    setBuzzPtr(0);
+    setStage(words.length ? 'reading' : 'done');
+  }, [qIdx]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reveal words while reading.
+  useEffect(() => {
+    if (stage !== 'reading' || !words.length) return;
+    const id = setInterval(() => {
+      setRevealedUpTo(prev => Math.min(prev + 1, words.length - 1));
+    }, REPLAY_WORD_MS);
+    return () => clearInterval(id);
+  }, [stage, qIdx, words.length]);
+
+  // Pause when the reveal reaches the next buzz; finish when the text runs
+  // out with nobody left to buzz.
+  useEffect(() => {
+    if (stage !== 'reading' || !words.length) return;
+    const nb = buzzes[buzzPtr];
+    if (nb && revealedUpTo >= nb.buzzWord) setStage('buzzing');
+    else if (!nb && revealedUpTo >= words.length - 1) setStage('done');
+  }, [stage, revealedUpTo, buzzPtr, buzzes, words.length]);
+
+  // Resolve the active buzz: correct ends the question, wrong flashes and
+  // the reading resumes for everyone still in.
+  useEffect(() => {
+    if (stage === 'buzzing') {
+      const id = setTimeout(() => setStage(buzzes[buzzPtr]?.correct ? 'done' : 'wrong'), REPLAY_BUZZ_PAUSE_MS);
+      return () => clearTimeout(id);
+    }
+    if (stage === 'wrong') {
+      const id = setTimeout(() => { setBuzzPtr(p => p + 1); setStage('reading'); }, REPLAY_WRONG_PAUSE_MS);
+      return () => clearTimeout(id);
+    }
+  }, [stage, buzzPtr, buzzes]);
+
+  // Buzzes the playback has resolved so far. During 'buzzing' the active
+  // buzz hasn't landed yet (status shows "Answering…", no points); during
+  // 'wrong' it has. 'done' shows everything up to the winning buzz.
+  const playedCount = stage === 'done'
+    ? (winnerIdx >= 0 ? winnerIdx + 1 : buzzes.length)
+    : stage === 'wrong' ? buzzPtr + 1
+    : buzzPtr;
+  const playedBuzzes = buzzes.slice(0, playedCount);
+  const activeBuzz = (stage === 'buzzing' || stage === 'wrong') ? buzzes[buzzPtr] : null;
+
+  function skipAhead() {
+    if (stage === 'done') {
+      setRevealedUpTo(words.length - 1); // reveal the rest of the question
+      return;
+    }
+    setRevealedUpTo(winner ? winner.buzzWord : Math.max(0, words.length - 1));
+    setStage('done');
+  }
+  function goNext() {
+    if (qIdx < totalQ - 1) setQIdx(i => i + 1); else onExit();
+  }
+  function goPrev() {
+    if (qIdx > 0) setQIdx(i => i - 1);
+  }
+
+  useEffect(() => {
+    function onKey(e) {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.key === ' ') { e.preventDefault(); if (stage !== 'done') skipAhead(); else goNext(); }
+      else if (e.key === 'ArrowRight') goNext();
+      else if (e.key === 'ArrowLeft') goPrev();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [stage, qIdx, totalQ, winnerIdx]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Running scores: everything from earlier questions plus the buzzes this
+  // playback has resolved so far.
+  const scores = useMemo(() => {
+    const s = {};
+    for (const p of rec?.players || []) s[p.userId] = 0;
+    for (let i = 0; i < qIdx; i++) {
+      for (const b of rec?.questions?.[i]?.buzzes || []) s[b.userId] = (s[b.userId] || 0) + (b.points || 0);
+    }
+    for (const b of playedBuzzes) s[b.userId] = (s[b.userId] || 0) + (b.points || 0);
+    return s;
+  }, [rec, qIdx, playedCount]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const players = (rec?.players || []).map(p => ({ ...p, score: scores[p.userId] || 0 }));
+  const maxScore = Math.max(1, ...players.map(p => p.score || 0));
+  const myScore = scores[myUserId] || 0;
+  const lockedOutIds = playedBuzzes.filter(b => !b.correct).map(b => b.userId);
+  const cardBuzz = stage === 'buzzing' && activeBuzz ? { userId: activeBuzz.userId } : null;
+  const cardResult = stage === 'done' && winner ? { userId: winner.userId, correct: true } : null;
+
+  // Word index → marker for buzzes the playback has shown (amber while
+  // answering, then green/red) so you can see exactly where each buzz landed.
+  const markerMap = {};
+  const visibleCount = stage === 'buzzing' ? buzzPtr + 1 : playedCount;
+  buzzes.slice(0, visibleCount).forEach((b, bi) => {
+    const pending = stage === 'buzzing' && bi === buzzPtr;
+    const cur = markerMap[b.buzzWord];
+    markerMap[b.buzzWord] = {
+      correct: cur?.correct || (!pending && b.correct),
+      pending: cur?.pending || pending,
+      label: [cur?.label, `${b.userId === myUserId ? 'You' : b.name}${pending ? '' : b.correct ? ' ✓' : ' ✗'}`].filter(Boolean).join(', '),
+    };
+  });
+
+  const ago = rec?.finishedAt ? formatRelative(Date.now() - new Date(rec.finishedAt).getTime()) : '';
+  const progressPct = words.length ? Math.min(100, ((revealedUpTo + 1) / words.length) * 100) : 0;
+  const resultMeta = winner
+    ? `${winner.userId === myUserId ? 'You' : winner.name} got it · word ${winner.buzzWord + 1}/${words.length || winner.totalWords}${typeof winner.points === 'number' && winner.points ? ` · +${winner.points}` : ''}`
+    : 'No one got it';
+
+  return (
+    <div className="flex flex-col h-full min-h-0 bg-transparent overflow-hidden">
+      {/* Header — same shape as the live match header */}
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/[0.04] flex-shrink-0">
+        <button onClick={onExit}
+          className="flex items-center gap-2 text-sm text-white/35 hover:text-white/60 transition-colors flex-shrink-0">
+          <ArrowLeft size={16} /> Back
+        </button>
+        <Zap size={14} className="text-white/50 flex-shrink-0" />
+        <span className="text-[13px] font-bold text-white tabular-nums">Q{qIdx + 1}/{totalQ}</span>
+        <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-white/[0.08] text-white/50">
+          Replay
+        </span>
+        <span className="text-[11px] text-white/35 truncate">{rec?.category} · {rec?.difficulty} · {ago}</span>
+        <div className="flex-1" />
+        <span className={`text-[12px] font-bold tabular-nums ${myScore > 0 ? 'text-emerald-400' : 'text-white/40'}`}>
+          {myScore}
+        </span>
+      </div>
+
+      <div className="flex flex-1 min-h-0">
+        {/* Question + action bar */}
+        <div className="flex-1 flex flex-col min-h-0 min-w-0">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden p-5 cursor-pointer" onClick={skipAhead}>
+            <div className="min-h-[120px]">
+              {words.length > 0 ? (
+                <p className="text-[15px] leading-relaxed text-white/90 font-light break-words">
+                  {words.slice(0, revealedUpTo + 1).map((w, i) => {
+                    const mk = markerMap[i];
+                    const isPower = q?.powerWordIndex != null && i === q.powerWordIndex;
+                    const cls = mk
+                      ? `${mk.pending ? 'text-amber-300' : mk.correct ? 'text-emerald-300' : 'text-rose-300'} font-medium underline decoration-dotted underline-offset-2`
+                      : isPower ? 'text-amber-300/80' : '';
+                    return (
+                      <span key={i} className={cls || undefined} title={mk?.label}>{w}{' '}</span>
+                    );
+                  })}
+                  {stage === 'reading' && revealedUpTo < words.length - 1 && (
+                    <span className="inline-block w-0.5 h-4 bg-white/30 animate-pulse ml-1 align-middle rounded-sm" />
+                  )}
+                </p>
+              ) : (
+                <p className="text-[12px] text-white/30 italic">No question text recorded.</p>
+              )}
+              {stage !== 'done' ? (
+                <p className="text-[10px] text-white/25 mt-4 italic">Click to skip ahead · Space</p>
+              ) : revealedUpTo < words.length - 1 ? (
+                <p className="text-[10px] text-white/25 mt-4 italic">Click to reveal the rest</p>
+              ) : null}
+            </div>
+          </div>
+
+          {/* Action bar — where the live BUZZ button sits */}
+          <div className="px-4 py-3 border-t border-white/[0.04] flex-shrink-0 space-y-2">
+            {stage === 'reading' && (
+              <div className="w-full py-3 rounded-lg border border-white/[0.05] bg-white/[0.02] text-center text-[11px] text-white/30">
+                Replaying…
+              </div>
+            )}
+            {stage === 'buzzing' && activeBuzz && (
+              <div className="w-full py-3 rounded-lg border border-white/[0.05] bg-white/[0.02] text-center text-[11px] text-white/30 inline-flex items-center justify-center gap-2">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-amber-400/50 animate-ping" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500/50" />
+                </span>
+                {activeBuzz.userId === myUserId ? 'You' : activeBuzz.name} buzzed at word {activeBuzz.buzzWord + 1} — answering…
+              </div>
+            )}
+            {stage === 'wrong' && activeBuzz && (
+              <div className="px-3 py-1.5 rounded-lg bg-rose-500/[0.08] border border-rose-500/15 text-[11px] text-rose-400/70 text-center">
+                {activeBuzz.userId === myUserId ? 'You were wrong' : `${activeBuzz.name} was wrong`}
+                {activeBuzz.answer ? ` — "${activeBuzz.answer}"` : ''}
+                {typeof activeBuzz.points === 'number' && activeBuzz.points < 0 ? ` · ${activeBuzz.points}` : ''} · continues
+              </div>
+            )}
+            {stage === 'done' && (
+              <>
+                {playedBuzzes.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {playedBuzzes.map((b, i) => (
+                      <span key={i} className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] ${
+                        b.correct
+                          ? 'border-emerald-500/25 bg-emerald-500/[0.06] text-emerald-300/80'
+                          : 'border-rose-500/25 bg-rose-500/[0.06] text-rose-300/80'
+                      }`}>
+                        {b.correct ? <Check size={10} /> : <X size={10} />}
+                        <span className="font-semibold">{b.userId === myUserId ? 'You' : b.name}</span>
+                        <span className="opacity-60">word {b.buzzWord + 1}</span>
+                        {b.answer && <span className="opacity-60">"{b.answer}"</span>}
+                        {typeof b.points === 'number' && b.points !== 0 && (
+                          <span className="font-bold">{b.points > 0 ? `+${b.points}` : b.points}</span>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <AnswerResultPanel
+                  correct={winner ? true : null}
+                  officialAnswer={q?.answer}
+                  meta={resultMeta}
+                />
+              </>
+            )}
+            <div className="flex gap-2">
+              <button onClick={goPrev} disabled={qIdx === 0}
+                className="flex-1 py-2.5 rounded-lg border border-white/[0.06] bg-white/[0.03] text-[12px] font-semibold text-white/50 hover:text-white/70 disabled:opacity-25 transition-colors">
+                ← Prev
+              </button>
+              <button onClick={goNext}
+                className="flex-1 py-2.5 rounded-lg border border-white/[0.06] bg-white/[0.03] text-[12px] font-semibold text-white/50 hover:text-white/70 transition-colors">
+                {qIdx < totalQ - 1 ? 'Next →' : 'Done'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Sidebar — identical PlayerCard scoreboard to the live game */}
+        <div className="w-44 flex-shrink-0 border-l border-white/[0.04] p-3 flex flex-col gap-1.5 overflow-y-auto">
+          <div className="flex items-center gap-1.5 mb-1 flex-shrink-0">
+            <Users size={11} className="text-white/25" />
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-white/25">
+              Match · {players.length}P
+            </span>
+          </div>
+          {players.map(p => (
+            <PlayerCard
+              key={p.userId}
+              player={p}
+              isMe={p.userId === myUserId}
+              buzz={cardBuzz}
+              lockedOut={lockedOutIds}
+              answerResult={cardResult}
+              maxScore={maxScore}
+            />
+          ))}
+          <div className="mt-auto pt-2 border-t border-white/[0.04] flex-shrink-0">
+            <div className="flex justify-between text-[10px] text-white/25 mb-1">
+              <span>Read</span><span>{Math.round(progressPct)}%</span>
+            </div>
+            <div className="h-1 bg-white/[0.05] rounded-full overflow-hidden">
+              <div className="h-full bg-white/20 rounded-full transition-all" style={{ width: `${progressPct}%` }} />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ============================================================
 function ReplayView({ set, onExit }) {
   const [qIdx, setQIdx] = useState(0);
@@ -2025,16 +2483,14 @@ function ReplayView({ set, onExit }) {
   return (
     <div className="h-full flex flex-col bg-transparent overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/[0.04] flex-shrink-0">
+      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-white/[0.04] flex-shrink-0">
         <button onClick={onExit}
-          className="text-white/45 hover:text-white/75 text-[11px] flex items-center gap-1 transition-colors">
-          <ChevronRight size={12} className="rotate-180" /> Back
+          className="flex items-center gap-2 text-sm text-white/35 hover:text-white/60 transition-colors">
+          <ArrowLeft size={16} /> Back
         </button>
-        <div className="flex-1 text-center">
-          <span className="text-[12px] font-bold text-white/70">{set?.category}</span>
-          <span className="text-[11px] text-white/35"> · {set?.difficulty}</span>
-        </div>
-        <span className="text-[11px] text-white/35 tabular-nums">{qIdx + 1}/{totalQ}</span>
+        <span className="text-[13px] font-bold text-white/80">{set?.category}</span>
+        <span className="text-[11px] text-white/35">· {set?.difficulty}</span>
+        <span className="text-[11px] text-white/35 tabular-nums ml-auto">{qIdx + 1}/{totalQ}</span>
       </div>
 
       {/* Summary bar */}
@@ -2052,7 +2508,7 @@ function ReplayView({ set, onExit }) {
         {words.length > 0 ? (
           <div
             onClick={!showResult ? skipToResult : undefined}
-            className={`rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4 leading-relaxed ${!showResult ? 'cursor-pointer' : ''}`}
+            className={`rounded-lg border border-white/[0.08] bg-white/[0.03] p-4 leading-relaxed ${!showResult ? 'cursor-pointer' : ''}`}
           >
             {words.map((w, i) => {
               const isRevealed = i <= revealedUpTo;
@@ -2092,14 +2548,14 @@ function ReplayView({ set, onExit }) {
             )}
           </div>
         ) : (
-          <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4 text-center text-[12px] text-white/30">
+          <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-4 text-center text-[12px] text-white/30">
             No question text recorded — play a new set to enable replays.
           </div>
         )}
 
         {/* Result card */}
         {showResult && q && (
-          <div className={`rounded-2xl border p-3.5 ${
+          <div className={`rounded-lg border p-3.5 ${
             q.correct
               ? 'border-emerald-500/25 bg-emerald-500/8'
               : 'border-rose-500/25 bg-rose-500/8'
@@ -2145,7 +2601,7 @@ function ReplayView({ set, onExit }) {
       {/* Nav footer */}
       <div className="flex-shrink-0 border-t border-white/[0.04] p-3 grid grid-cols-3 gap-2 items-center">
         <button onClick={goPrev} disabled={qIdx === 0}
-          className="py-2 rounded-xl border border-white/[0.08] bg-white/[0.03] text-[12px] font-semibold text-white/55 hover:text-white/80 hover:border-white/[0.14] disabled:opacity-25 transition-colors">
+          className="py-2 rounded-lg border border-white/[0.08] bg-white/[0.03] text-[12px] font-semibold text-white/55 hover:text-white/80 hover:border-white/[0.14] disabled:opacity-25 transition-colors">
           ← Prev
         </button>
         <div className="text-center text-[10px] text-white/30 tabular-nums">
@@ -2153,12 +2609,12 @@ function ReplayView({ set, onExit }) {
         </div>
         {qIdx < totalQ - 1 ? (
           <button onClick={goNext}
-            className="py-2 rounded-xl border border-white/[0.08] bg-white/[0.03] text-[12px] font-semibold text-white/55 hover:text-white/80 hover:border-white/[0.14] transition-colors">
+            className="py-2 rounded-lg border border-white/[0.08] bg-white/[0.03] text-[12px] font-semibold text-white/55 hover:text-white/80 hover:border-white/[0.14] transition-colors">
             Next →
           </button>
         ) : (
           <button onClick={onExit}
-            className="py-2 rounded-xl border border-white/[0.08] bg-white/[0.03] text-[12px] font-semibold text-white/55 hover:text-white/80 hover:border-white/[0.14] transition-colors">
+            className="py-2 rounded-lg border border-white/[0.08] bg-white/[0.03] text-[12px] font-semibold text-white/55 hover:text-white/80 hover:border-white/[0.14] transition-colors">
             Done
           </button>
         )}

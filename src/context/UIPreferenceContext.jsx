@@ -97,8 +97,19 @@ export function UIPreferenceProvider({ children }) {
   const latestPrefs = useRef(prefs);
   useEffect(() => { latestPrefs.current = { ...serverPrefs, ...optimisticPrefs }; }, [serverPrefs, optimisticPrefs]);
 
+  // `user` is read through a ref so setPref keeps a stable identity across
+  // fetchUser calls (which replace the user object after many in-app
+  // actions). A stable setPref keeps every setX below stable, which keeps
+  // the memoized context value below stable - so a user refetch with
+  // unchanged preferences re-renders ZERO windows. Without this, every
+  // fetchUser re-rendered all open windows simultaneously (context
+  // subscriptions bypass Window's React.memo), repainting N compositor
+  // layers in one frame - a multi-window wallpaper-flash trigger.
+  const userRef = useRef(user);
+  useEffect(() => { userRef.current = user; }, [user]);
+
   const setPref = useCallback(async (key, value) => {
-    if (!user) return;
+    if (!userRef.current) return;
     // Apply immediately so the UI reacts without waiting for the server.
     setOptimisticPrefs(prev => ({ ...prev, [key]: value }));
     const next = { ...latestPrefs.current, [key]: value };
@@ -109,7 +120,7 @@ export function UIPreferenceProvider({ children }) {
     } catch (err) {
       console.error('Failed to sync preferences:', err);
     }
-  }, [user, fetchUser]);
+  }, [fetchUser]);
 
   // setTheme is a no-op - dark mode is permanent.
   // eslint-disable-next-line no-unused-vars
@@ -133,18 +144,32 @@ export function UIPreferenceProvider({ children }) {
   }, []);
   const effectiveMode = isMobile ? 'classic' : uiMode;
 
+  // Memoized so the context value only changes when a resolved preference
+  // actually changes. The provider re-renders whenever AuthContext does
+  // (every fetchUser produces a new user object); an inline value object
+  // here would re-render every consumer - including ALL open windows,
+  // since context subscriptions bypass Window's React.memo - on each of
+  // those renders. All setters are stable, so the deps are just the
+  // resolved values.
+  const value = useMemo(() => ({
+    uiMode: effectiveMode, rawUiMode: uiMode, setUiMode,
+    wallpaper, setWallpaper,
+    dockSize, setDockSize,
+    iconStyle, setIconStyle,
+    dockPosition, setDockPosition,
+    theme, setTheme,
+    windowOpacity, setWindowOpacity,
+    titlebarOpacity, setTitlebarOpacity,
+    bottomBarTransparent, setBottomBarTransparent,
+  }), [
+    effectiveMode, uiMode, wallpaper, dockSize, iconStyle, dockPosition,
+    theme, windowOpacity, titlebarOpacity, bottomBarTransparent,
+    setUiMode, setWallpaper, setDockSize, setIconStyle, setDockPosition,
+    setTheme, setWindowOpacity, setTitlebarOpacity, setBottomBarTransparent,
+  ]);
+
   return (
-    <UIPreferenceContext.Provider value={{
-      uiMode: effectiveMode, rawUiMode: uiMode, setUiMode,
-      wallpaper, setWallpaper,
-      dockSize, setDockSize,
-      iconStyle, setIconStyle,
-      dockPosition, setDockPosition,
-      theme, setTheme,
-      windowOpacity, setWindowOpacity,
-      titlebarOpacity, setTitlebarOpacity,
-      bottomBarTransparent, setBottomBarTransparent,
-    }}>
+    <UIPreferenceContext.Provider value={value}>
       {children}
     </UIPreferenceContext.Provider>
   );

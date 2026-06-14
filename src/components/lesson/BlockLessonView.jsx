@@ -14,6 +14,7 @@ import FillBlankBlock from './FillBlankBlock';
 import ProgressBar from '../shared/ProgressBar';
 import { SkeletonProse } from '../shared/Skeleton';
 import ViewFade from '../shared/ViewFade';
+import LessonCoChat from './LessonCoChat';
 import {
   generateLessonBlocks as curriculumGenerateBlocks,
   generateFinalQuiz as curriculumGenerateFinalQuiz,
@@ -29,7 +30,12 @@ import {
 // AI picks the mix per lesson; a final quiz is appended lazily at the
 // end. Each block renders with its own component and reports back via
 // onComplete (or a grader) so the runner can mark it done and advance.
-export default function BlockLessonView({ curriculumId, lesson, onBack, api: apiProp, backLabel = 'Back to curriculum' }) {
+//
+// `coStudy` ({ shareId, partnerNames }) marks the lesson as part of a
+// SHARED curriculum: a live human chat rail (LessonCoChat) renders beside
+// the lesson column so both sides can talk while working through the same
+// blocks. shareId is null when the current user is the curriculum owner.
+export default function BlockLessonView({ curriculumId, lesson, onBack, api: apiProp, backLabel = 'Back to curriculum', coStudy = null }) {
   const api = useMemo(() => {
     if (apiProp) return apiProp;
     return {
@@ -196,8 +202,8 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
     }
   }
 
-  return (
-    <div className={`w-full ${wrapWidth} mx-auto px-5 md:px-8 py-7 md:py-9`}>
+  const lessonColumn = (
+    <>
       {/* Back button */}
       <button
         onClick={onBack}
@@ -282,6 +288,27 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
           </ViewFade>
         </>
       )}
+    </>
+  );
+
+  if (!coStudy) {
+    return <div className={`w-full ${wrapWidth} mx-auto px-5 md:px-8 py-7 md:py-9`}>{lessonColumn}</div>;
+  }
+
+  // Shared curriculum: lesson column + live co-study chat rail. The rail is
+  // sticky so it stays in view while the lesson content scrolls underneath.
+  return (
+    <div className="w-full max-w-6xl mx-auto px-5 md:px-8 py-7 md:py-9 flex items-start gap-5">
+      <div className={`flex-1 min-w-0 ${wrapWidth}`}>{lessonColumn}</div>
+      <ViewFade viewKey={`cochat:${lesson.id}`} className="w-[290px] shrink-0 sticky top-3">
+        <LessonCoChat
+          curriculumId={curriculumId}
+          lessonId={lesson.id}
+          shareId={coStudy.shareId || null}
+          partnerNames={coStudy.partnerNames || []}
+          className="h-[460px]"
+        />
+      </ViewFade>
     </div>
   );
 }

@@ -4,7 +4,6 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { AuthProvider } from './context/AuthContext';
 import { SharingProvider } from './context/SharingContext';
-import { GroupNotificationProvider } from './context/GroupNotificationContext';
 import { PanelProvider } from './context/PanelContext';
 import { SplitViewProvider } from './context/SplitViewContext';
 import ErrorBoundary from './components/shared/ErrorBoundary';
@@ -18,13 +17,11 @@ createRoot(document.getElementById('root')).render(
         <ToastProvider>
           <AuthProvider>
             <SharingProvider>
-              <GroupNotificationProvider>
-                <PanelProvider>
-                  <SplitViewProvider>
-                    <App />
-                  </SplitViewProvider>
-                </PanelProvider>
-              </GroupNotificationProvider>
+              <PanelProvider>
+                <SplitViewProvider>
+                  <App />
+                </SplitViewProvider>
+              </PanelProvider>
             </SharingProvider>
           </AuthProvider>
         </ToastProvider>

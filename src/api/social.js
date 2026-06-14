@@ -1,27 +1,10 @@
 import { apiFetch } from './client';
 
-// Profile
+// Account directory helpers. The former Social hub (friends / DMs / group
+// chat) was removed - sharing works with any account directly, so only the
+// account lookup endpoints remain here:
+//   • getMyProfile - viewer's account profile lookup
+//   • searchUsers  - used by ShareDialog to find any account to share with
+//                    (no friending required)
 export const getMyProfile = () => apiFetch('/api/social/profile');
-export const setProfile = (handle, displayName) => apiFetch('/api/social/profile', { method: 'POST', body: JSON.stringify({ handle, displayName }) });
-
-// Search
 export const searchUsers = (q) => apiFetch(`/api/social/search?q=${encodeURIComponent(q)}`);
-
-// Friends
-export const getFriends = () => apiFetch('/api/social/friends');
-export const sendFriendRequest = (userId) => apiFetch('/api/social/friends/add', { method: 'POST', body: JSON.stringify({ userId }) });
-export const acceptFriendRequest = (requestId) => apiFetch('/api/social/friends/accept', { method: 'POST', body: JSON.stringify({ requestId }) });
-export const declineFriendRequest = (requestId) => apiFetch('/api/social/friends/decline', { method: 'POST', body: JSON.stringify({ requestId }) });
-export const getFriendRequests = () => apiFetch('/api/social/friends/requests');
-export const removeFriend = (userId) => apiFetch('/api/social/friends/remove', { method: 'POST', body: JSON.stringify({ userId }) });
-
-// DMs
-export const listDMs = () => apiFetch('/api/social/dm');
-export const getDM = (userId) => apiFetch(`/api/social/dm/${userId}`);
-export const sendDM = (to, content) => apiFetch('/api/social/dm/send', { method: 'POST', body: JSON.stringify({ to, content }) });
-
-// Groups
-export const listGroups = () => apiFetch('/api/social/groups');
-export const createGroup = (name, memberIds) => apiFetch('/api/social/groups', { method: 'POST', body: JSON.stringify({ name, memberIds }) });
-export const getGroup = (id) => apiFetch(`/api/social/groups/${id}`);
-export const sendGroupMessage = (id, content) => apiFetch(`/api/social/groups/${id}/send`, { method: 'POST', body: JSON.stringify({ content }) });

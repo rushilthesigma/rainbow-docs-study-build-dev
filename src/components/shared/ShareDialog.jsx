@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, Check, X, Loader2, Trash2, UserPlus, Eye, Pencil } from 'lucide-react';
+import { Search, Check, X, Loader2, Trash2, UserPlus, Eye, Pencil, ArrowLeft } from 'lucide-react';
 import Modal from './Modal';
 import { searchUsers } from '../../api/social';
 import { createShare, revokeShare, updatePermission, listOutgoing } from '../../api/share';
@@ -11,15 +11,17 @@ import { createShare, revokeShare, updatePermission, listOutgoing } from '../../
 //   item:    { id, type, title } - type is the server itemType
 //            ('note' | 'flashcardDeck' | 'curriculum')
 //   onClose: () => void
+//   asPanel: when true, render as a docked side panel (same shell as the
+//            note editor's quiz panel) instead of a centered modal.
 //
 // Talks to the API via ShareApiClient (src/api/share.js). The user search uses
 // the existing /api/social/search, which already excludes the requester, so
 // the owner never appears in their own results; the API also rejects self- and
 // duplicate-shares and those errors are surfaced inline.
 
-const TYPE_LABEL = { note: 'note', flashcardDeck: 'flashcard deck', curriculum: 'curriculum' };
+const TYPE_LABEL = { note: 'note', flashcardDeck: 'flashcard deck', curriculum: 'curriculum', noteMap: 'note map' };
 
-export default function ShareDialog({ item, onClose }) {
+export default function ShareDialog({ item, onClose, asPanel = false }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -142,10 +144,10 @@ export default function ShareDialog({ item, onClose }) {
   }
 
   const noResults = query.trim() && !searching && results.length === 0;
+  const title = `Share ${TYPE_LABEL[item.type] || 'item'}`;
 
-  return (
-    <Modal open onClose={onClose} title={`Share ${TYPE_LABEL[item.type] || 'item'}`} size="md">
-      <div className="flex flex-col gap-4">
+  const body = (
+    <div className="flex flex-col gap-4">
         <p className="text-[12px] text-white/45 -mt-1 truncate">{item.title}</p>
 
         {/* Selected recipient + permission + confirm */}
@@ -270,7 +272,35 @@ export default function ShareDialog({ item, onClose }) {
             </div>
           )}
         </div>
+    </div>
+  );
+
+  // Docked side panel — mirrors the note editor's quiz panel shell so Share
+  // and Quiz look like siblings sharing the same column.
+  if (asPanel) {
+    return (
+      <div className="flex flex-col h-full min-h-0 bg-[#141414] border border-white/[0.08] rounded-lg overflow-hidden">
+        <div className="flex items-center gap-3 px-4 pt-3.5 pb-3 flex-shrink-0 border-b border-white/[0.07]">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Back"
+            className="flex items-center gap-1.5 text-white/40 hover:text-white/80 transition-colors text-sm"
+          >
+            <ArrowLeft size={14} /> Back
+          </button>
+          <h3 className="text-[14px] font-semibold text-white/90 flex-1 truncate">{title}</h3>
+        </div>
+        <div className="flex-1 overflow-y-auto px-4 py-4">
+          {body}
+        </div>
       </div>
+    );
+  }
+
+  return (
+    <Modal open onClose={onClose} title={title} size="md">
+      {body}
     </Modal>
   );
 }

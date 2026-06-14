@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, FileText, Plus, Trash2, Pencil, Layout, Sparkles, Wand2, Loader2, BookOpen, Network, Folder, Layers, ChevronRight, Share2 } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { ArrowLeft, FileText, Plus, Trash2, Pencil, Layout, Wand2, Loader2, BookOpen, Network, Folder, Layers, ChevronRight, ChevronDown, Check, Share2 } from 'lucide-react';
 import { InlineProgress } from '../../shared/ProgressBar';
 import { listNotes, createNote, deleteNote, getNote, updateNote, generateCues, generateSummary,
          listNoteMaps, createNoteMap, deleteNoteMap, updateNoteMap,
@@ -13,14 +13,78 @@ import LoadingSpinner from '../../shared/LoadingSpinner';
 import Modal from '../../shared/Modal';
 import ShareDialog from '../../shared/ShareDialog';
 import SharedWithMeView from '../../library/SharedWithMeView';
+import SharedItemViewer from '../../library/SharedItemViewer';
+import { useSharing } from '../../../context/SharingContext';
 import useBrowserBack from '../../../hooks/useBrowserBack';
-import NoteActions from '../../notes/NoteActions';
+import NoteActions, { QuizFromNotePanel } from '../../notes/NoteActions';
 import NoteMap from '../../notes/NoteMap';
 import MarkdownNoteEditor from '../../notes/MarkdownNoteEditor';
 import NoteFlashcards from '../../notes/NoteFlashcards';
 import { useToast } from '../../shared/Toast';
 
+// Custom topic picker. A real <select> renders the OS-native popup (the macOS
+// system menu), which looks foreign inside the app. This is a plain
+// button + absolutely-positioned menu so it themes identically on every
+// platform. `value` is the topicId ('' = No topic); `onChange` gets the new id.
+function TopicSelect({ topics = [], value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function onDoc(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    function onKey(e) { if (e.key === 'Escape') setOpen(false); }
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+
+  const current = value ? topics.find(t => t.id === value) : null;
+  const label = current ? current.name : 'No topic';
+
+  function choose(id) { onChange(id); setOpen(false); }
+
+  const item = (id, name) => {
+    const active = (id || '') === (value || '');
+    return (
+      <button
+        key={id || '__none'}
+        type="button"
+        onClick={() => choose(id)}
+        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors ${
+          active ? 'bg-blue-500/20 text-blue-100' : 'text-white/75 hover:bg-white/[0.08] hover:text-white'
+        }`}
+      >
+        <Check size={12} className={active ? 'text-blue-300' : 'opacity-0'} />
+        <span className="truncate">{name}</span>
+      </button>
+    );
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        title="Topic"
+        className="flex items-center gap-1.5 bg-blue-500 hover:bg-blue-400 rounded-lg px-2.5 py-1 text-[11px] font-medium text-white transition-colors max-w-[170px]"
+      >
+        <Folder size={12} className="flex-shrink-0" />
+        <span className="truncate">{label}</span>
+        <ChevronDown size={12} className={`flex-shrink-0 opacity-80 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-50 min-w-[170px] max-h-60 overflow-y-auto rounded-lg border border-white/[0.10] bg-[#1b1b1b] py-1 shadow-xl shadow-black/40">
+          {item('', 'No topic')}
+          {topics.map(t => item(t.id, t.name))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashcards }) {
+  const toast = useToast();
   // Serve from cache so re-opens are instant; always background-refresh for freshness.
   const [note, setNote] = useState(() => peek(`note:${noteId}`)?.note || null);
   const [loading, setLoading] = useState(() => !peek(`note:${noteId}`));
@@ -29,6 +93,12 @@ function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashca
   const [genSummary, setGenSummary] = useState(false);
   const [saveTimer, setSaveTimer] = useState(null);
   const [fc, setFc] = useState({ count: null, due: 0 });
+  const [shareOpen, setShareOpen] = useState(false);
+  // The quiz lives in a real split column beside the editor (not an overlay),
+  // so the editor reflows when it opens. Close it when switching notes.
+  const [quizOpen, setQuizOpen] = useState(false);
+
+  useEffect(() => { setQuizOpen(false); }, [noteId]);
 
   useEffect(() => {
     getNoteFlashcards(noteId).then(d => setFc({ count: (d.cards || []).length, due: d.due || 0 })).catch(() => {});
@@ -37,7 +107,12 @@ function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashca
   async function handleTopicChange(value) {
     const tid = value || null;
     setNote(prev => (prev ? { ...prev, topicId: tid } : prev));
-    try { await setNoteTopic(noteId, tid); } catch {}
+    try {
+      // Keep updatedAt in step: the PUT bumps it server-side, and a stale
+      // local copy would make the next autosave's baseUpdatedAt check 409.
+      const d = await setNoteTopic(noteId, tid);
+      if (d?.note?.updatedAt) setNote(prev => (prev ? { ...prev, updatedAt: d.note.updatedAt } : prev));
+    } catch {}
     onTopicChanged?.();
   }
 
@@ -52,14 +127,28 @@ function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashca
     return () => { cancelled = true; };
   }, [noteId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Latest note for the save closure (useCallback([noteId]) would otherwise
+  // capture a stale copy of updatedAt).
+  const noteRef = useRef(note);
+  noteRef.current = note;
+
   const save = useCallback(async (updates) => {
     setSaving(true);
     try {
-      const d = await updateNote(noteId, updates);
+      // baseUpdatedAt lets the server reject this save if the note changed
+      // since we loaded it — group members co-edit contributed notes, and a
+      // stale autosave from here used to silently revert their work.
+      const d = await updateNote(noteId, { ...updates, baseUpdatedAt: noteRef.current?.updatedAt });
       if (d?.note) { setNote(d.note); set(`note:${noteId}`, d); }
-    } catch {}
+    } catch (err) {
+      if (err?.status === 409 && err?.data?.note) {
+        setNote(err.data.note);
+        set(`note:${noteId}`, { note: err.data.note });
+        toast.error('This note was updated from your group. Reloaded the latest version.');
+      }
+    }
     setSaving(false);
-  }, [noteId]);
+  }, [noteId, toast]);
 
   function handleChange(field, value) {
     setNote(prev => ({ ...prev, [field]: value }));
@@ -69,13 +158,19 @@ function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashca
 
   async function handleGenCues() {
     setGenCues(true);
-    try { const d = await generateCues(noteId); setNote(prev => ({ ...prev, cues: d.cues })); } catch {}
+    try {
+      const d = await generateCues(noteId);
+      setNote(prev => ({ ...prev, cues: d.cues, ...(d.updatedAt ? { updatedAt: d.updatedAt } : {}) }));
+    } catch {}
     setGenCues(false);
   }
 
   async function handleGenSummary() {
     setGenSummary(true);
-    try { const d = await generateSummary(noteId); setNote(prev => ({ ...prev, summary: d.summary })); } catch {}
+    try {
+      const d = await generateSummary(noteId);
+      setNote(prev => ({ ...prev, summary: d.summary, ...(d.updatedAt ? { updatedAt: d.updatedAt } : {}) }));
+    } catch {}
     setGenSummary(false);
   }
 
@@ -91,18 +186,14 @@ function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashca
           <ArrowLeft size={16} /> Notes
         </button>
         <div className="flex items-center gap-2.5">
-          <div className="flex items-center gap-1.5 text-white/40">
-            <Folder size={13} />
-            <select
-              value={note.topicId || ''}
-              onChange={e => handleTopicChange(e.target.value)}
-              title="Topic"
-              className="bg-white/[0.05] border border-white/[0.08] rounded-lg px-2 py-1 text-[11px] text-white/75 outline-none hover:bg-white/[0.08] focus:border-blue-400/40 cursor-pointer max-w-[150px]"
-            >
-              <option value="">No topic</option>
-              {topics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          </div>
+          <TopicSelect topics={topics} value={note.topicId || ''} onChange={handleTopicChange} />
+          <button
+            onClick={() => { setShareOpen(true); setQuizOpen(false); }}
+            title="Share this note"
+            className="flex items-center gap-1.5 bg-blue-500 hover:bg-blue-400 rounded-lg px-2.5 py-1 text-[11px] font-medium text-white transition-colors"
+          >
+            <Share2 size={12} /> Share
+          </button>
           <span className="text-xs text-white/25">{saving ? 'Saving...' : 'Auto-saved'}</span>
         </div>
       </div>
@@ -117,17 +208,20 @@ function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashca
       <div className="mb-3 flex-shrink-0">
         <NoteActions
           note={note}
+          onMakeQuiz={() => { setQuizOpen(true); setShareOpen(false); }}
           onNoteUpdated={(patch) => setNote(prev => prev ? { ...prev, ...patch } : prev)}
         />
       </div>
 
+      <div className="flex-1 min-h-0 flex gap-3">
+      <div className="flex flex-col flex-1 min-h-0 min-w-0">
       {isCornell ? (
         <div className="flex flex-col flex-1 min-h-0 gap-3">
           <div className="flex-1 min-h-0 grid grid-cols-[200px_1fr] border border-white/[0.08] rounded-lg overflow-hidden">
             <div className="border-r border-white/[0.07] p-3 overflow-y-auto">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Cues</span>
-                <button onClick={handleGenCues} disabled={genCues} className="text-white/40 hover:text-white/70 disabled:opacity-50 transition-colors"><Sparkles size={12} /></button>
+                <button onClick={handleGenCues} disabled={genCues} className="text-white/40 hover:text-white/70 disabled:opacity-50 transition-colors"><Wand2 size={12} /></button>
               </div>
               {(note.cues || []).length > 0 ? (
                 <div>
@@ -136,7 +230,7 @@ function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashca
                   ))}
                 </div>
               ) : (
-                <p className="text-[10px] text-white/25 italic">Write notes, then click sparkle to generate cues</p>
+                <p className="text-[10px] text-white/25 italic">Write notes, then click the wand to generate cues</p>
               )}
             </div>
             <MarkdownNoteEditor
@@ -150,7 +244,7 @@ function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashca
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Summary</span>
               <button onClick={handleGenSummary} disabled={genSummary} className="flex items-center gap-1 text-[10px] text-white/40 hover:text-white/65 disabled:opacity-50 transition-colors">
-                <Sparkles size={10} /> Generate
+                Generate
               </button>
             </div>
             <textarea
@@ -186,6 +280,27 @@ function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashca
         <span className="flex-1" />
         <ChevronRight size={14} className="text-white/25" />
       </button>
+      </div>
+
+      {/* Quiz and Share share the right-hand split column and are mutually
+          exclusive — opening one closes the other. The note column reflows to
+          make room; neither is an overlay. An "edit" share lets the recipient
+          co-edit, and the saves above carry baseUpdatedAt so concurrent edits
+          409 instead of silently reverting. */}
+      {(quizOpen || shareOpen) && (
+        <div className="flex-shrink-0 min-h-0" style={{ width: 'clamp(320px, 36%, 440px)' }}>
+          {quizOpen ? (
+            <QuizFromNotePanel note={note} onClose={() => setQuizOpen(false)} />
+          ) : (
+            <ShareDialog
+              asPanel
+              item={{ id: noteId, type: 'note', title: note.title }}
+              onClose={() => setShareOpen(false)}
+            />
+          )}
+        </div>
+      )}
+      </div>
     </div>
   );
 }
@@ -228,6 +343,10 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
   const [activeTopicId, setActiveTopicId] = useState(null);
   const [topicDialog, setTopicDialog] = useState(null);
   const [shareTarget, setShareTarget] = useState(null);
+  // A "Shared with me" item opened as an in-window view (view === 'shared')
+  // rather than a screen-covering modal.
+  const [openShare, setOpenShare] = useState(null);
+  const { refresh: refreshShares } = useSharing();
   const [flashcardsNote, setFlashcardsNote] = useState(
     initialFlashcardsNoteId ? { id: initialFlashcardsNoteId, title: initialFlashcardsTitle || '' } : null,
   );
@@ -500,6 +619,22 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
     );
   }
 
+  // A note (or deck/curriculum) someone shared with this user, opened inside
+  // the Notes window — not as a full-screen modal.
+  if (view === 'shared' && openShare) {
+    return (
+      <ViewFade viewKey={`shared:${openShare.id}`} className="h-full flex flex-col">
+        <SharedItemViewer
+          key={openShare.id}
+          inline
+          share={openShare}
+          onClose={() => { setView('list'); setOpenShare(null); }}
+          onAccessLost={refreshShares}
+        />
+      </ViewFade>
+    );
+  }
+
   if (view === 'flashcards' && flashcardsNote) {
     return (
       <ViewFade viewKey="flashcards" className="h-full flex flex-col">
@@ -537,15 +672,30 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
             {activeMap && activeMap.isDefault && (
               <span className="text-[10px] uppercase tracking-wider text-white/30 border border-white/10 rounded-full px-1.5 py-0.5">Default</span>
             )}
+            {activeMap && (
+              <button
+                onClick={() => setShareTarget({ id: activeMap.id, type: 'noteMap', title: activeMap.name })}
+                className="flex items-center gap-1 hover:text-blue-300 transition-colors"
+                title="Share map"
+              >
+                <Share2 size={12} /> Share
+              </button>
+            )}
           </div>
         </div>
         <div className="flex-1 min-h-0 flex flex-col">
           <NoteMap
             key={selectedMapId || 'default'}
             mapId={selectedMapId || undefined}
+            mapName={activeMap?.name}
             onOpenNote={(noteId) => { setSelectedNoteId(noteId); setView('editor'); }}
           />
         </div>
+        {/* This view returns before the list view's ShareDialog mounts, so
+            sharing the open map needs its own instance here. */}
+        {shareTarget && (
+          <ShareDialog item={shareTarget} onClose={() => setShareTarget(null)} />
+        )}
       </ViewFade>
     );
   }
@@ -603,6 +753,13 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
                   </div>
                 </div>
                 <button
+                  onClick={(e) => { e.stopPropagation(); setShareTarget({ id: m.id, type: 'noteMap', title: m.name }); }}
+                  className="opacity-0 group-hover:opacity-100 text-white/20 hover:text-blue-300 transition-opacity"
+                  title="Share map"
+                >
+                  <Share2 size={12} />
+                </button>
+                <button
                   onClick={(e) => { e.stopPropagation(); handleRenameMap(m); }}
                   className="opacity-0 group-hover:opacity-100 text-white/20 hover:text-white/70 transition-opacity"
                   title="Rename map"
@@ -642,7 +799,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
         <div className="flex flex-wrap gap-1.5">
           <button
             onClick={() => setActiveTopicId(null)}
-            className={`text-[12px] px-2.5 py-1 rounded-lg border transition-colors ${activeTopicId === null ? 'bg-white/[0.10] border-white/20 text-white/90' : 'bg-white/[0.03] border-white/[0.06] text-white/55 hover:text-white/80 hover:bg-white/[0.06]'}`}
+            className={`text-[12px] px-2.5 py-1 rounded-lg border transition-colors ${activeTopicId === null ? 'bg-blue-500/[0.18] border-blue-400/[0.40] text-blue-100' : 'bg-white/[0.03] border-white/[0.06] text-white/55 hover:text-white/80 hover:bg-white/[0.06]'}`}
           >
             All <span className="text-white/35">{notes.length}</span>
           </button>
@@ -650,7 +807,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
             <div
               key={t.id}
               onClick={() => setActiveTopicId(t.id)}
-              className={`group flex items-center gap-1.5 text-[12px] pl-2 pr-1.5 py-1 rounded-lg border cursor-pointer transition-colors ${activeTopicId === t.id ? 'bg-white/[0.10] border-white/20 text-white/90' : 'bg-white/[0.03] border-white/[0.06] text-white/65 hover:text-white/85 hover:bg-white/[0.06]'}`}
+              className={`group flex items-center gap-1.5 text-[12px] pl-2 pr-1.5 py-1 rounded-lg border cursor-pointer transition-colors ${activeTopicId === t.id ? 'bg-blue-500/[0.18] border-blue-400/[0.40] text-blue-100' : 'bg-white/[0.03] border-white/[0.06] text-white/65 hover:text-white/85 hover:bg-white/[0.06]'}`}
             >
               <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: t.color }} />
               <span className="truncate max-w-[140px]">{t.name}</span>
@@ -662,7 +819,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
           {unfiled > 0 && (
             <button
               onClick={() => setActiveTopicId('unfiled')}
-              className={`text-[12px] px-2.5 py-1 rounded-lg border transition-colors ${activeTopicId === 'unfiled' ? 'bg-white/[0.10] border-white/20 text-white/90' : 'bg-white/[0.03] border-white/[0.06] text-white/55 hover:text-white/80 hover:bg-white/[0.06]'}`}
+              className={`text-[12px] px-2.5 py-1 rounded-lg border transition-colors ${activeTopicId === 'unfiled' ? 'bg-blue-500/[0.18] border-blue-400/[0.40] text-blue-100' : 'bg-white/[0.03] border-white/[0.06] text-white/55 hover:text-white/80 hover:bg-white/[0.06]'}`}
             >
               Unfiled <span className="text-white/35">{unfiled}</span>
             </button>
@@ -809,12 +966,12 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
 
       <Modal open={showCreate} onClose={() => setShowCreate(false)} title="New note">
         <div className="grid grid-cols-2 gap-3">
-          <button onClick={() => handleCreate('regular')} className="flex flex-col items-center gap-2 p-5 rounded-xl border border-white/[0.08] bg-white/[0.02] hover:bg-white/[0.05] hover:border-white/[0.14] transition-colors text-center">
+          <button onClick={() => handleCreate('regular')} className="flex flex-col items-center gap-2 p-5 rounded-xl border border-white/[0.08] bg-white/[0.02] hover:bg-blue-500/[0.10] hover:border-blue-400/[0.28] transition-colors text-center">
             <FileText size={24} className="text-white/50" />
             <span className="text-sm font-medium text-white/70">Regular</span>
             <span className="text-xs text-white/30">Freeform</span>
           </button>
-          <button onClick={() => handleCreate('cornell')} className="flex flex-col items-center gap-2 p-5 rounded-xl border border-white/[0.08] bg-white/[0.02] hover:bg-white/[0.05] hover:border-white/[0.14] transition-colors text-center">
+          <button onClick={() => handleCreate('cornell')} className="flex flex-col items-center gap-2 p-5 rounded-xl border border-white/[0.08] bg-white/[0.02] hover:bg-blue-500/[0.10] hover:border-blue-400/[0.28] transition-colors text-center">
             <Layout size={24} className="text-white/50" />
             <span className="text-sm font-medium text-white/70">Cornell</span>
             <span className="text-xs text-white/30">Cues + summary</span>
@@ -855,7 +1012,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
         </div>
       )}
 
-      <SharedWithMeView className="mt-8" />
+      <SharedWithMeView className="mt-8" onOpen={(s) => { setOpenShare(s); setView('shared'); }} />
 
       {shareTarget && (
         <ShareDialog item={shareTarget} onClose={() => setShareTarget(null)} />

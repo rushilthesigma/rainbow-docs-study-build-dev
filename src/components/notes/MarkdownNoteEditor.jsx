@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useEditor, useEditorState, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -11,10 +11,11 @@ import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import { Bold, Italic, Underline, Strikethrough, Heading2, List, ListOrdered, Code2, Eye, Pencil } from 'lucide-react';
+import { Bold, Italic, Underline, Strikethrough, Heading2, List, ListOrdered, Code2 } from 'lucide-react';
 
-// The Preview tab renders the stored markdown the same way notes display
-// elsewhere. rehype-raw parses inline HTML (e.g. the <u> underline that GFM
+// Shared markdown rendering used by the read-only MarkdownNoteView below (and
+// the same way notes display elsewhere). rehype-raw parses inline HTML (e.g.
+// the <u> underline that GFM
 // lacks) and rehype-sanitize strips anything dangerous; rehype-katex runs last
 // so its output is trusted. The schema only needs to let remark-math's `math`
 // spans survive sanitization so KaTeX can transform them.
@@ -40,13 +41,25 @@ const PROSE_TWEAKS =
 const PROSE_CLASS = `prose prose-sm prose-invert max-w-none ${PROSE_TWEAKS}`;
 const EDITOR_CLASS = `tiptap ${PROSE_CLASS} focus:outline-none p-4 min-h-full`;
 
-// A markdown-backed WYSIWYG note editor. The Write tab is a true rich-text
-// editor (TipTap/ProseMirror): bold/italic/underline/strikethrough render
-// inline, the toolbar applies real formatting, and markdown shortcuts work as
-// you type (**bold**, *italic*, ~~strike~~, "# ", "- ", "1. ", `code`).
-// Content is stored as markdown so notes stay compatible with the rest of the
-// app (AI generation, note maps, etc.). The Preview tab renders the markdown
-// with full KaTeX math + tables. The host owns the surrounding card and sets
+// Read-only rendering of stored note markdown — the same plugins and prose
+// styling as the editor, for hosts that display a note without editing
+// it (group library, shared items, …).
+export function MarkdownNoteView({ markdown, className = '' }) {
+  return (
+    <div className={`${PROSE_CLASS} ${className}`}>
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={MD_COMPONENTS}>
+        {markdown}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+// A markdown-backed WYSIWYG note editor. It's a true rich-text editor
+// (TipTap/ProseMirror): bold/italic/underline/strikethrough render inline, the
+// toolbar applies real formatting, and markdown shortcuts work as you type
+// (**bold**, *italic*, ~~strike~~, "# ", "- ", "1. ", `code`). Content is
+// stored as markdown so notes stay compatible with the rest of the app (AI
+// generation, note maps, etc.). The host owns the surrounding card and sets
 // height via `className` (e.g. "h-full").
 export default function MarkdownNoteEditor({
   value = '',
@@ -55,7 +68,6 @@ export default function MarkdownNoteEditor({
   className = '',
   autoFocus = false,
 }) {
-  const [mode, setMode] = useState('write');
   // Tracks the markdown we last emitted so external updates (AI generation,
   // switching notes) can be told apart from our own edits — preventing a
   // setContent → onUpdate → setState feedback loop.
@@ -119,10 +131,9 @@ export default function MarkdownNoteEditor({
     } : {}),
   }) || {};
 
-  const writing = mode === 'write';
   const run = (fn) => () => { if (editor) fn(editor.chain().focus()).run(); };
   const tBtn = (on) =>
-    `p-1.5 rounded-md transition-colors disabled:opacity-30 disabled:hover:bg-transparent ${
+    `p-1.5 rounded-md transition-colors ${
       on ? 'bg-white/[0.14] text-white' : 'text-white/45 hover:text-white/90 hover:bg-white/[0.08]'
     }`;
 
@@ -130,52 +141,21 @@ export default function MarkdownNoteEditor({
     <div className={`flex flex-col min-h-0 ${className}`}>
       {/* Toolbar */}
       <div className="flex items-center gap-0.5 px-2 py-1.5 border-b border-white/[0.07] flex-shrink-0">
-        <button type="button" disabled={!writing} onClick={run(c => c.toggleBold())} className={tBtn(active.bold)} title="Bold (⌘B)"><Bold size={15} /></button>
-        <button type="button" disabled={!writing} onClick={run(c => c.toggleItalic())} className={tBtn(active.italic)} title="Italic (⌘I)"><Italic size={15} /></button>
-        <button type="button" disabled={!writing} onClick={run(c => c.toggleUnderline())} className={tBtn(active.underline)} title="Underline (⌘U)"><Underline size={15} /></button>
-        <button type="button" disabled={!writing} onClick={run(c => c.toggleStrike())} className={tBtn(active.strike)} title="Strikethrough"><Strikethrough size={15} /></button>
+        <button type="button" onClick={run(c => c.toggleBold())} className={tBtn(active.bold)} title="Bold (⌘B)"><Bold size={15} /></button>
+        <button type="button" onClick={run(c => c.toggleItalic())} className={tBtn(active.italic)} title="Italic (⌘I)"><Italic size={15} /></button>
+        <button type="button" onClick={run(c => c.toggleUnderline())} className={tBtn(active.underline)} title="Underline (⌘U)"><Underline size={15} /></button>
+        <button type="button" onClick={run(c => c.toggleStrike())} className={tBtn(active.strike)} title="Strikethrough"><Strikethrough size={15} /></button>
         <span className="w-px h-4 bg-white/10 mx-1" />
-        <button type="button" disabled={!writing} onClick={run(c => c.toggleHeading({ level: 2 }))} className={tBtn(active.h2)} title="Heading"><Heading2 size={15} /></button>
-        <button type="button" disabled={!writing} onClick={run(c => c.toggleBulletList())} className={tBtn(active.bullet)} title="Bullet list"><List size={15} /></button>
-        <button type="button" disabled={!writing} onClick={run(c => c.toggleOrderedList())} className={tBtn(active.ordered)} title="Numbered list"><ListOrdered size={15} /></button>
-        <button type="button" disabled={!writing} onClick={run(c => c.toggleCode())} className={tBtn(active.code)} title="Inline code"><Code2 size={15} /></button>
-
-        <div className="ml-auto flex items-center gap-0.5 rounded-lg bg-white/[0.05] p-0.5">
-          <button
-            type="button"
-            onClick={() => setMode('write')}
-            className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors ${writing ? 'bg-white/[0.12] text-white/90' : 'text-white/45 hover:text-white/70'}`}
-          >
-            <Pencil size={12} /> Write
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('preview')}
-            className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors ${!writing ? 'bg-white/[0.12] text-white/90' : 'text-white/45 hover:text-white/70'}`}
-          >
-            <Eye size={12} /> Preview
-          </button>
-        </div>
+        <button type="button" onClick={run(c => c.toggleHeading({ level: 2 }))} className={tBtn(active.h2)} title="Heading"><Heading2 size={15} /></button>
+        <button type="button" onClick={run(c => c.toggleBulletList())} className={tBtn(active.bullet)} title="Bullet list"><List size={15} /></button>
+        <button type="button" onClick={run(c => c.toggleOrderedList())} className={tBtn(active.ordered)} title="Numbered list"><ListOrdered size={15} /></button>
+        <button type="button" onClick={run(c => c.toggleCode())} className={tBtn(active.code)} title="Inline code"><Code2 size={15} /></button>
       </div>
 
       {/* Content */}
-      {writing ? (
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          <EditorContent editor={editor} className="h-full" />
-        </div>
-      ) : (
-        <div className="flex-1 min-h-0 overflow-y-auto p-4">
-          {value.trim() ? (
-            <div className={PROSE_CLASS}>
-              <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={MD_COMPONENTS}>
-                {value}
-              </ReactMarkdown>
-            </div>
-          ) : (
-            <p className="text-white/25 text-sm italic">Nothing to preview yet.</p>
-          )}
-        </div>
-      )}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <EditorContent editor={editor} className="h-full" />
+      </div>
     </div>
   );
 }

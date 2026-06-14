@@ -1,4 +1,4 @@
-import { BookOpen, MessageSquare, FileText, Settings, Shield, Zap, Lightbulb, Calculator, Scale, Globe, Users } from 'lucide-react';
+import { BookOpen, MessageSquare, FileText, Settings, Shield, Zap, Lightbulb, Calculator, Scale, Globe, LayoutGrid } from 'lucide-react';
 
 // Mobile Preview was removed from the registry once App.jsx wired up
 // width-based mobile rendering - real phones get MobileShell directly,
@@ -19,11 +19,12 @@ const APP_REGISTRY = [
   // standalone `notemap` dock entry was removed; users open Notes and
   // pick a map there.
   { id: 'notes', label: 'Notes', icon: FileText, color: '#10b981', gradient: 'from-emerald-400 to-emerald-600' },
-  { id: 'groups', label: 'Study Groups', icon: Users, color: '#0ea5e9', gradient: 'from-sky-400 to-cyan-600' },
+  // Study Groups was removed entirely (feature deleted).
   { id: 'mathtutor', label: 'Math Tutor', icon: Calculator, color: '#4f46e5', gradient: 'from-indigo-500 to-violet-600' },
 { id: 'debate', label: 'Debate', icon: Scale, color: '#ef4444', gradient: 'from-rose-500 to-red-700' },
   { id: 'quizbowl', label: 'Quiz Bowl', icon: Zap, color: '#f59e0b', gradient: 'from-amber-400 to-orange-500' },
   { id: 'qbpedia', label: 'QBpedia', icon: Globe, color: '#8b5cf6', gradient: 'from-violet-500 to-purple-700' },
+  { id: 'widgets', label: 'Widgets', icon: LayoutGrid, color: '#6366f1', gradient: 'from-indigo-400 to-indigo-600' },
   { id: 'admin', label: 'Admin', icon: Shield, color: '#dc2626', gradient: 'from-red-500 to-red-700', adminOnly: true },
   { id: 'settings', label: 'Settings', icon: Settings, color: '#6b7280', gradient: 'from-gray-400 to-gray-600' },
 ];

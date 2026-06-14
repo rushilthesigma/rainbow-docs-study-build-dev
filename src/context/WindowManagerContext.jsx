@@ -15,18 +15,14 @@ function getDefaultSize(appId) {
     // monitor. The iframe inside is constrained to 375px so the mobile
     // breakpoint still fires.
     mobilepreview: { w: 500, h: 820 },
-    // Widgets gallery is intentionally small + fixed - it's a picker,
-    // not a workspace.
-    widgets: { w: 420, h: 580 },
   };
   return sizes[appId] || { w: 800, h: 560 };
 }
 
 // Apps whose windows are locked to their default size - no resize, no
 // maximize. Used for the Mobile Preview cutout (changing the dimensions
-// would defeat the point of the preview) and the Widgets gallery
-// (sized as a tight picker; resizing it would just create empty space).
-const FIXED_SIZE_APPS = new Set(['mobilepreview', 'widgets']);
+// would defeat the point of the preview).
+const FIXED_SIZE_APPS = new Set(['mobilepreview']);
 function isFixedSize(appId) { return FIXED_SIZE_APPS.has(appId); }
 
 function getCascadePos(offset) {
@@ -79,16 +75,17 @@ function reducer(state, action) {
       // user double-clicking) each get unique ids.
       const id = `win-${action.appId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       const size = getDefaultSize(action.appId);
-      // Caller can pin the spawn point (e.g. the Widgets app anchors
-      // itself above the + button in the dock). Otherwise fall back to
-      // the diagonal cascade.
-      const position = action.position
+      // Callers can opt into opening a window maximized via `meta.maximized`.
+      // No app forces this today - the Widgets gallery opens as a normal,
+      // resizable app window (the user can zoom it fullscreen if they want).
+      const openMaximized = !!action.meta?.maximized;
+      // Caller can pin the spawn point (e.g. anchoring above a dock
+      // button). A window opening maximized ignores the anchor and stores
+      // a cascade position as its un-zoom restore target.
+      const position = (action.position && !openMaximized)
         ? clampToViewport(action.position, size)
         : getCascadePos(state.cascadeOffset);
       const fixedSize = isFixedSize(action.appId);
-      // (Slides used to force-open maximized; that app is gone now so
-      // every window opens at its cascade position.)
-      const openMaximized = false;
       return {
         ...state,
         windows: {

@@ -33,6 +33,9 @@ export async function apiFetch(path, options = {}) {
     }
     const err = new Error(data.error || `Request failed: ${res.status}`);
     err.status = res.status;
+    // Conflict responses (409) carry the current server document so the
+    // caller can merge and retry instead of guessing.
+    err.data = data;
     throw err;
   }
 

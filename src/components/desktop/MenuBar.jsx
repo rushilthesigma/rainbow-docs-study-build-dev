@@ -8,11 +8,33 @@ import { Z } from '../../styles/tokens';
 import ReferralChip from './ReferralChip';
 import UpgradeChip from '../billing/UpgradeChip';
 
+// The clock lives in its own component so the 30s tick re-renders ONLY
+// this span - not the entire menu bar. The bar carries a heavy
+// backdrop-filter: a full-bar re-render repaints the whole strip and
+// forces the compositor to re-sample every window layer beneath it,
+// which is one of the periodic triggers of the multi-window wallpaper
+// flash. Bonus: setLabel with an identical string makes React bail out
+// entirely, so ticks where the displayed minute hasn't changed cost
+// nothing at all.
+function formatClock(d) {
+  const dateStr = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  const timeStr = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  return `${dateStr} ${timeStr}`;
+}
+
+function MenuBarClock({ dark }) {
+  const [label, setLabel] = useState(() => formatClock(new Date()));
+  useEffect(() => {
+    const interval = setInterval(() => setLabel(formatClock(new Date())), 30000);
+    return () => clearInterval(interval);
+  }, []);
+  return <span className={`tabular-nums ${dark ? 'text-white/70' : 'text-gray-600'}`}>{label}</span>;
+}
+
 export default function MenuBar({ onSpotlight }) {
   const { state } = useWindowManager();
   const { user, logout, fetchUser, setProfilePicked } = useAuth();
   const dark = true; // theme is always dark
-  const [time, setTime] = useState(new Date());
   const [showUserMenu, setShowUserMenu] = useState(false);
   // 'menu' | 'pin' - which view is inside the dropdown
   const [menuView, setMenuView] = useState('menu');
@@ -21,11 +43,6 @@ export default function MenuBar({ onSpotlight }) {
   const [pinBusy, setPinBusy] = useState(false);
   const menuRef = useRef(null);
   const pinInputRef = useRef(null);
-
-  useEffect(() => {
-    const interval = setInterval(() => setTime(new Date()), 30000);
-    return () => clearInterval(interval);
-  }, []);
 
   useEffect(() => {
     if (!showUserMenu) return;
@@ -90,9 +107,6 @@ export default function MenuBar({ onSpotlight }) {
     }
   }
 
-  const timeStr = time.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  const dateStr = time.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-
   const dropdownBg = dark ? 'rgba(30, 30, 40, 0.95)' : 'rgba(255, 255, 255, 0.97)';
   const dropdownBorder = dark ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.1)';
 
@@ -103,8 +117,15 @@ export default function MenuBar({ onSpotlight }) {
       style={{
         zIndex: Z.menubar,
         background: dark ? 'rgba(22, 20, 42, 0.48)' : 'rgba(220, 220, 228, 0.50)',
-        backdropFilter: 'blur(64px) saturate(2.2)',
-        WebkitBackdropFilter: 'blur(64px) saturate(2.2)',
+        // blur radius drives backdrop-filter cost: a full-width always-on bar
+        // re-samples its backdrop on every repaint behind it, and a 64px radius
+        // is the single most expensive composite in the shell - the dominant
+        // contributor to the multi-window wallpaper-flash (compositor misses
+        // vsync while re-blurring). At 48% background opacity 30px is visually
+        // identical to 64px but a fraction of the cost. Matches the Dock's
+        // lighter blur so the chrome is consistent.
+        backdropFilter: 'blur(30px) saturate(2.2)',
+        WebkitBackdropFilter: 'blur(30px) saturate(2.2)',
         borderBottom: dark ? '1px solid rgba(255,255,255,0.09)' : '1px solid rgba(0,0,0,0.08)',
         transform: 'translateZ(0)',
         willChange: 'transform',
@@ -252,7 +273,7 @@ export default function MenuBar({ onSpotlight }) {
           )}
         </div>
 
-        <span className={`tabular-nums ${dark ? 'text-white/70' : 'text-gray-600'}`}>{dateStr} {timeStr}</span>
+        <MenuBarClock dark={dark} />
       </div>
     </div>
   );

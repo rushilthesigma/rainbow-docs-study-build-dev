@@ -1,13 +1,18 @@
 import { useState, useEffect, useCallback } from 'react';
-import { FileText, Layers, BookOpen, AlertTriangle, ShieldOff, RefreshCw } from 'lucide-react';
+import { FileText, Layers, BookOpen, Network, AlertTriangle, ShieldOff, RefreshCw, ArrowLeft } from 'lucide-react';
 import Modal from '../shared/Modal';
 import Button from '../shared/Button';
 import LoadingSpinner from '../shared/LoadingSpinner';
 import MarkdownNoteEditor from '../notes/MarkdownNoteEditor';
+import SharedNoteMapEditor from './SharedNoteMapEditor';
 import { getSharedItem, updateSharedItem } from '../../api/share';
 import { useAuth } from '../../context/AuthContext';
 
 // SharedItemViewer - opens a shared item through the shareId access path.
+//
+// Two render modes: the default Modal (classic router pages), and `inline`
+// for the desktop Notes window - the shared item fills the window content
+// with a back link instead of covering the whole screen.
 //
 // View permission renders pure read-only presentations with no mutation
 // controls at all (AC-FNS-003.4). Edit permission renders editable fields
@@ -27,6 +32,7 @@ const TYPE_META = {
   note: { label: 'Note', icon: FileText },
   flashcardDeck: { label: 'Flashcard Deck', icon: Layers },
   curriculum: { label: 'Curriculum', icon: BookOpen },
+  noteMap: { label: 'Note Map', icon: Network },
 };
 
 function getSeenStamp(shareId) {
@@ -36,7 +42,7 @@ function setSeenStamp(shareId, updatedAt) {
   try { if (updatedAt) localStorage.setItem(SEEN_KEY_PREFIX + shareId, updatedAt); } catch {}
 }
 
-export default function SharedItemViewer({ share, onClose, onAccessLost }) {
+export default function SharedItemViewer({ share, onClose, onAccessLost, inline = false }) {
   const { user } = useAuth();
   const canEdit = share.permissionLevel === 'edit';
   const [item, setItem] = useState(null);
@@ -65,7 +71,10 @@ export default function SharedItemViewer({ share, onClose, onAccessLost }) {
     try {
       const fresh = await getSharedItem(share.itemType, share.itemId, share.id);
       const seen = getSeenStamp(share.id);
-      if (seen && fresh.updatedAt && fresh.updatedAt > seen) {
+      // Note maps autosave their own graph edits, so a seen-stamp comparison
+      // would flag the recipient's own saves as a "conflict". Skip it for maps
+      // — the map editor is last-write-wins like the owner's own canvas.
+      if (share.itemType !== 'noteMap' && seen && fresh.updatedAt && fresh.updatedAt > seen) {
         // Who made the newer edit? Shared writes always stamp
         // lastEditedAt === updatedAt, so a mismatch (or no stamp at all)
         // means the OWNER saved last; a matching stamp from another user
@@ -150,73 +159,129 @@ export default function SharedItemViewer({ share, onClose, onAccessLost }) {
   const meta = TYPE_META[share.itemType] || TYPE_META.note;
   const Icon = meta.icon;
 
+  const headerStrip = (
+    <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-white/50">
+      <Icon size={14} />
+      <span>{meta.label}</span>
+      <span aria-hidden>·</span>
+      <span>Shared by {share.ownerName}</span>
+      <span aria-hidden>·</span>
+      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${canEdit ? 'bg-emerald-500/15 text-emerald-500' : 'bg-sky-500/15 text-sky-500'}`}>
+        {canEdit ? 'Can edit' : 'View only'}
+      </span>
+    </div>
+  );
+
+  const banners = (
+    <>
+      {revoked && (
+        <div className="flex items-start gap-2 rounded-lg border border-red-400/40 bg-red-500/10 px-3 py-2.5 text-sm text-red-500">
+          <ShieldOff size={16} className="mt-0.5 shrink-0" />
+          <div>
+            <div className="font-semibold">Access removed</div>
+            <div className="text-red-400/90">The owner has removed your access to this item. Further changes cannot be saved.</div>
+          </div>
+        </div>
+      )}
+
+      {downgraded && !revoked && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-500">
+          <ShieldOff size={16} className="mt-0.5 shrink-0" />
+          <div>
+            <div className="font-semibold">Now view-only</div>
+            <div className="text-amber-400/90">The owner changed your permission to view-only, so your edits can no longer be saved.</div>
+          </div>
+        </div>
+      )}
+
+      {conflict && !revoked && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-500">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <div className="font-semibold">Changed since you last opened it</div>
+            <div className="text-amber-400/90">
+              {conflict.byOwner ? `${share.ownerName} edited this item` : 'Another collaborator edited this item'} after your last visit. Review before saving — the latest save wins.
+            </div>
+          </div>
+          <Button size="sm" variant="secondary" onClick={() => load({ confirmDiscard: true })}><RefreshCw size={13} /> Reload</Button>
+        </div>
+      )}
+    </>
+  );
+
+  // A 403 from the map editor's autosave maps to the same revoked/downgraded
+  // states the note/deck save path uses.
+  const handleMapAccessLost = useCallback((kind) => {
+    if (kind === 'downgraded') setDowngraded(true); else setRevoked(true);
+    onAccessLost?.();
+  }, [onAccessLost]);
+
+  const body = loading ? (
+    <div className="flex items-center justify-center py-12"><LoadingSpinner size={22} /></div>
+  ) : error ? (
+    <div className="text-sm text-red-500 py-6 text-center">{error}</div>
+  ) : revoked && !item ? null : item && (
+    share.itemType === 'noteMap' ? (
+      <SharedNoteMapEditor
+        share={share}
+        map={item}
+        canEdit={canEdit && !revoked && !downgraded}
+        inline={inline}
+        onAccessLost={handleMapAccessLost}
+      />
+    ) : (
+      <SharedItemBody
+        itemType={share.itemType}
+        item={item}
+        editable={canEdit && !revoked && !downgraded}
+        draft={draft}
+        setDraft={editDraft}
+        inline={inline}
+      />
+    )
+  );
+
+  // Note maps and curricula don't use the generic Save button — maps autosave
+  // their graph, curricula stay read-only.
+  const canSave = canEdit && !revoked && !downgraded && item
+    && share.itemType !== 'curriculum' && share.itemType !== 'noteMap';
+
+  // In-window view for the desktop Notes app: back link + header + scrolling
+  // body, contained in the window instead of covering the screen.
+  if (inline) {
+    return (
+      <div className="flex flex-col h-full min-h-0">
+        <div className="flex items-center gap-2 mb-3 shrink-0">
+          <button onClick={onClose} className="inline-flex items-center gap-1.5 text-[12px] text-gray-500 dark:text-white/40 hover:text-gray-800 dark:hover:text-white/70 transition-colors">
+            <ArrowLeft size={13} /> Notes
+          </button>
+        </div>
+        <div className="shrink-0 mb-3 flex items-start justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
+            <h2 className="text-[18px] font-bold text-gray-900 dark:text-white/90 truncate">{share.itemTitle || 'Shared item'}</h2>
+            <div className="mt-1">{headerStrip}</div>
+          </div>
+          {canSave && (
+            <Button size="sm" onClick={handleSave} loading={saving}>Save changes</Button>
+          )}
+        </div>
+        <div className="shrink-0 flex flex-col gap-3 empty:hidden mb-3">{banners}</div>
+        {saveError && <div className="shrink-0 text-sm text-red-500 mb-2">{saveError}</div>}
+        <div className="flex-1 min-h-0 overflow-y-auto pr-1">{body}</div>
+      </div>
+    );
+  }
+
   return (
     <Modal open onClose={onClose} title={share.itemTitle || 'Shared item'} size="lg">
       <div className="flex flex-col gap-4">
-        {/* Header strip: type, owner, permission */}
-        <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-white/50">
-          <Icon size={14} />
-          <span>{meta.label}</span>
-          <span aria-hidden>·</span>
-          <span>Shared by {share.ownerName}</span>
-          <span aria-hidden>·</span>
-          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide ${canEdit ? 'bg-emerald-500/15 text-emerald-500' : 'bg-sky-500/15 text-sky-500'}`}>
-            {canEdit ? 'Can edit' : 'View only'}
-          </span>
-        </div>
-
-        {revoked && (
-          <div className="flex items-start gap-2 rounded-lg border border-red-400/40 bg-red-500/10 px-3 py-2.5 text-sm text-red-500">
-            <ShieldOff size={16} className="mt-0.5 shrink-0" />
-            <div>
-              <div className="font-semibold">Access removed</div>
-              <div className="text-red-400/90">The owner has removed your access to this item. Further changes cannot be saved.</div>
-            </div>
-          </div>
-        )}
-
-        {downgraded && !revoked && (
-          <div className="flex items-start gap-2 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-500">
-            <ShieldOff size={16} className="mt-0.5 shrink-0" />
-            <div>
-              <div className="font-semibold">Now view-only</div>
-              <div className="text-amber-400/90">The owner changed your permission to view-only, so your edits can no longer be saved.</div>
-            </div>
-          </div>
-        )}
-
-        {conflict && !revoked && (
-          <div className="flex items-start gap-2 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-500">
-            <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-            <div className="flex-1">
-              <div className="font-semibold">Changed since you last opened it</div>
-              <div className="text-amber-400/90">
-                {conflict.byOwner ? `${share.ownerName} edited this item` : 'Another collaborator edited this item'} after your last visit. Review before saving — the latest save wins.
-              </div>
-            </div>
-            <Button size="sm" variant="secondary" onClick={() => load({ confirmDiscard: true })}><RefreshCw size={13} /> Reload</Button>
-          </div>
-        )}
-
-        {loading ? (
-          <div className="flex items-center justify-center py-12"><LoadingSpinner size={22} /></div>
-        ) : error ? (
-          <div className="text-sm text-red-500 py-6 text-center">{error}</div>
-        ) : revoked && !item ? null : item && (
-          <SharedItemBody
-            itemType={share.itemType}
-            item={item}
-            editable={canEdit && !revoked && !downgraded}
-            draft={draft}
-            setDraft={editDraft}
-          />
-        )}
-
+        {headerStrip}
+        {banners}
+        {body}
         {saveError && <div className="text-sm text-red-500">{saveError}</div>}
-
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
-          {canEdit && !revoked && !downgraded && item && share.itemType !== 'curriculum' && (
+          {canSave && (
             <Button size="sm" onClick={handleSave} loading={saving}>Save changes</Button>
           )}
         </div>
@@ -225,7 +290,7 @@ export default function SharedItemViewer({ share, onClose, onAccessLost }) {
   );
 }
 
-function SharedItemBody({ itemType, item, editable, draft, setDraft }) {
+function SharedItemBody({ itemType, item, editable, draft, setDraft, inline = false }) {
   if (itemType === 'note') {
     if (!editable) {
       return (
@@ -271,6 +336,7 @@ function SharedItemBody({ itemType, item, editable, draft, setDraft }) {
           value={draft.mainNotes}
           onChange={v => setDraft(d => ({ ...d, mainNotes: v }))}
           placeholder="Shared note content…"
+          className={inline ? 'min-h-[45vh] rounded-lg border border-gray-200 dark:border-white/[0.08]' : ''}
         />
         {item.type === 'cornell' && (
           <label className="text-xs text-gray-500 dark:text-white/40 flex flex-col gap-1">

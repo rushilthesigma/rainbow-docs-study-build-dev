@@ -2,10 +2,15 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Zap, Users, Copy, Check, X, Trophy, Play, LogOut, ArrowLeft, Flag, Bot } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { InlineProgress } from '../shared/ProgressBar';
+import { AnswerResultPanel } from '../trial/TrialSession';
 import {
   createMatch, joinMatch, startMatch, buzzMatch, answerMatch, nextMatchQuestion,
   endMatch, leaveMatch, streamMatch, botBuzz, botAnswer,
 } from '../../api/quizMatch';
+import MatchComparison from '../shared/MatchComparison';
+
+// Mirrors the server's QUIZBOWL_BUZZ_ANSWER_MS; only scales the countdown bar.
+const BUZZ_WINDOW_MS = 9000;
 
 const BOT_ROSTER = [
   { id: 'biscuit', name: 'Player 2', buzzAt: 0.90, accuracy: 0.40, thinkMs: 3000 },
@@ -96,6 +101,8 @@ export default function MobileMatch() {
   const [answer, setAnswer] = useState('');
   const [answerResult, setAnswerResult] = useState(null);
   const [autoAdvanceDeadline, setAutoAdvanceDeadline] = useState(null);
+  const [answerDeadline, setAnswerDeadline] = useState(null);
+  const [comparison, setComparison] = useState(null);
   const [lockedOut, setLockedOut] = useState([]);
   const [wrongFlash, setWrongFlash] = useState(null);
   const [abandoned, setAbandoned] = useState(null);
@@ -124,7 +131,12 @@ export default function MobileMatch() {
         setMatch(m);
         if (m.state === 'playing' && m.currentQuestion) {
           setQuestion(m.currentQuestion);
-          if (m.buzzWinner) setBuzz({ userId: m.buzzWinner, buzzAt: m.buzzAt });
+          if (m.buzzWinner) {
+            setBuzz({ userId: m.buzzWinner, buzzAt: m.buzzAt });
+            setAnswerDeadline((m.buzzAt || Date.now()) + (m.answerWindowMs || BUZZ_WINDOW_MS));
+          } else {
+            setAnswerDeadline(null);
+          }
           setAnswerResult(null);
           setView('playing');
         } else if (m.state === 'generating') {
@@ -132,6 +144,7 @@ export default function MobileMatch() {
         } else if (m.state === 'waiting') {
           setView('lobby');
         } else if (m.state === 'finished') {
+          if (m.comparison) setComparison(m.comparison);
           setView('finished');
         }
       },
@@ -143,7 +156,7 @@ export default function MobileMatch() {
         setMatch(m);
         setQuestion({ text, startedAt });
         setBuzz(null); setAnswer(''); setAnswerResult(null);
-        setAutoAdvanceDeadline(null); setLockedOut([]); setWrongFlash(null);
+        setAutoAdvanceDeadline(null); setAnswerDeadline(null); setLockedOut([]); setWrongFlash(null);
         setView('playing');
         if (isHostRef.current && botEngRef.current.bots.length) {
           clearBotTimers();
@@ -164,8 +177,9 @@ export default function MobileMatch() {
           }
         }
       },
-      onBuzz: ({ userId, buzzAt }) => {
+      onBuzz: ({ userId, buzzAt, answerWindowMs }) => {
         setBuzz({ userId, buzzAt });
+        setAnswerDeadline((buzzAt || Date.now()) + (answerWindowMs || BUZZ_WINDOW_MS));
         if (isHostRef.current) {
           for (const t of Object.values(botEngRef.current.buzzTimers)) clearTimeout(t);
           botEngRef.current.buzzTimers = {};
@@ -182,11 +196,11 @@ export default function MobileMatch() {
           }
         }
       },
-      onWrongAnswer: ({ userId, answer: wrongAns, lockedOut: lock, questionStartedAt: newStart, scores }) => {
-        setBuzz(null); setAnswer('');
+      onWrongAnswer: ({ userId, answer: wrongAns, lockedOut: lock, questionStartedAt: newStart, scores, timedOut }) => {
+        setBuzz(null); setAnswer(''); setAnswerDeadline(null);
         setLockedOut(lock || []);
         if (newStart && question) setQuestion(q => q ? { ...q, startedAt: newStart } : q);
-        setWrongFlash({ userId, answer: wrongAns });
+        setWrongFlash({ userId, answer: wrongAns, timedOut });
         if (scores) setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: scores[p.userId] || 0 })) } : prev);
         setTimeout(() => setWrongFlash(null), 1800);
         if (isHostRef.current && botEngRef.current.bots.length) {
@@ -215,14 +229,16 @@ export default function MobileMatch() {
       },
       onAnswerResult: (data) => {
         setAnswerResult(data);
+        setAnswerDeadline(null);
         setAutoAdvanceDeadline(data.autoAdvanceInMs ? Date.now() + data.autoAdvanceInMs : null);
         setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: data.scores[p.userId] || 0 })) } : prev);
         if (isHostRef.current) clearBotTimers();
       },
-      onMatchEnd: ({ scores, abandoned: wasAbandoned, leftBy, reason }) => {
+      onMatchEnd: ({ scores, abandoned: wasAbandoned, leftBy, reason, comparison: cmp }) => {
         setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: scores[p.userId] || 0 })) } : prev);
         setQuestion(null); setBuzz(null); setAnswer(''); setAnswerResult(null);
-        setAutoAdvanceDeadline(null); setWrongFlash(null);
+        setAutoAdvanceDeadline(null); setAnswerDeadline(null); setWrongFlash(null);
+        if (cmp) setComparison(cmp);
         if (wasAbandoned) setAbandoned({ leftBy, reason });
         setView('finished');
         clearBotTimers();
@@ -281,7 +297,8 @@ export default function MobileMatch() {
     if (!question || buzz) return;
     if (lockedOut.includes(myId)) return;
     setBuzz({ userId: myId || 'me', buzzAt: Date.now(), _optimistic: true });
-    try { await buzzMatch(code); } catch {}
+    setAnswerDeadline(Date.now() + BUZZ_WINDOW_MS);
+    try { await buzzMatch(code); } catch { setBuzz(null); setAnswerDeadline(null); }
   }, [question, buzz, code, myId, lockedOut]);
 
   async function handleSubmitAnswer() {
@@ -296,7 +313,7 @@ export default function MobileMatch() {
   async function handleLeave() {
     try { await leaveMatch(code); } catch {}
     setCode(''); setMatch(null); setQuestion(null); setBuzz(null);
-    setAnswerResult(null); setAbandoned(null);
+    setAnswerResult(null); setAbandoned(null); setAnswerDeadline(null); setComparison(null);
     setView('menu');
   }
 
@@ -561,6 +578,7 @@ export default function MobileMatch() {
         iBuzzed={iBuzzed} isHost={isHost} myId={myId}
         lockedOut={lockedOut} wrongFlash={wrongFlash}
         autoAdvanceDeadline={autoAdvanceDeadline}
+        answerDeadline={answerDeadline}
         revealSpeedMs={match.revealSpeedMs || 140}
         frozen={frozen} frozenAt={frozenAt}
         players={players} buzzerName={buzzerName} wrongName={wrongName}
@@ -592,6 +610,12 @@ export default function MobileMatch() {
               </div>
             ))}
           </div>
+          {comparison?.questions?.length > 0 && (
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-white/30 mb-2 text-left">Compare &amp; contrast</p>
+              <MatchComparison comparison={comparison} myUserId={myId} />
+            </div>
+          )}
           <button onClick={handleLeave}
             className="w-full py-3 rounded-2xl border border-white/[0.06] bg-white/[0.03] text-[13px] font-semibold text-white/50 active:bg-white/[0.07]">
             Back
@@ -608,15 +632,23 @@ export default function MobileMatch() {
   );
 }
 
-function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, onBuzz, onSubmitAnswer, onNext, onLeave, onEndMatch, iBuzzed, isHost, myId, lockedOut, wrongFlash, autoAdvanceDeadline, revealSpeedMs, frozen, frozenAt, players, buzzerName, wrongName, iAmLocked }) {
+function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, onBuzz, onSubmitAnswer, onNext, onLeave, onEndMatch, iBuzzed, isHost, myId, lockedOut, wrongFlash, autoAdvanceDeadline, answerDeadline, revealSpeedMs, frozen, frozenAt, players, buzzerName, wrongName, iAmLocked }) {
   const { revealed, wordIndex, totalWords } = useWordReveal(question?.text || '', question?.startedAt || 0, revealSpeedMs, frozen, frozenAt);
   const [now, setNow] = useState(() => Date.now());
 
+  const countingDown = !!answerDeadline && !!buzz && !answerResult;
   useEffect(() => {
-    if (!autoAdvanceDeadline) return;
+    if (!autoAdvanceDeadline && !countingDown) return;
     const id = setInterval(() => setNow(Date.now()), 100);
     return () => clearInterval(id);
-  }, [autoAdvanceDeadline]);
+  }, [autoAdvanceDeadline, countingDown, answerDeadline]);
+
+  // Clamp to the window so minor client/server clock skew never shows "10s".
+  const answerMsLeft = countingDown ? Math.max(0, Math.min(BUZZ_WINDOW_MS, answerDeadline - now)) : null;
+  const answerSecs = answerMsLeft != null ? Math.ceil(answerMsLeft / 1000) : null;
+  const answerPct = answerMsLeft != null ? Math.max(0, Math.min(100, (answerMsLeft / BUZZ_WINDOW_MS) * 100)) : 0;
+  const answerUrgent = answerMsLeft != null && answerMsLeft <= 3000;
+  const timeUp = answerMsLeft === 0;
 
   return (
     <div className="flex-1 min-h-0 flex flex-col bg-[#0a0a14] text-white">
@@ -665,12 +697,12 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
         {wrongFlash && !buzz && !answerResult && (
           <div className="px-3 py-1.5 rounded-2xl bg-rose-500/[0.08] border border-rose-500/15 text-[11px] text-rose-400/70 text-center">
             {wrongFlash.userId === myId ? 'Wrong' : `${wrongName} was wrong`}
-            {wrongFlash.answer ? ` — "${wrongFlash.answer}"` : ''} · continues
+            {wrongFlash.timedOut ? ' — ran out of time' : wrongFlash.answer ? ` — "${wrongFlash.answer}"` : ''} · continues
           </div>
         )}
         {!buzz && !answerResult && !iAmLocked && (
           <button onClick={onBuzz}
-            className="w-full py-5 rounded-2xl bg-red-600/80 active:bg-red-500/80 text-white text-[16px] font-bold uppercase tracking-[0.15em]">
+            className="w-full py-5 rounded-2xl bg-blue-600 active:bg-blue-500 text-white text-[16px] font-bold uppercase tracking-[0.15em]">
             BUZZ
           </button>
         )}
@@ -680,17 +712,29 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
           </div>
         )}
         {buzz && !answerResult && iBuzzed && (
-          <div className="flex gap-2">
-            <input
-              autoFocus value={answer} onChange={e => setAnswer(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && answer.trim() && onSubmitAnswer()}
-              placeholder="Answer…"
-              className="flex-1 px-4 py-3 rounded-2xl border border-white/[0.08] bg-white/[0.04] text-[14px] text-white/85 placeholder-white/20 outline-none focus:border-white/15"
-            />
-            <button onClick={onSubmitAnswer} disabled={!answer.trim()}
-              className="px-5 py-3 rounded-2xl bg-white/[0.07] active:bg-white/[0.11] border border-white/[0.08] text-white/60 text-[13px] font-semibold disabled:opacity-30">
-              →
-            </button>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className={`text-[11px] font-medium ${answerUrgent ? 'text-rose-300' : 'text-white/45'}`}>
+                {timeUp ? "Time's up" : 'Answer before the timer runs out'}
+              </span>
+              <span className={`text-[14px] font-bold tabular-nums ${answerUrgent ? 'text-rose-300' : 'text-white/70'}`}>{answerSecs ?? 0}s</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+              <div className={`h-full transition-all duration-100 ${answerUrgent ? 'bg-rose-500' : 'bg-amber-400'}`} style={{ width: `${answerPct}%` }} />
+            </div>
+            <div className="flex gap-2">
+              <input
+                autoFocus value={answer} onChange={e => setAnswer(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && answer.trim() && !timeUp && onSubmitAnswer()}
+                placeholder={timeUp ? "Time's up…" : 'Answer…'}
+                disabled={timeUp}
+                className="flex-1 px-4 py-3 rounded-2xl border border-white/[0.08] bg-white/[0.04] text-[14px] text-white/85 placeholder-white/20 outline-none focus:border-white/15 disabled:opacity-50"
+              />
+              <button onClick={onSubmitAnswer} disabled={!answer.trim() || timeUp}
+                className="px-5 py-3 rounded-2xl bg-white/[0.07] active:bg-white/[0.11] border border-white/[0.08] text-white/60 text-[13px] font-semibold disabled:opacity-30">
+                →
+              </button>
+            </div>
           </div>
         )}
         {buzz && !answerResult && !iBuzzed && (
@@ -699,21 +743,22 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
               <span className="absolute inline-flex h-full w-full rounded-full bg-amber-400/50 animate-ping" />
               <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500/50" />
             </span>
-            {buzzerName} is answering…
+            {buzzerName} is answering
+            {answerSecs != null && (
+              <span className={`font-bold tabular-nums ${answerUrgent ? 'text-rose-300' : 'text-white/55'}`}>{answerSecs}s</span>
+            )}
           </div>
         )}
         {answerResult && (
           <>
-            <div className={`p-3 rounded-2xl text-center border ${answerResult.correct ? 'bg-emerald-500/[0.08] border-emerald-500/25' : (answerResult.timeout || !answerResult.userId) ? 'bg-white/[0.03] border-white/[0.06]' : 'bg-rose-500/[0.08] border-rose-500/25'}`}>
-              <p className={`text-[13px] font-bold ${answerResult.correct ? 'text-emerald-400/80' : (answerResult.timeout || !answerResult.userId) ? 'text-white/40' : 'text-rose-400/80'}`}>
-                {answerResult.correct
-                  ? (answerResult.userId === myId ? '✓ Correct' : `${buzzerName} got it`)
-                  : (answerResult.timeout || !answerResult.userId)
-                    ? 'No one got it'
-                    : (answerResult.userId === myId ? '✗ Wrong' : `${buzzerName} was wrong`)}
-              </p>
-              <p className="text-[11px] text-white/40 mt-1"><strong className="text-white/60">{answerResult.correctAnswer}</strong></p>
-            </div>
+            <AnswerResultPanel
+              correct={answerResult.correct ? true : (answerResult.timeout || !answerResult.userId) ? null : false}
+              officialAnswer={answerResult.correctAnswer}
+              meta={answerResult.correct
+                ? (answerResult.userId === myId ? 'Correct!' : `${buzzerName} got it`)
+                : (answerResult.timeout || !answerResult.userId) ? 'No one got it'
+                : (answerResult.userId === myId ? 'Wrong!' : `${buzzerName} was wrong`)}
+            />
             {autoAdvanceDeadline ? (
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between text-[11px] text-white/30">

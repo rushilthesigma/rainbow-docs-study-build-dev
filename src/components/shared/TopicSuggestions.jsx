@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Sparkles, RefreshCw, ArrowRight } from 'lucide-react';
+import { RefreshCw, ArrowRight } from 'lucide-react';
 import { getTopicSuggestions } from '../../api/suggestions';
 
 export default function TopicSuggestions({
@@ -34,7 +34,6 @@ export default function TopicSuggestions({
     return (
       <div className={`rounded-2xl border border-white/[0.07] bg-white/[0.03] backdrop-blur-sm p-4 ${className}`}>
         <div className="flex items-center gap-2 mb-3">
-          <Sparkles size={13} className="text-white/30" />
           <span className="text-[13px] font-semibold text-white/60">{title}</span>
         </div>
         <div className="grid sm:grid-cols-3 gap-2">
@@ -49,7 +48,6 @@ export default function TopicSuggestions({
   if (error && !suggestions.length) {
     return (
       <div className={`rounded-2xl border border-white/[0.07] bg-white/[0.03] px-4 py-3 flex items-center gap-2 ${className}`}>
-        <Sparkles size={13} className="text-white/25" />
         <span className="text-[12px] text-white/35 flex-1">Couldn't load suggestions</span>
         <button onClick={() => load(true)} className="text-[12px] text-white/55 hover:text-white/80 font-medium transition-colors">Retry</button>
       </div>
@@ -59,7 +57,6 @@ export default function TopicSuggestions({
   return (
     <div className={`rounded-2xl border border-white/[0.07] bg-white/[0.03] backdrop-blur-sm p-4 ${className}`}>
       <div className="flex items-center gap-2 mb-3">
-        <Sparkles size={13} className="text-white/40" />
         <span className="text-[13px] font-semibold text-white/75">{title}</span>
         <span className="text-[9px] font-black uppercase tracking-[0.18em] text-white/25 ml-1">AI</span>
         <div className="flex-1" />

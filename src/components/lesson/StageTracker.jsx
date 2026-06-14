@@ -10,7 +10,7 @@ const TYPE_LABELS = {
   recap:        'Recap',
   application:  'In the Wild',
   challenge:    'Challenge',
-  open:         'Open Answer',
+  open:         'Graded Essay',
   discussion:   'Discussion',
   matching:     'Matching',
   'fill-blank': 'Fill in the Blank',
@@ -78,7 +78,7 @@ export default function StageTracker({ blocks = [], activeIdx = 0, onJump }) {
             if (!raw) return null;
             const stripped = raw
               .replace(new RegExp(`^${stageName}\\s*[-\\-:·]\\s*`, 'i'), '')
-              .replace(/^(Reading|Quiz|Example|Recap|Application|Challenge|Open Answer|Open|Discussion|Matching|Fill in the Blank)\s+\d*\s*[-\-:·]\s*/i, '');
+              .replace(/^(Reading|Quiz|Example|Recap|Application|Challenge|Graded Essay|Open Answer|Open|Discussion|Matching|Fill in the Blank)\s+\d*\s*[-\-:·]\s*/i, '');
             const display = stripped || raw;
             if (display === stageName) return null;
             return (

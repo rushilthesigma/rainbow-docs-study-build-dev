@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
-import { ArrowLeft, Check, ClipboardCheck, ChevronLeft, ChevronRight, ListChecks } from 'lucide-react';
+import { ArrowLeft, Check, ClipboardCheck, ChevronLeft, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import { TutorCanvas } from './MathTutorApp';
+import { TutorCanvas, NEUTRAL_BTN } from './MathTutorApp';
 import { sendMathTutorMessage, generateProblemSet } from '../../../api/mathTutor';
 import MathText from '../../shared/MathText';
 import ProgressBar, { InlineProgress } from '../../shared/ProgressBar';
@@ -140,35 +140,35 @@ export default function MathProblemSet({ topic, count = 5, presetProblems = null
     <div className="flex h-full bg-transparent animate-view-fade" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif' }}>
       {/* Main column: header + progress + prompt + canvas */}
       <div className="flex flex-col flex-1 min-w-0 h-full">
-        {/* Header */}
-        <div className="flex items-center gap-2.5 mx-2 mt-2 px-4 py-2.5 rounded-2xl flex-shrink-0 bg-white/8 border border-white/10 backdrop-blur-sm">
+        {/* Header — notes-style: inline back link + topic, quiet nav actions */}
+        <div className="flex items-center gap-2.5 mb-3 flex-shrink-0">
           {onBack && (
-            <button onClick={onBack} title="Back" className="w-7 h-7 rounded-lg flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-colors">
-              <ArrowLeft size={14} />
+            <button onClick={onBack} className="flex items-center gap-2 text-sm text-white/35 hover:text-white/60 transition-colors flex-shrink-0">
+              <ArrowLeft size={16} /> Math Tutor
             </button>
           )}
-          <div className="w-6 h-6 rounded-lg bg-white/10 flex items-center justify-center"><ListChecks size={12} className="text-white" /></div>
-          <span className="text-white font-semibold text-[14px] tracking-tight truncate">{topic}</span>
+          <span className="w-1 h-1 rounded-full bg-white/20 flex-shrink-0" />
+          <span className="text-sm font-bold text-white/90 truncate">{topic}</span>
           <div className="flex-1" />
           <span className="text-[11px] text-white/45 tabular-nums">Problem {idx + 1} of {problems.length}</span>
           <div className="flex items-center gap-0.5 ml-1">
-            <button onClick={() => go(-1)} disabled={idx === 0} title="Previous" className="w-7 h-7 rounded-lg flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"><ChevronLeft size={15} /></button>
-            <button onClick={() => go(1)} disabled={idx >= problems.length - 1} title="Next" className="w-7 h-7 rounded-lg flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"><ChevronRight size={15} /></button>
+            <button onClick={() => go(-1)} disabled={idx === 0} title="Previous" className="p-1.5 rounded-md text-white/35 hover:text-white/70 hover:bg-white/[0.05] disabled:opacity-25 disabled:cursor-not-allowed transition-colors"><ChevronLeft size={15} /></button>
+            <button onClick={() => go(1)} disabled={idx >= problems.length - 1} title="Next" className="p-1.5 rounded-md text-white/35 hover:text-white/70 hover:bg-white/[0.05] disabled:opacity-25 disabled:cursor-not-allowed transition-colors"><ChevronRight size={15} /></button>
           </div>
         </div>
 
         {/* Progress */}
-        <div className="mx-3 mt-2 h-1 rounded-full bg-white/[0.06] overflow-hidden flex-shrink-0">
+        <div className="h-1 rounded-full bg-white/[0.08] overflow-hidden flex-shrink-0">
           <div className="h-full bg-blue-400 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
         </div>
 
         {/* Problem prompt */}
-        <div className="mx-2 mt-2 px-4 py-3 rounded-2xl bg-white/[0.05] border border-white/10 flex-shrink-0">
+        <div className="mt-3 px-4 py-3 rounded-lg bg-white/[0.03] border border-white/[0.08] flex-shrink-0">
           <MathText as="div" className="text-[14px] text-white/90 leading-relaxed">{cur.prompt}</MathText>
         </div>
 
         {/* Canvas (remounts per problem so each keeps its own work) */}
-        <div className="flex-1 min-h-0 p-2">
+        <div className="flex-1 min-h-0 pt-2">
           <TutorCanvas
             key={cur.id}
             onCaptureReady={(api) => { captureRef.current = api; }}
@@ -182,22 +182,22 @@ export default function MathProblemSet({ topic, count = 5, presetProblems = null
       </div>
 
       {/* Right sidebar: actions + feedback */}
-      <div className="flex flex-col w-52 flex-shrink-0 border-l border-white/10 p-2 gap-2">
-        {/* Action buttons */}
-        <button onClick={() => getFeedback(false)} disabled={streaming} className="w-full py-2.5 rounded-xl bg-blue-500 hover:bg-blue-400 text-white border border-blue-400/40 text-[12px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-all flex-shrink-0">
-          {streaming ? <><InlineProgress active /> Checking…</> : <><Check size={12} /> Get feedback</>}
+      <div className="flex flex-col w-52 flex-shrink-0 border-l border-white/[0.08] p-2 gap-2">
+        {/* Action buttons — neutral surfaces, identity in the icon color */}
+        <button onClick={() => getFeedback(false)} disabled={streaming} className={`${NEUTRAL_BTN} w-full py-2.5 text-[12px] disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0`}>
+          {streaming ? <><InlineProgress active /> Checking…</> : <><Check size={12} className="text-emerald-300" /> Get feedback</>}
         </button>
-        <button onClick={() => getFeedback(true)} disabled={streaming} className="w-full py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-white/80 border border-white/15 text-[12px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition-all flex-shrink-0">
-          <ClipboardCheck size={12} /> Grade
+        <button onClick={() => getFeedback(true)} disabled={streaming} className={`${NEUTRAL_BTN} w-full py-2.5 text-[12px] disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0`}>
+          <ClipboardCheck size={12} className="text-amber-300" /> Grade
         </button>
         {idx < problems.length - 1 ? (
-          <button onClick={() => go(1)} className="w-full py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-white/80 border border-white/15 text-[12px] font-semibold flex items-center justify-center gap-1.5 transition-all flex-shrink-0">
+          <button onClick={() => go(1)} className={`${NEUTRAL_BTN} w-full py-2.5 text-[12px] flex-shrink-0`}>
             Next <ChevronRight size={12} />
           </button>
         ) : (
           onBack && (
-            <button onClick={onBack} className="w-full py-2.5 rounded-xl bg-emerald-500/80 hover:bg-emerald-500 text-white border border-emerald-400/40 text-[12px] font-semibold flex items-center justify-center gap-1.5 transition-all flex-shrink-0">
-              Finish
+            <button onClick={onBack} className="w-full py-2.5 rounded-lg border border-emerald-400/30 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20 hover:border-emerald-400/50 text-[12px] font-medium flex items-center justify-center gap-1.5 transition-colors flex-shrink-0">
+              <Check size={12} /> Finish
             </button>
           )
         )}
@@ -205,11 +205,11 @@ export default function MathProblemSet({ topic, count = 5, presetProblems = null
         {error && <p className="text-[11px] text-[#f87171] px-1 animate-fade-in flex-shrink-0">{error}</p>}
 
         {/* Divider */}
-        {fb != null && <div className="h-px bg-white/10 flex-shrink-0" />}
+        {fb != null && <div className="h-px bg-white/[0.08] flex-shrink-0" />}
 
         {/* Feedback */}
         {fb != null && (
-          <div key={cur.id} className="flex-1 min-h-0 overflow-y-auto rounded-xl bg-black/20 border border-white/10 px-3 py-2.5 animate-view-fade">
+          <div key={cur.id} className="flex-1 min-h-0 overflow-y-auto rounded-lg bg-white/[0.03] border border-white/[0.08] px-3 py-2.5 animate-view-fade">
             <div className="prose prose-sm prose-invert max-w-none prose-p:my-1 prose-headings:my-1.5 prose-ul:my-1 prose-li:my-0 text-[12px] text-white/80 leading-relaxed">
               <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: '#94a3b8' }]]}>
                 {normalizeMath(fb)}

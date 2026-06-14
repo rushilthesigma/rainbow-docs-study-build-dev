@@ -99,20 +99,26 @@ export async function getStreak() {
 }
 
 // ===== STRUCTURED LESSON BLOCKS (varied block types + final quiz) =====
-export async function generateLessonBlocks(curriculumId, lessonId) {
-  return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/blocks/generate`, {
+// Every block call takes an optional trailing `shareId`. When set, the
+// server resolves the lesson on the curriculum OWNER's record (shared
+// curricula are one live object, not copies), so a recipient doing the
+// lesson sees and advances the same blocks as the owner.
+const shareQS = (shareId) => (shareId ? `?shareId=${encodeURIComponent(shareId)}` : '');
+
+export async function generateLessonBlocks(curriculumId, lessonId, shareId = null) {
+  return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/blocks/generate${shareQS(shareId)}`, {
     method: 'POST',
   });
 }
 
-export async function generateFinalQuiz(curriculumId, lessonId) {
-  return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/blocks/final-quiz/generate`, {
+export async function generateFinalQuiz(curriculumId, lessonId, shareId = null) {
+  return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/blocks/final-quiz/generate${shareQS(shareId)}`, {
     method: 'POST',
   });
 }
 
-export async function gradeQuizBlock(curriculumId, lessonId, blockId, responses) {
-  return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/blocks/${blockId}/grade`, {
+export async function gradeQuizBlock(curriculumId, lessonId, blockId, responses, shareId = null) {
+  return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/blocks/${blockId}/grade${shareQS(shareId)}`, {
     method: 'POST',
     body: JSON.stringify({ responses }),
   });
@@ -122,17 +128,92 @@ export async function gradeQuizBlock(curriculumId, lessonId, blockId, responses)
 // Server stamps `block.submission = { text, score, perRubric, feedback,
 // letter, submittedAt }` and returns it back so the client can render
 // inline feedback immediately.
-export async function gradeOpenBlock(curriculumId, lessonId, blockId, text) {
-  return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/blocks/${blockId}/grade-open`, {
+export async function gradeOpenBlock(curriculumId, lessonId, blockId, text, shareId = null) {
+  return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/blocks/${blockId}/grade-open${shareQS(shareId)}`, {
     method: 'POST',
     body: JSON.stringify({ text }),
   });
 }
 
-export async function completeLessonBlock(curriculumId, lessonId, blockId) {
-  return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/blocks/${blockId}/complete`, {
+export async function completeLessonBlock(curriculumId, lessonId, blockId, shareId = null) {
+  return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/blocks/${blockId}/complete${shareQS(shareId)}`, {
     method: 'POST',
   });
+}
+
+// ===== LESSON CO-STUDY CHAT (shared curricula) =====
+// Human-to-human chat scoped to one lesson of a shared curriculum. The
+// owner connects without a shareId; recipients pass theirs. Messages are
+// delivered over the SSE stream below; this POST returns the stamped
+// message too so the sender can render it immediately.
+export async function sendCoChatMessage(curriculumId, lessonId, content, shareId = null) {
+  return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/co-chat${shareQS(shareId)}`, {
+    method: 'POST',
+    body: JSON.stringify({ content }),
+  });
+}
+
+// SSE stream for the lesson co-study chat. Events:
+//   { type: 'state', messages }            - on connect (recent history)
+//   { type: 'message', message }           - someone sent a message
+//   { type: 'presence', present: [{id,name}] } - who has the lesson open
+// Same fetch+reader pattern as the group note-stream (EventSource can't
+// carry the bearer token). Auto-reconnects 2s after a drop.
+export function openCoChatStream(curriculumId, lessonId, shareId, { onEvent, onError, onClose } = {}) {
+  let closed = false;
+  let controller = null;
+  let reconnectTimer = null;
+
+  const finish = () => {
+    if (closed) return;
+    closed = true;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    try { controller?.abort(); } catch {}
+    onClose?.();
+  };
+
+  const connect = async () => {
+    if (closed) return;
+    controller = new AbortController();
+    const headers = { Accept: 'text/event-stream' };
+    const token = getToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+    try {
+      const response = await fetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/co-chat-stream${shareQS(shareId)}`, {
+        headers, signal: controller.signal,
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        onError?.(response.status, err.error || `Stream failed: ${response.status}`);
+        finish();
+        return;
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let event = null;
+          try { event = JSON.parse(line.slice(6)); } catch {}
+          if (!event || closed) continue;
+          try { onEvent?.(event); } catch (cbErr) { console.error('co-chat stream onEvent failed:', cbErr); }
+        }
+      }
+    } catch (err) {
+      if (closed || err?.name === 'AbortError') return;
+    }
+    if (closed) return;
+    reconnectTimer = setTimeout(connect, 2000);
+  };
+
+  connect();
+  return { close: finish };
 }
 
 // ===== MIDTERMS / FINALS (course-level SRS exams) =====
@@ -155,6 +236,13 @@ export async function gradeCurriculumExam(curriculumId, examId, responses) {
 
 export async function getLessonHistory(curriculumId, lessonId) {
   return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/history`);
+}
+
+// Shared-curriculum gradebook: every participant's grades + completion. The
+// server authorizes via the requester's identity (owner or accepted
+// recipient), so no shareId is needed.
+export async function getCurriculumGradebook(curriculumId) {
+  return apiFetch(`/api/curriculum/${curriculumId}/gradebook`);
 }
 
 export async function resetLesson(curriculumId, lessonId) {

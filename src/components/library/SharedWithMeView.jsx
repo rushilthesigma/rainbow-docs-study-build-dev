@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { FileText, Layers, BookOpen, Share2, Check, X } from 'lucide-react';
+import { FileText, Layers, BookOpen, Network, Share2, Check, X } from 'lucide-react';
 import Button from '../shared/Button';
 import { useToast } from '../shared/Toast';
 import SharedItemViewer from './SharedItemViewer';
@@ -19,9 +19,14 @@ const TYPE_META = {
   note: { label: 'Note', icon: FileText },
   flashcardDeck: { label: 'Deck', icon: Layers },
   curriculum: { label: 'Curriculum', icon: BookOpen },
+  noteMap: { label: 'Note Map', icon: Network },
 };
 
-export default function SharedWithMeView({ className = '' }) {
+// `onOpen(share)` — when provided, opening an accepted share is delegated to
+// the host (the desktop Notes app renders it as an in-window view). Without
+// it, the legacy full-screen SharedItemViewer modal opens here (classic
+// router pages).
+export default function SharedWithMeView({ className = '', onOpen = null }) {
   const { incomingShares, acceptShare, declineShare, refresh, setLibraryOpen } = useSharing();
   const toast = useToast();
   const [openShare, setOpenShare] = useState(null);
@@ -95,7 +100,7 @@ export default function SharedWithMeView({ className = '' }) {
             return (
               <li key={s.id}>
                 <button
-                  onClick={() => !gone && setOpenShare(s)}
+                  onClick={() => !gone && (onOpen ? onOpen(s) : setOpenShare(s))}
                   disabled={gone}
                   className={`w-full flex items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors ${
                     gone

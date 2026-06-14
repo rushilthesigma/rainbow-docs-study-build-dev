@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Search, AlertTriangle, Check, RefreshCw, ArrowLeft, Loader2, List, Zap, FileText, Scale, Pencil, Plus, X, Sparkles, Globe, Clock } from 'lucide-react';
+import { Search, AlertTriangle, Check, RefreshCw, ArrowLeft, Loader2, List, Zap, FileText, Scale, Pencil, Plus, X, Wand2, Globe } from 'lucide-react';
 import { getWikiPage, searchWiki, listWikiPages, listWikiTitles, reportWikiPage, updateWikiPage, aiEditWikiPage, listWikiReports, resolveWikiReport } from '../../../api/wiki';
 import { checkAdmin } from '../../../api/admin';
 import { createNote, updateNote } from '../../../api/notes';
@@ -413,7 +413,6 @@ export default function QBpediaApp() {
   return (
     <ViewFade viewKey="hub" className="h-full flex flex-col">
       <HubView
-        recentPages={recentPages}
         searchResults={searchResults}
         setSearchResults={setSearchResults}
         onNavigate={openPage}
@@ -427,7 +426,7 @@ export default function QBpediaApp() {
 }
 
 // ─── Hub ──────────────────────────────────────────────────────────────────
-function HubView({ recentPages, searchResults, setSearchResults, onNavigate, onWhy, isAdmin, reportCount, onReports }) {
+function HubView({ searchResults, setSearchResults, onNavigate, onWhy, isAdmin, reportCount, onReports }) {
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const debounceRef = useRef(null);
@@ -459,6 +458,29 @@ function HubView({ recentPages, searchResults, setSearchResults, onNavigate, onW
     'William Shakespeare', 'The Civil War', 'Albert Einstein',
     'The Renaissance', 'Ancient Rome', 'Charles Darwin', 'The Cold War',
     'Marie Curie', 'The Ottoman Empire',
+  ];
+
+  const RECOMMENDED_TOPICS = [
+    { label: 'Emmy Noether',           cat: 'Science' },
+    { label: 'Paul Dirac',             cat: 'Science' },
+    { label: 'Leonhard Euler',         cat: 'Science' },
+    { label: 'Niels Bohr',             cat: 'Science' },
+    { label: 'The Brothers Karamazov', cat: 'Literature' },
+    { label: 'Don Quixote',            cat: 'Literature' },
+    { label: 'Doctor Faustus',         cat: 'Literature' },
+    { label: 'One Hundred Years of Solitude', cat: 'Literature' },
+    { label: 'Robespierre',            cat: 'History' },
+    { label: 'Simón Bolívar',          cat: 'History' },
+    { label: 'Otto von Bismarck',      cat: 'History' },
+    { label: 'Battle of Agincourt',    cat: 'History' },
+    { label: 'Caravaggio',             cat: 'Art' },
+    { label: 'Johannes Vermeer',       cat: 'Art' },
+    { label: 'Dmitri Shostakovich',    cat: 'Music' },
+    { label: 'Gustav Mahler',          cat: 'Music' },
+    { label: 'Immanuel Kant',          cat: 'Philosophy' },
+    { label: 'Søren Kierkegaard',      cat: 'Philosophy' },
+    { label: 'Prometheus',             cat: 'Mythology' },
+    { label: 'Osiris',                 cat: 'Mythology' },
   ];
 
   return (
@@ -499,7 +521,7 @@ function HubView({ recentPages, searchResults, setSearchResults, onNavigate, onW
           onChange={e => handleSearch(e.target.value)}
           onKeyDown={handleEnter}
           placeholder="Search or enter any topic to generate a page…"
-          className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-white/[0.10] bg-white/[0.04] text-sm text-white/90 placeholder-white/30 outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20 transition-colors"
+          className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-white/[0.10] bg-white/[0.04] text-sm text-white/90 placeholder-white/30 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500 transition-colors"
         />
         {searching && <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 animate-spin" />}
       </div>
@@ -540,15 +562,15 @@ function HubView({ recentPages, searchResults, setSearchResults, onNavigate, onW
         {searchResults === null && (
           <>
             <div className="mb-5">
-              <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 flex items-center gap-1.5 mb-2">
-                <Sparkles size={12} /> Quick start
+              <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 mb-2">
+                Quick start
               </h3>
               <div className="flex flex-wrap gap-1.5">
                 {POPULAR_TOPICS.map(topic => (
                   <button
                     key={topic}
                     onClick={() => onNavigate(slugify(topic))}
-                    className="text-[12px] px-2.5 py-1 rounded-lg border bg-white/[0.03] border-white/[0.06] text-white/55 hover:text-white/80 hover:bg-white/[0.06] transition-colors"
+                    className="text-[12px] px-2.5 py-1 rounded-lg border bg-blue-500 border-blue-400 text-white font-medium hover:bg-blue-400 hover:border-blue-300 transition-colors"
                   >
                     {topic}
                   </button>
@@ -556,28 +578,24 @@ function HubView({ recentPages, searchResults, setSearchResults, onNavigate, onW
               </div>
             </div>
 
-            {/* Recent pages */}
-            {recentPages.length > 0 && (
-              <div>
-                <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 flex items-center gap-1.5 mb-2">
-                  <Clock size={12} /> Recently generated
-                  <span className="text-white/30 font-medium tracking-normal">{recentPages.length}</span>
-                </h3>
-                <div>
-                  {recentPages.slice(0, 15).map(p => (
-                    <PageRow key={p.slug} page={p} onClick={() => onNavigate(p.slug)} />
-                  ))}
-                </div>
+            {/* Recommended niche topics */}
+            <div>
+              <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 mb-2">
+                Recommended
+              </h3>
+              <div className="space-y-0.5">
+                {RECOMMENDED_TOPICS.map(({ label, cat }) => (
+                  <button
+                    key={label}
+                    onClick={() => onNavigate(slugify(label))}
+                    className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-left hover:bg-white/[0.04] transition-colors group"
+                  >
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-white/25 w-16 shrink-0 group-hover:text-white/40 transition-colors">{cat}</span>
+                    <span className="text-[13px] text-white/65 group-hover:text-white/90 transition-colors">{label}</span>
+                  </button>
+                ))}
               </div>
-            )}
-
-            {recentPages.length === 0 && (
-              <div className="text-center py-12">
-                <Globe size={28} className="text-white/35 mx-auto mb-3" />
-                <p className="text-sm text-white/55 mb-1">No pages yet</p>
-                <p className="text-xs text-white/35">Search for any QB topic to generate the first article.</p>
-              </div>
-            )}
+            </div>
           </>
         )}
       </div>
@@ -1094,7 +1112,7 @@ function EditView({ page, onBack, onSaved }) {
               nothing is saved until the admin hits Save changes. */}
           <div className="pb-4 border-b border-white/[0.06] space-y-2.5">
             <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 flex items-center gap-1.5">
-              <Sparkles size={12} /> Edit with AI
+              <Wand2 size={12} /> Edit with AI
             </h3>
             <textarea
               value={aiInstruction}
@@ -1107,7 +1125,7 @@ function EditView({ page, onBack, onSaved }) {
             />
             <div className="flex items-center gap-2.5">
               <Button size="sm" variant="secondary" onClick={handleAiEdit} disabled={aiBusy || !aiInstruction.trim()}>
-                {aiBusy ? <><InlineProgress active /> Applying…</> : <><Sparkles size={13} /> Apply with AI</>}
+                {aiBusy ? <><InlineProgress active /> Applying…</> : <><Wand2 size={13} /> Apply with AI</>}
               </Button>
               {aiBusy && <p className="text-[11px] text-white/40">Rewriting the page, usually 10-30 seconds.</p>}
               {aiApplied && !aiBusy && (
@@ -1498,7 +1516,7 @@ function AdminReportsView({ onBack, onOpenPage, onResolved }) {
                         title="Rewrite the page with AI, telling it what was reported"
                         className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border border-blue-400/30 bg-blue-500/15 text-blue-200 hover:bg-blue-500/25 disabled:opacity-40 transition-colors"
                       >
-                        <Sparkles size={12} /> Fix with AI
+                        <Wand2 size={12} /> Fix with AI
                       </button>
                       <button
                         onClick={() => onOpenPage(r.slug)}

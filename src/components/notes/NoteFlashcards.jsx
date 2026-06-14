@@ -10,7 +10,7 @@ const GRADES = [
   { q: 1, label: 'Again', key: '1', cls: 'bg-rose-500/12 border-rose-400/30 text-rose-200 hover:bg-rose-500/20' },
   { q: 3, label: 'Hard', key: '2', cls: 'bg-amber-500/12 border-amber-400/30 text-amber-200 hover:bg-amber-500/20' },
   { q: 4, label: 'Good', key: '3', cls: 'bg-emerald-500/12 border-emerald-400/30 text-emerald-200 hover:bg-emerald-500/20' },
-  { q: 5, label: 'Easy', key: '4', cls: 'bg-sky-500/12 border-sky-400/30 text-sky-200 hover:bg-sky-500/20' },
+  { q: 5, label: 'Easy', key: '4', cls: 'bg-white/[0.06] border-white/20 text-white/80 hover:bg-white/[0.12]' },
 ];
 
 // Full-window flashcards view for a single note. Launched from the note
@@ -130,7 +130,7 @@ export default function NoteFlashcards({ noteId, noteTitle, onBack }) {
             <button onClick={() => { setMode('list'); load(); }} className="hover:text-white/80 flex items-center gap-1"><X size={12} /> Exit</button>
           </div>
           <div className="w-full h-1.5 bg-white/[0.06] rounded-full overflow-hidden mb-4 flex-shrink-0">
-            <div className="h-full bg-blue-500 rounded-full transition-all duration-300" style={{ width: `${((idx + (flipped ? 0.5 : 0)) / queue.length) * 100}%` }} />
+            <div className="h-full bg-white/70 rounded-full transition-all duration-300" style={{ width: `${((idx + (flipped ? 0.5 : 0)) / queue.length) * 100}%` }} />
           </div>
           <div className="flex-1 min-h-0 flex items-center justify-center">
             <div onClick={() => setFlipped(f => !f)} className="cursor-pointer w-full max-w-xl" style={{ perspective: '1000px' }}>
@@ -141,7 +141,7 @@ export default function NoteFlashcards({ noteId, noteTitle, onBack }) {
                   )}
                   <p className="text-[18px] font-medium text-white/90">{current.front}</p>
                 </div>
-                <div className="absolute inset-0 bg-gradient-to-br from-blue-500/[0.10] to-purple-500/[0.10] rounded-2xl border border-blue-400/25 p-8 flex items-center justify-center text-center overflow-auto" style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
+                <div className="absolute inset-0 bg-white/[0.07] rounded-2xl border border-white/[0.12] p-8 flex items-center justify-center text-center overflow-auto" style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
                   <p className="text-[17px] text-white/85">{current.back}</p>
                 </div>
               </div>

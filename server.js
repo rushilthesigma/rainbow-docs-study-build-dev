@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import express from 'express';
 import cors from 'cors';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
@@ -148,16 +148,36 @@ function savePresetBlocks(cache) {
   }
 }
 
+// users.json is read-modify-written by ~130 call sites. Handing every
+// request its own freshly-parsed snapshot meant concurrent requests each
+// held a private copy, and whichever saved LAST silently reverted the
+// others' writes — fatal for the block generators, which hold their
+// snapshot across a 10-60s Gemini call. One shared cached object makes
+// all in-process mutations land on the same object, so a later save can
+// never erase an earlier one. The mtime check keeps external writes
+// (manual users.json edits, import scripts) visible.
+let usersCache = null;
+let usersCacheMtimeMs = 0;
 function loadUsers() {
   try {
-    if (existsSync(USERS_FILE)) return JSON.parse(readFileSync(USERS_FILE, 'utf-8'));
+    if (existsSync(USERS_FILE)) {
+      const mtimeMs = statSync(USERS_FILE).mtimeMs;
+      if (usersCache && mtimeMs === usersCacheMtimeMs) return usersCache;
+      usersCache = JSON.parse(readFileSync(USERS_FILE, 'utf-8'));
+      usersCacheMtimeMs = mtimeMs;
+      return usersCache;
+    }
   } catch (e) { console.error('Error loading users:', e); }
-  return {};
+  // A failed read (e.g. another process mid-write) must not hand back a
+  // blank user table — a handler could persist it and wipe everyone.
+  return usersCache || {};
 }
 
 function saveUsers(users) {
   try {
     writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+    usersCache = users;
+    try { usersCacheMtimeMs = statSync(USERS_FILE).mtimeMs; } catch {}
   } catch (e) {
     console.error('FAILED to save users to', USERS_FILE, e.message);
     // Fallback to __dirname
@@ -1622,14 +1642,27 @@ function summarizeStudent(user, studentId) {
 // the average down until the student submits.
 function computeCourseGrade(curriculum) {
   let total = 0, weightSum = 0, gradedCount = 0;
+  // Unit tests are the primary graded work in math / AP courses (which have
+  // no written essays). Weight each unit test heavier than a single essay.
+  const unitTestWeight = Number(curriculum?.gradingPolicy?.unitTestWeight) || 2;
   for (const u of curriculum?.units || []) {
     for (const l of u.lessons || []) {
+      // Graded written assignments (essays), AI-scored against a rubric.
       const sub = l?.assignment?.submission;
-      if (!sub || typeof sub.score !== 'number') continue;
-      const w = Number(l.assignment.weight) || 1;
-      total += sub.score * w;
-      weightSum += w;
-      gradedCount++;
+      if (sub && typeof sub.score === 'number') {
+        const w = Number(l.assignment.weight) || 1;
+        total += sub.score * w;
+        weightSum += w;
+        gradedCount++;
+        continue;
+      }
+      // End-of-unit assessments, AI-graded. Their percentage is recorded on
+      // the lesson when the student submits the test (see /complete).
+      if (l?.type === 'unit_test' && typeof l.score === 'number') {
+        total += l.score * unitTestWeight;
+        weightSum += unitTestWeight;
+        gradedCount++;
+      }
     }
   }
   const percent = weightSum > 0 ? Math.round(total / weightSum) : null;
@@ -1637,7 +1670,7 @@ function computeCourseGrade(curriculum) {
     percent,
     letter: percent == null ? null : percentToLetter(percent),
     gradedCount,
-    graded: curriculum?.settings?.graded === true,
+    graded: curriculum?.graded === true || curriculum?.settings?.graded === true,
   };
 }
 
@@ -2305,7 +2338,9 @@ async function callClaude(systemPrompt, messages, model, maxOutputTokens = 4096,
   try {
     const resp = await anthropic.messages.create({
       model: resolved,
-      max_tokens: Math.min(Math.max(Number(maxOutputTokens) || 4096, 256), 32000),
+      // 64000 = Haiku 4.5 / Sonnet 4.6 output ceiling. Clamping lower
+      // truncated large structured outputs (curriculum edit) mid-JSON.
+      max_tokens: Math.min(Math.max(Number(maxOutputTokens) || 4096, 256), 64000),
       temperature: Number.isFinite(opts.temperature) ? opts.temperature : 0.7,
       ...(system ? { system } : {}),
       messages: messagesToAnthropic(messages),
@@ -2369,7 +2404,9 @@ async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096,
       // still tripped on the bespoke-HTML design phase where Pro is asked
       // to write rich HTML + SVG.
       const isProModel = /pro/i.test(String(resolved));
-      const callTimeoutMs = isProModel ? 360_000 : 60_000;
+      // opts.timeoutMs: callers whose output scales with input (curriculum
+      // edit re-emits the whole syllabus) outlive the flat 60s flash ceiling.
+      const callTimeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : (isProModel ? 360_000 : 60_000);
       const timeout = setTimeout(() => controller.abort(), callTimeoutMs);
 
       const m = genAI.getGenerativeModel({
@@ -3193,9 +3230,11 @@ app.get('/api/curriculum/:id', authMiddleware, (req, res) => {
     if (req.query.shareId) {
       // Shared recipients get course content, not the owner's private tutoring transcripts
       const sanitized = JSON.parse(JSON.stringify(curriculum), (k, v) => k === 'chatHistory' ? [] : v);
-      return res.json({ curriculum: sanitized });
+      return res.json({ curriculum: { ...sanitized, courseGrade: computeCourseGrade(sanitized) } });
     }
-    res.json({ curriculum });
+    // Attach the computed course grade (percent + letter, rolled up from unit
+    // tests / assignments) so the detail view can show it without a second call.
+    res.json({ curriculum: { ...curriculum, courseGrade: computeCourseGrade(curriculum) } });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -3332,6 +3371,11 @@ app.post('/api/pausd/enroll', authMiddleware, (req, res) => {
       createdAt: new Date().toISOString(),
       pausdSlug: tpl.slug,
       source: 'pausd',
+      // PAUSD courses are graded: the AI scores every end-of-unit test and a
+      // weighted course grade (percent + letter) is computed from those
+      // scores (see computeCourseGrade). Unit tests are the graded work.
+      graded: true,
+      gradingPolicy: { scale: 'percent+letter', unitTestWeight: 2, assignmentDefaultWeight: 1, autoAssign: true },
       settings: {
         topic: tpl.title,
         difficulty: tpl.difficulty || 'advanced',
@@ -3339,6 +3383,7 @@ app.post('/api/pausd/enroll', authMiddleware, (req, res) => {
         learningStyle: 'conceptual',
         includeExamples: true,
         includeExercises: true,
+        graded: true,
       },
       linkedGoalIds: [],
       units: (tpl.units || []).map((unit, ui) => {
@@ -3379,39 +3424,31 @@ app.post('/api/pausd/enroll', authMiddleware, (req, res) => {
           return base;
         });
 
-        // Whether the template already provides interactive math lessons.
+        // Concept list for this unit (its section lessons). Used to seed the
+        // Math Tutor so it drills the exact material the unit just taught.
+        const conceptTitles = lessons.filter(l => l.type === 'lesson').map(l => l.title);
+
+        // Whether the template already provides an interactive math tutor.
         const hasInlineMathTutor = lessons.some(l => l.type === 'math_tutor');
-        const hasInlinePractice  = lessons.some(l => l.type === 'practice');
 
         if (isMathCurriculum && lessons.length >= 2) {
-          // Auto-append a Math Tutor + Practice ONLY when the template
-          // didn't bake them in explicitly. PAUSD math units increasingly
-          // include them inline (drilled between sections), in which case
-          // we leave the template's structure untouched.
+          // The feedback loop for every math unit is Lesson -> Math Tutor ->
+          // Unit Test. After the section lessons, drop in a single Math Tutor
+          // session that drills the unit's concepts on the handwriting canvas
+          // with step-by-step feedback - the warm-up gate before the unit
+          // test. We seed it with the concept list (practiceConcepts) so it
+          // practices exactly what was taught, not a generic topic. Skip only
+          // if the template already baked a tutor in inline.
           if (!hasInlineMathTutor) {
-            lessons.splice(lessons.length - 1, 0, {
+            lessons.push({
               id: `${curriculumId}-u${ui}-mathtutor`,
               title: `${unit.title} - Math Tutor`,
-              description: `Walk through worked problems for ${unit.title} with step-by-step feedback on a handwriting canvas.`,
+              description: `Drill worked problems across ${unit.title} on the handwriting canvas, with step-by-step feedback. Your warm-up before the unit test.`,
               type: 'math_tutor',
               tool: 'math_tutor',
               practiceTopic: unit.title,
-              chatHistory: [],
-              phase: null,
-              phaseData: {},
-              content: null,
-              isCompleted: false,
-              score: null,
-            });
-          }
-          if (!hasInlinePractice) {
-            lessons.push({
-              id: `${curriculumId}-u${ui}-practice`,
-              title: `${unit.title} - Practice Problems`,
-              description: `Solve practice problems for ${unit.title} using the math canvas.`,
-              type: 'practice',
-              tool: 'math_canvas',
-              practiceTopic: unit.title,
+              practiceConcepts: conceptTitles,
+              isPreTest: true,
               chatHistory: [],
               phase: null,
               phaseData: {},
@@ -3712,12 +3749,27 @@ app.post('/api/curriculum/:id/lesson/:lessonId/complete', authMiddleware, (req, 
     const curriculum = (users[email].data?.curricula || []).find(c => c.id === req.params.id);
     if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
 
+    // A graded assessment (unit test / essay) posts its percentage here. When
+    // a score is present we treat this as a deterministic scored completion -
+    // mark complete and record the score - rather than a manual toggle, so a
+    // retake updates the grade instead of un-completing the lesson.
+    const bodyScore = (req.body && typeof req.body.score === 'number' && isFinite(req.body.score))
+      ? Math.max(0, Math.min(100, Math.round(req.body.score)))
+      : null;
+
     let found = false;
+    let foundLesson = null;
     for (const unit of curriculum.units || []) {
       const lesson = (unit.lessons || []).find(l => l.id === req.params.lessonId);
       if (lesson) {
-        lesson.isCompleted = !lesson.isCompleted;
+        if (bodyScore != null) {
+          lesson.isCompleted = true;
+          lesson.score = bodyScore;
+        } else {
+          lesson.isCompleted = !lesson.isCompleted;
+        }
         found = true;
+        foundLesson = lesson;
 
         // Update streak
         if (lesson.isCompleted) {
@@ -3759,6 +3811,9 @@ app.post('/api/curriculum/:id/lesson/:lessonId/complete', authMiddleware, (req, 
     res.json({
       success: true,
       streaks: users[email].data.studyStreaks,
+      isCompleted: !!foundLesson?.isCompleted,
+      score: foundLesson?.score ?? null,
+      courseGrade: computeCourseGrade(curriculum),
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -4317,6 +4372,162 @@ function findLessonInCurriculum(curriculum, lessonId) {
   return null;
 }
 
+// Re-resolve a curriculum lesson on a FRESH loadUsers() object. The block
+// endpoints await a 10-60s AI call between their initial loadUsers() and
+// saveUsers(); writing that stale pre-await snapshot back reverted every
+// save that landed in between — including other lessons' freshly generated
+// blocks, which the client then hit as "Block not found" 404s. Call this
+// after the await, mutate the returned lesson, save the returned users.
+function refetchCurriculumLesson(userId, curriculumId, lessonId) {
+  const users = loadUsers();
+  const email = findEmailById(users, userId);
+  if (!email) return null;
+  const curriculum = findUserCurriculum(users, email, curriculumId);
+  if (!curriculum) return null;
+  const found = findLessonInCurriculum(curriculum, lessonId);
+  if (!found) return null;
+  return { users, email, curriculum, unit: found.unit, lesson: found.lesson };
+}
+
+// Standalone-lesson twin (users[email].data.lessons[]).
+function refetchStandaloneLesson(userId, lessonId) {
+  const users = loadUsers();
+  const email = findEmailById(users, userId);
+  if (!email) return null;
+  const lesson = findLesson(users[email].data, lessonId);
+  if (!lesson) return null;
+  return { users, email, lesson };
+}
+
+// ===== Shared-curriculum lesson access ====================================
+// A curriculum share (ANY accepted permission level, view included) lets the
+// recipient DO lessons together with the owner: block generation, grading,
+// and completion all read and write the OWNER's copy, so both sides see the
+// same lesson state. Structural curriculum edits (PUT /api/curriculum/:id)
+// still require 'edit'. Returns null after sending the error response.
+function resolveLessonAccess(req, res) {
+  if (req.query.shareId) {
+    const access = resolveShareAccess(req, res, 'curriculum', req.params.id, { write: false });
+    if (!access) return null;
+    return { users: access.users, email: access.email, ownerId: access.share.ownerId, share: access.share };
+  }
+  const users = loadUsers();
+  const email = findEmailById(users, req.userId);
+  if (!email) { res.status(404).json({ error: 'User not found' }); return null; }
+  return { users, email, ownerId: req.userId, share: null };
+}
+
+// ===== Lesson co-study chat ===============================================
+// When a curriculum is shared, everyone studying it gets a per-lesson human
+// chat (the right-rail panel in the lesson view). Messages persist on the
+// OWNER's lesson object (lesson.coChat, capped) so the thread survives
+// reconnects; delivery + presence fan out over in-memory SSE streams, same
+// wiring as the group note-stream.
+const coChatStreams = new Map(); // "curriculumId:lessonId" -> Map<userId, res>
+const CO_CHAT_CAP = 200;
+
+function coChatKey(curriculumId, lessonId) { return `${curriculumId}:${lessonId}`; }
+
+function coChatBroadcast(key, event) {
+  const streams = coChatStreams.get(key);
+  if (!streams) return;
+  const payload = `data: ${JSON.stringify(event)}\n\n`;
+  for (const stream of streams.values()) {
+    try { stream.write(payload); stream.flush?.(); } catch {}
+  }
+}
+
+function coChatPresence(key) {
+  const streams = coChatStreams.get(key);
+  const ids = streams ? [...streams.keys()] : [];
+  const social = loadSocial();
+  const users = loadUsers();
+  coChatBroadcast(key, {
+    type: 'presence',
+    present: ids.map(id => ({ id, name: shareDisplayName(social, users, id) })),
+  });
+}
+
+// SSE: 'state' (recent messages) on connect, then 'message' / 'presence'.
+app.get('/api/curriculum/:id/lesson/:lessonId/co-chat-stream', authMiddleware, (req, res) => {
+  try {
+    const access = resolveLessonAccess(req, res);
+    if (!access) return;
+    const curriculum = findUserCurriculum(access.users, access.email, req.params.id);
+    if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
+    const found = findLessonInCurriculum(curriculum, req.params.lessonId);
+    if (!found) return res.status(404).json({ error: 'Lesson not found' });
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    const key = coChatKey(req.params.id, req.params.lessonId);
+    if (!coChatStreams.has(key)) coChatStreams.set(key, new Map());
+    const streams = coChatStreams.get(key);
+    const stale = streams.get(req.userId);
+    if (stale) { try { stale.end(); } catch {} }
+    streams.set(req.userId, res);
+
+    try {
+      res.write(`data: ${JSON.stringify({
+        type: 'state',
+        messages: (found.lesson.coChat || []).slice(-CO_CHAT_CAP),
+      })}\n\n`);
+      res.flush?.();
+    } catch {}
+    coChatPresence(key);
+
+    const keepalive = setInterval(() => {
+      try { res.write(`: keepalive ${Date.now()}\n\n`); res.flush?.(); } catch {}
+    }, 15000);
+
+    req.on('close', () => {
+      clearInterval(keepalive);
+      if (streams.get(req.userId) === res) {
+        streams.delete(req.userId);
+        if (streams.size === 0) coChatStreams.delete(key);
+        else coChatPresence(key);
+      }
+    });
+  } catch (e) {
+    try { res.status(500).json({ error: e.message }); } catch { try { res.end(); } catch {} }
+  }
+});
+
+app.post('/api/curriculum/:id/lesson/:lessonId/co-chat', authMiddleware, (req, res) => {
+  try {
+    const content = String((req.body || {}).content || '').trim();
+    if (!content) return res.status(400).json({ error: 'Message content required' });
+    const access = resolveLessonAccess(req, res);
+    if (!access) return;
+    const curriculum = findUserCurriculum(access.users, access.email, req.params.id);
+    if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
+    const found = findLessonInCurriculum(curriculum, req.params.lessonId);
+    if (!found) return res.status(404).json({ error: 'Lesson not found' });
+
+    const social = loadSocial();
+    const message = {
+      id: crypto.randomUUID(),
+      from: req.userId,
+      fromName: shareDisplayName(social, access.users, req.userId),
+      content: content.slice(0, 2000),
+      at: new Date().toISOString(),
+    };
+    if (!Array.isArray(found.lesson.coChat)) found.lesson.coChat = [];
+    found.lesson.coChat.push(message);
+    if (found.lesson.coChat.length > CO_CHAT_CAP) {
+      found.lesson.coChat = found.lesson.coChat.slice(-CO_CHAT_CAP);
+    }
+    saveUsers(access.users);
+
+    coChatBroadcast(coChatKey(req.params.id, req.params.lessonId), { type: 'message', message });
+    res.json({ message });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // =================================================================
 // GRADED MODE - per-lesson assignments + AI grading
 //
@@ -4353,6 +4564,9 @@ app.post('/api/curriculum/:id/lesson/:lessonId/assignment/generate', authMiddlew
     const curriculum = findUserCurriculum(users, email, req.params.id);
     if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
     if (curriculum.graded !== true) return res.status(400).json({ error: 'Curriculum is not in graded mode' });
+    // Math courses are graded by their end-of-unit tests (AI-scored), not by
+    // written essays. Never attach an essay assignment to a math lesson.
+    if (curriculum.category === 'Math') return res.status(400).json({ error: 'Math courses are graded by unit tests, not written assignments' });
     const found = findLessonInCurriculum(curriculum, req.params.lessonId);
     if (!found) return res.status(404).json({ error: 'Lesson not found' });
 
@@ -4563,7 +4777,7 @@ function stampBlock(lessonId, b, i, opts = {}) {
   const blockId = `${lessonId}-b${i}`;
   const typeLabel = {
     reading: 'Reading', quiz: 'Quiz', example: 'Worked Example',
-    recap: 'Recap', application: 'In the Wild', challenge: 'Challenge', open: 'Open Answer',
+    recap: 'Recap', application: 'In the Wild', challenge: 'Challenge', open: 'Graded Essay',
     discussion: 'Discussion', matching: 'Matching', 'fill-blank': 'Fill in the Blank',
   }[b.type] || 'Step';
   const base = {
@@ -4703,9 +4917,9 @@ AVAILABLE BLOCK TYPES — pick and sequence based on the topic:
   • "recap"       - A CONCEPT RECAP. 4-6 tight bullet points consolidating what's been covered. Use mid-lesson before moving to harder material.
   • "application" - A REAL-WORLD APPLICATION. 200-300 words of markdown showing where this concept appears in practice.
   • "challenge"   - A STRETCH PROBLEM with a hint and full solution. Use near the end for harder topics.
-  • "open"        - An OPEN-ANSWER prompt the student answers in their own words (40-150 words). MUST include a 2-3 item rubric. Strong when understanding matters more than recall.
+  • "open"        - A GRADED ESSAY. Student writes a free-form response (40-150 words) that the AI grades against a 2-3 item rubric. Use when understanding and reasoning matter more than recall — "Explain why...", "Compare...", "Argue whether...". Great for conceptual, historical, and ethical topics.
   • "discussion"  - AN AI DISCUSSION. Student chats with an AI tutor. Give an opening question + 3-5 talking points. Best near the end when the student has something to discuss.
-  • "matching"    - A MATCHING MINIGAME of 5-7 term/definition pairs. Ideal for vocabulary-heavy topics.
+  • "matching"    - A MATCHING MINIGAME of 5-7 term/definition pairs. ONLY for truly vocabulary-heavy topics (glossaries, anatomy, foreign language, technical jargon). Avoid for conceptual, procedural, historical, or applied topics.
   • "fill-blank"  - A FILL-IN-THE-BLANK exercise of 4-6 sentences. Good for keyword recall on definition-dense topics.
 
 PEDAGOGICAL SEQUENCING RULES:
@@ -4715,7 +4929,13 @@ PEDAGOGICAL SEQUENCING RULES:
   • "matching" and "fill-blank" should immediately follow the reading that introduced the terms they use.
   • "discussion" and "challenge" work best near the end once the student has built up knowledge.
   • Avoid repeating the same type more than twice consecutively.
-  • Let the topic type guide the mix: vocabulary topic → favor matching + fill-blank + open. Procedural topic → favor example + challenge + quiz. Conceptual topic → favor reading + open + discussion. Applied topic → favor application + open + example.
+  • Let the topic type guide the mix: vocabulary topic → consider matching + fill-blank + open. Procedural/math topic → favor example + quiz + challenge. Conceptual topic → favor reading + open (graded essay) + discussion. Historical/ethical topic → favor reading + open (graded essay) + application. Applied topic → favor application + open + example.
+
+VARIETY REQUIREMENT — CRITICAL:
+  • Every lesson MUST have a different structure. Do NOT default to reading → matching → reading → quiz. This is overused and boring.
+  • "matching" is NOT a default first exercise. Only include it when the topic genuinely has vocabulary to match (e.g., biology terms, legal definitions, foreign-language words). For history, math, science concepts, ethics, coding, economics — skip matching entirely and use quiz, open, example, or recap instead.
+  • The first non-reading block should vary by topic: a math lesson might open with "example", a history lesson with "open", a science lesson with "quiz", a philosophy lesson with "discussion".
+  • Aim for structural surprise: a lesson that goes reading → open → reading → challenge → recap is more engaging than the repetitive reading → matching pattern.
 
 SHAPES - each block's fields by type:
   reading:     {"type":"reading","title":"...","content":"<markdown>"}
@@ -4724,7 +4944,7 @@ SHAPES - each block's fields by type:
   recap:       {"type":"recap","title":"...","bullets":["...","...","...","..."]}
   application: {"type":"application","title":"...","content":"<200-300 words of markdown>"}
   challenge:   {"type":"challenge","title":"...","prompt":"<markdown problem>","hint":"<1-2 sentences nudging without solving>","solution":"<markdown explanation>"}
-  open:        {"type":"open","title":"...","prompt":"<markdown question, 1-3 sentences>","minWords":<40-80>,"rubric":[{"label":"...","criterion":"...","weight":<1-3>}, ...2-3 total...]}
+  open:        {"type":"open","title":"...","prompt":"<markdown essay question, 1-3 sentences>","minWords":<40-80>,"rubric":[{"label":"...","criterion":"...","weight":<1-3>}, ...2-3 total...]}
   discussion:  {"type":"discussion","title":"...","prompt":"<the AI's opening question to the student, 1-2 sentences>","talkingPoints":["<concept the AI should make sure gets discussed>", ...3-5 total...]}
   matching:    {"type":"matching","title":"...","instructions":"<one-line how-to>","pairs":[{"term":"<short term>","definition":"<definition or example, 1 sentence>"}, ...5-7 pairs...]}
   fill-blank:  {"type":"fill-blank","title":"...","instructions":"<one-line how-to>","sentences":[{"before":"<text before the blank>","answer":"<single word or short phrase>","after":"<text after the blank>","hint":"<optional short hint>"}, ...4-6 sentences...]}
@@ -4739,9 +4959,9 @@ Return JSON in this shape:
 
 app.post('/api/curriculum/:id/lesson/:lessonId/blocks/generate', authMiddleware, async (req, res) => {
   try {
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (!email) return res.status(404).json({ error: 'User not found' });
+    const access = resolveLessonAccess(req, res);
+    if (!access) return;
+    const { users, email } = access;
     users[email].data = migrateUserData(users[email].data);
     const curriculum = findUserCurriculum(users, email, req.params.id);
     if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
@@ -4800,14 +5020,25 @@ app.post('/api/curriculum/:id/lesson/:lessonId/blocks/generate', authMiddleware,
       return res.status(500).json({ error: 'Lesson generation failed. Please try again.' });
     }
 
+    // The Gemini call above took seconds — re-resolve the lesson on fresh
+    // data before writing. Saving the pre-await snapshot would revert
+    // everything other requests saved while we waited.
+    const fresh = refetchCurriculumLesson(access.ownerId, req.params.id, req.params.lessonId);
+    if (!fresh) return res.status(404).json({ error: 'Lesson not found' });
+    // A concurrent generate may have filled this lesson first. Serve its
+    // blocks — overwriting them would orphan the ids that client holds.
+    if (Array.isArray(fresh.lesson.blocks) && fresh.lesson.blocks.length > 0) {
+      return res.json({ blocks: fresh.lesson.blocks });
+    }
+
     // No SRS slot anymore - the AI mixes types as it sees fit, so a
     // hard-coded spaced-repetition reading at index 4 no longer makes
     // sense. The "recap" type covers reinforcement when the AI decides
     // that's what the lesson needs.
-    const blocks = blocksRaw.map((b, i) => stampBlock(lesson.id, b, i));
+    const blocks = blocksRaw.map((b, i) => stampBlock(fresh.lesson.id, b, i));
 
-    lesson.blocks = blocks;
-    saveUsers(users);
+    fresh.lesson.blocks = blocks;
+    saveUsers(fresh.users);
     res.json({ blocks });
   } catch (e) {
     console.error('blocks/generate failed:', e);
@@ -4820,9 +5051,9 @@ app.post('/api/curriculum/:id/lesson/:lessonId/blocks/generate', authMiddleware,
 // spaced repetition rather than a generic re-test.
 app.post('/api/curriculum/:id/lesson/:lessonId/blocks/final-quiz/generate', authMiddleware, async (req, res) => {
   try {
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (!email) return res.status(404).json({ error: 'User not found' });
+    const access = resolveLessonAccess(req, res);
+    if (!access) return;
+    const { users, email } = access;
     users[email].data = migrateUserData(users[email].data);
     const curriculum = findUserCurriculum(users, email, req.params.id);
     if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
@@ -4865,9 +5096,17 @@ Return JSON exactly:
       return res.status(500).json({ error: 'Final quiz returned no questions. Try again.' });
     }
 
-    const block = stampBlock(lesson.id, { type: 'quiz', title: 'Final Quiz', questions: parsed.questions }, lesson.blocks.length, { isFinal: true });
-    lesson.blocks.push(block);
-    saveUsers(users);
+    // Re-resolve on fresh data after the AI wait (see blocks/generate).
+    const fresh = refetchCurriculumLesson(access.ownerId, req.params.id, req.params.lessonId);
+    if (!fresh || !Array.isArray(fresh.lesson.blocks) || fresh.lesson.blocks.length === 0) {
+      return res.status(404).json({ error: 'Lesson not found' });
+    }
+    const freshLast = fresh.lesson.blocks[fresh.lesson.blocks.length - 1];
+    if (freshLast?.isFinal) return res.json({ block: freshLast });
+
+    const block = stampBlock(fresh.lesson.id, { type: 'quiz', title: 'Final Quiz', questions: parsed.questions }, fresh.lesson.blocks.length, { isFinal: true });
+    fresh.lesson.blocks.push(block);
+    saveUsers(fresh.users);
     res.json({ block });
   } catch (e) {
     console.error('blocks/final-quiz/generate failed:', e);
@@ -4877,9 +5116,9 @@ Return JSON exactly:
 
 app.post('/api/curriculum/:id/lesson/:lessonId/blocks/:bid/grade', authMiddleware, (req, res) => {
   try {
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (!email) return res.status(404).json({ error: 'User not found' });
+    const access = resolveLessonAccess(req, res);
+    if (!access) return;
+    const { users, email } = access;
     const curriculum = findUserCurriculum(users, email, req.params.id);
     if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
     const found = findLessonInCurriculum(curriculum, req.params.lessonId);
@@ -4903,7 +5142,10 @@ app.post('/api/curriculum/:id/lesson/:lessonId/blocks/:bid/grade', authMiddlewar
 
     // Feed weak spots into the note-map SRS log. Each missed question becomes a
     // candidate for flashcard variants when the student studies a matching node.
-    recordMissedQuestions(users[email].data, results.filter(r => !r.correct).map(r => {
+    // On a shared lesson the missed questions belong to whoever answered them,
+    // not the curriculum owner - log them to the requester's own SRS data.
+    const selfEmail = access.share ? findEmailById(users, req.userId) : email;
+    if (selfEmail) recordMissedQuestions(users[selfEmail].data, results.filter(r => !r.correct).map(r => {
       const q = (block.questions || []).find(qq => qq.id === r.qid) || {};
       return {
         prompt: q.prompt,
@@ -4915,6 +5157,10 @@ app.post('/api/curriculum/:id/lesson/:lessonId/blocks/:bid/grade', authMiddlewar
     }));
 
     saveUsers(users);
+
+    // Record THIS participant's quiz score in the per-user gradebook overlay
+    // (req.userId is the owner studying directly, or a shared recipient).
+    recordCurriculumProgress(req.params.id, req.userId, found.unit, found.lesson, block, score);
 
     res.json({ score, results });
   } catch (e) {
@@ -4933,9 +5179,11 @@ app.post('/api/curriculum/:id/lesson/:lessonId/blocks/:bid/grade-open', authMidd
     if (!text || typeof text !== 'string' || text.trim().length < 20) {
       return res.status(400).json({ error: 'Submission must be at least 20 characters' });
     }
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (!email) return res.status(404).json({ error: 'User not found' });
+    const access = resolveLessonAccess(req, res);
+    if (!access) return;
+    const { users, email } = access;
+    // Model tier + any usage caps follow the REQUESTER, not the curriculum owner.
+    const selfEmail = access.share ? findEmailById(users, req.userId) : email;
     const curriculum = findUserCurriculum(users, email, req.params.id);
     if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
     const found = findLessonInCurriculum(curriculum, req.params.lessonId);
@@ -4975,7 +5223,7 @@ Return JSON:
   "feedback": "<3-5 sentences of overall feedback addressed to the student. Mention 1 strength, 1-2 specific gaps, and one concrete next step.>"
 }`;
 
-    const result = await callGemini(system, [{ role: 'user', content: userMsg }], modelForUser(users[email], email), 1400, {
+    const result = await callGemini(system, [{ role: 'user', content: userMsg }], modelForUser(users[selfEmail] || users[email], selfEmail || email), 1400, {
       jsonMode: true, temperature: 0.4,
     });
     if (!result.success) return res.status(500).json({ error: result.error });
@@ -4995,7 +5243,13 @@ Return JSON:
     });
     const finalScore = weightSum > 0 ? Math.round(total / weightSum) : 0;
 
-    block.submission = {
+    // Re-resolve on fresh data after the AI wait (see blocks/generate).
+    const fresh = refetchCurriculumLesson(access.ownerId, req.params.id, req.params.lessonId);
+    if (!fresh) return res.status(404).json({ error: 'Lesson not found' });
+    const freshBlock = (fresh.lesson.blocks || []).find(b => b.id === req.params.bid);
+    if (!freshBlock || freshBlock.type !== 'open') return res.status(404).json({ error: 'Open-answer block not found' });
+
+    freshBlock.submission = {
       text: String(text).slice(0, 6000),
       submittedAt: new Date().toISOString(),
       score: finalScore,
@@ -5003,11 +5257,14 @@ Return JSON:
       perRubric,
       feedback: String(parsed.feedback || '').slice(0, 2000),
     };
-    block.score = finalScore;
-    block.completedAt = block.submission.submittedAt;
-    saveUsers(users);
+    freshBlock.score = finalScore;
+    freshBlock.completedAt = freshBlock.submission.submittedAt;
+    saveUsers(fresh.users);
 
-    res.json({ submission: block.submission });
+    // Record THIS participant's open-answer grade in the gradebook overlay.
+    recordCurriculumProgress(req.params.id, req.userId, fresh.unit, fresh.lesson, freshBlock, finalScore);
+
+    res.json({ submission: freshBlock.submission });
   } catch (e) {
     console.error('blocks/grade-open failed:', e);
     res.status(500).json({ error: e.message });
@@ -5016,9 +5273,9 @@ Return JSON:
 
 app.post('/api/curriculum/:id/lesson/:lessonId/blocks/:bid/complete', authMiddleware, (req, res) => {
   try {
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (!email) return res.status(404).json({ error: 'User not found' });
+    const access = resolveLessonAccess(req, res);
+    if (!access) return;
+    const { users, email } = access;
     const curriculum = findUserCurriculum(users, email, req.params.id);
     if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
     const found = findLessonInCurriculum(curriculum, req.params.lessonId);
@@ -5042,9 +5299,114 @@ app.post('/api/curriculum/:id/lesson/:lessonId/blocks/:bid/complete', authMiddle
       found.lesson.score = quizScores.length ? Math.round(quizScores.reduce((s, n) => s + n, 0) / quizScores.length) : null;
     }
     saveUsers(users);
+
+    // Record THIS participant's block completion in the gradebook overlay so a
+    // shared recipient's progress is tracked separately from the owner's.
+    recordCurriculumProgress(req.params.id, req.userId, found.unit, found.lesson, block,
+      typeof block.score === 'number' ? block.score : null);
+
     res.json({ block, lesson: { isCompleted: !!found.lesson.isCompleted, score: found.lesson.score ?? null } });
   } catch (e) {
     console.error('blocks/complete failed:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// =========================================================
+// SHARED CURRICULUM GRADEBOOK
+//
+// Returns every participant's performance on a shared curriculum: the owner
+// plus everyone with an accepted share. Visible to all participants (the owner
+// to track the people they shared with, and recipients to see the group). Each
+// participant's grades come from the per-user progress overlay; the owner also
+// falls back to their own copy for activity that predates the overlay.
+// =========================================================
+app.get('/api/curriculum/:id/gradebook', authMiddleware, (req, res) => {
+  try {
+    const cid = req.params.id;
+    const users = loadUsers();
+    const allShares = loadShares();
+
+    // Resolve who owns this curriculum and confirm the requester may see it.
+    let ownerId;
+    const requesterEmail = findEmailById(users, req.userId);
+    const requesterOwns = requesterEmail && findUserCurriculum(users, requesterEmail, cid);
+    if (requesterOwns) {
+      ownerId = req.userId;
+    } else {
+      const myShare = allShares.find(s =>
+        s.itemId === cid && s.itemType === 'curriculum' &&
+        s.recipientId === req.userId && s.status === 'accepted');
+      if (!myShare) return res.status(403).json({ error: 'You do not have access to this curriculum' });
+      ownerId = myShare.ownerId;
+    }
+
+    const ownerEmail = findEmailById(users, ownerId);
+    const curriculum = ownerEmail ? findUserCurriculum(users, ownerEmail, cid) : null;
+    if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
+
+    // The gradebook tracks the co-studyable standard lessons (the shared block
+    // flows only support 'lesson'-typed lessons), in course order.
+    const lessons = [];
+    for (const unit of curriculum.units || []) {
+      for (const l of unit.lessons || []) {
+        if (l.type && l.type !== 'lesson') continue;
+        lessons.push({ id: l.id, title: l.title, unitTitle: unit.title });
+      }
+    }
+
+    // Participants = owner + every accepted recipient.
+    const acceptedShares = allShares.filter(s =>
+      s.itemId === cid && s.itemType === 'curriculum' && s.status === 'accepted');
+    const participantIds = [ownerId, ...acceptedShares.map(s => s.recipientId).filter(rid => rid !== ownerId)];
+
+    const social = loadSocial();
+    const progress = loadCurriculumProgress();
+    const overlay = progress[cid]?.participants || {};
+
+    const participants = participantIds.map(uid => {
+      const rec = overlay[uid] || { lessons: {} };
+      const perLesson = lessons.map(les => {
+        const lr = rec.lessons?.[les.id];
+        if (lr) {
+          return { lessonId: les.id, score: typeof lr.score === 'number' ? lr.score : null, isCompleted: !!lr.isCompleted };
+        }
+        // Owner-only fallback: their own copy holds activity that predates the
+        // overlay. Recipients have no record on the owner's object.
+        if (uid === ownerId) {
+          const found = findLessonInCurriculum(curriculum, les.id);
+          const l = found?.lesson;
+          return { lessonId: les.id, score: (l && typeof l.score === 'number') ? l.score : null, isCompleted: !!l?.isCompleted };
+        }
+        return { lessonId: les.id, score: null, isCompleted: false };
+      });
+      const lessonsCompleted = perLesson.filter(p => p.isCompleted).length;
+      const scored = perLesson.filter(p => typeof p.score === 'number');
+      const averageScore = scored.length
+        ? Math.round(scored.reduce((s, p) => s + p.score, 0) / scored.length)
+        : null;
+      return {
+        userId: uid,
+        name: shareDisplayName(social, users, uid),
+        isOwner: uid === ownerId,
+        isYou: uid === req.userId,
+        lessonsTotal: lessons.length,
+        lessonsCompleted,
+        averageScore,
+        averageLetter: averageScore != null ? percentToLetter(averageScore) : null,
+        lastActivityAt: rec.lastActivityAt || null,
+        perLesson,
+      };
+    });
+
+    res.json({
+      curriculum: { id: cid, title: curriculum.title, lessons },
+      isOwner: ownerId === req.userId,
+      participantCount: participants.length,
+      participants,
+    });
+  } catch (e) {
+    console.error('gradebook failed:', e);
     res.status(500).json({ error: e.message });
   }
 });
@@ -5805,7 +6167,7 @@ app.get('/api/notes/:nid', authMiddleware, (req, res) => {
 
 app.put('/api/notes/:nid', authMiddleware, (req, res) => {
   try {
-    const { title, cues, mainNotes, summary, topicId } = req.body;
+    const { title, cues, mainNotes, summary, topicId, baseUpdatedAt } = req.body;
     let users, email, sharedWrite = false;
     if (req.query.shareId) {
       const access = resolveShareAccess(req, res, 'note', req.params.nid, { write: true });
@@ -5819,6 +6181,15 @@ app.put('/api/notes/:nid', authMiddleware, (req, res) => {
     }
     const note = (users[email].data?.notes || []).find(n => n.id === req.params.nid);
     if (!note) return res.status(404).json({ error: 'Note not found' });
+    // Group co-editing writes into this note too (group PUT sync-back), so a
+    // personal editor holding hours-old state would silently revert members'
+    // group-pad edits on its next autosave. Clients that send the updatedAt
+    // they loaded get a 409 with the current note instead; clients that
+    // don't keep the old last-write-wins.
+    if (baseUpdatedAt && note.updatedAt
+      && new Date(note.updatedAt).getTime() > new Date(baseUpdatedAt).getTime()) {
+      return res.status(409).json({ error: 'Note changed since you loaded it', note });
+    }
     if (title !== undefined) note.title = title;
     if (cues !== undefined) note.cues = cues;
     if (mainNotes !== undefined) note.mainNotes = mainNotes;
@@ -5938,7 +6309,7 @@ app.post('/api/notes/:nid/generate-cues', authMiddleware, async (req, res) => {
         note.cues = parsed.cues;
         note.updatedAt = new Date().toISOString();
         saveUsers(users);
-        return res.json({ cues: note.cues });
+        return res.json({ cues: note.cues, updatedAt: note.updatedAt });
       }
     }
     res.status(500).json({ error: 'Failed to generate cues' });
@@ -5963,7 +6334,7 @@ app.post('/api/notes/:nid/generate-summary', authMiddleware, async (req, res) =>
         note.summary = parsed.summary;
         note.updatedAt = new Date().toISOString();
         saveUsers(users);
-        return res.json({ summary: note.summary });
+        return res.json({ summary: note.summary, updatedAt: note.updatedAt });
       }
     }
     res.status(500).json({ error: 'Failed to generate summary' });
@@ -6271,9 +6642,18 @@ app.post('/api/note-maps', authMiddleware, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// GET /api/note-maps/:mid → full map body.
+// GET /api/note-maps/:mid → full map body. With ?shareId= a recipient reads
+// the OWNER's map through an accepted share (File & Note Sharing ADR-001).
 app.get('/api/note-maps/:mid', authMiddleware, (req, res) => {
   try {
+    if (req.query.shareId) {
+      const access = resolveShareAccess(req, res, 'noteMap', req.params.mid);
+      if (!access) return;
+      const map = findMap(access.users[access.email].data, req.params.mid);
+      if (!map) return res.status(404).json({ error: 'Map not found' });
+      // Shared reads stay pure — no auto-sync write triggered by the recipient.
+      return res.json({ map });
+    }
     const users = loadUsers();
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
@@ -6289,24 +6669,39 @@ app.get('/api/note-maps/:mid', authMiddleware, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// PUT /api/note-maps/:mid → update name / color / nodes / edges.
+// PUT /api/note-maps/:mid → update name / color / nodes / edges. With
+// ?shareId= a collaborator with edit permission rearranges the OWNER's graph;
+// renaming/recoloring the map stays with the owner.
 app.put('/api/note-maps/:mid', authMiddleware, (req, res) => {
   try {
     const { name, color, nodes, edges } = req.body || {};
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (!email) return res.status(404).json({ error: 'User not found' });
-    users[email].data = migrateUserData(users[email].data);
+    let users, email, sharedWrite = false;
+    if (req.query.shareId) {
+      const access = resolveShareAccess(req, res, 'noteMap', req.params.mid, { write: true });
+      if (!access) return;
+      ({ users, email } = access);
+      sharedWrite = true;
+    } else {
+      users = loadUsers();
+      email = findEmailById(users, req.userId);
+      if (!email) return res.status(404).json({ error: 'User not found' });
+      users[email].data = migrateUserData(users[email].data);
+    }
     const map = findMap(users[email].data, req.params.mid);
     if (!map) return res.status(404).json({ error: 'Map not found' });
-    if (typeof name === 'string') map.name = name.slice(0, 80) || map.name;
-    if (typeof color === 'string') map.color = color.slice(0, 24);
+    if (!sharedWrite && typeof name === 'string') map.name = name.slice(0, 80) || map.name;
+    if (!sharedWrite && typeof color === 'string') map.color = color.slice(0, 24);
     if (Array.isArray(nodes) && Array.isArray(edges)) {
       const sanitized = sanitizeGraph(nodes, edges);
       map.nodes = sanitized.nodes;
       map.edges = sanitized.edges;
       // A node removed from the canvas takes its flashcards with it.
       pruneOrphanCards(map);
+    }
+    map.updatedAt = new Date().toISOString();
+    if (sharedWrite) {
+      map.lastEditedBy = req.userId;
+      map.lastEditedAt = map.updatedAt;
     }
     saveUsers(users);
     res.json({ map });
@@ -6325,6 +6720,7 @@ app.delete('/api/note-maps/:mid', authMiddleware, (req, res) => {
     if (map.isDefault) return res.status(400).json({ error: 'Cannot delete the default map.' });
     users[email].data.noteMaps = users[email].data.noteMaps.filter(m => m.id !== map.id);
     saveUsers(users);
+    cascadeDeleteSharesForItem(map.id, req.userId, map.name, 'noteMap');
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -8740,8 +9136,38 @@ app.get('/api/suggestions/topics', authMiddleware, async (req, res) => {
 
 // Social data file
 const SOCIAL_FILE = join(DATA_DIR, 'social.json');
-function loadSocial() { try { return JSON.parse(readFileSync(SOCIAL_FILE, 'utf-8')); } catch { return { profiles: {}, messages: {}, groups: {} }; } }
-function saveSocial(data) { writeFileSync(SOCIAL_FILE, JSON.stringify(data, null, 2)); }
+// Same shared-cache contract as loadUsers/saveUsers above: handlers that hold
+// `social` across an await (study-group session generation runs a 10-60s AI
+// call before its saveSocial) must see mutations other handlers made in the
+// meantime — a fresh parse per call hands each handler its own object, and
+// the slowest writer silently reverts everyone else (this ate group note
+// edits whenever a session was being generated).
+let socialCache = null;
+let socialCacheMtimeMs = 0;
+function loadSocial() {
+  try {
+    if (existsSync(SOCIAL_FILE)) {
+      const mtimeMs = statSync(SOCIAL_FILE).mtimeMs;
+      if (socialCache && mtimeMs === socialCacheMtimeMs) return socialCache;
+      socialCache = JSON.parse(readFileSync(SOCIAL_FILE, 'utf-8'));
+      socialCacheMtimeMs = mtimeMs;
+      return socialCache;
+    }
+  } catch (e) { console.error('Error loading social:', e); }
+  return socialCache || { profiles: {}, messages: {}, groups: {} };
+}
+function saveSocial(data) {
+  try {
+    writeFileSync(SOCIAL_FILE, JSON.stringify(data, null, 2));
+    socialCache = data;
+    try { socialCacheMtimeMs = statSync(SOCIAL_FILE).mtimeMs; } catch {}
+  } catch (e) {
+    console.error('FAILED to save social to', SOCIAL_FILE, e.message);
+    // Keep the old contract: callers (and their clients) must see the
+    // failure rather than a 200 for a write that never persisted.
+    throw e;
+  }
+}
 
 // Set/update social profile (handle + displayName)
 app.post('/api/social/profile', authMiddleware, (req, res) => {
@@ -8796,19 +9222,25 @@ app.get('/api/social/profile', authMiddleware, (req, res) => {
   res.json({ profile });
 });
 
-// Search users by handle
+// Search accounts to share with. Matches ANY registered account by display
+// name (and by social handle when one exists) - sharing has no friending or
+// profile prerequisite, so every account is discoverable. The email address is
+// never returned (it would leak contact info to other users).
 app.get('/api/social/search', authMiddleware, (req, res) => {
-  const q = (req.query.q || '').toLowerCase();
+  const q = (req.query.q || '').toLowerCase().trim();
   if (!q) return res.json({ users: [] });
   const social = loadSocial();
   const users = loadUsers();
-  const results = Object.values(social.profiles)
-    .filter(p => p.userId !== req.userId && (p.handle.toLowerCase().includes(q) || p.displayName.toLowerCase().includes(q)))
-    .slice(0, 20)
-    .map(p => {
-      const email = findEmailById(users, p.userId);
-      return { ...p, plan: email ? getPlan(users[email], email) : 'free' };
-    });
+  const results = [];
+  for (const [email, rec] of Object.entries(users)) {
+    if (!rec || rec.id === req.userId) continue;
+    const profile = social.profiles[rec.id];
+    const handle = profile?.handle || rec.data?.socialHandle || null;
+    const displayName = profile?.displayName || rec.data?.socialDisplayName || rec.name || 'Covalent user';
+    if (!`${displayName} ${handle || ''}`.toLowerCase().includes(q)) continue;
+    results.push({ userId: rec.id, handle, displayName, plan: getPlan(rec, email) });
+    if (results.length >= 20) break;
+  }
   res.json({ users: results });
 });
 
@@ -9007,16 +9439,82 @@ app.post('/api/social/groups/:id/send', authMiddleware, (req, res) => {
 // { id, itemId, itemType: 'note'|'flashcardDeck'|'curriculum', ownerId, recipientId,
 //   permissionLevel: 'view'|'edit', status: 'pending'|'accepted'|'declined'|'revoked', createdAt, updatedAt }
 const SHARES_FILE = join(DATA_DIR, 'shares.json');
-const SHARE_ITEM_TYPES = ['note', 'flashcardDeck', 'curriculum'];
+const SHARE_ITEM_TYPES = ['note', 'flashcardDeck', 'curriculum', 'noteMap'];
+
+// Shareable items title themselves differently — notes/decks/curricula use
+// `title`, note maps use `name`. One helper so invitation + incoming payloads
+// label every type correctly.
+function shareItemTitle(item) {
+  return item?.title || item?.name || 'Untitled';
+}
 function loadShares() { try { return JSON.parse(readFileSync(SHARES_FILE, 'utf-8')); } catch { return []; } }
 function saveShares(shares) { writeFileSync(SHARES_FILE, JSON.stringify(shares, null, 2)); }
 
 function shareIsActive(s) { return s.status === 'pending' || s.status === 'accepted'; }
 
+// ===== Curriculum progress overlay (shared-curriculum gradebook) ============
+// A SHARED curriculum is one live object (everyone studies the owner's copy),
+// so block scores/completion written onto it can't tell participants apart.
+// This per-user overlay records each participant's OWN result whenever they
+// grade or complete a block, keyed curriculumId -> userId. It is the source of
+// truth for the gradebook; the live curriculum object is only a fallback for
+// the owner's activity that predates the overlay.
+//   { [curriculumId]: { participants: { [userId]: {
+//       lessons: { [lessonId]: { title, unitTitle, blocks: { [bid]: { type, score?, completedAt } },
+//                                score: number|null, isCompleted: bool, updatedAt } },
+//       lastActivityAt } } } }
+const CURRICULUM_PROGRESS_FILE = join(DATA_DIR, 'curriculumProgress.json');
+function loadCurriculumProgress() {
+  try { return JSON.parse(readFileSync(CURRICULUM_PROGRESS_FILE, 'utf-8')); } catch { return {}; }
+}
+function saveCurriculumProgress(p) {
+  writeFileSync(CURRICULUM_PROGRESS_FILE, JSON.stringify(p, null, 2));
+}
+
+// Record one participant's result on a block of a (possibly shared) curriculum.
+// `lesson` is the live lesson object (its block list drives per-user
+// completion); `block` is the block just graded/completed; `score` is that
+// user's score for it, or null for non-graded blocks (concept/info).
+function recordCurriculumProgress(curriculumId, userId, unit, lesson, block, score) {
+  if (!curriculumId || !userId || !lesson || !block) return;
+  try {
+    const store = loadCurriculumProgress();
+    const curr = store[curriculumId] || (store[curriculumId] = { participants: {} });
+    if (!curr.participants) curr.participants = {};
+    const part = curr.participants[userId] || (curr.participants[userId] = { lessons: {} });
+    if (!part.lessons) part.lessons = {};
+    const lrec = part.lessons[lesson.id] || (part.lessons[lesson.id] = { blocks: {} });
+    if (!lrec.blocks) lrec.blocks = {};
+    lrec.title = lesson.title || lrec.title;
+    lrec.unitTitle = unit?.title || lrec.unitTitle;
+    const now = new Date().toISOString();
+    const brec = lrec.blocks[block.id] || (lrec.blocks[block.id] = {});
+    brec.type = block.type;
+    if (typeof score === 'number') brec.score = score;
+    brec.completedAt = now;
+    // Per-user lesson grade = average of this user's graded block scores.
+    const graded = Object.values(lrec.blocks).filter(b => typeof b.score === 'number');
+    lrec.score = graded.length
+      ? Math.round(graded.reduce((s, b) => s + b.score, 0) / graded.length)
+      : null;
+    // Per-user completion mirrors the shared rule: every block this user has
+    // touched is done AND a final quiz exists in the lesson.
+    const blocks = lesson.blocks || [];
+    const hasFinal = blocks.some(b => b.isFinal === true);
+    lrec.isCompleted = blocks.length > 0 && hasFinal && blocks.every(b => lrec.blocks[b.id]?.completedAt);
+    lrec.updatedAt = now;
+    part.lastActivityAt = now;
+    saveCurriculumProgress(store);
+  } catch (e) {
+    console.error('recordCurriculumProgress failed:', e.message);
+  }
+}
+
 function findOwnedItem(data, itemType, itemId) {
   if (itemType === 'note') return (data.notes || []).find(n => n.id === itemId) || null;
   if (itemType === 'flashcardDeck') return (data.flashcardDecks || []).find(d => d.id === itemId) || null;
   if (itemType === 'curriculum') return (data.curricula || []).find(c => c.id === itemId) || null;
+  if (itemType === 'noteMap') return (data.noteMaps || []).find(m => m.id === itemId) || null;
   return null;
 }
 
@@ -9122,7 +9620,7 @@ app.post('/api/share', authMiddleware, (req, res) => {
     const social = loadSocial();
     getNotificationList(social, recipientId).push({
       id: crypto.randomUUID(), type: 'share_invitation', shareId: share.id,
-      itemId, itemType, itemTitle: item.title || 'Untitled',
+      itemId, itemType, itemTitle: shareItemTitle(item),
       fromUserId: req.userId, fromName: shareDisplayName(social, users, req.userId),
       permissionLevel: level, createdAt: now, read: false,
     });
@@ -9144,7 +9642,7 @@ app.get('/api/share/incoming', authMiddleware, (req, res) => {
         ...s,
         ownerName: shareDisplayName(social, users, s.ownerId),
         ownerHandle: social.profiles[s.ownerId]?.handle || null,
-        itemTitle: item?.title || 'Untitled',
+        itemTitle: shareItemTitle(item),
         itemExists: !!item,
         itemUpdatedAt: item?.updatedAt || null,
       };
@@ -9237,557 +9735,6 @@ app.delete('/api/share/:id', authMiddleware, (req, res) => {
       saveSocial(social);
     }
     res.json({ share });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ===== STUDY GROUPS =====
-
-// StudyGroupStore: StudyGroup documents persist in social.json under the
-// studyGroups key (the blueprint's `groups` key is already occupied by the
-// chat-groups feature, whose record shape is incompatible — documented drift).
-// StudyGroup: { id, name, description, adminIds: string[], memberIds: string[],
-//   library: GroupLibraryItem[], sessions: SessionSummary[], invitations: GroupInvitation[], createdAt }
-// GroupLibraryItem: { id, itemType, itemId, title, contributorId, contributedAt, snapshot }
-// GroupInvitation: { id, userId, invitedBy, status: 'pending'|'declined', createdAt, respondedAt? }
-function getStudyGroups(social) {
-  if (!social.studyGroups) social.studyGroups = {};
-  return social.studyGroups;
-}
-function findStudyGroup(social, id) { return getStudyGroups(social)[id] || null; }
-function isGroupAdmin(group, userId) { return group.adminIds.includes(userId); }
-function isGroupMember(group, userId) { return group.memberIds.includes(userId); }
-
-// Deep-copy snapshot for group library contributions (Group Study ADR-002):
-// self-contained copy, personal metadata stripped, original never referenced again.
-function snapshotItemForGroup(item, itemType) {
-  const snap = JSON.parse(JSON.stringify(item), (k, v) => k === 'chatHistory' ? [] : v);
-  delete snap.topicId;
-  delete snap.linkedCurriculumId;
-  delete snap.linkedLessonId;
-  delete snap.lastEditedBy;
-  delete snap.lastEditedAt;
-  if (itemType === 'flashcardDeck' && Array.isArray(snap.cards)) {
-    // Strip the contributor's personal SM-2 scheduling state
-    for (const c of snap.cards) {
-      delete c.ease; delete c.interval; delete c.reps; delete c.lapses;
-      delete c.nextDue; delete c.lastReviewed;
-    }
-  }
-  return snap;
-}
-
-// Removes a departing user from a group's member/admin lists. Returns an error
-// string when the last-admin guard blocks the operation (key contract: a group
-// must always have at least one admin). successorId may name a member to
-// promote first.
-function removeUserFromGroup(group, userId, successorId) {
-  const remainingMembers = group.memberIds.filter(m => m !== userId);
-  const remainingAdmins = group.adminIds.filter(a => a !== userId);
-  if (remainingMembers.length > 0 && remainingAdmins.length === 0) {
-    if (!successorId || !remainingMembers.includes(successorId)) {
-      return 'A new admin must be assigned before the last admin can leave';
-    }
-    group.adminIds = [successorId];
-  } else {
-    group.adminIds = remainingAdmins;
-  }
-  group.memberIds = remainingMembers;
-  return null;
-}
-
-// StudyGroupController: create group (creator becomes admin)
-app.post('/api/study-groups', authMiddleware, (req, res) => {
-  try {
-    const { name, description } = req.body || {};
-    const trimmed = (name || '').trim();
-    if (!trimmed) return res.status(400).json({ error: 'Group name is required' });
-    if (trimmed.length > 100) return res.status(400).json({ error: 'Group name must be 100 characters or fewer' });
-    const social = loadSocial();
-    const group = {
-      id: crypto.randomUUID(), name: trimmed, description: (description || '').trim(),
-      adminIds: [req.userId], memberIds: [req.userId],
-      library: [], sessions: [], invitations: [],
-      createdAt: new Date().toISOString(),
-    };
-    getStudyGroups(social)[group.id] = group;
-    saveSocial(social);
-    res.json({ group });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// List groups for the current user (plus their pending invitations)
-app.get('/api/study-groups', authMiddleware, (req, res) => {
-  try {
-    const social = loadSocial();
-    const all = Object.values(getStudyGroups(social));
-    const groups = all.filter(g => isGroupMember(g, req.userId)).map(g => ({
-      id: g.id, name: g.name, description: g.description,
-      memberCount: g.memberIds.length, role: isGroupAdmin(g, req.userId) ? 'admin' : 'member',
-      libraryCount: g.library.length,
-      activeSession: (() => {
-        const s = findActiveSessionForGroup(g.id);
-        return s ? { sessionId: s.sessionId, hostId: s.hostId, libraryItemId: s.libraryItemId, itemTitle: s.itemTitle, mode: s.mode } : null;
-      })(),
-      createdAt: g.createdAt,
-    }));
-    const invitations = [];
-    let usersForNames = null;
-    for (const g of all) {
-      for (const inv of g.invitations) {
-        if (inv.userId === req.userId && inv.status === 'pending') {
-          if (!usersForNames) usersForNames = loadUsers();
-          invitations.push({
-            id: inv.id, groupId: g.id, groupName: g.name,
-            invitedBy: inv.invitedBy, invitedByName: shareDisplayName(social, usersForNames, inv.invitedBy),
-            memberCount: g.memberIds.length, createdAt: inv.createdAt,
-          });
-        }
-      }
-    }
-    res.json({ groups, invitations });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Group detail with members, roles, library, invitations
-app.get('/api/study-groups/:id', authMiddleware, (req, res) => {
-  try {
-    const social = loadSocial();
-    const group = findStudyGroup(social, req.params.id);
-    if (!group || !isGroupMember(group, req.userId)) return res.status(404).json({ error: 'Group not found' });
-    const users = loadUsers();
-    const members = group.memberIds.map(mid => ({
-      userId: mid,
-      name: shareDisplayName(social, users, mid),
-      handle: social.profiles[mid]?.handle || null,
-      role: isGroupAdmin(group, mid) ? 'admin' : 'member',
-    }));
-    const invitations = group.invitations.map(inv => ({
-      ...inv, userName: shareDisplayName(social, users, inv.userId),
-    }));
-    res.json({ group: { ...group, members, invitations } });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Invite a user to the group (admin only)
-app.post('/api/study-groups/:id/invite', authMiddleware, (req, res) => {
-  try {
-    const { userId } = req.body || {};
-    if (!userId) return res.status(400).json({ error: 'userId required' });
-    const social = loadSocial();
-    const group = findStudyGroup(social, req.params.id);
-    if (!group || !isGroupMember(group, req.userId)) return res.status(404).json({ error: 'Group not found' });
-    if (!isGroupAdmin(group, req.userId)) return res.status(403).json({ error: 'Only group admins can invite members' });
-    const users = loadUsers();
-    if (!findEmailById(users, userId)) return res.status(404).json({ error: 'No account found for that user' });
-    if (isGroupMember(group, userId)) return res.status(409).json({ error: 'User is already a member' });
-    if (group.invitations.some(i => i.userId === userId && i.status === 'pending')) {
-      return res.status(409).json({ error: 'User already has a pending invitation' });
-    }
-    const now = new Date().toISOString();
-    const invitation = { id: crypto.randomUUID(), userId, invitedBy: req.userId, status: 'pending', createdAt: now };
-    group.invitations.push(invitation);
-    getNotificationList(social, userId).push({
-      id: crypto.randomUUID(), type: 'group_invitation', invitationId: invitation.id,
-      groupId: group.id, groupName: group.name,
-      fromUserId: req.userId, fromName: shareDisplayName(social, users, req.userId),
-      memberCount: group.memberIds.length, createdAt: now, read: false,
-    });
-    saveSocial(social);
-    res.json({ invitation });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Accept a group invitation
-app.post('/api/study-groups/:id/join', authMiddleware, (req, res) => {
-  try {
-    const social = loadSocial();
-    const group = findStudyGroup(social, req.params.id);
-    if (!group) return res.status(404).json({ error: 'Group not found' });
-    const inv = group.invitations.find(i => i.userId === req.userId && i.status === 'pending');
-    if (!inv) return res.status(404).json({ error: 'No pending invitation for this group' });
-    group.invitations = group.invitations.filter(i => i.id !== inv.id);
-    if (!group.memberIds.includes(req.userId)) group.memberIds.push(req.userId);
-    removeNotifications(getNotificationList(social, req.userId), n => n.type === 'group_invitation' && n.invitationId === inv.id);
-    saveSocial(social);
-    res.json({ group: { id: group.id, name: group.name, memberCount: group.memberIds.length } });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Decline a group invitation (kept with declined status so the admin sees it)
-app.post('/api/study-groups/:id/decline', authMiddleware, (req, res) => {
-  try {
-    const social = loadSocial();
-    const group = findStudyGroup(social, req.params.id);
-    if (!group) return res.status(404).json({ error: 'Group not found' });
-    const inv = group.invitations.find(i => i.userId === req.userId && i.status === 'pending');
-    if (!inv) return res.status(404).json({ error: 'No pending invitation for this group' });
-    inv.status = 'declined';
-    inv.respondedAt = new Date().toISOString();
-    removeNotifications(getNotificationList(social, req.userId), n => n.type === 'group_invitation' && n.invitationId === inv.id);
-    saveSocial(social);
-    res.json({ invitation: inv });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Contribute a material snapshot to the group library
-app.post('/api/study-groups/:id/library', authMiddleware, (req, res) => {
-  try {
-    const { itemType, itemId } = req.body || {};
-    if (!itemType || !itemId) return res.status(400).json({ error: 'itemType and itemId required' });
-    if (!SHARE_ITEM_TYPES.includes(itemType)) return res.status(400).json({ error: 'Invalid itemType' });
-    const social = loadSocial();
-    const group = findStudyGroup(social, req.params.id);
-    if (!group || !isGroupMember(group, req.userId)) return res.status(404).json({ error: 'Group not found' });
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (!email) return res.status(404).json({ error: 'User not found' });
-    const item = findOwnedItem(users[email].data || {}, itemType, itemId);
-    if (!item) return res.status(404).json({ error: 'Item not found in your library' });
-    if (group.library.some(l => l.itemId === itemId && l.contributorId === req.userId)) {
-      return res.status(409).json({ error: 'You have already contributed this item to the group' });
-    }
-    const entry = {
-      id: crypto.randomUUID(), itemType, itemId,
-      title: item.title || 'Untitled', contributorId: req.userId,
-      contributedAt: new Date().toISOString(),
-      snapshot: snapshotItemForGroup(item, itemType),
-    };
-    group.library.push(entry);
-    saveSocial(social);
-    res.json({ item: entry });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Remove a contribution (contributor or admin; personal copy unaffected)
-app.delete('/api/study-groups/:id/library/:itemId', authMiddleware, (req, res) => {
-  try {
-    const social = loadSocial();
-    const group = findStudyGroup(social, req.params.id);
-    if (!group || !isGroupMember(group, req.userId)) return res.status(404).json({ error: 'Group not found' });
-    const entry = group.library.find(l => l.id === req.params.itemId);
-    if (!entry) return res.status(404).json({ error: 'Library item not found' });
-    if (entry.contributorId !== req.userId && !isGroupAdmin(group, req.userId)) {
-      return res.status(403).json({ error: 'Only the contributor or a group admin can remove this item' });
-    }
-    group.library = group.library.filter(l => l.id !== entry.id);
-    saveSocial(social);
-    res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Remove a member (admin) or leave the group (self). Last-admin guard applies.
-app.delete('/api/study-groups/:id/members/:userId', authMiddleware, (req, res) => {
-  try {
-    const targetId = req.params.userId;
-    const isSelf = targetId === req.userId;
-    const social = loadSocial();
-    const group = findStudyGroup(social, req.params.id);
-    if (!group || !isGroupMember(group, req.userId)) return res.status(404).json({ error: 'Group not found' });
-    if (!isSelf && !isGroupAdmin(group, req.userId)) return res.status(403).json({ error: 'Only group admins can remove members' });
-    if (!isGroupMember(group, targetId)) return res.status(404).json({ error: 'User is not a member of this group' });
-    const guardError = removeUserFromGroup(group, targetId, (req.body || {}).successorId);
-    if (guardError) return res.status(422).json({ error: guardError });
-    // Departing members lose session access immediately (AC-GS-003.2).
-    // If the departing member hosts the active session, the session ends —
-    // remaining members would otherwise be locked out of host-only controls.
-    const activeSession = findActiveSessionForGroup(group.id);
-    if (activeSession) {
-      if (activeSession.hostId === targetId) {
-        terminateSessionsForGroup(group.id);
-      } else if (activeSession.streams.has(targetId)) {
-        detachSessionStream(activeSession, targetId);
-      }
-    }
-    if (group.memberIds.length === 0) {
-      // Last member left — group dissolves (and any session with it)
-      terminateSessionsForGroup(group.id);
-      delete getStudyGroups(social)[group.id];
-    } else if (!isSelf) {
-      getNotificationList(social, targetId).push({
-        id: crypto.randomUUID(), type: 'group_removed',
-        groupId: group.id, groupName: group.name,
-        fromUserId: req.userId, fromName: shareDisplayName(social, loadUsers(), req.userId),
-        createdAt: new Date().toISOString(), read: false,
-      });
-    }
-    saveSocial(social);
-    res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Promote a member to admin (admin only)
-app.post('/api/study-groups/:id/members/:userId/promote', authMiddleware, (req, res) => {
-  try {
-    const social = loadSocial();
-    const group = findStudyGroup(social, req.params.id);
-    if (!group || !isGroupMember(group, req.userId)) return res.status(404).json({ error: 'Group not found' });
-    if (!isGroupAdmin(group, req.userId)) return res.status(403).json({ error: 'Only group admins can promote members' });
-    const targetId = req.params.userId;
-    if (!isGroupMember(group, targetId)) return res.status(404).json({ error: 'User is not a member of this group' });
-    if (!group.adminIds.includes(targetId)) group.adminIds.push(targetId);
-    saveSocial(social);
-    res.json({ group: { id: group.id, adminIds: group.adminIds } });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Disband the group (admin only). The last-admin rule applies when other
-// members remain: a sole admin must name a successor (who is promoted) for
-// the request to proceed — the frontend prompts for this (AC-GS-003.4/.5).
-app.delete('/api/study-groups/:id', authMiddleware, (req, res) => {
-  try {
-    const social = loadSocial();
-    const group = findStudyGroup(social, req.params.id);
-    if (!group || !isGroupMember(group, req.userId)) return res.status(404).json({ error: 'Group not found' });
-    if (!isGroupAdmin(group, req.userId)) return res.status(403).json({ error: 'Only group admins can disband the group' });
-    const otherMembers = group.memberIds.filter(m => m !== req.userId);
-    const soleAdmin = group.adminIds.length === 1 && group.adminIds[0] === req.userId;
-    if (soleAdmin && otherMembers.length > 0) {
-      // Deliberate confirmation gate (WO-2/AC-GS-003.4): a sole admin must name
-      // a valid successor for the disband to proceed. The group is deleted
-      // below, so no promotion is recorded.
-      const successorId = (req.body || {}).successorId;
-      if (!successorId || !otherMembers.includes(successorId)) {
-        return res.status(422).json({ error: 'Assign a new admin before disbanding, or name a successor' });
-      }
-    }
-    const now = new Date().toISOString();
-    const users = loadUsers();
-    const fromName = shareDisplayName(social, users, req.userId);
-    for (const mid of otherMembers) {
-      removeNotifications(getNotificationList(social, mid), n => n.type === 'group_invitation' && n.groupId === group.id);
-      getNotificationList(social, mid).push({
-        id: crypto.randomUUID(), type: 'group_disbanded',
-        groupId: group.id, groupName: group.name,
-        fromUserId: req.userId, fromName, createdAt: now, read: false,
-      });
-    }
-    // Cancel pending invitations' notifications for non-members too
-    for (const inv of group.invitations) {
-      if (inv.status === 'pending') {
-        removeNotifications(getNotificationList(social, inv.userId), n => n.type === 'group_invitation' && n.invitationId === inv.id);
-      }
-    }
-    // Active sessions are terminated when the group is disbanded (key contract)
-    terminateSessionsForGroup(group.id);
-    // Library entries are deleted with the group; personal originals untouched.
-    delete getStudyGroups(social)[group.id];
-    saveSocial(social);
-    res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ===== GROUP STUDY SESSIONS (SessionManager) =====
-
-// SessionManager: in-memory registry of active StudySessions (Group Study
-// ADR-001 — SSE fan-out; a server restart terminates all sessions by design).
-// SessionEvent: { type: 'state'|'advance'|'join'|'leave'|'end', sessionId,
-//   currentIndex, totalItems, participantIds, scores }
-// SessionSummary (persisted on end): { sessionId, hostId, itemId, itemType,
-//   totalItems, scores, startedAt, endedAt }
-const activeSessions = new Map();
-
-function findActiveSessionForGroup(groupId) {
-  for (const s of activeSessions.values()) if (s.groupId === groupId) return s;
-  return null;
-}
-
-function sessionEventPayload(session, type) {
-  return {
-    type, sessionId: session.sessionId,
-    currentIndex: session.currentIndex, totalItems: session.totalItems,
-    participantIds: [...session.participantIds], scores: { ...session.scores },
-  };
-}
-
-function writeSessionEvent(res, eventId, payload) {
-  try {
-    res.write(`id: ${eventId}\ndata: ${JSON.stringify(payload)}\n\n`);
-    res.flush?.();
-  } catch {}
-}
-
-function broadcastSessionEvent(session, type) {
-  session.eventId += 1;
-  const payload = sessionEventPayload(session, type);
-  for (const res of session.streams.values()) writeSessionEvent(res, session.eventId, payload);
-}
-
-function detachSessionStream(session, userId, { broadcastLeave = true } = {}) {
-  const interval = session.keepalives.get(userId);
-  if (interval) clearInterval(interval);
-  session.keepalives.delete(userId);
-  const res = session.streams.get(userId);
-  session.streams.delete(userId);
-  if (res) { try { res.end(); } catch {} }
-  session.participantIds = session.participantIds.filter(p => p !== userId);
-  if (broadcastLeave) broadcastSessionEvent(session, 'leave');
-}
-
-// Terminates every active session for a group (disband / member-removal hooks).
-function terminateSessionsForGroup(groupId) {
-  for (const session of [...activeSessions.values()]) {
-    if (session.groupId !== groupId) continue;
-    broadcastSessionEvent(session, 'end');
-    for (const uid of [...session.streams.keys()]) detachSessionStream(session, uid, { broadcastLeave: false });
-    activeSessions.delete(session.sessionId);
-  }
-}
-
-function sessionTotalItems(entry) {
-  const snap = entry.snapshot || {};
-  if (entry.itemType === 'flashcardDeck') return Math.max(1, (snap.cards || []).length);
-  if (entry.itemType === 'curriculum') {
-    const lessons = (snap.units || []).reduce((n, u) => n + ((u.lessons || []).length), 0);
-    return Math.max(1, lessons);
-  }
-  return 1;
-}
-
-// Start a session: caller becomes Session Host (AC-GS-005.1)
-app.post('/api/study-groups/:id/sessions', authMiddleware, (req, res) => {
-  try {
-    const { libraryItemId, mode } = req.body || {};
-    if (!libraryItemId) return res.status(400).json({ error: 'libraryItemId required' });
-    const social = loadSocial();
-    const group = findStudyGroup(social, req.params.id);
-    if (!group || !isGroupMember(group, req.userId)) return res.status(404).json({ error: 'Group not found' });
-    const entry = group.library.find(l => l.id === libraryItemId);
-    if (!entry) return res.status(404).json({ error: 'Material not found in the group library' });
-    if (findActiveSessionForGroup(group.id)) return res.status(409).json({ error: 'This group already has an active session' });
-    const now = new Date().toISOString();
-    const session = {
-      sessionId: crypto.randomUUID(), groupId: group.id, hostId: req.userId,
-      libraryItemId: entry.id, itemId: entry.itemId, itemType: entry.itemType,
-      itemTitle: entry.title, mode: String(mode || 'flashcards').slice(0, 50),
-      totalItems: sessionTotalItems(entry), currentIndex: 0,
-      participantIds: [req.userId], scores: {}, startedAt: now,
-      eventId: 0, streams: new Map(), keepalives: new Map(),
-    };
-    // Notify every other member with a join action (AC-GS-005.2 / AC-GS-006.2).
-    // Members who join the group later must join explicitly (AC-GS-005.7).
-    const users = loadUsers();
-    const hostName = shareDisplayName(social, users, req.userId);
-    const sessionName = `${entry.title} (${session.mode})`;
-    for (const mid of group.memberIds) {
-      if (mid === req.userId) continue;
-      getNotificationList(social, mid).push({
-        id: crypto.randomUUID(), type: 'session_started',
-        groupId: group.id, groupName: group.name,
-        sessionId: session.sessionId, sessionName,
-        fromUserId: req.userId, fromName: hostName,
-        createdAt: now, read: false,
-      });
-    }
-    saveSocial(social);
-    // Register only after the notification write succeeds, so a failed save
-    // cannot leave the group 409-locked by a session the client never saw.
-    activeSessions.set(session.sessionId, session);
-    res.json({ session: { sessionId: session.sessionId, groupId: group.id, hostId: session.hostId, libraryItemId: entry.id, itemTitle: session.itemTitle, itemType: session.itemType, mode: session.mode, totalItems: session.totalItems, currentIndex: 0, startedAt: now } });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// SSE stream for a session participant. Membership is validated before the
-// stream is established (blueprint key contract). On connect (fresh join or
-// Last-Event-ID reconnect) the current state is replayed — never history
-// (AC-GS-005.3 / AC-GS-005.5).
-app.get('/api/study-groups/:id/sessions/:sessionId/stream', authMiddleware, (req, res) => {
-  try {
-    const social = loadSocial();
-    const group = findStudyGroup(social, req.params.id);
-    if (!group || !isGroupMember(group, req.userId)) return res.status(404).json({ error: 'Group not found' });
-    const session = activeSessions.get(req.params.sessionId);
-    if (!session || session.groupId !== group.id) return res.status(404).json({ error: 'Session not found or has ended' });
-
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    res.flushHeaders();
-
-    // Replace any stale connection for this user without a leave broadcast
-    if (session.streams.has(req.userId)) detachSessionStream(session, req.userId, { broadcastLeave: false });
-
-    session.streams.set(req.userId, res);
-    if (!session.participantIds.includes(req.userId)) session.participantIds.push(req.userId);
-
-    // Current state to the new connection, join to everyone else
-    session.eventId += 1;
-    writeSessionEvent(res, session.eventId, sessionEventPayload(session, 'state'));
-    for (const [uid, stream] of session.streams) {
-      if (uid === req.userId) continue;
-      writeSessionEvent(stream, session.eventId, sessionEventPayload(session, 'join'));
-    }
-
-    const keepalive = setInterval(() => {
-      try { res.write(`: keepalive ${Date.now()}\n\n`); res.flush?.(); } catch {}
-    }, 8000);
-    session.keepalives.set(req.userId, keepalive);
-
-    req.on('close', () => {
-      // Only detach if this response is still the registered stream (a
-      // reconnect may have already replaced it).
-      if (session.streams.get(req.userId) === res) {
-        detachSessionStream(session, req.userId);
-      } else {
-        clearInterval(keepalive);
-      }
-    });
-  } catch (e) {
-    // Headers may already be flushed (SSE); end the stream rather than hang it
-    try { res.status(500).json({ error: e.message }); } catch { try { res.end(); } catch {} }
-  }
-});
-
-// Host advances to the next item; all participant views update in sync
-// (AC-GS-005.4). The host may attach { scores: { userId: number } } — SSE is
-// one-way, so quiz scoring flows through the host's advance calls.
-app.post('/api/study-groups/:id/sessions/:sessionId/advance', authMiddleware, (req, res) => {
-  try {
-    const session = activeSessions.get(req.params.sessionId);
-    if (!session || session.groupId !== req.params.id) return res.status(404).json({ error: 'Session not found or has ended' });
-    if (session.hostId !== req.userId) return res.status(403).json({ error: 'Only the session host can advance' });
-    // Host must still be a group member (covers removal mid-session)
-    const groupNow = findStudyGroup(loadSocial(), session.groupId);
-    if (!groupNow || !isGroupMember(groupNow, req.userId)) return res.status(404).json({ error: 'Group not found' });
-    const { scores } = req.body || {};
-    if (scores && typeof scores === 'object') {
-      for (const [uid, val] of Object.entries(scores)) {
-        if (Number.isFinite(val) && (session.participantIds.includes(uid) || uid in session.scores)) session.scores[uid] = val;
-      }
-    }
-    if (session.currentIndex < session.totalItems - 1) session.currentIndex += 1;
-    broadcastSessionEvent(session, 'advance');
-    res.json({ session: sessionEventPayload(session, 'state') });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Host ends the session: broadcast end (participants render the summary from
-// this final event — AC-GS-005.6), persist SessionSummary, close streams.
-app.delete('/api/study-groups/:id/sessions/:sessionId', authMiddleware, (req, res) => {
-  try {
-    const session = activeSessions.get(req.params.sessionId);
-    if (!session || session.groupId !== req.params.id) return res.status(404).json({ error: 'Session not found or has ended' });
-    if (session.hostId !== req.userId) return res.status(403).json({ error: 'Only the session host can end the session' });
-    // Host must still be a group member (covers removal mid-session)
-    const groupCheck = findStudyGroup(loadSocial(), session.groupId);
-    if (!groupCheck || !isGroupMember(groupCheck, req.userId)) return res.status(404).json({ error: 'Group not found' });
-    const endedAt = new Date().toISOString();
-    const summary = {
-      sessionId: session.sessionId, hostId: session.hostId,
-      itemId: session.itemId, itemType: session.itemType,
-      totalItems: session.totalItems, scores: { ...session.scores },
-      startedAt: session.startedAt, endedAt,
-    };
-    broadcastSessionEvent(session, 'end');
-    for (const uid of [...session.streams.keys()]) detachSessionStream(session, uid, { broadcastLeave: false });
-    activeSessions.delete(session.sessionId);
-    const social = loadSocial();
-    const group = findStudyGroup(social, session.groupId);
-    if (group) {
-      group.sessions.push(summary);
-      saveSocial(social);
-    }
-    res.json({ summary });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -9983,6 +9930,7 @@ RULES:
 - Every lesson must have "id", "title", "description", and "type" (one of: "lesson", "math_tutor", "practice", "essay", "unit_test"). "math_tutor" = step-by-step worked problems on a handwriting canvas (math only). "essay" = a graded short essay (scored against a rubric).
 - DO NOT invent user progress fields like chatHistory, isCompleted, score, phase - the server preserves those on the client side.
 - If the instruction is ambiguous, use your best judgment. Do NOT refuse.
+- Output minified JSON on a single line - no indentation or extra whitespace. Large curricula must fit in the response.
 
 Return JSON with this exact shape:
 {
@@ -9995,27 +9943,35 @@ Return JSON with this exact shape:
   ]
 }`;
 
+    const skeletonJson = JSON.stringify(skeleton);
     const userParts = [
-      `CURRENT CURRICULUM (JSON):\n${JSON.stringify(skeleton, null, 2)}`,
+      `CURRENT CURRICULUM (JSON):\n${skeletonJson}`,
     ];
     if (contextPieces.length) {
       userParts.push(`\nCONTEXT FILES:\n${contextPieces.join('\n\n')}`);
     }
     userParts.push(`\nINSTRUCTION FROM USER:\n${instruction.trim()}`);
 
+    // The model re-emits the ENTIRE curriculum, so the output budget must
+    // scale with its size (plus headroom for thinking tokens and additions).
+    // A flat 8192 truncated anything beyond ~30 units mid-JSON, which made
+    // every edit on a large curriculum fail with "invalid JSON". 60000 stays
+    // under Gemini's 65536 and Claude's 64000 output ceilings; the timeout
+    // override covers re-emits that outlive callGemini's default 60s.
+    const maxTokens = Math.min(60000, Math.max(8192, 4096 + Math.ceil(skeletonJson.length / 3)));
     const result = await callGemini(
       system,
       [{ role: 'user', content: userParts.join('\n\n') }],
-      modelForUser(users[email], email),
-      8192,
-      { jsonMode: true, temperature: 0.5 }
+      modelForUser(users[email], email, { provider: 'anthropic' }),
+      maxTokens,
+      { jsonMode: true, temperature: 0.5, timeoutMs: 240_000 }
     );
     if (!result.success) return res.status(500).json({ error: result.error || 'Edit failed' });
 
     const text = result.data.content?.[0]?.text || '';
     const updated = parseAIJson(text);
     if (!updated || !Array.isArray(updated.units)) {
-      console.error('Curriculum-edit parse failed. First 400 chars:', text.slice(0, 400));
+      console.error(`Curriculum-edit parse failed (${text.length} chars). First 400:`, text.slice(0, 400), '…Last 200:', text.slice(-200));
       return res.status(500).json({ error: 'Model returned invalid JSON. Try again.' });
     }
 
@@ -10319,11 +10275,19 @@ app.post('/api/lessons/:id/blocks/generate', authMiddleware, async (req, res) =>
       return res.status(500).json({ error: 'Lesson generation failed. Please try again.' });
     }
 
-    const blocks = blocksRaw.map((b, i) => stampBlock(lesson.id, b, i));
+    // Re-resolve on fresh data after the AI wait — saving the pre-await
+    // snapshot would revert every write that landed while we waited.
+    const fresh = refetchStandaloneLesson(req.userId, req.params.id);
+    if (!fresh) return res.status(404).json({ error: 'Lesson not found' });
+    if (Array.isArray(fresh.lesson.blocks) && fresh.lesson.blocks.length > 0) {
+      return res.json({ blocks: fresh.lesson.blocks });
+    }
 
-    lesson.blocks = blocks;
-    lesson.lastActiveAt = Date.now();
-    saveUsers(users);
+    const blocks = blocksRaw.map((b, i) => stampBlock(fresh.lesson.id, b, i));
+
+    fresh.lesson.blocks = blocks;
+    fresh.lesson.lastActiveAt = Date.now();
+    saveUsers(fresh.users);
     res.json({ blocks });
   } catch (e) {
     console.error('lessons blocks/generate failed:', e);
@@ -10373,9 +10337,17 @@ Return JSON exactly:
       return res.status(500).json({ error: 'Final quiz returned no questions. Try again.' });
     }
 
-    const block = stampBlock(lesson.id, { type: 'quiz', title: 'Final Quiz', questions: parsed.questions }, lesson.blocks.length, { isFinal: true });
-    lesson.blocks.push(block);
-    saveUsers(users);
+    // Re-resolve on fresh data after the AI wait (see blocks/generate).
+    const fresh = refetchStandaloneLesson(req.userId, req.params.id);
+    if (!fresh || !Array.isArray(fresh.lesson.blocks) || fresh.lesson.blocks.length === 0) {
+      return res.status(404).json({ error: 'Lesson not found' });
+    }
+    const freshLast = fresh.lesson.blocks[fresh.lesson.blocks.length - 1];
+    if (freshLast?.isFinal) return res.json({ block: freshLast });
+
+    const block = stampBlock(fresh.lesson.id, { type: 'quiz', title: 'Final Quiz', questions: parsed.questions }, fresh.lesson.blocks.length, { isFinal: true });
+    fresh.lesson.blocks.push(block);
+    saveUsers(fresh.users);
     res.json({ block });
   } catch (e) {
     console.error('lessons blocks/final-quiz/generate failed:', e);
@@ -10490,7 +10462,13 @@ Return JSON: { "perRubric": [{"label":"...","score":<0-100>,"note":"..."}], "fee
     });
     const finalScore = weightSum > 0 ? Math.round(total / weightSum) : 0;
 
-    block.submission = {
+    // Re-resolve on fresh data after the AI wait (see blocks/generate).
+    const fresh = refetchStandaloneLesson(req.userId, req.params.id);
+    if (!fresh) return res.status(404).json({ error: 'Lesson not found' });
+    const freshBlock = (fresh.lesson.blocks || []).find(b => b.id === req.params.bid);
+    if (!freshBlock || freshBlock.type !== 'open') return res.status(404).json({ error: 'Open-answer block not found' });
+
+    freshBlock.submission = {
       text: String(text).slice(0, 6000),
       submittedAt: new Date().toISOString(),
       score: finalScore,
@@ -10498,10 +10476,10 @@ Return JSON: { "perRubric": [{"label":"...","score":<0-100>,"note":"..."}], "fee
       perRubric,
       feedback: String(parsed.feedback || '').slice(0, 2000),
     };
-    block.score = finalScore;
-    block.completedAt = block.submission.submittedAt;
-    saveUsers(users);
-    res.json({ submission: block.submission });
+    freshBlock.score = finalScore;
+    freshBlock.completedAt = freshBlock.submission.submittedAt;
+    saveUsers(fresh.users);
+    res.json({ submission: freshBlock.submission });
   } catch (e) {
     console.error('lessons blocks/grade-open failed:', e);
     res.status(500).json({ error: e.message });
@@ -12069,6 +12047,87 @@ app.get('/api/quizbowl/sets', authMiddleware, (req, res) => {
   }
 });
 
+// GET /api/quizbowl/matches - saved multiplayer match replays for this user.
+app.get('/api/quizbowl/matches', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    res.json({ matches: users[email].data.multiplayerMatches || [] });
+  } catch (e) {
+    console.error('QB list matches error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/quizbowl/matches - save a finished AI/bot game replay.
+// AI lobby and 1v1 bot games run entirely client-side (TrialSession), so
+// the client submits the finished question log in the same shape that
+// saveMatchReplay() produces for multiplayer, and it lands in the same
+// multiplayerMatches list the Replays tab reads. The human player's
+// identity always comes from the auth token, never the payload.
+app.post('/api/quizbowl/matches', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const body = req.body || {};
+    const rawQuestions = Array.isArray(body.questions) ? body.questions : [];
+    if (!rawQuestions.length) return res.status(400).json({ error: 'No questions in replay' });
+
+    const str = (v, max) => String(v ?? '').slice(0, max);
+    const num = (v, fallback = 0) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
+    const questions = rawQuestions.slice(0, 50).map(q => ({
+      text: str(q.text, 4000),
+      answer: str(q.answer, 400),
+      powerWordIndex: Number.isInteger(q.powerWordIndex) ? q.powerWordIndex : null,
+      totalWords: num(q.totalWords),
+      buzzes: (Array.isArray(q.buzzes) ? q.buzzes : []).slice(0, 20).map(b => ({
+        userId: b.isBot ? str(b.userId, 60) : req.userId,
+        name: b.isBot ? str(b.name, 60) : (users[email].name || 'You'),
+        isBot: !!b.isBot,
+        buzzWord: num(b.buzzWord),
+        totalWords: num(b.totalWords),
+        answer: str(b.answer, 200),
+        correct: !!b.correct,
+        points: num(b.points),
+      })),
+    }));
+    const players = (Array.isArray(body.players) ? body.players : []).slice(0, 16).map(p => ({
+      userId: p.isBot ? str(p.userId, 60) : req.userId,
+      name: p.isBot ? str(p.name, 60) : (users[email].name || 'You'),
+      isBot: !!p.isBot,
+      finalScore: num(p.finalScore),
+    }));
+    if (!players.some(p => p.isBot)) return res.status(400).json({ error: 'Not an AI match' });
+
+    const record = {
+      id: crypto.randomUUID(),
+      code: 'AI',
+      category: str(body.category, 60) || 'Mixed',
+      difficulty: str(body.difficulty, 30) || 'Medium',
+      scoringFormat: str(body.scoringFormat, 30) || 'standard',
+      finishedAt: new Date().toISOString(),
+      players,
+      questions,
+      totalQuestions: num(body.totalQuestions, questions.length),
+      myUserId: req.userId,
+    };
+    users[email].data = migrateUserData(users[email].data);
+    if (!users[email].data.multiplayerMatches) users[email].data.multiplayerMatches = [];
+    users[email].data.multiplayerMatches.unshift(record);
+    if (users[email].data.multiplayerMatches.length > 50) {
+      users[email].data.multiplayerMatches = users[email].data.multiplayerMatches.slice(0, 50);
+    }
+    saveUsers(users);
+    res.json({ ok: true, match: record });
+  } catch (e) {
+    console.error('QB save AI match error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /api/quizbowl/sm2-due - categories where the SM-2 algorithm says the
 // student is due for another drill session. Capped at 5 results, sorted by
 // how overdue they are. Only surfaces categories with at least 1 rep so a
@@ -12466,6 +12525,11 @@ function newMatchCode() {
   return `M${Date.now().toString(36).slice(-5).toUpperCase()}`;
 }
 
+// How long a player has to answer after buzzing in. Once this elapses the
+// buzz is forfeited (treated as a wrong/no answer) so nobody can sit on a
+// buzz and look the answer up. Surfaced to every client as a live countdown.
+const QUIZBOWL_BUZZ_ANSWER_MS = 9000;
+
 function pushMatchEvent(match, type, payload) {
   const body = `data: ${JSON.stringify({ type, ...payload })}\n\n`;
   for (const p of match.players) {
@@ -12481,16 +12545,127 @@ function pushMatchEvent(match, type, payload) {
   }
 }
 
+// Record a buzz attempt into match.currentQuestionBuzzes.
+// Called from both /answer and /bot-answer so every human and bot buzz
+// is captured with its word position (computed from elapsed time).
+function recordBuzzForLog(match, { userId, answer, correct, points }) {
+  if (!match.currentQuestionBuzzes) match.currentQuestionBuzzes = [];
+  const q = match.questions[match.currentIdx];
+  if (!q) return;
+  const totalWords = (q.text || '').split(/\s+/).filter(Boolean).length;
+  const speed = match.revealSpeedMs || 140;
+  const elapsed = Math.max(0, (match.buzzAt || Date.now()) - (match.questionStartedAt || 0));
+  const buzzWord = Math.min(Math.max(0, Math.floor(elapsed / speed)), totalWords - 1);
+  const player = match.players.find(p => p.userId === userId);
+  match.currentQuestionBuzzes.push({
+    userId,
+    name: player?.name || String(userId).replace(/^bot:[^:]+:/, ''),
+    isBot: !!player?.isBot,
+    buzzWord,
+    totalWords,
+    answer: String(answer || '').trim(),
+    correct: !!correct,
+    points: typeof points === 'number' ? points : 0,
+  });
+}
+
+// Push the current question into match.questionLog and reset the per-Q accumulator.
+// Must be called before match.currentIdx changes.
+function finalizeQuestionLog(match) {
+  if (!match.questionLog) match.questionLog = [];
+  const q = match.questions[match.currentIdx];
+  if (!q) return;
+  const totalWords = (q.text || '').split(/\s+/).filter(Boolean).length;
+  match.questionLog.push({
+    text: q.text || '',
+    answer: q.answer || '',
+    powerWordIndex: q.powerWordIndex ?? null,
+    totalWords,
+    buzzes: Array.isArray(match.currentQuestionBuzzes) ? [...match.currentQuestionBuzzes] : [],
+  });
+  match.currentQuestionBuzzes = [];
+}
+
+// Compact head-to-head summary sent with `match_end` so the finished screen
+// can show a per-question "compare and contrast" of every player without a
+// separate replay fetch. Built straight from the finalized question log.
+function buildMatchComparison(match) {
+  const players = (match.players || []).map(p => ({
+    userId: p.userId,
+    name: p.name,
+    isBot: !!p.isBot,
+    finalScore: match.scores?.[p.userId] || 0,
+  }));
+  const questions = (match.questionLog || []).map(q => ({
+    answer: q.answer || '',
+    totalWords: q.totalWords || ((q.text || '').split(/\s+/).filter(Boolean).length),
+    powerWordIndex: q.powerWordIndex ?? null,
+    buzzes: (q.buzzes || []).map(b => ({
+      userId: b.userId,
+      name: b.name,
+      isBot: !!b.isBot,
+      buzzWord: b.buzzWord,
+      correct: !!b.correct,
+      points: typeof b.points === 'number' ? b.points : 0,
+      answer: b.answer || '',
+    })),
+  }));
+  return { players, questions };
+}
+
+// Persist the completed match replay to each real (non-bot) player's data.
+function saveMatchReplay(match) {
+  try {
+    if (!match.questionLog || match.questionLog.length === 0) return;
+    const users = loadUsers();
+    const finishedAt = new Date().toISOString();
+    const record = {
+      id: crypto.randomUUID(),
+      code: match.code,
+      category: match.category || 'Mixed',
+      difficulty: match.difficulty || 'Medium',
+      scoringFormat: match.scoringFormat || 'standard',
+      finishedAt,
+      players: match.players.map(p => ({
+        userId: p.userId,
+        name: p.name,
+        isBot: !!p.isBot,
+        finalScore: match.scores[p.userId] || 0,
+      })),
+      questions: match.questionLog.slice(0, 50),
+      totalQuestions: (match.questions || []).length,
+    };
+    const realPlayers = match.players.filter(p => !p.isBot);
+    let dirty = false;
+    for (const p of realPlayers) {
+      const email = findEmailById(users, p.userId);
+      if (!email || !users[email]) continue;
+      users[email].data = migrateUserData(users[email].data);
+      if (!users[email].data.multiplayerMatches) users[email].data.multiplayerMatches = [];
+      users[email].data.multiplayerMatches.unshift({ ...record, myUserId: p.userId });
+      if (users[email].data.multiplayerMatches.length > 50) {
+        users[email].data.multiplayerMatches = users[email].data.multiplayerMatches.slice(0, 50);
+      }
+      dirty = true;
+    }
+    if (dirty) saveUsers(users);
+  } catch (e) {
+    console.error('[QB] saveMatchReplay error:', e);
+  }
+}
+
 // Advance to next question (or end match). Used by host /next endpoint
 // AND by the auto-advance timer that fires 5s after any reveal state.
 function advanceMatchToNextQuestion(match) {
   if (match.revealTimeoutId) { clearTimeout(match.revealTimeoutId); match.revealTimeoutId = null; }
   if (match.questionTimeoutId) { clearTimeout(match.questionTimeoutId); match.questionTimeoutId = null; }
+  finalizeQuestionLog(match);
   const nextIdx = match.currentIdx + 1;
   if (nextIdx >= match.questions.length) {
     match.state = 'finished';
     match.lastActivity = Date.now();
-    pushMatchEvent(match, 'match_end', { scores: match.scores });
+    saveMatchReplay(match);
+    pushMatchEvent(match, 'match_end', { scores: match.scores, comparison: buildMatchComparison(match) });
     return;
   }
   match.currentIdx = nextIdx;
@@ -12509,12 +12684,60 @@ function advanceMatchToNextQuestion(match) {
   scheduleQuestionTimeout(match);
 }
 
+// The buzz answer clock. Once a player buzzes they have QUIZBOWL_BUZZ_ANSWER_MS
+// to answer; if they don't, the buzz is forfeited and scored as a wrong answer
+// (a neg if it interrupted the read) so stalling to look the answer up costs
+// you the question. Doubles as the safety net for a buzzer who disconnects.
+function scheduleBuzzTimeout(match) {
+  if (match.buzzTimeoutId) { clearTimeout(match.buzzTimeoutId); match.buzzTimeoutId = null; }
+  match.buzzTimeoutId = setTimeout(() => {
+    if (!matches.has(match.code)) return;
+    if (match.state !== 'playing' || !match.buzzWinner) return;
+    const buzzer = match.buzzWinner;
+    const buzzAt = match.buzzAt || Date.now();
+    const q = match.questions[match.currentIdx];
+    // Score the dead buzz exactly like a submitted wrong answer, and log it
+    // so it shows up in the replay / compare view.
+    const negPts = quizbowlScoreForBuzz(match, { correct: false });
+    recordBuzzForLog(match, { userId: buzzer, answer: '', correct: false, points: negPts });
+    if (negPts) match.scores[buzzer] = (match.scores[buzzer] || 0) + negPts;
+    match.buzzWinner = null;
+    match.buzzAt = null;
+    if (!match.lockedOutForQ) match.lockedOutForQ = {};
+    match.lockedOutForQ[buzzer] = true;
+    match.lastActivity = Date.now();
+    const stillPlaying = match.players.filter(p => !match.lockedOutForQ[p.userId]);
+    if (stillPlaying.length === 0) {
+      match.state = 'reveal';
+      pushMatchEvent(match, 'answer_result', {
+        userId: buzzer, correct: false, answer: '', timedOut: true,
+        correctAnswer: q?.answer || '', scores: match.scores,
+        finalMiss: true, autoAdvanceInMs: 5000, ptsGained: negPts,
+      });
+      scheduleAutoAdvance(match, 5000);
+    } else {
+      // Hand the stalled reading time back to the remaining players so they
+      // don't get a wall of text dumped on resume.
+      const pausedMs = Date.now() - buzzAt;
+      match.questionStartedAt = (match.questionStartedAt || Date.now()) + pausedMs;
+      pushMatchEvent(match, 'wrong_answer', {
+        userId: buzzer, answer: '', correctAnswer: q?.answer || '', timedOut: true,
+        lockedOut: Object.keys(match.lockedOutForQ),
+        questionStartedAt: match.questionStartedAt,
+        scores: match.scores, ptsGained: negPts,
+      });
+      scheduleQuestionTimeout(match);
+    }
+  }, QUIZBOWL_BUZZ_ANSWER_MS);
+}
+
 // Server-side "time's up" for the current question. If no correct answer
 // comes in by the time the question has been fully read + a grace period,
 // reveal the answer and auto-advance. This is what the user means by
 // "at the end of the question, everyone shouldn't have to buzz wrong to move on."
 function scheduleQuestionTimeout(match) {
   if (match.questionTimeoutId) clearTimeout(match.questionTimeoutId);
+  if (match.buzzTimeoutId) { clearTimeout(match.buzzTimeoutId); match.buzzTimeoutId = null; }
   const q = match.questions[match.currentIdx];
   if (!q) return;
   const words = (q.text || '').split(/\s+/).filter(Boolean).length || 1;
@@ -12561,14 +12784,17 @@ function scheduleDisconnectAbandon(match, userId, graceMs = 10000) {
     if (!['playing', 'reveal', 'generating'].includes(match.state)) return;
     if (match.questionTimeoutId) { clearTimeout(match.questionTimeoutId); match.questionTimeoutId = null; }
     if (match.revealTimeoutId)   { clearTimeout(match.revealTimeoutId);   match.revealTimeoutId = null; }
+    finalizeQuestionLog(match);
     match.state = 'finished';
     match.buzzWinner = null;
     match.buzzAt = null;
+    saveMatchReplay(match);
     pushMatchEvent(match, 'match_end', {
       scores: match.scores,
       abandoned: true,
       leftBy: userId,
       reason: 'disconnect',
+      comparison: buildMatchComparison(match),
     });
     match.players = match.players.filter(p => p.userId !== userId);
     if (!match.players.length) matches.delete(match.code);
@@ -12594,12 +12820,21 @@ function publicMatchState(match) {
       : null,
     buzzWinner: match.buzzWinner,
     buzzAt: match.buzzAt,
+    // Time the buzzer has left to answer, so a client that joins/reconnects
+    // mid-buzz can resume the same countdown everyone else is seeing.
+    answerWindowMs: QUIZBOWL_BUZZ_ANSWER_MS,
     hostId: match.hostId,
     category: match.category,
     difficulty: match.difficulty,
     revealSpeedMs: match.revealSpeedMs,
     scoringFormat: match.scoringFormat || 'standard',
     maxPlayers: QUIZBOWL_MAX_PLAYERS,
+    // Group study matches: questions are generated from this material rather
+    // than a category, and the lobby shows the title instead of the picker.
+    studyTitle: match.studyContext?.title || null,
+    // On the finished screen, ship the head-to-head breakdown so a late
+    // snapshot (reconnect) can still render the compare view.
+    comparison: match.state === 'finished' ? buildMatchComparison(match) : undefined,
   };
 }
 
@@ -12816,11 +13051,24 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
   res.json({ ok: true });
 
   try {
-    const sys = `You are a quiz bowl question writer. Write pyramidal tossup questions - each starts with obscure clues and progressively gets easier. Include a NAQT-style power mark "(*)" placed roughly 60-70% of the way through each question (after the hard clues but before the "giveaway" clue) - buzzing before the mark earns +15, after earns +10. Output ONLY valid JSON with no markdown, no code fences, no prose before or after.
+    const grounded = !!(match.studyContext && match.studyContext.text);
+    const sys = grounded
+      ? `You are a quiz bowl question writer. Write pyramidal tossup questions based ONLY on the provided study material - never use outside knowledge; every clue and every answer must be checkable against the material text alone. Each question starts with obscure clues and progressively gets easier. Include a NAQT-style power mark "(*)" placed roughly 60-70% of the way through each question (after the hard clues but before the "giveaway" clue) - buzzing before the mark earns +15, after earns +10. Output ONLY valid JSON with no markdown, no code fences, no prose before or after.
+
+Exact format:
+{"questions":[{"text":"Hard clues here, more clues, (*) easier clues here, giveaway clue.","answer":"Answer"}]}`
+      : `You are a quiz bowl question writer. Write pyramidal tossup questions - each starts with obscure clues and progressively gets easier. Include a NAQT-style power mark "(*)" placed roughly 60-70% of the way through each question (after the hard clues but before the "giveaway" clue) - buzzing before the mark earns +15, after earns +10. Output ONLY valid JSON with no markdown, no code fences, no prose before or after.
 
 Exact format:
 {"questions":[{"text":"Hard clues here, more clues, (*) easier clues here, giveaway clue.","answer":"Answer"}]}`;
-    const userMsg = `Generate ${questionCount} pyramidal quiz bowl questions in category "${category}" at ${difficulty} difficulty. Each MUST contain exactly one (*) power mark. Return ONLY the JSON object described - nothing else.`;
+    const userMsg = grounded
+      ? `Write ${questionCount} pyramidal quiz bowl tossup questions at ${difficulty} difficulty using ONLY facts from the study material below. Every answer must be directly supported by the text. Each question MUST contain exactly one (*) power mark.
+
+STUDY MATERIAL ("${match.studyContext.title}"):
+${match.studyContext.text}
+
+Return ONLY the JSON object described - nothing else.`
+      : `Generate ${questionCount} pyramidal quiz bowl questions in category "${category}" at ${difficulty} difficulty. Each MUST contain exactly one (*) power mark. Return ONLY the JSON object described - nothing else.`;
     // Flash is faster + more reliable for raw-JSON tasks; Pro's thinking
     // tokens often consume the budget before emitting output.
     const result = await callGemini(sys, [{ role: 'user', content: userMsg }], GEMINI_FLASH, 8192);
@@ -12846,6 +13094,8 @@ Exact format:
     match.buzzWinner = null;
     match.buzzAt = null;
     match.lockedOutForQ = {};
+    match.questionLog = [];
+    match.currentQuestionBuzzes = [];
     match.lastActivity = Date.now();
     pushMatchEvent(match, 'question_start', {
       idx: 0,
@@ -12879,7 +13129,10 @@ app.post('/api/quizbowl/match/:code/buzz', authMiddleware, (req, res) => {
   match.lastActivity = Date.now();
   // Pause the "question end" timeout while the buzzer decides on an answer.
   if (match.questionTimeoutId) { clearTimeout(match.questionTimeoutId); match.questionTimeoutId = null; }
-  pushMatchEvent(match, 'buzz', { userId: req.userId, buzzAt: match.buzzAt });
+  // Safety net: if the buzzer never submits an answer (disconnect, API error)
+  // automatically treat it as a wrong answer so the match doesn't freeze.
+  scheduleBuzzTimeout(match);
+  pushMatchEvent(match, 'buzz', { userId: req.userId, buzzAt: match.buzzAt, answerWindowMs: QUIZBOWL_BUZZ_ANSWER_MS });
   res.json({ ok: true, buzzAt: match.buzzAt });
 });
 
@@ -12963,9 +13216,13 @@ app.post('/api/quizbowl/match/:code/answer', authMiddleware, (req, res) => {
     || (keyWord && keyWord.length >= 4 && within(a, keyWord, 1))
   );
 
+  // Answer received — cancel the buzz timeout regardless of correct/wrong.
+  if (match.buzzTimeoutId) { clearTimeout(match.buzzTimeoutId); match.buzzTimeoutId = null; }
+
   if (correct) {
     // Correct: question ends. Score awarded per scoringFormat. Auto-advance in 5s.
     const pts = quizbowlScoreForBuzz(match, { correct: true });
+    recordBuzzForLog(match, { userId: req.userId, answer, correct: true, points: pts });
     match.scores[req.userId] = (match.scores[req.userId] || 0) + pts;
     match.state = 'reveal';
     match.lastActivity = Date.now();
@@ -12977,6 +13234,7 @@ app.post('/api/quizbowl/match/:code/answer', authMiddleware, (req, res) => {
   } else {
     // Wrong: apply neg, lock out this player, give the others a chance.
     const negPts = quizbowlScoreForBuzz(match, { correct: false });
+    recordBuzzForLog(match, { userId: req.userId, answer, correct: false, points: negPts });
     if (negPts) match.scores[req.userId] = (match.scores[req.userId] || 0) + negPts;
     if (!match.lockedOutForQ) match.lockedOutForQ = {};
     match.lockedOutForQ[req.userId] = true;
@@ -13031,13 +13289,17 @@ app.post('/api/quizbowl/match/:code/end', authMiddleware, (req, res) => {
   if (match.state === 'finished') return res.json({ ok: true, alreadyFinished: true });
   if (match.questionTimeoutId) { clearTimeout(match.questionTimeoutId); match.questionTimeoutId = null; }
   if (match.revealTimeoutId)   { clearTimeout(match.revealTimeoutId);   match.revealTimeoutId = null; }
+  if (match.buzzTimeoutId)     { clearTimeout(match.buzzTimeoutId);     match.buzzTimeoutId = null; }
+  finalizeQuestionLog(match);
   match.state = 'finished';
   match.buzzWinner = null;
   match.buzzAt = null;
   match.lastActivity = Date.now();
+  saveMatchReplay(match);
   pushMatchEvent(match, 'match_end', {
     scores: match.scores,
     endedByHost: true,
+    comparison: buildMatchComparison(match),
   });
   res.json({ ok: true });
 });
@@ -13065,13 +13327,16 @@ app.post('/api/quizbowl/match/:code/leave', authMiddleware, (req, res) => {
   if (wasLive) {
     if (match.questionTimeoutId) { clearTimeout(match.questionTimeoutId); match.questionTimeoutId = null; }
     if (match.revealTimeoutId)   { clearTimeout(match.revealTimeoutId);   match.revealTimeoutId = null; }
+    finalizeQuestionLog(match);
     match.state = 'finished';
     match.buzzWinner = null;
     match.buzzAt = null;
+    saveMatchReplay(match);
     pushMatchEvent(match, 'match_end', {
       scores: match.scores,
       abandoned: true,
       leftBy: req.userId,
+      comparison: buildMatchComparison(match),
     });
   }
 
@@ -13104,7 +13369,8 @@ app.post('/api/quizbowl/match/:code/bot-buzz', authMiddleware, (req, res) => {
   match.buzzAt = Date.now();
   match.lastActivity = Date.now();
   if (match.questionTimeoutId) { clearTimeout(match.questionTimeoutId); match.questionTimeoutId = null; }
-  pushMatchEvent(match, 'buzz', { userId: botId, buzzAt: match.buzzAt });
+  scheduleBuzzTimeout(match);
+  pushMatchEvent(match, 'buzz', { userId: botId, buzzAt: match.buzzAt, answerWindowMs: QUIZBOWL_BUZZ_ANSWER_MS });
   res.json({ ok: true });
 });
 
@@ -13122,13 +13388,17 @@ app.post('/api/quizbowl/match/:code/bot-answer', authMiddleware, (req, res) => {
   if (!match.players.some(p => p.userId === botId)) return res.status(404).json({ error: 'Bot not in match' });
   if (match.buzzWinner !== botId) return res.json({ ok: false, reason: 'not_the_buzzer' });
 
+  // Bot answered — cancel the buzz timeout.
+  if (match.buzzTimeoutId) { clearTimeout(match.buzzTimeoutId); match.buzzTimeoutId = null; }
+
   const pts = quizbowlScoreForBuzz(match, { correct: !!correct });
+  const q = match.questions[match.currentIdx];
+  const correctAnswer = q ? q.answer : '';
+  recordBuzzForLog(match, { userId: botId, answer: correct ? correctAnswer : '[Bot]', correct: !!correct, points: pts });
   match.scores[botId] = (match.scores[botId] || 0) + pts;
   match.lastActivity = Date.now();
 
   const scores = { ...match.scores };
-  const q = match.questions[match.currentIdx];
-  const correctAnswer = q ? q.answer : '';
 
   if (correct) {
     match.state = 'reveal';
@@ -14771,13 +15041,13 @@ const QBPEDIA_SEARCH_MANDATE = `
 
 MANDATORY: Before writing anything, use the google_search tool. Run at least two searches on this topic and base every name, date, title, and fact on the search results, not on memory. An article written without searching is unacceptable.
 
-Do NOT use Wikipedia or any Wikimedia property as a source — QBpedia exists to replace Wikipedia, so it can never cite it. Ground facts in other references instead: Britannica, academic/.edu pages, museums, libraries, archives, primary sources. Wikipedia-backed results are discarded after the fact, so an article grounded only in Wikipedia ends up with no citations at all.`;
+Do NOT use Wikipedia or any Wikimedia property as a source — QBpedia exists to replace Wikipedia, so it can never cite it. Do NOT use Grokipedia or any Reddit page as a source either. Ground facts in other references instead: Britannica, academic/.edu pages, museums, libraries, archives, primary sources. Wikipedia-backed, Grokipedia-backed, and Reddit-backed results are discarded after the fact, so an article grounded only in those ends up with no citations at all.`;
 
 // QBpedia's premise is "not Wikipedia", so its citations must not be
 // Wikipedia either. Grounding URLs are opaque vertex redirects; the chunk
 // title carries the source domain, so match on both fields.
 function isWikipediaSource(s) {
-  return /wikipedia|wikimedia|wiktionary/i.test(`${s?.url || ''} ${s?.title || ''}`);
+  return /wikipedia|wikimedia|wiktionary|grokipedia|reddit\.com/i.test(`${s?.url || ''} ${s?.title || ''}`);
 }
 
 // Drop Wikipedia entries from a page's source list and renumber the inline
@@ -14909,7 +15179,7 @@ async function qbpediaCallAndParse(prompt, { grounded }) {
   const result = await callGemini(
     grounded ? QBPEDIA_SYSTEM_PROSE : QBPEDIA_SYSTEM,
     [{ role: 'user', content: grounded ? prompt + QBPEDIA_SEARCH_MANDATE : prompt }],
-    GEMINI_PRO,
+    GEMINI_FLASH,
     8192,
     grounded ? { enableWebSearch: true, skipCitationMarkers: true } : { jsonMode: true }
   );
@@ -14938,7 +15208,7 @@ async function qbpediaCallAndParse(prompt, { grounded }) {
   return { parsed, sources: filtered.sources };
 }
 
-// Pages are written by Gemini Pro with Google Search grounding so facts are
+// Pages are written by Gemini Flash with Google Search grounding so facts are
 // verified and cited. Sources are REQUIRED: even with the mandate, the model
 // sometimes answers from memory and returns zero grounding chunks (seen on
 // "NBA"), so a sourceless grounded result gets one full retry. Only when both
@@ -15296,8 +15566,16 @@ app.get('/{*path}', (req, res) => {
   res.sendFile(join(__dirname, 'dist', 'index.html'));
 });
 
-app.listen(PORT, () => {
+const httpServer = app.listen(PORT, () => {
   console.log(`Covalent server running on port ${PORT}`);
+});
+// A second instance that can't bind the port must DIE, not linger: a
+// zombie instance keeps its setInterval jobs and in-memory users cache
+// alive and periodically writes stale snapshots over users.json, silently
+// reverting other writes (seen as "Block not found" after generation).
+httpServer.on('error', (err) => {
+  console.error(`FATAL: could not listen on port ${PORT} (${err.code || err.message}) — another instance is likely running. Exiting.`);
+  process.exit(1);
 });
 // redeploy 1776608927
 // redeploy 1776609207

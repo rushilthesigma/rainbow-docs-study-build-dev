@@ -52,8 +52,9 @@ const ITEM_ROUTES = {
   note: id => `/api/notes/${id}`,
   flashcardDeck: id => `/api/flashcards/${id}`,
   curriculum: id => `/api/curriculum/${id}`,
+  noteMap: id => `/api/note-maps/${id}`,
 };
-const ITEM_KEYS = { note: 'note', flashcardDeck: 'deck', curriculum: 'curriculum' };
+const ITEM_KEYS = { note: 'note', flashcardDeck: 'deck', curriculum: 'curriculum', noteMap: 'map' };
 
 // Returns the item object (unwrapped from its type-specific response key).
 export async function getSharedItem(itemType, itemId, shareId) {

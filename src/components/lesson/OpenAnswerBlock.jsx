@@ -55,7 +55,7 @@ export default function OpenAnswerBlock({ block, onComplete, gradeFn, hideContin
           {/* Type chip */}
           <div className="flex items-center gap-2 mb-3">
             <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-sky-200/85 bg-sky-400/[0.10] border border-sky-300/[0.22] rounded-full px-2.5 py-0.5">
-              <PenTool size={10} strokeWidth={2.4} /> Open Answer
+              <PenTool size={10} strokeWidth={2.4} /> Graded Essay
             </span>
             {submission && (
               <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide ${gradeStyle(submission.score)}`}>

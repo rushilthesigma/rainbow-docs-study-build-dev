@@ -251,8 +251,10 @@ export default function LessonPage() {
 
       {/* Graded-mode assignment - only renders when the course is graded.
           Sits above the chat so the student sees the assignment + can either
-          submit there or use the chat below to work through the content first. */}
-      {curriculum.graded && currentLesson.type === 'lesson' && (
+          submit there or use the chat below to work through the content first.
+          Math courses are graded by their end-of-unit tests, not written
+          essays, so the essay assignment card is suppressed for them. */}
+      {curriculum.graded && currentLesson.type === 'lesson' && curriculum.category !== 'Math' && (
         <div className="mb-4 flex-shrink-0">
           <AssignmentCard
             curriculumId={curriculumId}

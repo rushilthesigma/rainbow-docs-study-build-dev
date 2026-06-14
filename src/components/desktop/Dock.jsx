@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Plus } from 'lucide-react';
 import APP_REGISTRY from './appRegistry';
 import { useWindowManager } from '../../context/WindowManagerContext';
 import { useUIPreference } from '../../context/UIPreferenceContext';
@@ -111,40 +110,6 @@ function DockIcon({ app, mouseX, isOpen, isActive, onClick, size, iconStyle }) {
   );
 }
 
-// + button in the dock tray - opens the Widgets app (a fixed-size
-// window registered in AppWindow). The window spawns anchored above
-// this button, centered horizontally on it, with an 18px gap so it
-// looks like it's coming out of the +.
-const WIDGETS_SIZE = { w: 420, h: 580 };
-const WIDGETS_GAP = 18;
-function SystemTrayIcons() {
-  const { openApp } = useWindowManager();
-  const btnRef = useRef(null);
-  function handleClick() {
-    const btn = btnRef.current;
-    let position = null;
-    if (btn) {
-      const r = btn.getBoundingClientRect();
-      const cx = r.left + r.width / 2;
-      position = {
-        x: Math.round(cx - WIDGETS_SIZE.w / 2),
-        y: Math.round(r.top - WIDGETS_SIZE.h - WIDGETS_GAP),
-      };
-    }
-    openApp('widgets', 'Widgets', { position, focusIfOpen: true });
-  }
-  return (
-    <button
-      ref={btnRef}
-      onClick={handleClick}
-      className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-white/[0.07] active:bg-white/[0.04] transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/20"
-      aria-label="Widgets"
-    >
-      <Plus size={12} strokeWidth={2.2} className="text-white/60" />
-    </button>
-  );
-}
-
 export default function Dock(_props) {
   const { state, openApp, restoreWindow, focusWindow } = useWindowManager();
   const { dockSize, iconStyle, theme } = useUIPreference();
@@ -233,12 +198,6 @@ export default function Dock(_props) {
           />
         ))}
 
-        {/* ── Widgets tray (+) ── */}
-        <div className="w-px bg-white/[0.12] self-center" style={{ height: size * 0.6 }} />
-        <div className="flex flex-col items-center">
-          <SystemTrayIcons />
-          <div className="h-1.5 mt-1" />
-        </div>
       </div>
     </>
   );

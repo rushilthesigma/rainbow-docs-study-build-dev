@@ -90,21 +90,23 @@ export function useToast() {
 
 // Toast surfaces need solid theme-aware backgrounds - the previous
 // `bg-white/[0.08]` was invisible against a light wallpaper. Each variant
-// uses a tinted but solid surface in both modes so toasts always pop.
+// uses a tinted FULLY OPAQUE surface in both modes (the dark hexes are the
+// variant color pre-mixed into the #1a1a26 base) so toasts read clearly
+// without a backdrop-blur layer over the content behind them.
 const variantStyles = {
   info: {
     border: 'border-gray-200 dark:border-white/[0.12]',
-    bg: 'bg-white/95 dark:bg-[#1a1a26]/95',
+    bg: 'bg-white dark:bg-[#1a1a26]',
     icon: <Info size={14} className="text-blue-500 dark:text-blue-300/90" />,
   },
   success: {
     border: 'border-emerald-300 dark:border-emerald-400/25',
-    bg: 'bg-emerald-50/95 dark:bg-emerald-500/[0.08]',
+    bg: 'bg-emerald-50 dark:bg-[#19272d]',
     icon: <CheckCircle2 size={14} className="text-emerald-600 dark:text-emerald-300/90" />,
   },
   error: {
     border: 'border-rose-300 dark:border-rose-400/25',
-    bg: 'bg-rose-50/95 dark:bg-rose-500/[0.08]',
+    bg: 'bg-rose-50 dark:bg-[#2b1d2a]',
     icon: <AlertCircle size={14} className="text-rose-600 dark:text-rose-300/90" />,
   },
 };
@@ -124,7 +126,7 @@ function ToastViewport({ toasts, onDismiss }) {
           <div
             key={t.id}
             role={t.variant === 'error' ? 'alert' : 'status'}
-            className={`pointer-events-auto flex items-start gap-2 min-w-[240px] max-w-sm px-3 py-2 rounded-xl backdrop-blur-xl shadow-[0_8px_24px_rgba(0,0,0,0.18)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.35)] border ${v.border} ${v.bg} text-[12.5px] text-gray-800 dark:text-white/85 animate-fade-in`}
+            className={`pointer-events-auto flex items-start gap-2 min-w-[240px] max-w-sm px-3 py-2 rounded-xl shadow-[0_8px_24px_rgba(0,0,0,0.18)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.35)] border ${v.border} ${v.bg} text-[12.5px] text-gray-800 dark:text-white/85 animate-fade-in`}
           >
             <span className="mt-0.5 shrink-0">{v.icon}</span>
             <div className="flex-1 leading-snug">

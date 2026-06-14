@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Check, ArrowLeft, Loader2, X, Plus } from 'lucide-react';
 import Button from '../shared/Button';
 import LoadingSpinner from '../shared/LoadingSpinner';
@@ -10,13 +10,24 @@ const GRADES = [
   { q: 1, label: 'Again', hint: 'forgot', cls: 'bg-rose-500/12 border-rose-400/30 text-rose-200 hover:bg-rose-500/20', key: '1' },
   { q: 3, label: 'Hard', hint: 'barely', cls: 'bg-amber-500/12 border-amber-400/30 text-amber-200 hover:bg-amber-500/20', key: '2' },
   { q: 4, label: 'Good', hint: 'got it', cls: 'bg-emerald-500/12 border-emerald-400/30 text-emerald-200 hover:bg-emerald-500/20', key: '3' },
-  { q: 5, label: 'Easy', hint: 'instant', cls: 'bg-sky-500/12 border-sky-400/30 text-sky-200 hover:bg-sky-500/20', key: '4' },
+  { q: 5, label: 'Easy', hint: 'instant', cls: 'bg-white/[0.06] border-white/20 text-white/80 hover:bg-white/[0.12]', key: '4' },
 ];
 
 // Spaced-repetition review for one note map. Overview shows what to do next
 // (review due cards, quiz a new concept, drill weak spots); the session runs
 // the SM-2 flip-card loop with 4-button grading.
-export default function NoteMapReview({ open, onClose, mapId, onChange }) {
+//
+// Persistence is injectable via `api` so the same UI drives a personal map
+// (default, keyed by mapId) or a group's shared map (the group endpoints).
+// Pass either `mapId` (personal) or `api` ({ getSrs, generateNodeCards,
+// reviewCard }); api wins when both are given.
+export default function NoteMapReview({ open, onClose, mapId, api: apiProp, onChange }) {
+  const api = useMemo(() => apiProp || {
+    getSrs: () => getMapSrs(mapId),
+    generateNodeCards: (nodeId) => generateNodeFlashcards(mapId, nodeId, {}),
+    reviewCard: (cardId, quality) => reviewMapCard(mapId, cardId, quality),
+  }, [apiProp, mapId]);
+
   const [loading, setLoading] = useState(true);
   const [srs, setSrs] = useState(null);
   const [view, setView] = useState('overview'); // 'overview' | 'session' | 'done'
@@ -32,23 +43,22 @@ export default function NoteMapReview({ open, onClose, mapId, onChange }) {
   const [sessionLabel, setSessionLabel] = useState('Review');
 
   const refresh = useCallback(async () => {
-    if (!mapId) return;
     try {
-      const data = await getMapSrs(mapId);
+      const data = await api.getSrs();
       setSrs(data);
     } catch { /* keep prior state */ }
-  }, [mapId]);
+  }, [api]);
 
   useEffect(() => {
     if (!open) return;
     setView('overview');
     setLoading(true);
     setGenError(null);
-    getMapSrs(mapId)
+    api.getSrs()
       .then(d => setSrs(d))
       .catch(() => setSrs(null))
       .finally(() => setLoading(false));
-  }, [open, mapId]);
+  }, [open, api]);
 
   // Esc closes the panel (it's non-modal, so this is the only dismissal key).
   useEffect(() => {
@@ -74,7 +84,7 @@ export default function NoteMapReview({ open, onClose, mapId, onChange }) {
     if (!currentCard || grading) return;
     setGrading(true);
     try {
-      await reviewMapCard(mapId, currentCard.id, q);
+      await api.reviewCard(currentCard.id, q);
     } catch { /* still advance - schedule is best-effort */ }
     setGrading(false);
     setReviewed(n => n + 1);
@@ -86,7 +96,7 @@ export default function NoteMapReview({ open, onClose, mapId, onChange }) {
       refresh();
       onChange?.();
     }
-  }, [currentCard, grading, mapId, idx, queue.length, refresh, onChange]);
+  }, [currentCard, grading, api, idx, queue.length, refresh, onChange]);
 
   // Keyboard: Space/Enter flips, 1-4 grade once flipped.
   useEffect(() => {
@@ -106,7 +116,7 @@ export default function NoteMapReview({ open, onClose, mapId, onChange }) {
     setGenId(nodeId);
     setGenError(null);
     try {
-      await generateNodeFlashcards(mapId, nodeId, {});
+      await api.generateNodeCards(nodeId);
       await refresh();
       onChange?.();
     } catch (e) {
@@ -122,8 +132,8 @@ export default function NoteMapReview({ open, onClose, mapId, onChange }) {
   // In-app floating panel (not a screen-dimming modal): anchored top-right of
   // the note map, leaves the rest of the app visible and interactive.
   return (
-    <div className="absolute z-30 top-2 right-2 w-[340px] max-h-[calc(100%-1rem)] overflow-y-auto rounded-2xl border border-white/[0.12] bg-[#161622]/95 backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.45)] animate-view-fade">
-      <div className="sticky top-0 z-10 flex items-center justify-between px-4 pt-3.5 pb-2.5 bg-[#161622]/95 backdrop-blur-xl border-b border-white/[0.06]">
+    <div className="absolute z-30 top-2 right-2 w-[340px] max-h-[calc(100%-1rem)] overflow-y-auto rounded-2xl border border-white/[0.12] bg-[#0f0f0f]/95 backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.45)] animate-view-fade">
+      <div className="sticky top-0 z-10 flex items-center justify-between px-4 pt-3.5 pb-2.5 bg-[#0f0f0f]/95 backdrop-blur-xl border-b border-white/[0.06]">
         <h3 className="text-[14px] font-bold text-white/90">Spaced Repetition</h3>
         <button
           onClick={onClose}
@@ -216,7 +226,7 @@ function OverviewView({ srs, summary, genId, genError, onStartReview, onDrill, o
           <div className="divide-y divide-white/[0.05]">
             {newNodes.map(n => (
               <div key={n.id} className="flex items-center gap-2.5 py-1.5">
-                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: n.color || '#60a5fa' }} />
+                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: n.color || '#9ca3af' }} />
                 <span className="flex-1 min-w-0 text-[12px] text-white/80 truncate">{n.label}</span>
                 {n.degree > 0 && <span className="text-[10px] text-white/30">{n.degree} link{n.degree !== 1 ? 's' : ''}</span>}
                 <button
@@ -262,7 +272,7 @@ function SessionView({ card, idx, total, flipped, grading, label, onFlip, onGrad
       </div>
 
       <div className="w-full h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
-        <div className="h-full bg-blue-500 rounded-full transition-all duration-300" style={{ width: `${progress}%` }} />
+        <div className="h-full bg-white/70 rounded-full transition-all duration-300" style={{ width: `${progress}%` }} />
       </div>
 
       {/* Flip card */}
@@ -281,7 +291,7 @@ function SessionView({ card, idx, total, flipped, grading, label, onFlip, onGrad
             <p className="text-[17px] font-medium text-white/90">{card.front}</p>
           </div>
           <div
-            className="absolute inset-0 bg-blue-500/[0.08] rounded-2xl border border-blue-400/20 p-8 flex items-center justify-center text-center overflow-auto"
+            className="absolute inset-0 bg-white/[0.07] rounded-2xl border border-white/[0.12] p-8 flex items-center justify-center text-center overflow-auto"
             style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
           >
             <p className="text-[16px] text-white/85">{card.back}</p>

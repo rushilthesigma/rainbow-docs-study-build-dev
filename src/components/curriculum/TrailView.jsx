@@ -1,5 +1,5 @@
 import {
-  BookOpen, Calculator, PenTool, FileText, ClipboardCheck, Lock, Check, Trophy, Sparkles,
+  BookOpen, Calculator, PenTool, FileText, ClipboardCheck, Lock, Check, Trophy,
 } from 'lucide-react';
 
 // =========================================================
@@ -69,7 +69,7 @@ export default function TrailView({ curriculum, onOpenLesson }) {
       <div className="relative mb-6 rounded-2xl overflow-hidden border border-white/[0.08] bg-white/[0.04] p-4">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center text-white shadow-sm">
-            <Sparkles size={18} />
+            <BookOpen size={18} />
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-600 dark:text-emerald-400">Trail · BETA</p>

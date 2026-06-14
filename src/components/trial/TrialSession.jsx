@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useWindowManager } from '../../context/WindowManagerContext';
 import { Zap, Trophy, X, Check, AlertCircle, ChevronRight, Users, Swords, ArrowRight } from 'lucide-react';
 import Button from '../shared/Button';
 import { buzzToQuality } from '../../utils/sm2';
@@ -123,10 +124,13 @@ function checkAnswer(userAns, correctAns) {
 //   lobbyMode  - boolean: full 8-player tournament room
 //   botNames   - { [botId]: customName } map for display
 //   onComplete - ({ xp, userScore, sessionResults })
+//   onMatchFinished - (replay) fired once when the game ends, with the
+//                     full question log in the multiplayer-replay shape
 export default function TrialSession({
   questions, difficulty, bots: botsProp, matchMode = false,
-  lobbyMode = false, botNames, scoringFormat, onComplete,
+  lobbyMode = false, botNames, scoringFormat, onComplete, onMatchFinished,
 }) {
+  const { state } = useWindowManager();
   const ACTIVE_BOTS = botsProp ?? ALL_BOTS.slice(0, 3);
   const FORMAT = scoringFormat || DEFAULT_FORMAT;
   const MATCH_TARGET = FORMAT.target || 10;
@@ -176,6 +180,16 @@ export default function TrialSession({
   // question reopens for the remaining bots).
   const claimedRef = useRef(null);
 
+  // ── Replay recording ──────────────────────────────────────────────────
+  // Mirrors the multiplayer server's questionLog shape so a finished AI
+  // game can be saved and replayed by the same MatchReplayView.
+  const questionLogRef   = useRef([]);
+  const currentBuzzesRef = useRef([]);
+  const _tsIsActiveRef   = useRef(false);  _tsIsActiveRef.current = state.windows[state.activeWindowId]?.appId === 'quizbowl';
+  const buzzWordRef      = useRef(0);
+  const qLoggedRef       = useRef(false);
+  const replayEmittedRef = useRef(false);
+
   const q          = questions[qIdx];
   const totalQ     = questions.length;
   const revealSpeed= difficulty === 'hard' ? 115 : difficulty === 'easy' ? 210 : 155;
@@ -192,6 +206,8 @@ export default function TrialSession({
     setPhase('reading');
     setBuzzedBy(null);
     claimedRef.current = null;
+    currentBuzzesRef.current = [];
+    qLoggedRef.current = false;
     setAnswer('');
     setAnswerResult(null);
     setUserNegged(false);
@@ -268,6 +284,17 @@ export default function TrialSession({
           // flowing.
           const pts     = correct ? scoreForBuzz({ correct: true, ratio, format: FORMAT }) : 0;
 
+          currentBuzzesRef.current.push({
+            userId: bot.id,
+            name: botNames?.[bot.id] || bot.name,
+            isBot: true,
+            buzzWord: Math.min(Math.max(0, words.current.length - 1), Math.floor(ratio * words.current.length)),
+            totalWords: words.current.length,
+            answer: '',
+            correct,
+            points: pts,
+          });
+
           // Freeze the question reveal the moment a bot locks in a correct answer
           if (correct && revealTimer.current) {
             clearInterval(revealTimer.current);
@@ -298,22 +325,24 @@ export default function TrialSession({
     if (!buzzedBy || buzzedBy === 'user') return;
     const botState = botStates.find(s => s.id === buzzedBy);
     if (!botState?.correct) {
+      // Release the claim lock immediately so the user can buzz again
+      // while the "wrong" notification is still visible. The visual
+      // (buzzedBy) clears after 1200ms; protect against clobbering a
+      // user buzz that fires during that window.
+      claimedRef.current = null;
       setTimeout(() => {
-        // Release the synchronous buzz lock, not just buzzedBy. Without
-        // clearing claimedRef, the reopened question still looks buzzable
-        // (the BUZZ button reappears) but handleBuzz() and every pending
-        // bot timer bail on `claimedRef.current != null`, so pressing buzz
-        // does nothing for the rest of the question. Mirrors the user-neg
-        // reopen in submitAnswer().
-        claimedRef.current = null;
-        setBuzzedBy(null);
+        setBuzzedBy(prev => prev !== 'user' ? null : prev);
         if (revealedCount < words.current.length) startReveal();
       }, 1200);
     } else {
       const cumScore = botState.score || 0;
       setTimeout(() => {
-        if (matchMode && cumScore >= MATCH_TARGET) { setMatchWinner(buzzedBy); setPhase('done'); }
-        else advanceQuestion();
+        if (matchMode && cumScore >= MATCH_TARGET) {
+          logQuestion();
+          setMatchWinner(buzzedBy);
+          setPhase('done');
+          emitReplay();
+        } else advanceQuestion();
       }, 2000);
     }
   }, [buzzedBy]); // eslint-disable-line
@@ -335,7 +364,8 @@ export default function TrialSession({
   // the stale-closure bug where space presses were silently dropped.
   useEffect(() => {
     const onKey = e => {
-      if (e.code === 'Space' && phaseRef.current === 'reading' && !buzzedByRef.current && !userNeggedRef.current) {
+      if (!_tsIsActiveRef.current) return;
+      if (e.code === 'Space' && phaseRef.current === 'reading' && !userNeggedRef.current && claimedRef.current == null) {
         e.preventDefault(); handleBuzz();
       }
       if (e.code === 'Enter' && phaseRef.current === 'buzzed') {
@@ -347,10 +377,11 @@ export default function TrialSession({
   }, []); // eslint-disable-line
 
   function handleBuzz() {
-    if (phaseRef.current !== 'reading' || buzzedByRef.current || userNeggedRef.current) return;
+    if (phaseRef.current !== 'reading' || userNeggedRef.current) return;
     if (claimedRef.current != null) return;
     claimedRef.current = 'user';
     clearInterval(revealTimer.current);
+    buzzWordRef.current = Math.max(0, revealedCntRef.current - 1);
     setBuzzRatio(revealedCntRef.current / Math.max(1, words.current.length));
     setBuzzedBy('user');
     setPhase('buzzed');
@@ -368,6 +399,16 @@ export default function TrialSession({
 
     setAnswerResult({ correct, xpGained, ptsGained, userAnswer: ans.trim() });
     setSessionResults(prev => [...prev, { questionId: q.id, question: q, quality, correct, buzzRatio }]);
+    currentBuzzesRef.current.push({
+      userId: 'me',
+      name: 'You',
+      isBot: false,
+      buzzWord: buzzWordRef.current,
+      totalWords: words.current.length,
+      answer: ans.trim(),
+      correct,
+      points: ptsGained,
+    });
 
     if (correct) {
       setXp(p => p + xpGained);
@@ -375,7 +416,8 @@ export default function TrialSession({
       setCombo(p => p + 1);
       if (matchMode && newScore >= MATCH_TARGET) {
         setPhase('result');
-        setTimeout(() => { setMatchWinner('user'); setPhase('done'); }, 1800);
+        logQuestion();
+        setTimeout(() => { setMatchWinner('user'); setPhase('done'); emitReplay(); }, 1800);
         return;
       }
     } else {
@@ -398,8 +440,52 @@ export default function TrialSession({
     setTimeout(advanceQuestion, 2200);
   }
 
+  // Snapshot the current question + its buzzes into the replay log.
+  // Guarded so the multiple end-of-question paths (advance, skip, match
+  // point) can all call it without double-logging.
+  function logQuestion() {
+    if (!q || qLoggedRef.current) return;
+    qLoggedRef.current = true;
+    questionLogRef.current.push({
+      text: q.question || '',
+      answer: q.answer || '',
+      powerWordIndex: q.powerWordIndex ?? null,
+      totalWords: words.current.length,
+      buzzes: currentBuzzesRef.current,
+    });
+    currentBuzzesRef.current = [];
+  }
+
+  // Hand the finished game to the parent in the multiplayer-replay shape.
+  // Called synchronously from every end-of-game path (not an effect) because
+  // onComplete can unmount us before a post-render effect would fire. Final
+  // scores are re-derived from the logged buzzes so timer callbacks don't
+  // have to fight stale state closures.
+  function emitReplay() {
+    if (replayEmittedRef.current) return;
+    replayEmittedRef.current = true;
+    const log = questionLogRef.current;
+    if (!onMatchFinished || log.length === 0) return;
+    const totals = {};
+    for (const lq of log) for (const b of lq.buzzes) totals[b.userId] = (totals[b.userId] || 0) + (b.points || 0);
+    onMatchFinished({
+      players: [
+        { userId: 'me', name: 'You', isBot: false, finalScore: totals.me || 0 },
+        ...ACTIVE_BOTS.map(b => ({
+          userId: b.id,
+          name: botNames?.[b.id] || b.name,
+          isBot: true,
+          finalScore: totals[b.id] || 0,
+        })),
+      ],
+      questions: log,
+      totalQuestions: totalQ,
+    });
+  }
+
   function advanceQuestion() {
     clearAllTimers();
+    logQuestion();
     if (qIdx + 1 >= totalQ) finishSession();
     else setQIdx(i => i + 1);
   }
@@ -407,11 +493,13 @@ export default function TrialSession({
   function finishSession() {
     setPhase('done');
     clearAllTimers();
+    emitReplay();
     if (!matchWinner) onComplete?.({ xp, userScore, sessionResults });
   }
 
   function skipQuestion() {
     clearAllTimers();
+    logQuestion();
     setSessionResults(prev => [...prev, { questionId: q?.id, question: q, quality: 1, correct: false, buzzRatio: 1 }]);
     if (qIdx + 1 >= totalQ) finishSession();
     else setQIdx(i => i + 1);
@@ -518,7 +606,7 @@ export default function TrialSession({
             {userNegged && phase === 'reading' && (
               <div className="rounded-xl px-3 py-2 bg-rose-500/[0.08] border border-rose-500/[0.20] flex items-center gap-2">
                 <AlertCircle size={12} className="text-rose-400 flex-shrink-0" />
-                <p className="text-[12px] text-rose-300/80">Negged · question continues</p>
+                <p className="text-[12px] text-rose-300/80">Wrong · question continues</p>
               </div>
             )}
 
@@ -635,7 +723,7 @@ export default function TrialSession({
               <div className="h-full bg-blue-400 rounded-full transition-all duration-700" style={{ width: `${userPct}%` }} />
             </div>
             <span className="text-white/35 text-[10px]">
-              {userNegged ? '✗ Negged'
+              {userNegged ? '✗ Wrong'
                 : phase === 'buzzed' && buzzedBy === 'user' ? 'Answering…'
                 : phase === 'result' && answerResult?.correct ? '✓ Correct'
                 : phase === 'result' ? '✗ Wrong'

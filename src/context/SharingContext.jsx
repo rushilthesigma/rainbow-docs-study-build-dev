@@ -8,8 +8,7 @@ import { useAuth } from './AuthContext';
 //
 // Polls GET /api/share/incoming (built server-side in WO-1) to surface pending
 // share invitations and the accepted-shares list to the app shell, and exposes
-// the recipient/owner share actions. NotificationBadge reads `pendingCount`
-// from here to render the unread bubble on the Social nav entry.
+// the recipient/owner share actions via `pendingCount` and the action callbacks.
 //
 // Per the work order, this talks to the API directly via `apiFetch`; the
 // dedicated ShareApiClient is a separate work order. When it lands, the four
@@ -35,28 +34,46 @@ export function SharingProvider({ children }) {
   // Guards against a slow in-flight fetch landing after a newer one (or after
   // sign-out) and clobbering fresher state.
   const reqIdRef = useRef(0);
+  // True once the first fetch for the current user completes. Background poll
+  // ticks after that point must be SILENT: flipping `loading` true→false every
+  // 30s changes the context value twice per tick, re-rendering every consumer
+  // even when nothing changed. With 2+ windows subscribed those simultaneous
+  // re-renders repaint multiple compositor layers in the same frame - the
+  // multi-window wallpaper-flash trigger documented in Window.jsx.
+  const initialLoadDoneRef = useRef(false);
 
   const refresh = useCallback(async () => {
     // Nothing to fetch when signed out; clear any stale list.
     if (!user) {
+      initialLoadDoneRef.current = false;
       setIncomingShares([]);
       setError(null);
       return;
     }
     const reqId = ++reqIdRef.current;
-    setLoading(true);
+    const isInitial = !initialLoadDoneRef.current;
+    if (isInitial) setLoading(true);
     try {
       const data = await apiFetch('/api/share/incoming');
       if (reqId !== reqIdRef.current) return; // superseded
-      setIncomingShares(Array.isArray(data?.shares) ? data.shares : []);
+      // Keep the previous array identity when the payload is unchanged so
+      // steady-state poll ticks don't change the context value at all.
+      const next = Array.isArray(data?.shares) ? data.shares : [];
+      setIncomingShares(prev =>
+        JSON.stringify(prev) === JSON.stringify(next) ? prev : next);
       setError(null);
     } catch (e) {
       if (reqId !== reqIdRef.current) return;
       // Transient poll failures must not blow away the list the badge is built
-      // from - record the error but keep the last good data.
-      setError(e);
+      // from - record the error but keep the last good data. Repeated identical
+      // failures keep the old error object so consumers don't re-render.
+      setError(prev =>
+        (prev && e && prev.message === e.message) ? prev : e);
     } finally {
-      if (reqId === reqIdRef.current) setLoading(false);
+      if (reqId === reqIdRef.current) {
+        initialLoadDoneRef.current = true;
+        if (isInitial) setLoading(false);
+      }
     }
   }, [user]);
 

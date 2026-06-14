@@ -48,6 +48,17 @@ export const fetchQuizBowlPatterns = () => apiFetch('/api/quizbowl/patterns');
 // SM-2-based categories the algorithm says are due for re-drilling today.
 export const fetchQuizBowlSm2Due = () => apiFetch('/api/quizbowl/sm2-due');
 
+// Returns { matches: [{ id, code, category, difficulty, finishedAt, players, questions, myUserId, ... }] }
+export const fetchQuizBowlMatches = () => apiFetch('/api/quizbowl/matches');
+
+// Persist a finished AI/bot game (TrialSession runs those entirely
+// client-side) so it shows up in the Replays tab alongside multiplayer
+// matches. The server stamps player identity from the auth token.
+export const saveAiMatchReplay = (payload) => apiFetch('/api/quizbowl/matches', {
+  method: 'POST',
+  body: JSON.stringify(payload),
+});
+
 // Returns { niches: [{ topic, reason }] } - Gemini-suggested niche sub-topics
 // within a category for targeted AI drilling.
 export const fetchQuizBowlNiches = ({ category, difficulty = 'Medium' } = {}) => {
