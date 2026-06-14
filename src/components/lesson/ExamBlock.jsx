@@ -97,7 +97,7 @@ export default function ExamBlock({ curriculumId }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <GraduationCap size={16} className="text-blue-500" />
+        <GraduationCap size={16} className="text-white/50" />
         <h3 className="text-sm font-bold uppercase tracking-wider text-gray-700 dark:text-gray-200">Exams</h3>
         <span className="text-[11px] text-gray-400 tabular-nums">
           {data.progress?.done || 0} / {data.progress?.total || 0} lessons complete
@@ -145,9 +145,9 @@ function ExamCard({ kind, title, subtitle, unlocked, progressFraction, unlockAt,
   const pct = Math.round(Math.min(100, (progressFraction / unlockAt) * 100));
 
   return (
-    <div className="rounded-2xl border border-gray-200 dark:border-[#2A2A40] bg-white dark:bg-[#161622] p-5">
+    <div className="rounded-2xl border border-white/[0.08] bg-white/[0.04] p-5">
       <div className="flex items-start gap-3 mb-3">
-        <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white shadow ${unlocked ? 'bg-blue-500' : 'bg-gray-300 dark:bg-[#2A2A40]'}`}>
+        <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white/80 ${unlocked ? 'bg-white/[0.12] border border-white/[0.15]' : 'bg-white/[0.06] border border-white/[0.08]'}`}>
           {kind === 'final' ? <Trophy size={18} /> : <GraduationCap size={18} />}
         </div>
         <div className="flex-1 min-w-0">
@@ -162,8 +162,8 @@ function ExamCard({ kind, title, subtitle, unlocked, progressFraction, unlockAt,
           <div className="flex items-center gap-2 text-xs text-gray-400 mb-2">
             <Lock size={12} /> {pct}% of the way to unlocking
           </div>
-          <div className="h-1.5 rounded-full bg-gray-100 dark:bg-[#0a0a14] overflow-hidden">
-            <div className="h-full bg-gray-300 dark:bg-[#2A2A40]" style={{ width: `${pct}%` }} />
+          <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+            <div className="h-full bg-white/[0.20]" style={{ width: `${pct}%` }} />
           </div>
         </>
       )}
@@ -172,7 +172,7 @@ function ExamCard({ kind, title, subtitle, unlocked, progressFraction, unlockAt,
         <button
           onClick={onGenerate}
           disabled={busy}
-          className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-indigo-600 shadow-md shadow-blue-500/30 disabled:opacity-50"
+          className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-blue-500 hover:bg-blue-500/90 disabled:opacity-50 transition-colors"
         >
           {busy ? <><InlineProgress active /> Building exam…</> : <><Play size={14} /> Generate {title}</>}
         </button>
