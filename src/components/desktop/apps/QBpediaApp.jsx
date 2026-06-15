@@ -570,7 +570,7 @@ function HubView({ searchResults, setSearchResults, onNavigate, onWhy, isAdmin, 
                   <button
                     key={topic}
                     onClick={() => onNavigate(slugify(topic))}
-                    className="text-[12px] px-2.5 py-1 rounded-lg border bg-blue-500 border-blue-400 text-white font-medium hover:bg-blue-400 hover:border-blue-300 transition-colors"
+                    className="text-[12px] px-2.5 py-1 rounded-lg bg-blue-500 text-white font-medium hover:bg-blue-400 transition-colors"
                   >
                     {topic}
                   </button>

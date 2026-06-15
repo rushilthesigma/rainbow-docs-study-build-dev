@@ -977,15 +977,15 @@ function QuizBowlHub({ hubLoading, history, recs, patterns, sm2Due = [], matchLi
         {/* Quick access: head-to-head + custom set + replays */}
         <div className="grid grid-cols-3 gap-2">
           <button onClick={onMultiplayer}
-            className="py-2.5 rounded-lg border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] text-white/70 hover:text-white/95 text-[12px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
+            className="py-2.5 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[12px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
             Multiplayer
           </button>
           <button onClick={onCustom} data-tour="qb-custom-set"
-            className="py-2.5 rounded-lg border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] text-white/70 hover:text-white/95 text-[12px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
+            className="py-2.5 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[12px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
             Custom
           </button>
           <button onClick={onReplays}
-            className="py-2.5 rounded-lg border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] text-white/70 hover:text-white/95 text-[12px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
+            className="py-2.5 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[12px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
             Replays
           </button>
         </div>
