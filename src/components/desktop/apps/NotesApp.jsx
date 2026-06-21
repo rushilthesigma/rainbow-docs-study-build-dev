@@ -15,7 +15,6 @@ import ShareDialog from '../../shared/ShareDialog';
 import SharedWithMeView from '../../library/SharedWithMeView';
 import SharedItemViewer from '../../library/SharedItemViewer';
 import { useSharing } from '../../../context/SharingContext';
-import { useWindowManager } from '../../../context/WindowManagerContext';
 import useBrowserBack from '../../../hooks/useBrowserBack';
 import NoteActions, { QuizFromNotePanel, AIEditNotePanel } from '../../notes/NoteActions';
 import NoteMap from '../../notes/NoteMap';
@@ -392,9 +391,104 @@ function NewTopicView({ onBack, onCreated }) {
   );
 }
 
+function MapNameView({ mode, map, onBack, onSubmit }) {
+  const isRename = mode === 'rename';
+  const [name, setName] = useState(isRename ? (map?.name || '') : 'Untitled Map');
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef(null);
+
+  useEffect(() => { inputRef.current?.focus(); inputRef.current?.select(); }, []);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    const ok = await onSubmit(name);
+    if (!ok) setBusy(false);
+  }
+
+  return (
+    <ViewFade viewKey={isRename ? 'rename-map' : 'create-map'} className="h-full flex flex-col">
+      <div className="flex items-center gap-3 pb-4 mb-6 border-b border-white/[0.06] flex-shrink-0">
+        <button onClick={onBack} className="flex items-center gap-2 text-sm text-white/40 hover:text-white/90 transition-colors">
+          <ArrowLeft size={16} /> Back
+        </button>
+        <h2 className="text-lg font-bold text-white/90">{isRename ? 'Rename map' : 'New map'}</h2>
+      </div>
+      <div className="flex-1 flex items-center justify-center pb-10">
+        <form onSubmit={handleSubmit} className="w-full max-w-sm flex flex-col gap-6">
+          <div className="flex flex-col items-center gap-2 text-center">
+            <span className="h-12 w-12 rounded-xl bg-blue-500/[0.12] text-blue-300 flex items-center justify-center">
+              {isRename ? <Pencil size={20} /> : <Network size={22} />}
+            </span>
+            <h3 className="text-[15px] font-semibold text-white/80">{isRename ? 'Rename your map' : 'Name your map'}</h3>
+            <p className="text-[12px] text-white/40">{isRename ? 'Give this map a clearer name.' : 'Group related notes and ideas into one visual map.'}</p>
+          </div>
+          <div>
+            <label className="text-[11px] font-semibold uppercase tracking-widest text-white/35 mb-2 block">Name</label>
+            <input
+              ref={inputRef}
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="Untitled Map"
+              className="w-full px-4 py-3 rounded-xl border border-white/[0.10] bg-white/[0.04] text-[15px] text-white/90 placeholder-white/25 outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20 transition-all"
+            />
+          </div>
+          <div className="flex gap-2 justify-center">
+            <Button type="button" variant="ghost" size="sm" onClick={onBack} disabled={busy}>Cancel</Button>
+            <Button type="submit" size="sm" disabled={busy}>
+              {busy ? <Loader2 size={13} className="animate-spin" /> : (isRename ? <Check size={14} /> : <Plus size={14} />)}
+              {isRename ? 'Rename map' : 'Create map'}
+            </Button>
+          </div>
+        </form>
+      </div>
+    </ViewFade>
+  );
+}
+
+function DeleteMapView({ map, onBack, onConfirm }) {
+  const [busy, setBusy] = useState(false);
+
+  async function handleDelete() {
+    if (busy) return;
+    setBusy(true);
+    const ok = await onConfirm();
+    if (!ok) setBusy(false);
+  }
+
+  return (
+    <ViewFade viewKey="delete-map" className="h-full flex flex-col">
+      <div className="flex items-center gap-3 pb-4 mb-6 border-b border-white/[0.06] flex-shrink-0">
+        <button onClick={onBack} className="flex items-center gap-2 text-sm text-white/40 hover:text-white/90 transition-colors">
+          <ArrowLeft size={16} /> Back
+        </button>
+        <h2 className="text-lg font-bold text-white/90">Delete map</h2>
+      </div>
+      <div className="flex-1 flex items-center justify-center pb-10">
+        <div className="w-full max-w-sm flex flex-col gap-6">
+          <div className="flex flex-col items-center gap-2 text-center">
+            <span className="h-12 w-12 rounded-xl bg-rose-500/[0.12] text-rose-300 flex items-center justify-center">
+              <Trash2 size={22} />
+            </span>
+            <h3 className="text-[15px] font-semibold text-white/80">Delete &ldquo;{map?.name}&rdquo;?</h3>
+            <p className="text-[12px] text-white/40">This map and all of its nodes and links will be permanently removed. This can&rsquo;t be undone.</p>
+          </div>
+          <div className="flex gap-2 justify-center">
+            <Button type="button" variant="ghost" size="sm" onClick={onBack} disabled={busy}>Cancel</Button>
+            <Button type="button" variant="danger" size="sm" onClick={handleDelete} disabled={busy}>
+              {busy ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={14} />}
+              Delete map
+            </Button>
+          </div>
+        </div>
+      </div>
+    </ViewFade>
+  );
+}
+
 export default function NotesApp({ initialNoteId = null, initialMapId = null, initialView = null, initialFlashcardsNoteId = null, initialFlashcardsTitle = null } = {}) {
   const toast = useToast();
-  const { openApp } = useWindowManager();
   const startView = initialFlashcardsNoteId ? 'flashcards'
                     : initialNoteId ? 'editor'
                     : initialMapId ? 'map'
@@ -410,8 +504,6 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
   const [selectedMapId, setSelectedMapId] = useState(initialMapId);
   const [creatingMap, setCreatingMap] = useState(false);
   const [loading, setLoading] = useState(!cachedNotes);
-  const [showCreate, setShowCreate] = useState(false);
-  const [showAI, setShowAI] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiType, setAiType] = useState('regular');
   const [aiBusy, setAiBusy] = useState(false);
@@ -423,7 +515,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
   const [selectedLessonIds, setSelectedLessonIds] = useState([]);
   const [curriculumLoading, setCurriculumLoading] = useState(false);
   const [selectedNoteId, setSelectedNoteId] = useState(initialNoteId || initialFlashcardsNoteId);
-  const [nameDialog, setNameDialog] = useState(null);
+  const [mapTarget, setMapTarget] = useState(null);
 
   const cachedTopics = peek('notes:topics');
   const [topics, setTopics] = useState(() => cachedTopics?.topics || []);
@@ -496,48 +588,65 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
 
   function handleCreateMap() {
     if (creatingMap) return;
-    setNameDialog({ mode: 'create', initial: 'Untitled Map' });
+    setView('create-map');
   }
 
-  function handleRenameMap(map) {
-    setNameDialog({ mode: 'rename', initial: map.name, mapId: map.id });
-  }
-
-  async function handleNameSubmit(name) {
+  async function handleCreateMapSubmit(name) {
     const trimmed = (name || '').trim() || 'Untitled Map';
-    const dialog = nameDialog;
-    setNameDialog(null);
-    if (!dialog) return;
-    if (dialog.mode === 'create') {
-      setCreatingMap(true);
-      try {
-        const d = await createNoteMap(trimmed);
-        if (d?.map?.id) {
-          openApp('notes', trimmed, { initialView: 'map', initialMapId: d.map.id });
-        }
-        await reloadMaps(true);
-      } catch (e) {
-        toast.error(e?.message || 'Could not create map.');
+    setCreatingMap(true);
+    try {
+      const d = await createNoteMap(trimmed);
+      await reloadMaps(true);
+      if (d?.map?.id) {
+        setSelectedMapId(d.map.id);
+        setView('map');
+      } else {
+        setView('list');
       }
+      return true;
+    } catch (e) {
+      toast.error(e?.message || 'Could not create map.');
+      return false;
+    } finally {
       setCreatingMap(false);
-    } else if (dialog.mode === 'rename') {
-      if (trimmed === dialog.initial) return;
-      try {
-        await updateNoteMap(dialog.mapId, { name: trimmed });
-        await reloadMaps(true);
-      } catch (e) { toast.error(e?.message || 'Rename failed.'); }
     }
   }
 
-  async function handleDeleteMap(e, map) {
+  function handleRenameMap(map) {
+    setMapTarget({ id: map.id, name: map.name, isDefault: map.isDefault, returnTo: view });
+    setView('rename-map');
+  }
+
+  async function handleRenameMapSubmit(name) {
+    const target = mapTarget;
+    const back = target?.returnTo || 'list';
+    const trimmed = (name || '').trim();
+    if (!target || !trimmed || trimmed === target.name) { setView(back); return true; }
+    try {
+      await updateNoteMap(target.id, { name: trimmed });
+      await reloadMaps(true);
+      setView(back);
+      return true;
+    } catch (e) { toast.error(e?.message || 'Rename failed.'); return false; }
+  }
+
+  function handleDeleteMap(e, map) {
     e.stopPropagation();
     if (map.isDefault) { toast.error("Can't delete the default map."); return; }
-    if (!confirm(`Delete the map "${map.name}"? Nodes and edges will be lost.`)) return;
+    setMapTarget({ id: map.id, name: map.name, isDefault: map.isDefault, returnTo: view });
+    setView('delete-map');
+  }
+
+  async function handleDeleteMapConfirm() {
+    const target = mapTarget;
+    if (!target) { setView('list'); return true; }
     try {
-      await deleteNoteMap(map.id);
-      if (selectedMapId === map.id) setSelectedMapId(null);
+      await deleteNoteMap(target.id);
+      if (selectedMapId === target.id) setSelectedMapId(null);
       await reloadMaps(true);
-    } catch (err) { toast.error(err?.message || 'Delete failed.'); }
+      setView('list');
+      return true;
+    } catch (err) { toast.error(err?.message || 'Delete failed.'); return false; }
   }
 
   function openMap(map) {
@@ -546,11 +655,11 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
   }
 
   useEffect(() => {
-    if (!showAI || aiSource !== 'curriculum' || curricula.length > 0) return;
+    if (view !== 'ai' || aiSource !== 'curriculum' || curricula.length > 0) return;
     listCurricula()
       .then(d => setCurricula(d.curricula || d || []))
       .catch(() => {});
-  }, [showAI, aiSource, curricula.length]);
+  }, [view, aiSource, curricula.length]);
 
   useEffect(() => {
     if (!selectedCurriculumId) { setCurriculumDetail(null); return; }
@@ -576,7 +685,6 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
       if (seedTopic) reloadTopics(true);
       setSelectedNoteId(data.note.id);
       setView('editor');
-      setShowCreate(false);
     } catch {}
   }
 
@@ -655,7 +763,6 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
       bust('notes:list');
       setSelectedNoteId(noteId);
       setView('editor');
-      setShowAI(false);
       setAiPrompt('');
       setSelectedCurriculumId(null);
       setCurriculumDetail(null);
@@ -685,6 +792,202 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
   function openNote(id) {
     setSelectedNoteId(id);
     setView('editor');
+  }
+
+  if (view === 'create') {
+    return (
+      <ViewFade viewKey="create" className="h-full flex flex-col">
+        <div className="flex items-center gap-3 pb-4 mb-6 border-b border-white/[0.06] flex-shrink-0">
+          <button onClick={() => setView('list')} className="flex items-center gap-2 text-sm text-white/40 hover:text-white/90 transition-colors">
+            <ArrowLeft size={16} /> Back
+          </button>
+          <h2 className="text-lg font-bold text-white/90">New note</h2>
+        </div>
+        <div className="flex-1 flex items-center justify-center pb-10">
+          <div className="grid grid-cols-2 gap-3 w-full max-w-2xl">
+            <button onClick={() => handleCreate('regular')} className="flex flex-col items-center gap-2 p-6 rounded-xl border border-white/[0.08] bg-white/[0.02] hover:bg-blue-500/[0.10] hover:border-blue-400/[0.28] transition-colors text-center">
+              <FileText size={24} className="text-white/50" />
+              <span className="text-sm font-medium text-white/70">Regular</span>
+              <span className="text-xs text-white/30">Freeform</span>
+            </button>
+            <button onClick={() => handleCreate('cornell')} className="flex flex-col items-center gap-2 p-6 rounded-xl border border-white/[0.08] bg-white/[0.02] hover:bg-blue-500/[0.10] hover:border-blue-400/[0.28] transition-colors text-center">
+              <Layout size={24} className="text-white/50" />
+              <span className="text-sm font-medium text-white/70">Cornell</span>
+              <span className="text-xs text-white/30">Cues + summary</span>
+            </button>
+          </div>
+        </div>
+      </ViewFade>
+    );
+  }
+
+  if (view === 'ai') {
+    return (
+      <ViewFade viewKey="ai" className="h-full flex flex-col">
+        <div className="flex items-center gap-3 pb-4 mb-6 border-b border-white/[0.06] flex-shrink-0">
+          <button onClick={() => { setView('list'); setAiError(null); }} className="flex items-center gap-2 text-sm text-white/40 hover:text-white/90 transition-colors">
+            <ArrowLeft size={16} /> Back
+          </button>
+          <h2 className="text-lg font-bold text-white/90">Generate note with AI</h2>
+        </div>
+        <div className="flex-1 overflow-y-auto min-h-0">
+          <div className="w-full max-w-lg mx-auto space-y-4 pb-10">
+            <div>
+              <label className="text-xs font-medium text-white/40 mb-1.5 block">Source</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setAiSource('prompt')}
+                  className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs transition-colors ${aiSource === 'prompt' ? 'border-blue-400/45 bg-blue-500/15 text-white' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}
+                >
+                  <Wand2 size={12} /> From prompt
+                </button>
+                <button
+                  onClick={() => setAiSource('curriculum')}
+                  className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs transition-colors ${aiSource === 'curriculum' ? 'border-blue-400/45 bg-blue-500/15 text-white' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}
+                >
+                  <BookOpen size={12} /> From curriculum
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-white/40 mb-1.5 block">Type</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => setAiType('regular')} className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs transition-colors ${aiType === 'regular' ? 'border-blue-400/45 bg-blue-500/15 text-white' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}>
+                  <FileText size={12} /> Regular
+                </button>
+                <button onClick={() => setAiType('cornell')} className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs transition-colors ${aiType === 'cornell' ? 'border-blue-400/45 bg-blue-500/15 text-white' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}>
+                  <Layout size={12} /> Cornell
+                </button>
+              </div>
+            </div>
+
+            {aiSource === 'curriculum' && (
+              <>
+                <div>
+                  <label className="text-xs font-medium text-white/40 mb-1.5 block">Curriculum</label>
+                  <select
+                    value={selectedCurriculumId || ''}
+                    onChange={e => setSelectedCurriculumId(e.target.value || null)}
+                    className="w-full px-3 py-2 rounded-lg border border-white/[0.06] bg-white/[0.04] text-sm text-white/70 outline-none"
+                  >
+                    <option value="">- Pick a curriculum -</option>
+                    {curricula.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
+                  </select>
+                </div>
+
+                {selectedCurriculumId && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs font-medium text-white/40">Lessons ({selectedLessonIds.length} selected)</label>
+                      {curriculumDetail && (
+                        <div className="flex gap-1.5">
+                          <button
+                            onClick={() => {
+                              const all = [];
+                              for (const u of curriculumDetail.units || []) for (const l of u.lessons || []) all.push(l.id);
+                              setSelectedLessonIds(all);
+                            }}
+                            className="text-[10px] text-white/40 hover:text-white/70 hover:underline"
+                          >All</button>
+                          <button
+                            onClick={() => setSelectedLessonIds([])}
+                            className="text-[10px] text-white/30 hover:text-white/50 hover:underline"
+                          >None</button>
+                        </div>
+                      )}
+                    </div>
+                    <div className="max-h-48 overflow-y-auto rounded-lg border border-white/[0.06] bg-white/[0.02] p-2">
+                      {curriculumLoading ? (
+                        <div className="flex items-center justify-center py-6 text-xs text-white/30"><InlineProgress active /> Loading lessons…</div>
+                      ) : !curriculumDetail ? (
+                        <p className="text-[11px] text-white/25 italic p-2">Curriculum not found.</p>
+                      ) : (
+                        (curriculumDetail.units || []).map(u => (
+                          <div key={u.id} className="mb-2 last:mb-0">
+                            <p className="text-[10px] font-semibold text-white/35 uppercase tracking-wider px-1 mb-1">{u.title}</p>
+                            {(u.lessons || []).map(l => {
+                              const checked = selectedLessonIds.includes(l.id);
+                              return (
+                                <label key={l.id} className="flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-white/[0.04] cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => setSelectedLessonIds(prev => checked ? prev.filter(id => id !== l.id) : [...prev, l.id])}
+                                    className="w-3 h-3 accent-white"
+                                  />
+                                  <span className="text-xs text-white/60">{l.title}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            <div>
+              <label className="text-xs font-medium text-white/40 mb-1.5 block">
+                {aiSource === 'curriculum' ? 'Extra instructions (optional)' : 'Topic'}
+              </label>
+              <textarea
+                value={aiPrompt}
+                onChange={e => setAiPrompt(e.target.value)}
+                rows={3}
+                placeholder={aiSource === 'curriculum' ? 'Extra instructions…' : 'What should the note cover?'}
+                className="w-full px-3 py-2 rounded-lg border border-white/[0.06] bg-white/[0.04] text-sm text-white/70 placeholder-white/20 outline-none resize-none"
+              />
+            </div>
+
+            {aiError && <p className="text-xs text-rose-400">{aiError}</p>}
+            <div className="flex gap-2 justify-center pt-1">
+              <Button size="sm" variant="ghost" onClick={() => { setView('list'); setAiError(null); }}>Cancel</Button>
+              <Button
+                size="sm"
+                onClick={handleGenerate}
+                disabled={aiBusy || (aiSource === 'curriculum' ? (!selectedCurriculumId || selectedLessonIds.length === 0) : !aiPrompt.trim())}
+              >
+                {aiBusy ? <><InlineProgress active /> Generating…</> : <><Wand2 size={14} /> Generate</>}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </ViewFade>
+    );
+  }
+
+  if (view === 'create-map') {
+    return (
+      <MapNameView
+        mode="create"
+        onBack={() => setView('list')}
+        onSubmit={handleCreateMapSubmit}
+      />
+    );
+  }
+
+  if (view === 'rename-map') {
+    return (
+      <MapNameView
+        mode="rename"
+        map={mapTarget}
+        onBack={() => setView(mapTarget?.returnTo || 'list')}
+        onSubmit={handleRenameMapSubmit}
+      />
+    );
+  }
+
+  if (view === 'delete-map') {
+    return (
+      <DeleteMapView
+        map={mapTarget}
+        onBack={() => setView(mapTarget?.returnTo || 'list')}
+        onConfirm={handleDeleteMapConfirm}
+      />
+    );
   }
 
   if (view === 'new-topic') {
@@ -808,10 +1111,10 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
       <div className="flex items-center justify-between mb-5 flex-shrink-0">
         <h2 className="text-lg font-bold text-white/90">Notes</h2>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="secondary" onClick={() => setShowAI(true)}>
+          <Button size="sm" variant="secondary" onClick={() => setView('ai')}>
             <Wand2 size={14} /> AI
           </Button>
-          <Button size="sm" onClick={() => setShowCreate(true)}><Plus size={14} /> New</Button>
+          <Button size="sm" onClick={() => setView('create')}><Plus size={14} /> New</Button>
         </div>
       </div>
 
@@ -926,161 +1229,12 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
         </div>
       </div>
 
-      <Modal open={showAI} onClose={() => { setShowAI(false); setAiError(null); }} title="Generate note with AI">
-        <div className="space-y-3">
-          <div>
-            <label className="text-xs font-medium text-white/40 mb-1.5 block">Source</label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => setAiSource('prompt')}
-                className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs transition-colors ${aiSource === 'prompt' ? 'border-blue-400/45 bg-blue-500/15 text-white' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}
-              >
-                <Wand2 size={12} /> From prompt
-              </button>
-              <button
-                onClick={() => setAiSource('curriculum')}
-                className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs transition-colors ${aiSource === 'curriculum' ? 'border-blue-400/45 bg-blue-500/15 text-white' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}
-              >
-                <BookOpen size={12} /> From curriculum
-              </button>
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs font-medium text-white/40 mb-1.5 block">Type</label>
-            <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => setAiType('regular')} className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs transition-colors ${aiType === 'regular' ? 'border-blue-400/45 bg-blue-500/15 text-white' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}>
-                <FileText size={12} /> Regular
-              </button>
-              <button onClick={() => setAiType('cornell')} className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs transition-colors ${aiType === 'cornell' ? 'border-blue-400/45 bg-blue-500/15 text-white' : 'border-white/[0.06] bg-white/[0.02] text-white/40 hover:bg-white/[0.05] hover:text-white/60'}`}>
-                <Layout size={12} /> Cornell
-              </button>
-            </div>
-          </div>
-
-          {aiSource === 'curriculum' && (
-            <>
-              <div>
-                <label className="text-xs font-medium text-white/40 mb-1.5 block">Curriculum</label>
-                <select
-                  value={selectedCurriculumId || ''}
-                  onChange={e => setSelectedCurriculumId(e.target.value || null)}
-                  className="w-full px-3 py-2 rounded-lg border border-white/[0.06] bg-white/[0.04] text-sm text-white/70 outline-none"
-                >
-                  <option value="">- Pick a curriculum -</option>
-                  {curricula.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
-                </select>
-              </div>
-
-              {selectedCurriculumId && (
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-xs font-medium text-white/40">Lessons ({selectedLessonIds.length} selected)</label>
-                    {curriculumDetail && (
-                      <div className="flex gap-1.5">
-                        <button
-                          onClick={() => {
-                            const all = [];
-                            for (const u of curriculumDetail.units || []) for (const l of u.lessons || []) all.push(l.id);
-                            setSelectedLessonIds(all);
-                          }}
-                          className="text-[10px] text-white/40 hover:text-white/70 hover:underline"
-                        >All</button>
-                        <button
-                          onClick={() => setSelectedLessonIds([])}
-                          className="text-[10px] text-white/30 hover:text-white/50 hover:underline"
-                        >None</button>
-                      </div>
-                    )}
-                  </div>
-                  <div className="max-h-48 overflow-y-auto rounded-lg border border-white/[0.06] bg-white/[0.02] p-2">
-                    {curriculumLoading ? (
-                      <div className="flex items-center justify-center py-6 text-xs text-white/30"><InlineProgress active /> Loading lessons…</div>
-                    ) : !curriculumDetail ? (
-                      <p className="text-[11px] text-white/25 italic p-2">Curriculum not found.</p>
-                    ) : (
-                      (curriculumDetail.units || []).map(u => (
-                        <div key={u.id} className="mb-2 last:mb-0">
-                          <p className="text-[10px] font-semibold text-white/35 uppercase tracking-wider px-1 mb-1">{u.title}</p>
-                          {(u.lessons || []).map(l => {
-                            const checked = selectedLessonIds.includes(l.id);
-                            return (
-                              <label key={l.id} className="flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-white/[0.04] cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  onChange={() => setSelectedLessonIds(prev => checked ? prev.filter(id => id !== l.id) : [...prev, l.id])}
-                                  className="w-3 h-3 accent-white"
-                                />
-                                <span className="text-xs text-white/60">{l.title}</span>
-                              </label>
-                            );
-                          })}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-
-          <div>
-            <label className="text-xs font-medium text-white/40 mb-1.5 block">
-              {aiSource === 'curriculum' ? 'Extra instructions (optional)' : 'Topic'}
-            </label>
-            <textarea
-              value={aiPrompt}
-              onChange={e => setAiPrompt(e.target.value)}
-              rows={3}
-              placeholder={aiSource === 'curriculum' ? 'Extra instructions…' : 'What should the note cover?'}
-              className="w-full px-3 py-2 rounded-lg border border-white/[0.06] bg-white/[0.04] text-sm text-white/70 placeholder-white/20 outline-none resize-none"
-            />
-          </div>
-
-          {aiError && <p className="text-xs text-rose-400">{aiError}</p>}
-          <div className="flex gap-2 justify-end">
-            <Button size="sm" variant="ghost" onClick={() => { setShowAI(false); setAiError(null); }}>Cancel</Button>
-            <Button
-              size="sm"
-              onClick={handleGenerate}
-              disabled={aiBusy || (aiSource === 'curriculum' ? (!selectedCurriculumId || selectedLessonIds.length === 0) : !aiPrompt.trim())}
-            >
-              {aiBusy ? <><InlineProgress active /> Generating…</> : <><Wand2 size={14} /> Generate</>}
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      <NameMapModal
-        open={!!nameDialog}
-        mode={nameDialog?.mode}
-        initial={nameDialog?.initial}
-        onClose={() => setNameDialog(null)}
-        onSubmit={handleNameSubmit}
-      />
-
-      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="New note">
-        <div className="grid grid-cols-2 gap-3">
-          <button onClick={() => handleCreate('regular')} className="flex flex-col items-center gap-2 p-5 rounded-xl border border-white/[0.08] bg-white/[0.02] hover:bg-blue-500/[0.10] hover:border-blue-400/[0.28] transition-colors text-center">
-            <FileText size={24} className="text-white/50" />
-            <span className="text-sm font-medium text-white/70">Regular</span>
-            <span className="text-xs text-white/30">Freeform</span>
-          </button>
-          <button onClick={() => handleCreate('cornell')} className="flex flex-col items-center gap-2 p-5 rounded-xl border border-white/[0.08] bg-white/[0.02] hover:bg-blue-500/[0.10] hover:border-blue-400/[0.28] transition-colors text-center">
-            <Layout size={24} className="text-white/50" />
-            <span className="text-sm font-medium text-white/70">Cornell</span>
-            <span className="text-xs text-white/30">Cues + summary</span>
-          </button>
-        </div>
-      </Modal>
-
       <div className="flex-1 overflow-y-auto min-h-0">
       {notes.length === 0 ? (
         <div className="text-center py-12">
           <FileText size={28} className="text-white/35 mx-auto mb-3" />
           <p className="text-sm text-white/55 mb-3">No notes yet</p>
-          <Button size="sm" onClick={() => setShowCreate(true)}><Plus size={14} /> New note</Button>
+          <Button size="sm" onClick={() => setView('create')}><Plus size={14} /> New note</Button>
         </div>
       ) : visibleNotes.length === 0 ? (
         <div className="text-center py-10 text-[12px] text-white/35">No notes in this topic yet.</div>
@@ -1138,36 +1292,3 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
   );
 }
 
-function NameMapModal({ open, mode, initial, onClose, onSubmit }) {
-  const [name, setName] = useState(initial || '');
-  useEffect(() => {
-    if (open) setName(initial || '');
-  }, [open, initial]);
-
-  if (!open) return null;
-  const title = mode === 'rename' ? 'Rename map' : 'Name this map';
-  const confirmLabel = mode === 'rename' ? 'Rename' : 'Create';
-  function submit(e) {
-    e?.preventDefault?.();
-    onSubmit(name.trim() || 'Untitled Map');
-  }
-
-  return (
-    <Modal open={open} onClose={onClose} title={title} size="sm">
-      <form onSubmit={submit} className="flex flex-col gap-4">
-        <input
-          autoFocus
-          value={name}
-          onChange={e => setName(e.target.value)}
-          onFocus={e => e.currentTarget.select()}
-          placeholder="Untitled Map"
-          className="w-full px-3.5 py-2.5 rounded-lg border border-white/[0.10] bg-white/[0.04] text-[14px] text-white/90 placeholder-white/30 outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20"
-        />
-        <div className="flex gap-2 justify-end">
-          <Button type="button" variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
-          <Button type="submit" size="sm">{confirmLabel}</Button>
-        </div>
-      </form>
-    </Modal>
-  );
-}

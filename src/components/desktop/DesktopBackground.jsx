@@ -48,9 +48,9 @@ export default memo(function DesktopBackground() {
     return () => observer.disconnect();
   }, []);
 
-  // All OSes default to lavender on first login; user can change in Settings.
-  const effectiveWallpaper = WALLPAPERS[wallpaper] ? wallpaper : 'lavender';
-  const wp = WALLPAPERS[effectiveWallpaper] || WALLPAPERS.lavender;
+  // Match the signed-out landing page's nighttime-sky wallpaper by default.
+  const effectiveWallpaper = WALLPAPERS[wallpaper] ? wallpaper : 'milkyway';
+  const wp = WALLPAPERS[effectiveWallpaper] || WALLPAPERS.milkyway;
 
   useEffect(() => {
     if (wp.type !== 'image') return;

@@ -838,7 +838,7 @@ function createDefaultData() {
       customInstructions: '',
       // ----- UI prefs (moved off localStorage) -----
       theme: 'dark',
-      wallpaper: 'lavender',
+      wallpaper: 'milkyway',
       dockSize: 'medium',
       iconStyle: 'gradient',
       dockPosition: 'bottom',
