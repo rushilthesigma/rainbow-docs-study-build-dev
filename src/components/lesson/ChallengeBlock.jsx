@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { ArrowRight, Eye, Flame, Lightbulb } from 'lucide-react';
+import { ArrowRight, Eye, Lightbulb, Zap } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
+import MathText from '../shared/MathText';
 
 // Stretch problem. The AI surfaces this when the student is clearly
 // ahead of the curve (acing recent quizzes). Has a hint reveal and a
@@ -19,18 +20,18 @@ export default function ChallengeBlock({ block, onComplete, hideContinue = false
 
   return (
     <div className="cl-anim-in">
-      <div className="border-t border-rose-300/[0.18] pt-7 lg:pt-9 mb-6">
+      <div className="border-t border-white/[0.07] pt-7 lg:pt-9 mb-6">
         <div className="mx-auto max-w-[68ch]">
           <div className="flex items-center gap-2 mb-3">
-            <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-rose-200/85 bg-rose-400/[0.10] border border-rose-300/[0.22] rounded-full px-2.5 py-0.5">
-              <Flame size={10} strokeWidth={2.4} /> Challenge
+            <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-blue-200/85 bg-blue-400/[0.10] border border-blue-300/[0.22] rounded-full px-2.5 py-0.5">
+              <Zap size={10} strokeWidth={2.4} /> Challenge
             </span>
           </div>
 
           {block.title && (
-            <h2 className="text-[22px] font-semibold tracking-[-0.01em] text-white mb-5">
+            <MathText as="h2" className="text-[22px] font-semibold tracking-[-0.01em] text-white mb-5">
               {block.title}
-            </h2>
+            </MathText>
           )}
 
           {/* Prompt */}
@@ -49,7 +50,7 @@ export default function ChallengeBlock({ block, onComplete, hideContinue = false
             {block.hint && !hintShown && (
               <button
                 onClick={() => setHintShown(true)}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[12.5px] font-semibold text-amber-100 bg-amber-400/[0.10] border border-amber-300/[0.30] hover:bg-amber-400/[0.18] hover:border-amber-300/[0.50] transition-all"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[12.5px] font-semibold text-blue-100 bg-blue-400/[0.10] border border-blue-300/[0.28] hover:bg-blue-400/[0.18] hover:border-blue-300/[0.45] transition-all"
               >
                 <Lightbulb size={13} strokeWidth={2.4} /> Show hint
               </button>
@@ -66,9 +67,9 @@ export default function ChallengeBlock({ block, onComplete, hideContinue = false
 
           {/* Hint */}
           {hintShown && block.hint && (
-            <div className="mt-5 rounded-xl border border-amber-300/[0.22] bg-amber-400/[0.05] px-4 py-3.5">
-              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-amber-200/75 mb-1.5">Hint</p>
-              <p className="text-[14px] text-white/82 leading-relaxed">{block.hint}</p>
+            <div className="mt-5 rounded-xl border border-blue-300/[0.18] bg-blue-400/[0.05] px-4 py-3.5">
+              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-blue-200/70 mb-1.5">Hint</p>
+              <MathText as="p" className="text-[14px] text-white/82 leading-relaxed">{block.hint}</MathText>
             </div>
           )}
 
@@ -92,7 +93,7 @@ export default function ChallengeBlock({ block, onComplete, hideContinue = false
         <div className="flex justify-end border-t border-white/[0.05] pt-5">
           <button
             onClick={onComplete}
-            className="inline-flex items-center gap-2.5 px-6 py-3 rounded-xl font-semibold text-[14px] text-white bg-gradient-to-b from-rose-500 to-rose-600 hover:from-rose-400 hover:to-rose-500 border border-rose-400/45 transition-all"
+            className="inline-flex items-center gap-2.5 px-6 py-3 rounded-xl font-semibold text-[14px] text-white bg-blue-500 hover:bg-blue-400 transition-colors"
           >
             {continueLabel} <ArrowRight size={15} />
           </button>

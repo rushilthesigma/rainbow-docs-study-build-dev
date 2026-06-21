@@ -50,7 +50,7 @@ export default function ShortcutsHelp({ open, onClose }) {
 
   return (
     <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: Z.shortcuts }} onClick={onClose}>
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      <div className="absolute inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-sm" />
       <div
         onClick={e => e.stopPropagation()}
         className="relative w-full max-w-md rounded-2xl bg-white dark:bg-[#161622] border border-gray-200 dark:border-[#2A2A40] shadow-2xl overflow-hidden"

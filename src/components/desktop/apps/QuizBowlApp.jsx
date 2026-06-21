@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Zap, Play, Check, X, Loader2, Lightbulb, Users, BookOpen, Sparkles, Settings, ArrowRight, Target, TrendingDown, Clock, History, Flame, ChevronRight, ArrowLeft, Trophy, Swords, RefreshCw, Eye } from 'lucide-react';
+import { Zap, Play, Pause, Check, X, Loader2, Lightbulb, Users, BookOpen, Sparkles, Settings, ArrowRight, Target, TrendingDown, TrendingUp, Clock, History, Flame, ChevronRight, ArrowLeft, Trophy, Swords, RefreshCw, Eye } from 'lucide-react';
 import TrialSession, { AnswerResultPanel } from '../../trial/TrialSession';
 import { apiFetch } from '../../../api/client';
 import { fetchQBReaderTossups, saveQuizBowlSet, fetchQuizBowlHistory, fetchQuizBowlRecommendations, fetchQuizBowlPatterns, fetchQuizBowlSm2Due, fetchQuizBowlMatches, saveAiMatchReplay } from '../../../api/quizMatch';
@@ -188,6 +188,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   const cachedSm2  = peek('qb:sm2due');
   const cachedMatches = peek('qb:matches');
   const [history, setHistory] = useState(cachedHist || null);
+  const [skillProfile, setSkillProfile] = useState(cachedHist?.secretProfile || null);
   const [recs, setRecs] = useState(cachedRecs?.recommendations || []);
   const [patterns, setPatterns] = useState(cachedPats?.patterns || null);
   const [sm2Due, setSm2Due] = useState(cachedSm2?.dueCategories || []);
@@ -214,6 +215,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
           .catch(() => ({ matches: [] })),
       ]);
       setHistory(h);
+      setSkillProfile(h?.secretProfile || null);
       setRecs(r.recommendations || []);
       setPatterns(p.patterns || null);
       setSm2Due(s.dueCategories || []);
@@ -259,6 +261,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   const [correct, setCorrect] = useState(null);
   const [scores, setScores] = useState([]);
   const [reading, setReading] = useState(true);
+  const [isPaused, setIsPaused] = useState(false);
   const fetchingMoreRef = useRef(false);
   const [refilling, setRefilling] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -266,12 +269,13 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   const QB_PREFETCH_THRESHOLD = 3;
 
   const q = questions[currentQ];
-  const { revealed, done, stop, wordIndex, totalWords } = useWordReveal(q?.text || '', revealSpeedMs, reading && !buzzed && view === 'playing');
+  const { revealed, done, stop, wordIndex, totalWords } = useWordReveal(q?.text || '', revealSpeedMs, reading && !buzzed && !isPaused && view === 'playing');
 
   // Refs so the keydown handler (registered once per view change) always
   // reads the latest state without needing a stale-closure re-registration.
   const _buzzedRef    = useRef(buzzed);    _buzzedRef.current    = buzzed;
   const _readingRef   = useRef(reading);   _readingRef.current   = reading;
+  const _isPausedRef  = useRef(isPaused);  _isPausedRef.current  = isPaused;
   const _showResultRef= useRef(showResult);_showResultRef.current= showResult;
   const _isActiveRef  = useRef(false);    _isActiveRef.current  = state.windows[state.activeWindowId]?.appId === 'quizbowl';
   const _stopRef      = useRef(stop);      _stopRef.current      = stop;
@@ -323,7 +327,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
         setQuestions(parsed.questions.map(q => ({ ...q, ...parseTossupText(q.text || '') })));
         setPlayingSource('ai');
       }
-      setCurrentQ(0); setScores([]); setBuzzed(false); setShowResult(false); setReading(true);
+      setCurrentQ(0); setScores([]); setBuzzed(false); setShowResult(false); setReading(true); setIsPaused(false);
       fetchingMoreRef.current = false;
       beginNewSet();
       setView('playing');
@@ -343,7 +347,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
         } else {
           setQuestions(tossups);
           setPlayingSource('qbreader');
-          setCurrentQ(0); setScores([]); setBuzzed(false); setShowResult(false); setReading(true);
+          setCurrentQ(0); setScores([]); setBuzzed(false); setShowResult(false); setReading(true); setIsPaused(false);
           fetchingMoreRef.current = false;
           beginNewSet();
           setView('playing');
@@ -369,7 +373,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
       if (parsed?.questions?.length) {
         setQuestions(parsed.questions.map(q => ({ ...q, ...parseTossupText(q.text || '') })));
         setPlayingSource('ai');
-        setCurrentQ(0); setScores([]); setBuzzed(false); setShowResult(false); setReading(true);
+        setCurrentQ(0); setScores([]); setBuzzed(false); setShowResult(false); setReading(true); setIsPaused(false);
         beginNewSet();
         setView('playing');
       } else setError('Generation failed. Try again.');
@@ -508,12 +512,12 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
     if (isInfinite) {
       if (currentQ + 1 >= questions.length) return;
       setCurrentQ(prev => prev + 1);
-      setBuzzed(false); setShowResult(false); setCorrect(null); setAnswer(''); setReading(true);
+      setBuzzed(false); setShowResult(false); setCorrect(null); setAnswer(''); setReading(true); setIsPaused(false);
       return;
     }
     if (currentQ < questions.length - 1) {
       setCurrentQ(prev => prev + 1);
-      setBuzzed(false); setShowResult(false); setCorrect(null); setAnswer(''); setReading(true);
+      setBuzzed(false); setShowResult(false); setCorrect(null); setAnswer(''); setReading(true); setIsPaused(false);
     } else setView('review');
   }
 
@@ -531,9 +535,15 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
       const buzzed     = _buzzedRef.current;
       const reading    = _readingRef.current;
       const showResult = _showResultRef.current;
-      if (e.key === ' ' && !buzzed) {
+      const paused     = _isPausedRef.current;
+      if (e.key === ' ' && !buzzed && !showResult) {
         e.preventDefault();
-        if (!buzzed) { setBuzzed(true); setReading(false); _stopRef.current?.(); }
+        if (paused) { setIsPaused(false); return; }
+        setBuzzed(true); setReading(false); _stopRef.current?.();
+      }
+      if (e.key === 'p' && !buzzed && !showResult && !(e.target instanceof HTMLInputElement)) {
+        e.preventDefault();
+        setIsPaused(p => !p);
       }
       if (e.key === 'Enter' && buzzed && !showResult) { e.preventDefault(); _submitRef.current?.(); }
       else if (e.key === 'Enter' && showResult) { e.preventDefault(); _nextQRef.current?.(); }
@@ -630,6 +640,15 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
           <span className={`text-[12px] font-bold tabular-nums ${scores.filter(s => s.correct).length > 0 ? 'text-emerald-400' : 'text-white/40'}`}>
             {scores.filter(s => s.correct).length}
           </span>
+          {!buzzed && !showResult && (
+            <button
+              onClick={() => setIsPaused(p => !p)}
+              aria-label={isPaused ? 'Resume' : 'Pause'}
+              className={`p-1 rounded-lg border transition-colors ${isPaused ? 'border-amber-400/30 bg-amber-500/[0.10] text-amber-300' : 'border-transparent text-white/30 hover:text-white/60 hover:bg-white/5'}`}
+            >
+              {isPaused ? <Play size={13} /> : <Pause size={13} />}
+            </button>
+          )}
           {isInfinite && (
             <>
               <button
@@ -648,7 +667,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
             </>
           )}
           {isInfinite && settingsOpen && (
-            <div className="absolute right-2 top-full mt-1 w-72 z-20 rounded-lg border border-white/[0.12] bg-black/70 backdrop-blur-xl p-3.5 space-y-3">
+            <div className="absolute right-2 top-full mt-1 w-72 z-20 rounded-lg border border-white/[0.12] bg-white dark:bg-[#181818] p-3.5 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Settings</span>
                 <button onClick={() => setSettingsOpen(false)} className="text-white/45 hover:text-white/75"><X size={12} /></button>
@@ -666,7 +685,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
               <div className="grid grid-cols-2 gap-1">
                 {DIFFICULTIES.map(d => (
                   <button key={d} onClick={() => setDifficulty(d)}
-                    className={`px-2 py-1.5 rounded-lg text-[11px] font-semibold transition-colors focus:outline-none ${difficulty === d ? 'bg-blue-500/[0.18] text-blue-100 border border-blue-400/[0.40]' : 'bg-white/[0.03] text-white/55 border border-white/[0.06] hover:bg-white/[0.06] hover:text-white/75'}`}>
+                    className={`px-2 py-1.5 rounded-lg text-[11px] font-semibold transition-colors focus:outline-none ${difficulty === d ? 'bg-blue-500/[0.30] text-blue-100 border border-blue-400/[0.40]' : 'bg-white/[0.03] text-white/55 border border-white/[0.06] hover:bg-white/[0.06] hover:text-white/75'}`}>
                     {d}
                   </button>
                 ))}
@@ -687,7 +706,12 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
           <div className="min-h-[120px]">
             <p className="text-[15px] leading-relaxed text-white/90 font-light">
               {revealed}
-              {reading && !done && <span className="inline-block w-0.5 h-4 bg-white/35 animate-pulse ml-1 align-middle rounded-sm" />}
+              {reading && !done && !isPaused && <span className="inline-block w-0.5 h-4 bg-white/35 animate-pulse ml-1 align-middle rounded-sm" />}
+              {isPaused && !buzzed && (
+                <span className="inline-flex items-center gap-1 ml-2 align-middle px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-[0.14em] bg-amber-500/[0.12] border border-amber-400/25 text-amber-300/80">
+                  <Pause size={8} /> paused
+                </span>
+              )}
             </p>
           </div>
         </div>
@@ -696,7 +720,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
           {!buzzed && (
             <>
               <button onClick={handleBuzz} data-tour="qb-buzz"
-                className="w-full py-4 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[15px] font-bold uppercase tracking-[0.15em] active:scale-[0.98] transition-all">
+                className="w-full py-4 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[15px] font-bold uppercase tracking-[0.15em] active:scale-[0.98] transition-all">
                 BUZZ
               </button>
               <p className="text-[10px] text-white/35 text-center">Space to buzz</p>
@@ -705,9 +729,9 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
           {buzzed && !showResult && (
             <div className="flex gap-2">
               <input value={answer} onChange={e => setAnswer(e.target.value)} placeholder="Answer…" autoFocus
-                className="flex-1 px-4 py-3 rounded-lg border border-white/[0.10] bg-white/[0.05] text-[14px] text-white placeholder-white/25 outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20 transition-colors" />
+                className="flex-1 px-4 py-3 rounded-lg border border-blue-500/40 bg-white/[0.05] text-[14px] text-white placeholder-white/25 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/25 transition-colors" />
               <button onClick={handleSubmit} disabled={!answer.trim()}
-                className="px-5 py-3 rounded-lg bg-white/[0.09] hover:bg-white/[0.13] text-white/70 text-[13px] font-bold disabled:opacity-30 transition-colors">
+                className="px-5 py-3 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[13px] font-bold disabled:opacity-30 transition-colors">
                 <ArrowRight size={16} />
               </button>
             </div>
@@ -728,7 +752,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
               />
               <div className="flex gap-2">
                 <button onClick={() => openLessonFor(q.answer)}
-                  className="flex-1 py-3 rounded-lg border border-white/[0.10] bg-white/[0.04] text-white/55 text-[12px] font-semibold hover:bg-white/[0.08] hover:text-white/75 inline-flex items-center justify-center gap-1.5 transition-colors">
+                  className="flex-1 py-3 rounded-lg border border-blue-500/40 bg-blue-500/[0.08] text-blue-300 text-[12px] font-semibold hover:bg-blue-500/[0.15] hover:text-blue-200 inline-flex items-center justify-center gap-1.5 transition-colors">
                   <Lightbulb size={13} /> Lesson
                 </button>
                 {(() => {
@@ -736,7 +760,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
                   const showLoading = outOfBuffer && refilling;
                   return (
                     <button onClick={nextQuestion} disabled={outOfBuffer}
-                      className="flex-1 py-3 rounded-lg bg-white/[0.09] hover:bg-white/[0.13] text-white/70 text-[13px] font-semibold disabled:opacity-40 inline-flex items-center justify-center gap-2 transition-colors">
+                      className="flex-1 py-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[13px] font-semibold disabled:opacity-40 inline-flex items-center justify-center gap-2 transition-colors">
                       {showLoading ? <><InlineProgress active /> Loading…</> : 'Next →'}
                     </button>
                   );
@@ -888,6 +912,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
     <QuizBowlHub
       hubLoading={hubLoading}
       history={history}
+      skillProfile={skillProfile}
       recs={recs}
       patterns={patterns}
       sm2Due={sm2Due}
@@ -909,20 +934,36 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
 // ============================================================
 // HUB
 // ============================================================
-function QuizBowlHub({ hubLoading, history, recs, patterns, sm2Due = [], matchList = [], error, generating, onLaunch, onMultiplayer, onCustom, onAILobby, onReplay, onReplayMatch, onReplays }) {
+function QuizBowlHub({ hubLoading, history, skillProfile, recs, patterns, sm2Due = [], matchList = [], error, generating, onLaunch, onMultiplayer, onCustom, onAILobby, onReplay, onReplayMatch, onReplays }) {
   const stats = history?.stats || { sets: 0, accuracy: 0, studyMs: 0, categoryStats: {} };
   const sets = history?.sets || [];
 
-  // Pre-compute weakness ranking from category stats. We surface up to
-  // three weakest categories with at least 3 attempts so a single bad
-  // round doesn't dominate the list.
-  const weaknesses = useMemo(() => {
-    return Object.entries(stats.categoryStats || {})
+  // ML-derived weakness/strength from secretProfile; fall back to raw categoryStats.
+  const topWeakness = useMemo(() => {
+    if (skillProfile?.weaknesses?.length) {
+      const w = skillProfile.weaknesses[0];
+      return { cat: w.category, acc: w.accuracy, total: w.attempts };
+    }
+    const fallback = Object.entries(stats.categoryStats || {})
       .filter(([, v]) => v.total >= 3)
       .map(([cat, v]) => ({ cat, acc: Math.round((v.correct / v.total) * 100), total: v.total }))
-      .sort((a, b) => a.acc - b.acc)
-      .slice(0, 3);
-  }, [stats.categoryStats]);
+      .sort((a, b) => a.acc - b.acc);
+    return fallback[0] || null;
+  }, [skillProfile, stats.categoryStats]);
+
+  const topStrength = useMemo(() => {
+    if (skillProfile?.strengths?.length) {
+      const s = skillProfile.strengths[0];
+      return { cat: s.category, acc: s.accuracy, total: s.attempts };
+    }
+    const fallback = Object.entries(stats.categoryStats || {})
+      .filter(([, v]) => v.total >= 5)
+      .map(([cat, v]) => ({ cat, acc: Math.round((v.correct / v.total) * 100), total: v.total }))
+      .sort((a, b) => b.acc - a.acc);
+    return fallback[0] || null;
+  }, [skillProfile, stats.categoryStats]);
+
+  const hoDiff = topStrength ? (topStrength.acc >= 85 ? 'Tournament' : 'Hard') : 'Hard';
 
   return (
     <div className="h-full overflow-y-auto bg-transparent">
@@ -944,21 +985,38 @@ function QuizBowlHub({ hubLoading, history, recs, patterns, sm2Due = [], matchLi
         {/* Buzz patterns - shows when there's enough data */}
         {patterns && <BuzzPatterns patterns={patterns} />}
 
-        {/* Train weaknesses CTA - only when we have enough data */}
-        {weaknesses.length > 0 && (
-          <button
-            onClick={() => onLaunch({ category: weaknesses[0].cat, difficulty: 'Medium', source: 'qbreader' })}
-            disabled={generating}
-            className="w-full text-left rounded-lg border border-white/[0.08] bg-white/[0.03] p-4 hover:bg-white/[0.06] hover:border-white/[0.14] transition-all disabled:opacity-40"
-          >
-            <div className="flex items-center gap-1.5 mb-1.5">
-              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Train weaknesses</span>
-            </div>
-            <p className="text-[14px] font-bold text-white/90 mb-0.5">Practice {weaknesses[0].cat}</p>
-            <p className="text-[11px] text-white/55">
-              You're at <span className="text-rose-300 font-semibold">{weaknesses[0].acc}%</span> over {weaknesses[0].total} questions. The AI will keep feeding you {weaknesses[0].cat} tossups until you climb back.
-            </p>
-          </button>
+        {/* Drill weakness + Hone strength side-by-side */}
+        {(topWeakness || topStrength) && (
+          <div className="grid grid-cols-2 gap-2">
+            {topWeakness && (
+              <button
+                onClick={() => onLaunch({ category: topWeakness.cat, difficulty: 'Medium', source: 'qbreader' })}
+                disabled={generating}
+                className="text-left rounded-lg border border-rose-500/20 bg-rose-500/[0.05] p-3.5 hover:bg-rose-500/[0.10] hover:border-rose-500/30 transition-all disabled:opacity-40"
+              >
+                <div className="flex items-center gap-1 mb-1.5">
+                  <TrendingDown size={11} className="text-rose-400/70" />
+                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-rose-400/70">Drill weakness</span>
+                </div>
+                <p className="text-[13px] font-bold text-white/90 leading-tight mb-0.5">{topWeakness.cat}</p>
+                <p className="text-[10px] text-white/45">{topWeakness.acc}% · {topWeakness.total}Q</p>
+              </button>
+            )}
+            {topStrength && (
+              <button
+                onClick={() => onLaunch({ category: topStrength.cat, difficulty: hoDiff, source: 'qbreader' })}
+                disabled={generating}
+                className="text-left rounded-lg border border-emerald-500/20 bg-emerald-500/[0.05] p-3.5 hover:bg-emerald-500/[0.10] hover:border-emerald-500/30 transition-all disabled:opacity-40"
+              >
+                <div className="flex items-center gap-1 mb-1.5">
+                  <TrendingUp size={11} className="text-emerald-400/70" />
+                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-400/70">Hone strength</span>
+                </div>
+                <p className="text-[13px] font-bold text-white/90 leading-tight mb-0.5">{topStrength.cat}</p>
+                <p className="text-[10px] text-white/45">{topStrength.acc}% · {hoDiff}</p>
+              </button>
+            )}
+          </div>
         )}
 
         {/* Play vs AI CTA */}
@@ -989,6 +1047,14 @@ function QuizBowlHub({ hubLoading, history, recs, patterns, sm2Due = [], matchLi
             Replays
           </button>
         </div>
+
+        {/* Skills tracker - ML-powered category breakdown + struggle/mastery topics */}
+        <SkillsPanel
+          skillProfile={skillProfile}
+          categoryStats={stats.categoryStats}
+          generating={generating}
+          onLaunch={onLaunch}
+        />
 
         {/* SM-2 "Recommended today" — categories the spaced-repetition algorithm
             says are due based on the player's past buzz performance. */}
@@ -1078,36 +1144,6 @@ function QuizBowlHub({ hubLoading, history, recs, patterns, sm2Due = [], matchLi
           </div>
         )}
 
-        {/* Category breakdown */}
-        {weaknesses.length > 0 && (
-          <div>
-            <div className="flex items-center gap-1.5 mb-1.5">
-              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">By category</span>
-            </div>
-            <div className="space-y-1">
-              {Object.entries(stats.categoryStats || {})
-                .map(([cat, v]) => ({ cat, acc: v.total ? Math.round((v.correct / v.total) * 100) : 0, total: v.total }))
-                .sort((a, b) => a.acc - b.acc)
-                .map(({ cat, acc, total }) => {
-                  const barCls = acc >= 75 ? 'bg-emerald-400/70' : acc >= 50 ? 'bg-amber-400/70' : 'bg-rose-400/70';
-                  return (
-                    <button key={cat}
-                      onClick={() => onLaunch({ category: cat, difficulty: 'Medium', source: 'qbreader' })}
-                      disabled={generating}
-                      className="w-full grid grid-cols-[80px_1fr_56px] items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.02] border border-white/[0.05] hover:bg-white/[0.05] hover:border-white/[0.10] transition-colors text-left disabled:opacity-40"
-                    >
-                      <span className="text-[11px] text-white/75 font-medium truncate">{cat}</span>
-                      <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
-                        <div className={`h-full rounded-full ${barCls}`} style={{ width: `${Math.max(4, acc)}%` }} />
-                      </div>
-                      <span className="text-[10px] text-white/45 tabular-nums text-right">{acc}% · {total}</span>
-                    </button>
-                  );
-                })}
-            </div>
-          </div>
-        )}
-
         {/* Past multiplayer matches */}
         {matchList.length > 0 && (
           <div>
@@ -1150,6 +1186,163 @@ function QuizBowlHub({ hubLoading, history, recs, patterns, sm2Due = [], matchLi
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ============================================================
+// SKILLS PANEL
+// ML-powered breakdown of strengths, weaknesses, and specific
+// answer-objects the student keeps missing or has mastered.
+// Uses secretProfile data from the backend (categoryProfile,
+// struggleTopics, masteryTopics). Falls back to raw categoryStats
+// for accounts without enough history for the ML model.
+// ============================================================
+function SkillsPanel({ skillProfile, categoryStats, generating, onLaunch }) {
+  const [tab, setTab] = useState('all');
+
+  // Build the full category list. Use richer per-category ML data when
+  // available — it carries recent accuracy and buzz timing that raw
+  // categoryStats doesn't have.
+  const categories = useMemo(() => {
+    if (skillProfile?.categoryProfile && Object.keys(skillProfile.categoryProfile).length) {
+      return Object.entries(skillProfile.categoryProfile)
+        .filter(([, cp]) => (cp.attempts || 0) >= 2)
+        .map(([cat, cp]) => ({
+          cat,
+          acc: cp.accuracy || 0,
+          recentAcc: cp.recentAccuracy ?? cp.accuracy ?? 0,
+          total: cp.attempts || 0,
+          avgBuzzPos: cp.avgBuzzPosition || 0,
+        }))
+        .sort((a, b) => a.acc - b.acc);
+    }
+    return Object.entries(categoryStats || {})
+      .filter(([, v]) => (v.total || 0) >= 2)
+      .map(([cat, v]) => ({
+        cat,
+        acc: v.total ? Math.round((v.correct / v.total) * 100) : 0,
+        recentAcc: null,
+        total: v.total || 0,
+        avgBuzzPos: 0,
+      }))
+      .sort((a, b) => a.acc - b.acc);
+  }, [skillProfile, categoryStats]);
+
+  const struggleTopics = skillProfile?.struggleTopics || [];
+  const masteryTopics = skillProfile?.masteryTopics || [];
+
+  const filtered = tab === 'weak' ? categories.filter(c => c.acc < 60)
+    : tab === 'strong' ? categories.filter(c => c.acc >= 70)
+    : categories;
+
+  if (!categories.length && !struggleTopics.length) return null;
+
+  const TABS = [
+    { key: 'all', label: 'All' },
+    { key: 'weak', label: 'Weak' },
+    { key: 'strong', label: 'Strong' },
+  ];
+
+  return (
+    <div>
+      {/* Header + tabs */}
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Skills</span>
+        <div className="ml-auto flex gap-1">
+          {TABS.map(t => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-colors ${tab === t.key ? 'bg-white/[0.10] text-white/80' : 'text-white/30 hover:text-white/55'}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Category bars — each clickable to launch a set in that category */}
+      {filtered.length > 0 && (
+        <div className="space-y-1 mb-3">
+          {filtered.map(({ cat, acc, recentAcc, total, avgBuzzPos }) => {
+            const barCls = acc >= 75 ? 'bg-emerald-400/70' : acc >= 50 ? 'bg-amber-400/70' : 'bg-rose-400/70';
+            const diff = recentAcc !== null ? recentAcc - acc : null;
+            const trend = diff !== null && Math.abs(diff) >= 3
+              ? (diff > 0 ? 'up' : 'down') : null;
+            const drillDiff = acc >= 75 ? 'Hard' : 'Medium';
+            return (
+              <button
+                key={cat}
+                onClick={() => onLaunch({ category: cat, difficulty: drillDiff, source: 'qbreader' })}
+                disabled={generating}
+                className="w-full grid grid-cols-[84px_1fr_auto] items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.02] border border-white/[0.05] hover:bg-white/[0.05] hover:border-white/[0.10] transition-colors text-left disabled:opacity-40"
+              >
+                <span className="text-[11px] text-white/75 font-medium truncate">{cat}</span>
+                <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+                  <div className={`h-full rounded-full ${barCls} transition-all`} style={{ width: `${Math.max(4, acc)}%` }} />
+                </div>
+                <div className="flex items-center gap-1 min-w-[64px] justify-end">
+                  {trend === 'up' && <TrendingUp size={9} className="text-emerald-400/70 shrink-0" />}
+                  {trend === 'down' && <TrendingDown size={9} className="text-rose-400/70 shrink-0" />}
+                  <span className="text-[10px] text-white/45 tabular-nums">{acc}%</span>
+                  <span className="text-[9px] text-white/25 tabular-nums">·{total}</span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Struggle topics — specific answer-objects the student keeps missing.
+          Launch an AI set focused on each one so they can drill to mastery. */}
+      {struggleTopics.length > 0 && (
+        <div className="mb-3">
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-rose-400/60">Need work</span>
+            <span className="text-[9px] text-white/25">· specific topics you keep missing</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {struggleTopics.slice(0, 8).map((t, i) => (
+              <button
+                key={i}
+                onClick={() => onLaunch({
+                  category: t.category || 'Mixed',
+                  difficulty: 'Medium',
+                  source: 'ai',
+                  customInstructions: `Focus exclusively on tossups about "${t.topic}". The student has answered this incorrectly ${t.seen - t.correct} out of ${t.seen} times.`,
+                })}
+                disabled={generating}
+                title={`${t.correct}/${t.seen} correct — click to drill`}
+                className="px-2 py-1 rounded-md border border-rose-500/20 bg-rose-500/[0.06] hover:bg-rose-500/[0.12] hover:border-rose-500/30 text-[10px] text-rose-300/80 transition-colors disabled:opacity-40 truncate max-w-[140px]"
+              >
+                {t.topic}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Mastery topics — things the student has answered correctly every recent attempt. */}
+      {masteryTopics.length > 0 && (
+        <div>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-400/60">Locked in</span>
+            <span className="text-[9px] text-white/25">· mastered</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {masteryTopics.slice(0, 8).map((t, i) => (
+              <span
+                key={i}
+                title={`${t.seen} seen — consistently correct`}
+                className="px-2 py-1 rounded-md border border-emerald-500/15 bg-emerald-500/[0.04] text-[10px] text-emerald-300/60 truncate max-w-[140px]"
+              >
+                {t.topic}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

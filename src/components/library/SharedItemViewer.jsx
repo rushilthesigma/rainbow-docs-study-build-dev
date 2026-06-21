@@ -3,7 +3,7 @@ import { FileText, Layers, BookOpen, Network, AlertTriangle, ShieldOff, RefreshC
 import Modal from '../shared/Modal';
 import Button from '../shared/Button';
 import LoadingSpinner from '../shared/LoadingSpinner';
-import MarkdownNoteEditor from '../notes/MarkdownNoteEditor';
+import MarkdownNoteEditor, { MarkdownNoteView } from '../notes/MarkdownNoteEditor';
 import SharedNoteMapEditor from './SharedNoteMapEditor';
 import { getSharedItem, updateSharedItem } from '../../api/share';
 import { useAuth } from '../../context/AuthContext';
@@ -303,11 +303,13 @@ function SharedItemBody({ itemType, item, editable, draft, setDraft, inline = fa
             </ReadOnlySection>
           )}
           <ReadOnlySection label={item.type === 'cornell' ? 'Notes' : null}>
-            <div className="whitespace-pre-wrap">{item.mainNotes || <span className="italic opacity-60">This note is empty.</span>}</div>
+            {item.mainNotes
+              ? <MarkdownNoteView markdown={item.mainNotes} />
+              : <span className="italic opacity-60">This note is empty.</span>}
           </ReadOnlySection>
           {item.summary && (
             <ReadOnlySection label="Summary">
-              <div className="whitespace-pre-wrap">{item.summary}</div>
+              <MarkdownNoteView markdown={item.summary} />
             </ReadOnlySection>
           )}
         </div>

@@ -239,9 +239,9 @@ export function TutorCanvas({ onCaptureReady, initialStrokes = null, onStrokesCh
   );
 
   return (
-    <div className="flex flex-col h-full border border-white/[0.08] rounded-xl overflow-hidden bg-black/20">
+    <div className="flex flex-col h-full border border-white/[0.08] rounded-xl overflow-hidden bg-white/20 dark:bg-black/20">
       {/* Canvas toolbar */}
-      <div className="flex items-center gap-1 px-3 py-2 border-b border-white/[0.06] bg-black/10 flex-shrink-0">
+      <div className="flex items-center gap-1 px-3 py-2 border-b border-white/[0.06] bg-white/10 dark:bg-black/10 flex-shrink-0">
         {iconBtn(tool === 'pen',    () => setTool('pen'),    <Pen    size={13} />, 'Pen')}
         {iconBtn(tool === 'eraser', () => setTool('eraser'), <Eraser size={13} />, 'Eraser')}
         <div className="w-px h-4 bg-white/10 mx-1" />
@@ -274,7 +274,7 @@ export function TutorCanvas({ onCaptureReady, initialStrokes = null, onStrokesCh
         <canvas
           ref={canvasRef}
           className="absolute inset-0 w-full h-full cursor-crosshair"
-          style={{ background: 'rgba(0,0,0,0.55)' }}
+          style={{ background: document.documentElement.classList.contains('dark') ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.55)' }}
           onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
           onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw}
         />
@@ -327,7 +327,7 @@ function MathModelPicker({ active, plan, onPick, disabled = false }) {
         <div
           ref={popRef}
           style={{ position: 'fixed', left: pos.left, top: pos.top, width: 224, zIndex: 9999 }}
-          className="rounded-xl border border-white/10 bg-[#1b1b1f] shadow-2xl p-1.5 animate-fade-in"
+          className="rounded-xl border border-white/10 bg-white dark:bg-[#1b1b1f] shadow-2xl p-1.5 animate-fade-in"
         >
           {STUDY_MODELS.map((m) => {
             const locked = !canUseStudyModel(m.key, plan);
@@ -342,7 +342,7 @@ function MathModelPicker({ active, plan, onPick, disabled = false }) {
                 }`}
               >
                 <div className="flex-1 min-w-0">
-                  <p className="text-[12px] font-bold text-white flex items-center gap-1.5 truncate">
+                  <p className="text-[12px] font-bold text-gray-900 dark:text-white flex items-center gap-1.5 truncate">
                     {m.label}
                     <span className="text-[9px] font-medium text-white/40">{m.provider}</span>
                     {locked && lockLabel && (
@@ -737,7 +737,7 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
         mode === 'both' ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'
       }`}>
         {/* Chat column */}
-        <div className={`flex flex-col min-h-0 border border-white/[0.08] rounded-xl overflow-hidden bg-white/[0.02] ${
+        <div className={`flex flex-col min-h-0 overflow-hidden ${
           mode === 'canvas' ? 'hidden' : ''
         }`}>
           <div className="flex-1 min-h-0 overflow-hidden">

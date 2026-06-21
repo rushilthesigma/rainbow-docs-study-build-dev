@@ -55,7 +55,7 @@ export default function CurriculumPage() {
   if (!curriculum) {
     return (
       <div className="text-center py-20">
-        <p className="text-gray-500 dark:text-gray-400">Curriculum not found.</p>
+        <p className="text-white/45">Curriculum not found.</p>
         <Button variant="ghost" onClick={() => navigate('/dashboard')} className="mt-4">
           Back to Dashboard
         </Button>
@@ -85,7 +85,7 @@ export default function CurriculumPage() {
               <p className="text-sm text-white/50 mt-1">{curriculum.description}</p>
             )}
           </div>
-          <Button variant="ghost" onClick={handleDelete} loading={deleting} size="sm" className="text-gray-400 hover:text-rose-500">
+          <Button variant="ghost" onClick={handleDelete} loading={deleting} size="sm" className="text-white/35 hover:text-rose-400">
             <Trash2 size={16} />
           </Button>
         </div>

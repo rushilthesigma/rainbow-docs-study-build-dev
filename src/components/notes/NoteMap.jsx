@@ -794,7 +794,7 @@ export default function NoteMap({ onOpenNote, mapId, mapName }) {
                   if (e.key === 'Enter') { renameNode(renaming.id, renaming.value.trim() || 'Untitled'); setRenaming(null); }
                   if (e.key === 'Escape') setRenaming(null);
                 }}
-                className="absolute px-2 py-1 rounded-lg bg-[#1a1a1a] border border-blue-400/60 text-xs text-white outline-none shadow-lg"
+                className="absolute px-2 py-1 rounded-lg bg-gray-100 dark:bg-[#1a1a1a] border border-blue-400/60 text-xs text-gray-900 dark:text-white outline-none shadow-lg"
                 style={{ left: screenX - 60, top: screenY - 30, width: 120 }}
               />
             );

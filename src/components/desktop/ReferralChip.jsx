@@ -87,11 +87,11 @@ export default function ReferralChip() {
       <button
         onClick={() => setOpen(o => !o)}
         title="Referral code"
-        className="p-1 rounded text-white/55 hover:text-white/90 transition-colors inline-flex items-center gap-1"
+        className="p-1 rounded text-gray-500 hover:text-gray-800 dark:text-white/55 dark:hover:text-white/90 transition-colors inline-flex items-center gap-1"
       >
         <Gift size={13} />
         {info && (
-          <span className={`text-[10px] tabular-nums font-semibold ${unlocked ? 'text-emerald-300' : 'text-white/55'}`}>
+          <span className={`text-[10px] tabular-nums font-semibold ${unlocked ? 'text-emerald-500 dark:text-emerald-300' : 'text-gray-500 dark:text-white/55'}`}>
             {myProgress}
           </span>
         )}
@@ -99,21 +99,24 @@ export default function ReferralChip() {
 
       {open && (
         <div
-          className="absolute right-0 top-7 w-72 rounded-xl overflow-hidden shadow-xl border border-white/[0.10] animate-modal-in"
-          style={{ zIndex: Z.menubarMenu, background: 'rgb(30, 30, 40)' }}
+          className="absolute right-0 top-7 w-72 rounded-xl overflow-hidden shadow-xl border border-gray-200 dark:border-white/[0.10] animate-modal-in"
+          style={{
+            zIndex: Z.menubarMenu,
+            background: document.documentElement.classList.contains('dark') ? 'rgb(30, 30, 40)' : 'rgb(255, 255, 255)',
+          }}
         >
           {/* My code + progress */}
-          <div className="px-3 py-3 border-b border-white/[0.06]">
-            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/40 mb-1.5">Your referral code</p>
+          <div className="px-3 py-3 border-b border-gray-200 dark:border-white/[0.06]">
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400 dark:text-white/40 mb-1.5">Your referral code</p>
             <div className="flex items-center gap-2">
-              <code className="flex-1 font-mono text-[15px] font-bold text-white tracking-[0.2em] bg-white/[0.06] border border-white/[0.10] rounded-md px-2.5 py-1.5 text-center select-all">
+              <code className="flex-1 font-mono text-[15px] font-bold text-gray-900 dark:text-white tracking-[0.2em] bg-gray-100 dark:bg-white/[0.06] border border-gray-200 dark:border-white/[0.10] rounded-md px-2.5 py-1.5 text-center select-all">
                 {info?.code ? (revealed ? info.code : '•'.repeat(info.code.length)) : '••••••••'}
               </code>
               <button
                 onClick={() => setRevealed(v => !v)}
                 disabled={!info?.code}
                 title={revealed ? 'Hide' : 'Show'}
-                className="p-1.5 rounded-md text-white/55 hover:text-white hover:bg-white/[0.08] transition-colors disabled:opacity-40"
+                className="p-1.5 rounded-md text-gray-400 hover:text-gray-900 hover:bg-gray-100 dark:text-white/55 dark:hover:text-white dark:hover:bg-white/[0.08] transition-colors disabled:opacity-40"
               >
                 {revealed ? <EyeOff size={13} /> : <Eye size={13} />}
               </button>
@@ -121,12 +124,12 @@ export default function ReferralChip() {
                 onClick={copyCode}
                 disabled={!info?.code}
                 title="Copy"
-                className="p-1.5 rounded-md text-white/55 hover:text-white hover:bg-white/[0.08] transition-colors disabled:opacity-40"
+                className="p-1.5 rounded-md text-gray-400 hover:text-gray-900 hover:bg-gray-100 dark:text-white/55 dark:hover:text-white dark:hover:bg-white/[0.08] transition-colors disabled:opacity-40"
               >
-                {copied ? <Check size={13} className="text-emerald-300" /> : <Copy size={13} />}
+                {copied ? <Check size={13} className="text-emerald-500 dark:text-emerald-300" /> : <Copy size={13} />}
               </button>
             </div>
-            <p className={`text-[11px] mt-2 ${unlocked ? 'text-emerald-300' : 'text-white/55'}`}>
+            <p className={`text-[11px] mt-2 ${unlocked ? 'text-emerald-500 dark:text-emerald-300' : 'text-gray-500 dark:text-white/55'}`}>
               {unlocked
                 ? `Plus-Lite unlocked · ${info.referralsUsed} friends joined`
                 : `${info ? info.referralsUsed : 0} / ${info?.referralsRequired ?? 2} friends joined - unlock Plus-Lite at ${info?.referralsRequired ?? 2}.`}
@@ -135,15 +138,15 @@ export default function ReferralChip() {
 
           {/* Redeem someone else's code */}
           <div className="px-3 py-3">
-            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/40 mb-1.5">
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400 dark:text-white/40 mb-1.5">
               {alreadyRedeemed ? 'Redeemed code' : 'Got a code?'}
             </p>
             {alreadyRedeemed ? (
               <div className="flex items-center gap-2">
-                <code className="flex-1 font-mono text-[13px] font-semibold text-emerald-200 tracking-[0.18em] bg-emerald-500/[0.10] border border-emerald-400/25 rounded-md px-2.5 py-1.5 text-center">
+                <code className="flex-1 font-mono text-[13px] font-semibold text-emerald-700 dark:text-emerald-200 tracking-[0.18em] bg-emerald-500/[0.10] border border-emerald-400/25 rounded-md px-2.5 py-1.5 text-center">
                   {info.redeemedCode}
                 </code>
-                <Check size={14} className="text-emerald-300" />
+                <Check size={14} className="text-emerald-500 dark:text-emerald-300" />
               </div>
             ) : (
               <form onSubmit={handleRedeem} className="flex items-center gap-1.5">
@@ -160,24 +163,24 @@ export default function ReferralChip() {
                   autoComplete="off"
                   spellCheck={false}
                   disabled={busy}
-                  className="flex-1 min-w-0 font-mono text-[13px] text-white tracking-[0.18em] text-center bg-white/[0.04] border border-white/[0.10] rounded-md px-2 py-1.5 outline-none focus:border-blue-400/50 focus:bg-white/[0.07] transition-colors uppercase placeholder:text-white/20"
+                  className="flex-1 min-w-0 font-mono text-[13px] text-gray-900 dark:text-white tracking-[0.18em] text-center bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.10] rounded-md px-2 py-1.5 outline-none focus:border-blue-400 dark:focus:border-white/[0.22] focus:bg-white dark:focus:bg-white/[0.07] transition-colors uppercase placeholder:text-gray-300 dark:placeholder:text-white/20"
                 />
                 <button
                   type="submit"
                   disabled={busy || input.length !== 8}
-                  className="px-3 py-1.5 rounded-md bg-blue-500 hover:bg-blue-400 text-white text-[12px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1"
+                  className="px-3 py-1.5 rounded-md bg-gray-900/[0.06] hover:bg-gray-900/[0.12] text-gray-700 dark:bg-white/[0.10] dark:hover:bg-white/[0.16] dark:text-white/80 text-[12px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1"
                 >
                   Apply
                 </button>
               </form>
             )}
             {error && (
-              <p className="mt-2 text-[11px] text-rose-300 inline-flex items-start gap-1">
+              <p className="mt-2 text-[11px] text-rose-600 dark:text-rose-300 inline-flex items-start gap-1">
                 <X size={11} className="mt-px flex-shrink-0" /> {error}
               </p>
             )}
             {success && (
-              <p className="mt-2 text-[11px] text-emerald-300 inline-flex items-start gap-1">
+              <p className="mt-2 text-[11px] text-emerald-600 dark:text-emerald-300 inline-flex items-start gap-1">
                 <Check size={11} className="mt-px flex-shrink-0" /> {success}
               </p>
             )}

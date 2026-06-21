@@ -654,10 +654,10 @@ export default function TrialSession({
                   autoFocus value={answer} onChange={e => setAnswer(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && submitAnswer()}
                   placeholder="Answer…"
-                  className="flex-1 px-4 py-3 rounded-2xl border border-white/10 bg-white/5 text-[14px] text-white placeholder-white/25 outline-none focus:border-white/[0.15] transition-colors"
+                  className="flex-1 px-4 py-3 rounded-2xl border border-blue-500/40 bg-white/5 text-[14px] text-white placeholder-white/25 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/25 transition-colors"
                 />
                 <button onClick={submitAnswer} disabled={!answer.trim()}
-                  className="px-5 py-3 rounded-2xl bg-white/[0.09] hover:bg-white/[0.13] text-white/70 text-[13px] font-bold disabled:opacity-30 transition-colors">
+                  className="px-5 py-3 rounded-2xl bg-blue-500 hover:bg-blue-400 text-white text-[13px] font-bold disabled:opacity-30 transition-colors">
                   <ArrowRight size={16} />
                 </button>
               </div>

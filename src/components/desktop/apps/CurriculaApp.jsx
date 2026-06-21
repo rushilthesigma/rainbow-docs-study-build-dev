@@ -40,10 +40,10 @@ const TYPE_COLORS = { lesson: 'text-white/50', math_tutor: 'text-white/50', prac
 // gradebook: emerald = strong, sky = solid, amber = shaky, rose = failing.
 function gradePillClass(pct) {
   if (pct == null) return 'border-white/15 bg-white/5 text-white/50';
-  if (pct >= 90) return 'border-emerald-400/30 bg-emerald-500/10 text-emerald-300';
-  if (pct >= 80) return 'border-sky-400/30 bg-sky-500/10 text-sky-300';
-  if (pct >= 70) return 'border-amber-400/30 bg-amber-500/10 text-amber-300';
-  return 'border-rose-400/30 bg-rose-500/10 text-rose-300';
+  if (pct >= 90) return 'border-emerald-400/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300';
+  if (pct >= 80) return 'border-sky-400/30 bg-sky-500/10 text-sky-700 dark:text-sky-300';
+  if (pct >= 70) return 'border-amber-400/30 bg-amber-500/10 text-amber-700 dark:text-amber-300';
+  return 'border-rose-400/30 bg-rose-500/10 text-rose-700 dark:text-rose-300';
 }
 
 // When opened from another app (e.g. NotesApp's "Build Curriculum from
@@ -105,6 +105,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
     else if (view === 'assessment') setView('detail');
     else if (view === 'math_tutor') setView('detail');
     else if (view === 'gradebook') setView('detail');
+    else if (view === 'edit') setView('detail');
     else setView('list');
   });
 
@@ -158,8 +159,6 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
   const [sourceError, setSourceError] = useState('');
   const sourceFileRef = useRef(null);
 
-  // Edit curriculum modal
-  const [editOpen, setEditOpen] = useState(false);
   const [shareTarget, setShareTarget] = useState(null);
 
   // PAUSD catalog browser state
@@ -519,9 +518,9 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
           <button onClick={() => setView('detail')} className="flex items-center gap-2 text-sm text-white/40 hover:text-white/90">
             <ArrowLeft size={16} /> Back to curriculum
           </button>
-          <span className="text-xs text-gray-400">·</span>
+          <span className="text-xs text-white/40">·</span>
           <span className="text-xs font-semibold text-white/60 uppercase tracking-wider">{label}</span>
-          <span className="text-xs text-gray-400">·</span>
+          <span className="text-xs text-white/40">·</span>
           <span className="text-xs text-white/60 truncate">{currentLesson.title}</span>
         </div>
         <div className="flex-1 min-h-0">
@@ -568,7 +567,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
           <BlockLessonView
             curriculumId={cid}
             lesson={currentLesson}
-            onBack={() => setView('detail')}
+            onBack={() => { refreshSelectedCurriculum(cid); setView('detail'); }}
             api={sharedApi}
             coStudy={coStudy}
           />
@@ -687,17 +686,17 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
             {(activeShare || outgoingPartners.length > 0) && (
               <button
                 onClick={openGradebook}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-sky-400/25 bg-sky-500/[0.08] text-xs font-semibold text-sky-200/90 hover:border-sky-400/45 hover:bg-sky-500/[0.14] transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-sky-400/25 bg-sky-500/[0.08] text-xs font-semibold text-sky-700 dark:text-sky-200/90 hover:border-sky-400/45 hover:bg-sky-500/[0.14] transition-colors"
                 title="See everyone's performance on this shared curriculum"
               >
                 <BarChart3 size={13} /> Gradebook
                 {!activeShare && outgoingPartners.length > 0 && (
-                  <span className="text-[10px] font-bold text-sky-200/70 tabular-nums">{outgoingPartners.length + 1}</span>
+                  <span className="text-[10px] font-bold text-sky-700/80 dark:text-sky-200/70 tabular-nums">{outgoingPartners.length + 1}</span>
                 )}
               </button>
             )}
             {activeShare && (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-sky-400/25 bg-sky-500/[0.08] text-[11px] font-semibold text-sky-200/90">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-sky-400/25 bg-sky-500/[0.08] text-[11px] font-semibold text-sky-700 dark:text-sky-200/90">
                 <Users size={11} /> Shared by {activeShare.ownerName || 'a study partner'}
               </span>
             )}
@@ -718,7 +717,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
             )}
             {!activeShare && (
               <button
-                onClick={() => setEditOpen(true)}
+                onClick={() => setView('edit')}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 text-xs font-medium text-white/50 hover:border-white/25 hover:text-white/80 transition-colors"
                 title="Edit curriculum"
               >
@@ -733,7 +732,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
             {c.description && <p className="text-sm text-white/45 mb-3">{c.description}</p>}
             <div className="flex items-center gap-3 mb-4">
               <ProgressBar value={completedLessons} max={totalLessons} className="flex-1" />
-              <span className="text-xs text-gray-500 tabular-nums flex-shrink-0">{completedLessons}/{totalLessons}</span>
+              <span className="text-xs text-white/45 tabular-nums flex-shrink-0">{completedLessons}/{totalLessons}</span>
             </div>
             {/* Course grade - the AI's rolled-up grade from every unit test the
                 student has taken (and any graded essays). Appears once at least
@@ -771,19 +770,24 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
           </div>
         )}
 
-        {editOpen && (
-          <EditCurriculumModal
-            curriculum={c}
-            onClose={() => setEditOpen(false)}
-            onUpdated={(updated) => {
-              setSelectedCurriculum(updated);
-              // Also update list-view cache so the updated title/descr propagate
-              setCurricula(prev => prev.map(x => x.id === updated.id ? updated : x));
-              bust('curricula:list');
-              setEditOpen(false);
-            }}
-          />
-        )}
+      </ViewFade>
+    );
+  }
+
+  // Edit curriculum (full-page view)
+  if (view === 'edit' && selectedCurriculum) {
+    return (
+      <ViewFade viewKey={`edit:${selectedCurriculum.id}`}>
+        <EditCurriculumView
+          curriculum={selectedCurriculum}
+          onBack={() => setView('detail')}
+          onUpdated={(updated) => {
+            setSelectedCurriculum(updated);
+            setCurricula(prev => prev.map(x => x.id === updated.id ? updated : x));
+            bust('curricula:list');
+            setView('detail');
+          }}
+        />
       </ViewFade>
     );
   }
@@ -800,7 +804,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
               <h3 className="text-[22px] font-bold text-white tracking-tight">A few quick questions</h3>
             </div>
             {genError && (
-              <div className="px-3 py-2 mb-4 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-300">
+              <div className="px-3 py-2 mb-4 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-700 dark:text-amber-300">
                 {genError}
               </div>
             )}
@@ -890,16 +894,16 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
             <PillGroup label="Difficulty" options={DIFFICULTY_OPTIONS} value={settings.difficulty} onChange={v => setSettings(p => ({ ...p, difficulty: v }))} />
             <PillGroup label="Style" options={LEARNING_STYLE_OPTIONS} value={settings.learningStyle} onChange={v => setSettings(p => ({ ...p, learningStyle: v }))} />
             <div className="flex gap-4">
-              <Toggle label="Examples" checked={settings.includeExamples} onChange={v => setSettings(p => ({ ...p, includeExamples: v }))} />
-              <Toggle label="Exercises" checked={settings.includeExercises} onChange={v => setSettings(p => ({ ...p, includeExercises: v }))} />
+              <Toggle label="Examples" accent="blue" checked={settings.includeExamples} onChange={v => setSettings(p => ({ ...p, includeExamples: v }))} />
+              <Toggle label="Exercises" accent="blue" checked={settings.includeExercises} onChange={v => setSettings(p => ({ ...p, includeExercises: v }))} />
             </div>
 
             {/* ===== Source material (textbooks + websites) ===== */}
-            <div className="rounded-xl border border-white/10 bg-white/[0.06] backdrop-blur-sm p-4">
+            <div className="rounded-xl border border-white/10 p-4">
               <div className="flex items-baseline justify-between mb-3">
-                <p className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-200">Sources <span className="font-normal opacity-60">(optional)</span></p>
+                <p className="text-xs font-bold uppercase tracking-wider text-white/60">Sources <span className="font-normal opacity-60">(optional)</span></p>
                 {sources.length > 0 && (
-                  <span className="text-[10px] text-gray-400 tabular-nums">{sources.length}/8</span>
+                  <span className="text-[10px] text-white/40 tabular-nums">{sources.length}/8</span>
                 )}
               </div>
 
@@ -934,7 +938,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
               <button
                 onClick={() => sourceFileRef.current?.click()}
                 disabled={sourceBusy || sources.length >= 8}
-                className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border-2 border-dashed border-gray-300 dark:border-white/10 text-white/45 text-xs hover:border-white/30 hover:text-white/70 transition-colors disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border-2 border-dashed border-white/[0.10] text-white/45 text-xs hover:border-white/30 hover:text-white/70 transition-colors disabled:opacity-50"
               >
                 {sourceBusy ? <InlineProgress active /> : <Paperclip size={13} />}
                 Attach PDFs or text files
@@ -958,12 +962,12 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
                           <Icon size={11} />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-[12px] font-medium text-gray-900 dark:text-gray-100 truncate">{s.title}</p>
-                          <p className="text-[10px] text-gray-400 truncate">{s.url || s.kind} · {Math.round((s.chars || s.content?.length || 0) / 100) / 10}k chars</p>
+                          <p className="text-[12px] font-medium text-white/90 truncate">{s.title}</p>
+                          <p className="text-[10px] text-white/40 truncate">{s.url || s.kind} · {Math.round((s.chars || s.content?.length || 0) / 100) / 10}k chars</p>
                         </div>
                         <button
                           onClick={() => removeSource(s.id)}
-                          className="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-300 hover:text-rose-500 transition-all flex-shrink-0"
+                          className="opacity-0 group-hover:opacity-100 p-1 rounded text-white/30 hover:text-rose-500 transition-all flex-shrink-0"
                           title="Remove"
                         >
                           <X size={11} />
@@ -1020,9 +1024,9 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
       <button
         onClick={() => { loadPausdCatalog(); setView('pausd'); }}
         data-tour="pausd-catalog-button"
-        className="w-full mb-4 flex items-center gap-3 p-3 rounded-xl border border-white/10 bg-white/[0.06] hover:border-white/20 hover:bg-white/10 transition-colors text-left backdrop-blur-sm"
+        className="w-full mb-4 flex items-center gap-3 p-3 rounded-xl border border-white/[0.08] bg-white/[0.04] hover:border-white/[0.16] hover:bg-white/[0.07] transition-colors text-left backdrop-blur-sm"
       >
-        <div className="w-10 h-10 rounded-lg bg-white/10 text-white/70 flex items-center justify-center flex-shrink-0">
+        <div className="w-10 h-10 rounded-lg bg-white/[0.07] text-white/70 flex items-center justify-center flex-shrink-0">
           <GraduationCap size={18} />
         </div>
         <div className="flex-1 min-w-0">
@@ -1050,7 +1054,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
             <div className="space-y-2">
               {pendingShares.map((s) => (
                 <div key={s.id} className="flex items-center gap-3 rounded-xl border border-sky-400/25 bg-sky-500/[0.06] px-4 py-3">
-                  <div className="w-9 h-9 rounded-lg bg-sky-500/15 flex items-center justify-center flex-shrink-0"><BookOpen size={16} className="text-sky-300" /></div>
+                  <div className="w-9 h-9 rounded-lg bg-sky-500/15 flex items-center justify-center flex-shrink-0"><BookOpen size={16} className="text-sky-600 dark:text-sky-300" /></div>
                   <div className="flex-1 min-w-0">
                     <h3 className="text-sm font-medium text-white truncate">{s.itemTitle}</h3>
                     <p className="text-xs text-white/45 mt-0.5">{s.ownerName} wants to study this with you</p>
@@ -1064,8 +1068,8 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
                 </div>
               ))}
               {acceptedShares.map((s) => (
-                <div key={s.id} onClick={() => openSharedCurriculum(s)} className="flex items-center gap-4 bg-white/[0.06] backdrop-blur-sm rounded-xl border border-white/10 px-4 py-3 cursor-pointer hover:border-white/25 hover:bg-white/10 transition-colors">
-                  <div className="w-9 h-9 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0"><Users size={16} className="text-sky-300/80" /></div>
+                <div key={s.id} onClick={() => openSharedCurriculum(s)} className="flex items-center gap-4 bg-white/[0.04] backdrop-blur-sm rounded-xl border border-white/[0.08] px-4 py-3 cursor-pointer hover:border-white/[0.18] hover:bg-white/[0.07] transition-colors">
+                  <div className="w-9 h-9 rounded-lg bg-white/[0.07] flex items-center justify-center flex-shrink-0"><Users size={16} className="text-sky-600 dark:text-sky-300/80" /></div>
                   <div className="flex-1 min-w-0">
                     <h3 className="text-sm font-medium text-white truncate">{s.itemTitle}</h3>
                     <p className="text-xs text-white/40 mt-0.5">Studying together with {s.ownerName}</p>
@@ -1081,7 +1085,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
       {curricula.length === 0 ? (
         <div className="text-center py-12">
           <BookOpen size={32} className="text-white/40 mx-auto mb-3" />
-          <p className="text-sm text-gray-500 mb-4">No curricula yet</p>
+          <p className="text-sm text-white/45 mb-4">No curricula yet</p>
           <div className="flex items-center justify-center gap-2">
             <Button onClick={() => setView('new')}><Plus size={16} /> New</Button>
             <Button variant="secondary" onClick={() => { loadPausdCatalog(); setView('pausd'); }}>
@@ -1109,15 +1113,15 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
             : (c.units || []).reduce((s, u) => s + (u.lessons || []).filter(l => l.isCompleted).length, 0);
           const units = typeof c.unitCount === 'number' ? c.unitCount : (c.units?.length || 0);
           return (
-            <div key={c.id} onClick={() => openCurriculum(c.id)} className="flex items-center gap-4 bg-white/[0.06] backdrop-blur-sm rounded-xl border border-white/10 px-4 py-3 cursor-pointer hover:border-white/25 hover:bg-white/10 transition-colors">
-              <div className="w-9 h-9 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0"><BookOpen size={16} className="text-white/60" /></div>
+            <div key={c.id} onClick={() => openCurriculum(c.id)} className="flex items-center gap-4 bg-white/[0.04] backdrop-blur-sm rounded-xl border border-white/[0.08] px-4 py-3 cursor-pointer hover:border-white/[0.18] hover:bg-white/[0.07] transition-colors">
+              <div className="w-9 h-9 rounded-lg bg-white/[0.07] flex items-center justify-center flex-shrink-0"><BookOpen size={16} className="text-white/50" /></div>
               <div className="flex-1 min-w-0">
                 <h3 className="text-sm font-medium text-white truncate">{c.title}</h3>
                 <p className="text-xs text-white/40 mt-0.5">{done}/{total} lessons · {units} unit{units === 1 ? '' : 's'}</p>
               </div>
               <button
                 onClick={(e) => { e.stopPropagation(); setShareTarget({ id: c.id, type: 'curriculum', title: c.title }); }}
-                className="p-1.5 rounded-lg text-white/25 hover:text-blue-300 hover:bg-white/[0.06] transition-colors flex-shrink-0"
+                className="p-1.5 rounded-lg text-white/25 hover:text-blue-600 dark:hover:text-blue-300 hover:bg-white/[0.06] transition-colors flex-shrink-0"
                 title="Share"
               >
                 <Share2 size={15} />
@@ -1156,7 +1160,7 @@ function UnitSection({ unit, onOpenLesson }) {
   const completedLessons = (unit.lessons || []).filter(l => l.isCompleted).length;
 
   return (
-    <div className={`bg-white/[0.06] backdrop-blur-sm rounded-xl border border-white/10 overflow-hidden ${unit.locked ? 'opacity-50' : ''}`}>
+    <div className={`bg-white/[0.04] backdrop-blur-sm rounded-xl border border-white/[0.08] overflow-hidden ${unit.locked ? 'opacity-50' : ''}`}>
       <button onClick={() => setOpen(!open)} className="w-full flex items-center gap-3 p-3 text-left hover:bg-white/5 transition-colors">
         {unit.locked ? <Lock size={14} className="text-white/30" /> : open ? <ChevronDown size={16} className="text-white/30" /> : <ChevronRight size={16} className="text-white/30" />}
         <div className="flex-1 min-w-0">
@@ -1346,18 +1350,12 @@ function AssessmentView({ lesson, curriculum, onBack }) {
 
         {/* ── Header ── */}
         <div className="mb-6">
-          <div className="flex items-center gap-2 mb-2">
-            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-[0.18em] ${
-              isEssay ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-            }`}>
-              {isEssay ? <FileText size={9} /> : <ClipboardCheck size={9} />}
-              {isEssay ? 'Graded Essay' : 'Assessment'}
-            </span>
+          <div className="flex items-center gap-2 mb-1">
+            <h1 className="text-[18px] font-bold text-white/90 leading-snug">{lesson.title}</h1>
             {totalRubricPoints && (
-              <span className="text-[10px] text-white/25 font-medium">{totalRubricPoints} pts total</span>
+              <span className="text-[10px] text-white/25 font-medium flex-shrink-0">{totalRubricPoints} pts</span>
             )}
           </div>
-          <h1 className="text-[18px] font-bold text-white/90 leading-snug">{lesson.title}</h1>
         </div>
 
         {/* ── Loading ── */}
@@ -1368,9 +1366,9 @@ function AssessmentView({ lesson, curriculum, onBack }) {
         )}
 
         {error && (
-          <div className="flex items-start gap-3 bg-rose-900/20 border border-rose-800/50 rounded-2xl p-4 mb-4">
-            <X size={14} className="text-rose-400 mt-0.5 flex-shrink-0" />
-            <p className="text-[13px] text-rose-300">{error}</p>
+          <div className="flex items-start gap-3 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800/50 rounded-2xl p-4 mb-4">
+            <X size={14} className="text-rose-500 dark:text-rose-400 mt-0.5 flex-shrink-0" />
+            <p className="text-[13px] text-rose-700 dark:text-rose-300">{error}</p>
           </div>
         )}
 
@@ -1569,8 +1567,8 @@ function AssessmentView({ lesson, curriculum, onBack }) {
   );
 }
 
-// ============= Edit with AI modal =============
-function EditCurriculumModal({ curriculum, onClose, onUpdated }) {
+// ============= Edit curriculum (full-page view) =============
+function EditCurriculumView({ curriculum, onBack, onUpdated }) {
   const [instruction, setInstruction] = useState('');
   const [files, setFiles] = useState([]);
   const [submitting, setSubmitting] = useState(false);
@@ -1579,7 +1577,6 @@ function EditCurriculumModal({ curriculum, onClose, onUpdated }) {
 
   function addFiles(list) {
     const incoming = Array.from(list || []);
-    // Cap to 5 files + 25MB each (server caps 50MB but we nudge smaller)
     const filtered = incoming.filter(f => f.size <= 25 * 1024 * 1024).slice(0, 5);
     setFiles(prev => [...prev, ...filtered].slice(0, 5));
   }
@@ -1603,78 +1600,76 @@ function EditCurriculumModal({ curriculum, onClose, onUpdated }) {
   }
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center bg-black/50 p-4" style={{ zIndex: Z.modal }} onClick={onClose}>
-      <div
-        className="w-full max-w-xl bg-black/40 backdrop-blur-2xl rounded-2xl border border-white/10 shadow-2xl overflow-hidden"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
-          <div className="flex items-center gap-2">
-            <Wand2 size={14} className="text-white/50" />
-            <h3 className="text-sm font-semibold text-white">Edit curriculum with AI</h3>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"><X size={16} /></button>
+    <div className="flex flex-col h-full">
+      <button onClick={onBack} className="flex items-center gap-2 text-sm text-white/40 hover:text-white/90 mb-6">
+        <ArrowLeft size={16} /> Back
+      </button>
+
+      <div className="flex items-center gap-2 mb-1">
+        <Wand2 size={16} className="text-white/50" />
+        <h2 className="text-lg font-bold text-white">Edit curriculum with AI</h2>
+      </div>
+      <p className="text-xs text-white/35 mb-6">{curriculum.title}</p>
+
+      <div className="flex-1 overflow-y-auto space-y-6 pb-4">
+        <div>
+          <label className="text-xs font-medium text-white/45 mb-2 block">Your instruction</label>
+          <textarea
+            value={instruction}
+            onChange={e => setInstruction(e.target.value)}
+            placeholder={'Examples:\n• Add a unit on functional groups after Unit 2\n• Simplify Unit 1 to 3 lessons\n• Rename "Intro" to "Getting Started" and add a practice lesson\n• Rewrite this to match the AP Chemistry syllabus in the attached PDF'}
+            rows={7}
+            autoFocus
+            className="w-full px-3 py-2.5 rounded-lg border border-white/10 bg-white/[0.04] text-sm text-white placeholder-white/30 resize-none outline-none focus:border-white/30"
+          />
         </div>
 
-        <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
-          <div>
-            <label className="text-xs font-medium text-white/45 mb-2 block">Your instruction</label>
-            <textarea
-              value={instruction}
-              onChange={e => setInstruction(e.target.value)}
-              placeholder={'Examples:\n• Add a unit on functional groups after Unit 2\n• Simplify Unit 1 to 3 lessons\n• Rename "Intro" to "Getting Started" and add a practice lesson\n• Rewrite this to match the AP Chemistry syllabus in the attached PDF'}
-              rows={6}
-              className="w-full px-3 py-2 rounded-lg border border-white/10 bg-white/[0.04] text-sm text-white placeholder-gray-400 resize-none outline-none focus:border-white/30"
+        <div>
+          <label className="text-xs font-medium text-white/45 mb-2 block">Context files (optional)</label>
+          <div
+            onDragOver={e => e.preventDefault()}
+            onDrop={onDrop}
+            onClick={() => fileInputRef.current?.click()}
+            className="border-2 border-dashed border-white/15 rounded-xl p-5 text-center cursor-pointer hover:border-white/30 transition-colors"
+          >
+            <Upload size={18} className="text-white/40 mx-auto mb-1.5" />
+            <p className="text-xs text-white/45">Drop PDFs or text files here, or click to pick</p>
+            <p className="text-[10px] text-white/40 mt-0.5">up to 5 files · 25MB each</p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.txt,.md,.json,application/pdf,text/plain,text/markdown"
+              className="hidden"
+              onChange={e => { addFiles(e.target.files); e.target.value = ''; }}
             />
           </div>
-
-          <div>
-            <label className="text-xs font-medium text-white/45 mb-2 block">Context files (optional)</label>
-            <div
-              onDragOver={e => e.preventDefault()}
-              onDrop={onDrop}
-              onClick={() => fileInputRef.current?.click()}
-              className="border-2 border-dashed border-white/10 rounded-xl p-4 text-center cursor-pointer hover:border-white/30"
-            >
-              <Upload size={18} className="text-gray-400 mx-auto mb-1" />
-              <p className="text-xs text-white/45">Drop PDFs or text files here, or click to pick</p>
-              <p className="text-[10px] text-gray-400 mt-0.5">up to 5 files · 25MB each</p>
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept=".pdf,.txt,.md,.json,application/pdf,text/plain,text/markdown"
-                className="hidden"
-                onChange={e => { addFiles(e.target.files); e.target.value = ''; }}
-              />
+          {files.length > 0 && (
+            <div className="mt-2 space-y-1.5">
+              {files.map((f, i) => (
+                <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/10">
+                  <Paperclip size={11} className="text-white/40 flex-shrink-0" />
+                  <span className="flex-1 text-xs text-white/60 truncate">{f.name}</span>
+                  <span className="text-[10px] text-white/40">{Math.round(f.size / 1024)} KB</span>
+                  <button onClick={() => removeFile(i)} className="text-white/30 hover:text-rose-500"><X size={11} /></button>
+                </div>
+              ))}
             </div>
-            {files.length > 0 && (
-              <div className="mt-2 space-y-1.5">
-                {files.map((f, i) => (
-                  <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/10">
-                    <Paperclip size={11} className="text-gray-400 flex-shrink-0" />
-                    <span className="flex-1 text-xs text-gray-700 dark:text-gray-200 truncate">{f.name}</span>
-                    <span className="text-[10px] text-gray-400">{Math.round(f.size / 1024)} KB</span>
-                    <button onClick={() => removeFile(i)} className="text-gray-300 hover:text-rose-500"><X size={11} /></button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {error && <p className="text-xs text-rose-500 bg-rose-50 dark:bg-rose-900/20 rounded-lg px-3 py-2">{error}</p>}
+          )}
         </div>
 
-        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-white/10">
-          <button onClick={onClose} className="px-4 py-2 rounded-lg border border-white/10 text-xs font-medium text-white/60">Cancel</button>
-          <button
-            onClick={submit}
-            disabled={!instruction.trim() || submitting}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white/[0.10] hover:bg-white/[0.15] border border-white/[0.12] text-white text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {submitting ? <><InlineProgress active /> Applying…</> : <>Apply edit</>}
-          </button>
-        </div>
+        {error && <p className="text-xs text-rose-500 bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2">{error}</p>}
+      </div>
+
+      <div className="flex items-center justify-end gap-2 pt-4 border-t border-white/10 mt-2">
+        <button onClick={onBack} className="px-4 py-2 rounded-lg border border-white/10 text-xs font-medium text-white/60 hover:text-white/80">Cancel</button>
+        <button
+          onClick={submit}
+          disabled={!instruction.trim() || submitting}
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 border border-blue-500 text-white text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {submitting ? <><InlineProgress active /> Applying…</> : <>Apply edit</>}
+        </button>
       </div>
     </div>
   );
@@ -1699,7 +1694,7 @@ function PausdCatalogView({ catalog, loading, enrollingSlug, onBack, onEnroll })
   if (grouped.science) grouped.science.sort((a, b) => String(a.grade).localeCompare(String(b.grade)));
 
   const SUBJECT_META = {
-    math: { label: 'Mathematics', icon: Sigma, color: 'text-white/60', bg: 'bg-white/[0.06]' },
+    math: { label: 'Mathematics', icon: Sigma, color: 'text-white/60', bg: 'bg-white/[0.04]' },
     science: { label: 'Science', icon: Atom, color: 'text-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-900/20' },
     geography: { label: 'Geography', icon: MapIcon, color: 'text-sky-400', bg: 'bg-sky-50 dark:bg-sky-900/20' },
   };
@@ -1731,7 +1726,7 @@ function PausdCatalogView({ catalog, loading, enrollingSlug, onBack, onEnroll })
           {['math', 'science', 'geography'].map(key => {
             const courses = grouped[key];
             if (!courses?.length) return null;
-            const meta = SUBJECT_META[key] || { label: key, icon: BookOpen, color: 'text-gray-500', bg: 'bg-gray-50' };
+            const meta = SUBJECT_META[key] || { label: key, icon: BookOpen, color: 'text-white/45', bg: 'bg-white/[0.04]' };
             const SubjectIcon = meta.icon;
             return (
               <section key={key}>
@@ -1740,7 +1735,7 @@ function PausdCatalogView({ catalog, loading, enrollingSlug, onBack, onEnroll })
                     <SubjectIcon size={14} className={meta.color} />
                   </div>
                   <h3 className="text-sm font-bold text-white uppercase tracking-wider">{meta.label}</h3>
-                  <span className="text-[10px] text-gray-400">· {courses.length} course{courses.length === 1 ? '' : 's'}</span>
+                  <span className="text-[10px] text-white/40">· {courses.length} course{courses.length === 1 ? '' : 's'}</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {courses.map((c, i) => (
@@ -1770,17 +1765,17 @@ function PausdCourseCard({ course, enrolling, onEnroll, tourAnchor }) {
       onClick={onEnroll}
       disabled={enrolling}
       data-tour={tourAnchor ? 'pausd-course-card' : undefined}
-      className="text-left flex flex-col h-full p-4 rounded-xl border border-white/10 bg-white/[0.06] backdrop-blur-sm hover:border-white/25 hover:bg-white/10 transition-colors disabled:opacity-60"
+      className="text-left flex flex-col h-full p-4 rounded-xl border border-white/[0.08] bg-white/[0.04] backdrop-blur-sm hover:border-white/[0.18] hover:bg-white/[0.07] transition-colors disabled:opacity-60"
     >
       <h4 className="text-sm font-bold text-white leading-snug mb-1.5">{course.title}</h4>
       <p className="text-[11px] text-white/45 leading-snug line-clamp-3 mb-2 flex-1">{course.description}</p>
       {course.textbook && (
-        <p className="text-[10px] text-gray-400 dark:text-gray-500 italic leading-snug line-clamp-1 mb-2">
+        <p className="text-[10px] text-white/35 italic leading-snug line-clamp-1 mb-2">
           {course.textbook}
         </p>
       )}
       <div className="flex items-center justify-between mt-auto">
-        <p className="text-[10px] text-gray-400 tabular-nums">
+        <p className="text-[10px] text-white/40 tabular-nums">
           Grade {course.grade} · {course.unitCount}u · {course.lessonCount} lessons
         </p>
         {enrolling ? (

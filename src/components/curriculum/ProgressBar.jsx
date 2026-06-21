@@ -4,14 +4,14 @@ export default function ProgressBar({ value = 0, max = 100, size = 'md', showLab
 
   return (
     <div className={`flex items-center gap-3 ${className}`}>
-      <div className={`flex-1 bg-gray-100 dark:bg-gray-700/50 rounded-full overflow-hidden ${heights[size]}`}>
+      <div className={`flex-1 bg-white/[0.08] rounded-full overflow-hidden ${heights[size]}`}>
         <div
           className="h-full bg-white/35 rounded-full transition-all duration-500"
           style={{ width: `${pct}%` }}
         />
       </div>
       {showLabel && (
-        <span className="text-xs font-medium text-gray-500 dark:text-gray-400 tabular-nums w-9 text-right">
+        <span className="text-xs font-medium text-white/45 tabular-nums w-9 text-right">
           {pct}%
         </span>
       )}

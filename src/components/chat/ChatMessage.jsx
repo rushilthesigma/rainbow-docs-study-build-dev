@@ -1,10 +1,10 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import { Check, X, Copy, Pencil, FileText, ExternalLink, FileText as NoteIcon, Zap, Swords, Brain, ChevronRight } from 'lucide-react';
+import { Check, X, Copy, Pencil, FileText, ExternalLink, FileText as NoteIcon, Zap, Swords, Brain, ChevronRight, Volume2, Square } from 'lucide-react';
 import MathText from '../shared/MathText';
 import { useWindowManager } from '../../context/WindowManagerContext';
 
@@ -14,7 +14,7 @@ function ThinkingPanel({ text, streaming }) {
   const [open, setOpen] = useState(!!streaming);
   if (!text) return null;
   return (
-    <div className="mb-2 rounded-xl border border-white/10 bg-black/10 overflow-hidden">
+    <div className="mb-2 rounded-xl border border-white/10 bg-gray-100 dark:bg-black/10 overflow-hidden">
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
@@ -124,7 +124,7 @@ function InlineQuiz({ quizJson }) {
         const isWrong = submitted && userAnswer && userAnswer !== q.correct;
         return (
           <div key={i} className={`rounded-lg border p-3 ${submitted ? (isCorrect ? 'border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/10' : isWrong ? 'border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-900/10' : 'border-gray-200 dark:border-[#2A2A40]') : 'border-gray-200 dark:border-[#2A2A40]'}`}>
-            <MathText as="p" className="text-sm font-medium mb-2">{i + 1}. {q.question.replace(/^\d+[.,)\s:]+/, '')}</MathText>
+            <MathText as="p" className="text-sm font-medium mb-2">{`${i + 1}. ${q.question.replace(/^\d+[.,)\s:]+/, '')}`}</MathText>
             <div className="space-y-1">
               {(q.options || []).map(opt => {
                 const letter = opt.charAt(0);
@@ -185,6 +185,54 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
   const [editText, setEditText] = useState(raw);
   const [instructText, setInstructText] = useState('');
   const [copied, setCopied] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const utterRef = useRef(null);
+
+  useEffect(() => () => { window.speechSynthesis?.cancel(); }, []);
+
+  function pickFemaleVoice() {
+    const voices = window.speechSynthesis.getVoices();
+    const PREFERRED = ['Samantha', 'Google US English', 'Microsoft Zira - English', 'Microsoft Zira', 'Karen', 'Moira', 'Tessa', 'Veena', 'Google UK English Female', 'Ava'];
+    for (const name of PREFERRED) {
+      const v = voices.find(v => v.name === name || v.name.startsWith(name));
+      if (v) return v;
+    }
+    const femaleKw = ['female', 'zira', 'samantha', 'karen', 'moira', 'tessa', 'veena', 'ava'];
+    return voices.find(v => v.lang.startsWith('en') && femaleKw.some(k => v.name.toLowerCase().includes(k)))
+      || voices.find(v => v.lang.startsWith('en'))
+      || voices[0]
+      || null;
+  }
+
+  function toggleSpeak() {
+    if (!window.speechSynthesis) return;
+    if (speaking) {
+      window.speechSynthesis.cancel();
+      setSpeaking(false);
+      return;
+    }
+    // Strip markdown syntax so TTS reads clean prose, not punctuation noise.
+    const text = (message.content || '')
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/#{1,6}\s/g, '')
+      .replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1')
+      .replace(/_([^_]+)_/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/\[.*?\]/g, '')
+      .replace(/\n{2,}/g, '. ')
+      .replace(/\n/g, ' ')
+      .trim();
+    if (!text) return;
+    const utter = new SpeechSynthesisUtterance(text);
+    utterRef.current = utter;
+    const femaleVoice = pickFemaleVoice();
+    if (femaleVoice) utter.voice = femaleVoice;
+    utter.onend = () => setSpeaking(false);
+    utter.onerror = () => setSpeaking(false);
+    window.speechSynthesis.speak(utter);
+    setSpeaking(true);
+  }
 
   async function handleCopy() {
     // Copy the RAW markdown, not the rendered HTML, so it pastes cleanly
@@ -396,7 +444,7 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
         {message.thinking && !isError && <ThinkingPanel text={message.thinking} streaming={isStreaming} />}
         {isStreaming && !displayContent && !message.thinking && <ThinkingDots />}
         {displayContent && (
-          <div ref={markdownRef} className="prose prose-sm dark:prose-invert max-w-none prose-p:my-2 prose-headings:my-3 prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-code:bg-gray-200 dark:prose-code:bg-white/[0.08] prose-code:px-1 prose-code:rounded prose-pre:bg-gray-900 dark:prose-pre:bg-black/60 prose-pre:rounded-lg">
+          <div ref={markdownRef} className="prose prose-sm dark:prose-invert max-w-none prose-p:my-2 prose-headings:my-3 prose-ul:my-2 prose-ol:my-2 prose-li:my-1 prose-code:bg-gray-200 dark:prose-code:bg-white/[0.08] prose-code:px-1 prose-code:rounded prose-pre:bg-gray-800 dark:prose-pre:bg-black/60 prose-pre:rounded-lg">
             <ReactMarkdown
               remarkPlugins={[remarkGfm, remarkMath]}
               rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: '#94a3b8' }]]}
@@ -460,6 +508,19 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
             >
               {copied ? <><Check size={10} /> Copied</> : <><Copy size={10} /> Copy</>}
             </button>
+            {window.speechSynthesis && (
+              <button
+                onClick={toggleSpeak}
+                title={speaking ? 'Stop playback' : 'Play response aloud'}
+                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] hover:bg-gray-100 dark:hover:bg-white/[0.07] transition-colors ${
+                  speaking
+                    ? 'text-blue-500 dark:text-blue-400'
+                    : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-200'
+                }`}
+              >
+                {speaking ? <><Square size={10} /> Stop</> : <><Volume2 size={10} /> Play</>}
+              </button>
+            )}
             {canEdit && typeof onAiInstruct === 'function' && (
               <button
                 onClick={() => { setEditing(true); setInstructText(''); }}

@@ -5,6 +5,7 @@ import {
 } from '../../api/curriculum';
 import QuizBlock from './QuizBlock';
 import { InlineProgress } from '../shared/ProgressBar';
+import MathText from '../shared/MathText';
 
 // Course-level exam runner. Drops into CurriculaApp's curriculum detail
 // view as a section: shows midterm + final cards with their unlock /
@@ -228,14 +229,14 @@ function ExamCarousel({ exam, onSubmit, results, onClose }) {
   }
 
   return (
-    <div className="rounded-2xl border border-blue-500/15 bg-[#0f1124]/80 backdrop-blur p-6 lg:p-8">
+    <div className="rounded-2xl border border-blue-500/15 bg-blue-50 dark:bg-[#0f1124]/80 backdrop-blur p-6 lg:p-8">
       <div className="flex items-center justify-between mb-5">
         <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.16em] px-2 py-0.5 rounded-md bg-blue-500/15 text-blue-300 border border-blue-500/30">
           {exam.title}
         </span>
         <span className="text-[12px] font-mono text-gray-500 tabular-nums">Q {idx + 1} / {total}</span>
       </div>
-      <h3 className="text-[17px] leading-relaxed text-white mb-5 font-medium">{q.prompt}</h3>
+      <MathText as="h3" className="text-[17px] leading-relaxed text-white mb-5 font-medium">{q.prompt}</MathText>
       <div className="flex flex-col gap-2.5">
         {(q.choices || []).map((c, i) => {
           const letter = String.fromCharCode(65 + i);
@@ -247,13 +248,13 @@ function ExamCarousel({ exam, onSubmit, results, onClose }) {
               className={`text-left flex items-start gap-3 px-4 py-3 rounded-xl border transition-all ${
                 isPicked
                   ? 'border-blue-400 bg-blue-500/15 text-white'
-                  : 'border-blue-500/10 bg-[#0a0a14] text-gray-200 hover:border-blue-500/40 hover:bg-blue-500/5'
+                  : 'border-blue-500/10 bg-white dark:bg-[#0a0a14] text-gray-700 dark:text-gray-200 hover:border-blue-500/40 hover:bg-blue-500/5'
               }`}
             >
               <span className={`w-6 h-6 rounded-md grid place-items-center font-mono text-[12px] font-bold shrink-0 ${
-                isPicked ? 'bg-gradient-to-br from-blue-500 to-indigo-500 text-white' : 'bg-[#0a0a14] text-gray-400 border border-blue-500/15'
+                isPicked ? 'bg-gradient-to-br from-blue-500 to-indigo-500 text-white' : 'bg-white dark:bg-[#0a0a14] text-gray-400 border border-blue-500/15'
               }`}>{letter}</span>
-              <span className="text-[14px] leading-snug">{c}</span>
+              <MathText as="span" className="text-[14px] leading-snug">{c}</MathText>
             </button>
           );
         })}
@@ -262,7 +263,7 @@ function ExamCarousel({ exam, onSubmit, results, onClose }) {
         <div className="flex gap-1.5">
           {exam.questions.map((_, i) => (
             <span key={i} className={`w-1.5 h-1.5 rounded-full ${
-              i === idx ? 'bg-blue-400' : i < idx || picks[exam.questions[i].id] ? 'bg-blue-500/50' : 'bg-[#2A2A40]'
+              i === idx ? 'bg-blue-400' : i < idx || picks[exam.questions[i].id] ? 'bg-blue-500/50' : 'bg-gray-300 dark:bg-[#2A2A40]'
             }`} />
           ))}
         </div>

@@ -43,13 +43,76 @@ function useImageReady(url) {
   return ready;
 }
 
+// Phone / narrow-viewport gate. Matches the app's MOBILE_BREAKPOINT (768)
+// so the signed-out landing flips to its mobile layout at the same width
+// the signed-in shell flips to MobileShell.
+function useIsMobile(breakpoint = 768) {
+  const [mobile, setMobile] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth < breakpoint,
+  );
+  useEffect(() => {
+    const onResize = () => setMobile(window.innerWidth < breakpoint);
+    onResize();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [breakpoint]);
+  return mobile;
+}
+
+// Per-section sizing. Desktop pins each section to exactly one viewport and
+// snaps between them. On phones, mandatory snap over fixed-100vh sections
+// traps momentum scrolling and clips any section taller than the (browser-
+// chrome-reduced) viewport, so we drop snap and let sections grow: each
+// still fills the screen (min-h) but extends and scrolls normally when its
+// content runs long. svh = the always-visible height, so nothing hides
+// behind the URL bar.
+function sectionH(isMobile) {
+  return isMobile ? 'min-h-[100svh] py-20' : 'snap-start h-screen';
+}
+
 export default function LandingPage() {
   const { login } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [loginError, setLoginError] = useState(null);
   const [googleReady, setGoogleReady] = useState(false);
   const googleBtnRef = useRef(null);
   const scrollerRef = useRef(null);
+  const lastBtnWidthRef = useRef(0);
   const bgReady = useImageReady(LANDING_WALLPAPER);
+  const isMobile = useIsMobile();
+
+  // Count one anonymous landing-page visit per browser session for admin
+  // analytics. The sessionStorage guard keeps refreshes and StrictMode's
+  // double-mount from inflating the count. Fire-and-forget — never blocks
+  // the page or surfaces an error.
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem('covalent-landing-counted')) return;
+      sessionStorage.setItem('covalent-landing-counted', '1');
+    } catch { /* private mode: skip the guard, still ping once per mount */ }
+    fetch('/api/metrics/landing-visit', { method: 'POST' }).catch(() => {});
+  }, []);
+
+  // Render (or re-render) the GSI button sized to its container. The button
+  // is the transparent click-target overlaid on the cosmetic button, so its
+  // width has to match the container exactly. A hardcoded 400px overflowed
+  // narrow phones (GSI's max width) and pushed the invisible iframe out of
+  // alignment with the button beneath it, so real taps missed.
+  function renderGoogleBtn() {
+    const el = googleBtnRef.current;
+    if (!el || !window.google?.accounts?.id) return;
+    const width = Math.max(220, Math.min(400, Math.round(el.offsetWidth || 320)));
+    // Skip a re-render that wouldn't change anything (avoids flicker on every
+    // resize tick); GSI's max is 400, so clamp before comparing.
+    if (el.hasChildNodes() && Math.abs(width - lastBtnWidthRef.current) < 8) return;
+    lastBtnWidthRef.current = width;
+    el.innerHTML = '';
+    window.google.accounts.id.renderButton(el, {
+      theme: 'filled_blue',
+      size: 'large',
+      width,
+    });
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -63,13 +126,7 @@ export default function LandingPage() {
         // without needing an on-screen rendered button element.
         use_fedcm_for_prompt: true,
       });
-      if (googleBtnRef.current && !googleBtnRef.current.hasChildNodes()) {
-        window.google.accounts.id.renderButton(googleBtnRef.current, {
-          theme: 'filled_blue',
-          size: 'large',
-          width: 300,
-        });
-      }
+      renderGoogleBtn();
       setGoogleReady(true);
     };
     if (window.google?.accounts?.id) {
@@ -90,31 +147,29 @@ export default function LandingPage() {
     return () => { cancelled = true; script.removeEventListener('load', init); };
   }, []);
 
+  // Keep the GSI button width matched to its container across viewport
+  // changes (phone rotation, desktop window drag).
+  useEffect(() => {
+    if (!googleReady) return;
+    const onResize = () => renderGoogleBtn();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [googleReady]);
+
   async function handleGoogleResponse(response) {
     setLoading(true);
+    setLoginError(null);
     try {
       const data = await googleLogin(response.credential);
       if (data.success) {
         login(data.user, data.token);
       }
-    } catch (err) { console.error('Login failed:', err); }
-    setLoading(false);
-  }
-
-  function triggerGoogle() {
-    if (!window.google?.accounts?.id) return;
-    // Click the rendered button synchronously while still in the user-gesture
-    // call stack. Safari / iOS and many mobile browsers block popups that are
-    // opened from async callbacks, so the old approach (prompt() → fallback
-    // btn.click() inside the notification callback) silently failed on those
-    // devices. Clicking directly here is always in-gesture.
-    const btn = googleBtnRef.current?.querySelector('div[role=button], button');
-    if (btn) {
-      btn.click();
-      return;
+    } catch (err) {
+      console.error('Login failed:', err);
+      setLoginError(err.message || 'Sign-in failed. Please try again.');
     }
-    // No rendered button available yet, so use One Tap / FedCM prompt as fallback.
-    window.google.accounts.id.prompt();
+    setLoading(false);
   }
 
   function scrollToSection(name) {
@@ -123,7 +178,7 @@ export default function LandingPage() {
   }
 
   return (
-    <div className="relative h-screen w-full overflow-hidden bg-[#05070f] text-white select-none">
+    <div className={`relative w-full overflow-hidden bg-[#05070f] text-white select-none ${isMobile ? 'h-[100dvh]' : 'h-screen'}`}>
       {/* Fixed wallpaper layer. Deep-navy base so the page never sits on
           raw black while the image is still downloading. */}
       <div className="absolute inset-0 z-0">
@@ -140,32 +195,27 @@ export default function LandingPage() {
       <div
         ref={scrollerRef}
         data-scroll-root
-        className="relative z-10 h-screen overflow-y-scroll snap-y snap-mandatory scrollbar-hide"
+        className={`relative z-10 overflow-y-scroll overflow-x-hidden scrollbar-hide ${isMobile ? 'h-[100dvh]' : 'h-screen snap-y snap-mandatory'}`}
       >
         <HeroSection
+          isMobile={isMobile}
           onSignIn={() => scrollToSection('signin')}
           onTour={() => scrollToSection('how')}
         />
-        <HowItWorksSection />
-        <FeaturesSection />
-        <NoteMapSection />
-        <QuizBowlSection />
+        <HowItWorksSection isMobile={isMobile} />
+        <FeaturesSection isMobile={isMobile} />
+        <NoteMapSection isMobile={isMobile} />
+        <QuizBowlSection isMobile={isMobile} />
         <SignInSection
+          isMobile={isMobile}
           loading={loading}
+          loginError={loginError}
           googleReady={googleReady}
-          onSignIn={triggerGoogle}
+          googleBtnRef={googleBtnRef}
           onWhyNotGpt={() => scrollToSection('whynotgpt')}
         />
-        <WhyNotGptSection />
+        <WhyNotGptSection isMobile={isMobile} />
       </div>
-
-      {/* Hidden GIS button - mounted off-screen so the script + button
-          are present in the DOM. All sign-in CTAs click this. */}
-      <div
-        ref={googleBtnRef}
-        aria-hidden="true"
-        style={{ position: 'absolute', left: -99999, top: 0, width: 1, height: 1, overflow: 'hidden', pointerEvents: 'none' }}
-      />
     </div>
   );
 }
@@ -211,11 +261,11 @@ function FadeUp({ className = '', children }) {
 }
 
 // ===== Hero =====
-function HeroSection({ onSignIn, onTour }) {
+function HeroSection({ isMobile, onSignIn, onTour }) {
   return (
     <section
       data-section="hero"
-      className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative"
+      className={`${sectionH(isMobile)} w-full flex flex-col items-center justify-center px-6 relative`}
     >
       {/* Subtle scrim so the headline reads against any wallpaper */}
       <div className="absolute inset-0 bg-black/35" />
@@ -244,7 +294,7 @@ function HeroSection({ onSignIn, onTour }) {
       <button
         onClick={onTour}
         aria-label="Scroll down"
-        className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-1 text-white/65 hover:text-white transition-colors"
+        className="absolute bottom-[calc(1.5rem+env(safe-area-inset-bottom))] sm:bottom-8 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-1 text-white/65 hover:text-white transition-colors"
       >
         <span className="text-[10px] font-bold uppercase tracking-[0.16em]">Scroll</span>
         <ChevronDown size={16} className="animate-bounce-slow" strokeWidth={2.4} />
@@ -254,7 +304,7 @@ function HeroSection({ onSignIn, onTour }) {
 }
 
 // ===== How it works =====
-function HowItWorksSection() {
+function HowItWorksSection({ isMobile }) {
   const STEPS = [
     {
       n: '1',
@@ -273,7 +323,7 @@ function HowItWorksSection() {
     },
   ];
   return (
-    <section data-section="how" className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative">
+    <section data-section="how" className={`${sectionH(isMobile)} w-full flex flex-col items-center justify-center px-6 relative`}>
       <div className="absolute inset-0 bg-black/35" />
       <FadeUp className="relative z-10 w-full max-w-2xl">
         <h2 className="text-[30px] sm:text-[38px] md:text-[44px] leading-[1.08] font-bold tracking-[-0.02em] text-white mb-8">
@@ -296,7 +346,7 @@ function HowItWorksSection() {
 }
 
 // ===== What's inside =====
-function FeaturesSection() {
+function FeaturesSection({ isMobile }) {
   const FEATURES = [
     {
       icon: BookOpen,
@@ -330,7 +380,7 @@ function FeaturesSection() {
     },
   ];
   return (
-    <section data-section="features" className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative">
+    <section data-section="features" className={`${sectionH(isMobile)} w-full flex flex-col items-center justify-center px-6 relative`}>
       <div className="absolute inset-0 bg-black/35" />
       <FadeUp className="relative z-10 w-full max-w-4xl">
         <h2 className="text-[30px] sm:text-[38px] md:text-[44px] leading-[1.08] font-bold tracking-[-0.02em] text-white mb-2">
@@ -365,7 +415,7 @@ function FeaturesSection() {
 // a node you can drag and link, the AI can suggest related nodes, and
 // you can run spaced-repetition review over a map. Left side is a small
 // static graph illustration, right side is three plain feature rows.
-function NoteMapSection() {
+function NoteMapSection({ isMobile }) {
   // Illustration only. Positions are percentages of the panel; the SVG
   // edges below use the same numbers (x * 3.6, y * 2.8) so the lines land
   // under the node dots in the 360x280 viewBox.
@@ -390,7 +440,7 @@ function NoteMapSection() {
   ];
 
   return (
-    <section data-section="notemap" className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative">
+    <section data-section="notemap" className={`${sectionH(isMobile)} w-full flex flex-col items-center justify-center px-6 relative`}>
       <div className="absolute inset-0 bg-black/35" />
       <FadeUp className="relative z-10 w-full max-w-5xl">
         <h2 className="text-[30px] sm:text-[38px] md:text-[44px] leading-[1.08] font-bold tracking-[-0.02em] text-white mb-2">
@@ -429,7 +479,11 @@ function NoteMapSection() {
             {NODES.map((n) => (
               <span
                 key={`label-${n.id}`}
-                className={`absolute whitespace-nowrap font-medium ${n.big ? 'text-[12px] text-white' : 'text-[11px] text-white/75'}`}
+                className={`absolute whitespace-nowrap font-medium ${
+                  n.big
+                    ? `${isMobile ? 'text-[10px]' : 'text-[12px]'} text-white`
+                    : `${isMobile ? 'text-[9px]' : 'text-[11px]'} text-white/75`
+                }`}
                 style={
                   n.flip
                     ? { right: `${100 - n.x}%`, top: `${n.y}%`, transform: 'translate(-12px, -50%)' }
@@ -463,9 +517,9 @@ function NoteMapSection() {
 }
 
 // ===== Quiz Bowl =====
-function QuizBowlSection() {
+function QuizBowlSection({ isMobile }) {
   return (
-    <section data-section="quizbowl" className="snap-start h-screen w-full flex flex-col items-center justify-center px-6 relative">
+    <section data-section="quizbowl" className={`${sectionH(isMobile)} w-full flex flex-col items-center justify-center px-6 relative`}>
       <div className="absolute inset-0 bg-black/35" />
       <FadeUp className="relative z-10 max-w-2xl w-full">
         <h2 className="text-[30px] sm:text-[38px] md:text-[44px] leading-[1.08] font-bold tracking-[-0.02em] text-white mb-2">
@@ -527,11 +581,15 @@ function QuizBowlSection() {
 // ===== Sign-in =====
 //
 // Google OAuth is the only sign-in path.
-function SignInSection({ loading, googleReady, onSignIn, onWhyNotGpt }) {
+// The GSI renderButton renders inside a cross-origin iframe, so it cannot be
+// triggered via programmatic .click(). Instead, we position the real GSI
+// button (transparent, opacity:0) directly over our custom-styled button so
+// real user pointer events hit the iframe and open the account chooser popup.
+function SignInSection({ isMobile, loading, loginError, googleReady, googleBtnRef, onWhyNotGpt }) {
   return (
     <section
       data-section="signin"
-      className="snap-start min-h-screen w-full flex flex-col items-center justify-center px-6 py-16 relative"
+      className={`${isMobile ? 'min-h-[100svh] py-20' : 'snap-start min-h-screen py-16'} w-full flex flex-col items-center justify-center px-6 relative`}
     >
       <div className="absolute inset-0 bg-black/35" />
 
@@ -543,31 +601,56 @@ function SignInSection({ loading, googleReady, onSignIn, onWhyNotGpt }) {
           Your courses, notes, and quiz history save to your Google account.
         </p>
 
-        {/* Google OAuth - primary (and only) sign-in path */}
-        <button
-          onClick={onSignIn}
-          disabled={loading || !googleReady}
-          className="mt-8 w-full py-3 rounded-lg bg-white hover:bg-white/95 active:scale-[0.98] text-[14px] font-semibold text-slate-800 transition-all disabled:opacity-50 inline-flex items-center justify-center gap-2.5"
-        >
-          {loading ? (
-            <span className="inline-flex items-center gap-2"><Loader size={14} className="animate-spin" /> Signing in...</span>
-          ) : (
-            <>
-              <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
-                <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
-                <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
-                <path fill="#FBBC05" d="M10.53 28.59a14.5 14.5 0 0 1 0-9.18l-7.98-6.19a24.1 24.1 0 0 0 0 21.56l7.98-6.19z"/>
-                <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
-              </svg>
-              Continue with Google
-            </>
-          )}
-        </button>
+        {/* Google OAuth - primary (and only) sign-in path.
+            The visible <button> is purely cosmetic (pointer-events off).
+            The transparent googleBtnRef overlay on top receives real clicks
+            and relays them into the GSI iframe → opens the account chooser. */}
+        <div className="relative mt-8 w-full">
+          <button
+            disabled={loading || !googleReady}
+            className="w-full py-3 rounded-lg bg-white text-[14px] font-semibold text-slate-800 transition-all disabled:opacity-50 inline-flex items-center justify-center gap-2.5 pointer-events-none select-none"
+            tabIndex={-1}
+            aria-hidden="true"
+          >
+            {loading ? (
+              <span className="inline-flex items-center gap-2"><Loader size={14} className="animate-spin" /> Signing in...</span>
+            ) : (
+              <>
+                <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+                  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+                  <path fill="#FBBC05" d="M10.53 28.59a14.5 14.5 0 0 1 0-9.18l-7.98-6.19a24.1 24.1 0 0 0 0 21.56l7.98-6.19z"/>
+                  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+                </svg>
+                Continue with Google
+              </>
+            )}
+          </button>
+
+          {/* Transparent GSI button overlay — real user clicks hit the iframe */}
+          <div
+            ref={googleBtnRef}
+            aria-label="Continue with Google"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              opacity: 0,
+              cursor: 'pointer',
+              pointerEvents: (loading || !googleReady) ? 'none' : 'auto',
+            }}
+          />
+        </div>
+
+        {loginError && (
+          <p className="mt-3 text-[13px] text-red-400 text-center">
+            {loginError}
+          </p>
+        )}
 
       </FadeUp>
 
       {/* Bottom links */}
-      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 flex items-center gap-5">
+      <div className="absolute bottom-[calc(1.5rem+env(safe-area-inset-bottom))] sm:bottom-8 left-1/2 -translate-x-1/2 z-10 flex items-center gap-5">
         <a
           href="https://discord.gg/rRdhczxjgC"
           target="_blank"
@@ -592,7 +675,7 @@ function SignInSection({ loading, googleReady, onSignIn, onWhyNotGpt }) {
 }
 
 // ===== Why not GPT? =====
-function WhyNotGptSection() {
+function WhyNotGptSection({ isMobile }) {
   const ROWS = [
     {
       title: 'Courses',
@@ -629,7 +712,7 @@ function WhyNotGptSection() {
   return (
     <section
       data-section="whynotgpt"
-      className="snap-start min-h-screen w-full flex flex-col items-center justify-center px-6 py-16 relative"
+      className={`${isMobile ? 'min-h-[100svh] py-20' : 'snap-start min-h-screen py-16'} w-full flex flex-col items-center justify-center px-6 relative`}
     >
       <div className="absolute inset-0 bg-black/40" />
 
@@ -641,27 +724,48 @@ function WhyNotGptSection() {
           A chat box forgets you between sessions. RushilAI keeps track of what you miss and builds the next quiz around it.
         </p>
 
-        {/* One table, hairline rows. Column headers inside the same frame. */}
-        <div className="rounded-xl ring-1 ring-white/[0.10] bg-white/[0.03] overflow-hidden">
-          <div className="grid grid-cols-[84px_1fr_1fr] sm:grid-cols-[120px_1fr_1fr]">
-            <span className="px-4 py-2.5" />
-            <span className="px-4 py-2.5 flex items-center gap-1.5 border-l border-white/[0.05]">
-              <Check size={10} className="text-emerald-400 shrink-0" strokeWidth={3} />
-              <span className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-emerald-300">RushilAI</span>
-            </span>
-            <span className="px-4 py-2.5 flex items-center gap-1.5 border-l border-white/[0.05]">
-              <X size={10} className="text-white/25 shrink-0" strokeWidth={2.5} />
-              <span className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-white/30">ChatGPT</span>
-            </span>
+        {isMobile ? (
+          /* Phone: two narrow text columns are unreadable, so each row
+             stacks the RushilAI / ChatGPT lines under its title. Still one
+             frame with hairline dividers, no nested cards. */
+          <div className="rounded-xl ring-1 ring-white/[0.10] bg-white/[0.03] overflow-hidden divide-y divide-white/[0.06]">
+            {ROWS.map((row) => (
+              <div key={row.title} className="px-4 py-4">
+                <p className="text-[13px] font-semibold tracking-tight text-white mb-2.5">{row.title}</p>
+                <div className="flex gap-2.5 mb-2">
+                  <Check size={13} className="text-emerald-400 shrink-0 mt-0.5" strokeWidth={3} />
+                  <p className="text-[12.5px] leading-relaxed text-white/75">{row.us}</p>
+                </div>
+                <div className="flex gap-2.5">
+                  <X size={13} className="text-white/25 shrink-0 mt-0.5" strokeWidth={2.5} />
+                  <p className="text-[12.5px] leading-relaxed text-white/40">{row.them}</p>
+                </div>
+              </div>
+            ))}
           </div>
-          {ROWS.map((row) => (
-            <div key={row.title} className="grid grid-cols-[84px_1fr_1fr] sm:grid-cols-[120px_1fr_1fr] border-t border-white/[0.06]">
-              <span className="px-4 py-3.5 text-[12px] font-semibold text-white/80">{row.title}</span>
-              <p className="px-4 py-3.5 text-[12px] leading-relaxed text-white/70 border-l border-white/[0.05]">{row.us}</p>
-              <p className="px-4 py-3.5 text-[12px] leading-relaxed text-white/35 border-l border-white/[0.05]">{row.them}</p>
+        ) : (
+          /* One table, hairline rows. Column headers inside the same frame. */
+          <div className="rounded-xl ring-1 ring-white/[0.10] bg-white/[0.03] overflow-hidden">
+            <div className="grid grid-cols-[120px_1fr_1fr]">
+              <span className="px-4 py-2.5" />
+              <span className="px-4 py-2.5 flex items-center gap-1.5 border-l border-white/[0.05]">
+                <Check size={10} className="text-emerald-400 shrink-0" strokeWidth={3} />
+                <span className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-emerald-300">RushilAI</span>
+              </span>
+              <span className="px-4 py-2.5 flex items-center gap-1.5 border-l border-white/[0.05]">
+                <X size={10} className="text-white/25 shrink-0" strokeWidth={2.5} />
+                <span className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-white/30">ChatGPT</span>
+              </span>
             </div>
-          ))}
-        </div>
+            {ROWS.map((row) => (
+              <div key={row.title} className="grid grid-cols-[120px_1fr_1fr] border-t border-white/[0.06]">
+                <span className="px-4 py-3.5 text-[12px] font-semibold text-white/80">{row.title}</span>
+                <p className="px-4 py-3.5 text-[12px] leading-relaxed text-white/70 border-l border-white/[0.05]">{row.us}</p>
+                <p className="px-4 py-3.5 text-[12px] leading-relaxed text-white/35 border-l border-white/[0.05]">{row.them}</p>
+              </div>
+            ))}
+          </div>
+        )}
       </FadeUp>
     </section>
   );

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Trophy, Lightbulb } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, Trophy } from 'lucide-react';
 import StageTracker from './StageTracker';
 import ReadingBlock from './ReadingBlock';
 import QuizBlock from './QuizBlock';
@@ -8,7 +8,6 @@ import RecapBlock from './RecapBlock';
 import ApplicationBlock from './ApplicationBlock';
 import ChallengeBlock from './ChallengeBlock';
 import OpenAnswerBlock from './OpenAnswerBlock';
-import DiscussionBlock from './DiscussionBlock';
 import MatchingBlock from './MatchingBlock';
 import FillBlankBlock from './FillBlankBlock';
 import ProgressBar from '../shared/ProgressBar';
@@ -21,12 +20,13 @@ import {
   completeLessonBlock as curriculumCompleteBlock,
   gradeQuizBlock as curriculumGradeBlock,
   gradeOpenBlock as curriculumGradeOpenBlock,
+  markLessonComplete as curriculumMarkLessonComplete,
 } from '../../api/curriculum';
 
 // Block-based lesson runner. A lesson is a sequence of typed blocks the
 // student steps through one at a time - readings, quizzes, worked
 // examples, recaps, real-world applications, challenges, open-answer
-// prompts, AI discussions, and matching / fill-in-the-blank games. The
+// prompts, and matching / fill-in-the-blank games. The
 // AI picks the mix per lesson; a final quiz is appended lazily at the
 // end. Each block renders with its own component and reports back via
 // onComplete (or a grader) so the runner can mark it done and advance.
@@ -44,6 +44,7 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
       gradeBlock: (bid, resp) => curriculumGradeBlock(curriculumId, lesson.id, bid, resp),
       gradeOpenBlock: (bid, text) => curriculumGradeOpenBlock(curriculumId, lesson.id, bid, text),
       completeBlock: (bid) => curriculumCompleteBlock(curriculumId, lesson.id, bid),
+      markComplete: () => curriculumMarkLessonComplete(curriculumId, lesson.id),
     };
   }, [apiProp, curriculumId, lesson.id]);
 
@@ -56,6 +57,9 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
   });
   const [generating, setGenerating] = useState(false);
   const [err, setErr] = useState('');
+  // Tracks whether the server has recorded isCompleted for this lesson so we
+  // don't double-call the complete endpoint.
+  const serverMarkedRef = useRef(!!lesson.isCompleted);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,7 +88,7 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
   }
 
   // Generic "this block is done" handler. Self-contained blocks (reading,
-  // example, recap, application, challenge, discussion, matching,
+  // example, recap, application, challenge, matching,
   // fill-blank) call this from their Continue button; the server marks
   // the block complete and we advance. Quiz and open-answer have their
   // own grading handlers below.
@@ -98,6 +102,7 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
     try {
       const res = await api.completeBlock(block.id);
       setBlocks(prev => prev.map((b, i) => i === activeIdx ? { ...b, completedAt: res.block.completedAt } : b));
+      if (res.lesson?.isCompleted) serverMarkedRef.current = true;
       maybeKickFinalQuiz(activeIdx);
       advance();
     } catch (e) { setErr(e.message); }
@@ -116,7 +121,12 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
     if (idx < len - 2) return;
     api.generateFinalQuiz()
       .then(({ block: finalBlock }) => {
-        setBlocks(prev => (prev[prev.length - 1]?.isFinal ? prev : [...prev, finalBlock]));
+        setBlocks(prev => {
+          if (prev[prev.length - 1]?.isFinal) return prev;
+          // Don't append if the student has already finished all existing blocks
+          if (prev.length > 0 && prev.every(b => b.completedAt)) return prev;
+          return [...prev, finalBlock];
+        });
       })
       .catch(() => { /* idempotent on retry; ignored */ });
   }
@@ -136,7 +146,9 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
       ? { ...b, score: results.score, completedAt: new Date().toISOString(), responses: results.results }
       : b
     ));
-    api.completeBlock(blocks[idx].id).catch(() => {});
+    api.completeBlock(blocks[idx].id)
+      .then(res => { if (res?.lesson?.isCompleted) serverMarkedRef.current = true; })
+      .catch(() => {});
 
     // Kick the final-quiz generation as soon as the student is deep
     // enough into the lesson. The endpoint is idempotent - calling it
@@ -147,10 +159,17 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
   }
 
   const active = blocks[activeIdx];
-  // Done = the lazily-appended final quiz is present AND every block is
-  // complete. Block count varies by difficulty, so a hardcoded length
-  // check (== 8) wrongly left non-intermediate lessons never "done".
-  const allDone = blocks.length > 0 && !!blocks[blocks.length - 1]?.isFinal && blocks.every(b => b.completedAt);
+  // Done = every block has a completedAt. The final quiz is optional - if
+  // generation fails the student shouldn't be stuck forever.
+  const allDone = blocks.length > 0 && blocks.every(b => b.completedAt);
+
+  // When allDone first becomes true, ensure the server records isCompleted.
+  // Uses markLessonComplete (idempotent force-set) so concurrent calls are safe.
+  useEffect(() => {
+    if (!allDone || serverMarkedRef.current) return;
+    serverMarkedRef.current = true;
+    if (api.markComplete) api.markComplete().catch(() => {});
+  }, [allDone, api]);
   const avgQuizScore = (() => {
     const qs = blocks.filter(b => b.type === 'quiz' && typeof b.score === 'number').map(b => b.score);
     return qs.length ? Math.round(qs.reduce((s, n) => s + n, 0) / qs.length) : 0;
@@ -162,7 +181,7 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
 
   // Dispatch the active block to the component that renders its type.
   // Self-contained blocks (reading / example / recap / application /
-  // challenge / discussion / matching / fill-blank) get the generic
+  // challenge / matching / fill-blank) get the generic
   // completion handler; quiz and open-answer get their graders. Unknown
   // or malformed legacy blocks fall back to a reading rendering so a
   // step never shows up blank.
@@ -193,7 +212,6 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
       case 'recap':       return <RecapBlock {...props} />;
       case 'application': return <ApplicationBlock {...props} continueLabel="Continue" />;
       case 'challenge':   return <ChallengeBlock {...props} continueLabel="Continue" />;
-      case 'discussion':  return <DiscussionBlock {...props} />;
       case 'matching':    return <MatchingBlock {...props} />;
       case 'fill-blank':  return <FillBlankBlock {...props} />;
       case 'reading':     return <ReadingBlock {...props} continueLabel="Continue" />;
@@ -213,11 +231,8 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
         {backLabel}
       </button>
 
-      {/* Lesson title - pill tag + headline + subtitle */}
+      {/* Lesson title - headline + subtitle */}
       <header className="mb-8">
-        <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-blue-300/85 bg-blue-500/[0.10] border border-blue-400/[0.22] rounded-full px-2.5 py-0.5 mb-4">
-          <Lightbulb size={11} strokeWidth={2.4} /> Lesson
-        </span>
         <h1 className="text-[30px] md:text-[36px] font-semibold tracking-[-0.02em] text-white/95 leading-[1.1] mb-2">
           {lesson.title}
         </h1>
@@ -230,7 +245,7 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
 
       {/* Generating state */}
       {generating && (
-        <div className="rounded-3xl border border-blue-400/[0.18] bg-blue-500/[0.04] backdrop-blur-sm p-8 mb-6">
+        <div className="mb-6">
           <ProgressBar
             active
             label="Building your lesson"
@@ -255,31 +270,56 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
 
           <ViewFade viewKey={allDone ? 'done' : active?.id || `idx:${activeIdx}`}>
           {allDone ? (
-            <div
-              className="relative overflow-hidden rounded-3xl border border-emerald-400/25 p-10 md:p-12 text-center"
-              style={{
-                background:
-                  'radial-gradient(at 50% 0%, rgba(16,185,129,0.18) 0%, transparent 55%),' +
-                  'radial-gradient(at 100% 100%, rgba(59,130,246,0.14) 0%, transparent 60%),' +
-                  'rgba(14, 20, 24, 0.55)',
-              }}
-            >
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 grid place-items-center mx-auto mb-5">
-                <Trophy size={28} className="text-white drop-shadow" strokeWidth={2.2} />
+            <div className="p-8">
+              {/* Icon + title */}
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-10 h-10 rounded-lg bg-blue-500/[0.10] border border-blue-400/20 grid place-items-center flex-shrink-0">
+                  <Trophy size={18} className="text-blue-400" />
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-[0.18em] font-bold text-blue-400/60 mb-0.5">Completed</p>
+                  <h2 className="text-[15px] font-bold text-white/90 leading-tight">Lesson complete</h2>
+                </div>
               </div>
-              <h2 className="text-[28px] md:text-[32px] font-semibold tracking-[-0.02em] text-white mb-2">
-                Lesson complete
-              </h2>
-              <p className="text-white/55 text-[14px] mb-1">All {blocks.length} blocks finished.</p>
-              <p className="text-[13px] text-emerald-200/85 mb-7">
-                Average quiz score
-                <span className="ml-2 font-mono font-bold text-white text-[15px] tabular-nums">{avgQuizScore}%</span>
-              </p>
+
+              {/* Large score — only shown when quizzes were scored */}
+              {avgQuizScore > 0 && (
+                <div className="mb-5">
+                  <p className="text-[10px] uppercase tracking-[0.18em] font-bold text-white/30 mb-1">Average quiz score</p>
+                  <div className="flex items-baseline gap-1">
+                    <span className={`text-[48px] font-black tabular-nums leading-none ${
+                      avgQuizScore >= 80 ? 'text-blue-400' :
+                      avgQuizScore >= 50 ? 'text-white/80' :
+                      'text-rose-400'
+                    }`}>{avgQuizScore}</span>
+                    <span className="text-[24px] text-white/25">%</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Stat cards */}
+              <div className="flex gap-2 mb-6">
+                <div className="flex-1 rounded-lg px-3 py-2.5">
+                  <p className="text-[9.5px] uppercase tracking-[0.16em] font-bold text-white/35 mb-1">Blocks done</p>
+                  <p className="text-[17px] font-bold tabular-nums text-blue-400">{blocks.length}</p>
+                </div>
+                {avgQuizScore > 0 && (
+                  <div className="flex-1 rounded-lg px-3 py-2.5">
+                    <p className="text-[9.5px] uppercase tracking-[0.16em] font-bold text-white/35 mb-1">Quiz avg</p>
+                    <p className={`text-[17px] font-bold tabular-nums ${
+                      avgQuizScore >= 80 ? 'text-blue-400' :
+                      avgQuizScore >= 50 ? 'text-white/90' :
+                      'text-rose-400'
+                    }`}>{avgQuizScore}%</p>
+                  </div>
+                )}
+              </div>
+
               <button
                 onClick={onBack}
-                className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl font-semibold text-[14px] text-white bg-gradient-to-b from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 border border-emerald-400/45 transition-all"
+                className="inline-flex items-center gap-2 px-5 py-2 rounded-lg font-semibold text-[13px] text-white bg-blue-500 hover:bg-blue-400 transition-colors"
               >
-                <ArrowLeft size={14} /> {backLabel}
+                <ArrowLeft size={13} /> {backLabel}
               </button>
             </div>
           ) : (

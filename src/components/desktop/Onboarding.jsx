@@ -18,7 +18,7 @@ export default function Onboarding({ onComplete }) {
   const [useCase, setUseCase] = useState(null); // 'school' | 'quizbowl'
   const { user, fetchUser } = useAuth();
   const { wallpaper, setWallpaper } = useUIPreference();
-  const dark = true;
+  const dark = document.documentElement.classList.contains('dark');
 
   const STEPS = useCase === 'quizbowl'
     ? ['welcome', 'purpose', 'wallpaper', 'qb-ready']
@@ -245,7 +245,7 @@ function WallpaperPick({ wallpaper, setWallpaper, picks, dark }) {
               key={id}
               onClick={() => setWallpaper(id)}
               className={`group relative aspect-[4/3] rounded-lg overflow-hidden border-2 transition-all ${
-                isActive ? 'border-blue-500 ring-2 ring-blue-500/25 scale-[1.02]' : 'border-white/15 dark:border-white/15 hover:border-white/40'
+                isActive ? 'border-blue-500 ring-2 ring-blue-500/25 scale-[1.02]' : 'border-gray-300 hover:border-gray-400 dark:border-white/15 dark:hover:border-white/40'
               }`}
               title={wp.label}
             >

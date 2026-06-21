@@ -83,7 +83,7 @@ export default function UpgradeChip() {
       {open && (
         <div
           className="absolute right-0 top-7 w-80 rounded-xl overflow-hidden shadow-xl border border-white/[0.10] animate-modal-in"
-          style={{ zIndex: Z.menubarMenu, background: 'rgb(30, 30, 40)' }}
+          style={{ zIndex: Z.menubarMenu, background: 'rgb(28, 28, 28)' }}
         >
           {/* Caller's current usage vs caps. If the live usage endpoint
               hasn't loaded yet (or 404s on an older server), fall back

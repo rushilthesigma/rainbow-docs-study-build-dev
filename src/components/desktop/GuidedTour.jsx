@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowRight, X, GraduationCap, Sparkles } from 'lucide-react';
+import { ArrowRight, X, GraduationCap } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { syncData } from '../../api/auth';
 import { Z } from '../../styles/tokens';
@@ -316,11 +316,13 @@ export default function GuidedTour() {
       {/* Tooltip */}
       <div
         ref={tipRef}
-        className="absolute pointer-events-auto rounded-2xl shadow-2xl border border-white/[0.10] p-4"
+        className="absolute pointer-events-auto rounded-2xl shadow-2xl border border-gray-200/70 dark:border-white/[0.10] p-4"
         style={{
           ...tipStyle,
           width: tipWidth,
-          background: 'rgba(12,12,24,0.88)',
+          background: document.documentElement.classList.contains('dark')
+            ? 'rgba(12,12,24,0.88)'
+            : 'rgba(255,255,255,0.92)',
           backdropFilter: 'blur(32px)',
           WebkitBackdropFilter: 'blur(32px)',
         }}
@@ -334,7 +336,7 @@ export default function GuidedTour() {
             <div
               key={i}
               className={`flex-1 h-[3px] rounded-full transition-all ${
-                i < stepIdx ? 'bg-blue-400/55' : i === stepIdx ? 'bg-blue-400' : 'bg-white/[0.12]'
+                i < stepIdx ? 'bg-blue-400/55' : i === stepIdx ? 'bg-blue-400' : 'bg-gray-200 dark:bg-white/[0.12]'
               }`}
             />
           ))}
@@ -342,33 +344,32 @@ export default function GuidedTour() {
 
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-1.5">
-            <Sparkles size={12} className={isWaiting ? 'text-blue-300/50 animate-pulse' : 'text-blue-400/85'} />
-            <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/45">
+            <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-gray-500 dark:text-white/45">
               {isWaiting ? 'Loading…' : `Step ${stepIdx + 1} of ${steps.length}`}
             </span>
           </div>
-          <button onClick={skip} title="Skip tour (Esc)" className="text-white/30 hover:text-white/65 -m-1 p-1 transition-colors">
+          <button onClick={skip} title="Skip tour (Esc)" className="text-gray-400 hover:text-gray-700 dark:text-white/30 dark:hover:text-white/65 -m-1 p-1 transition-colors">
             <X size={13} />
           </button>
         </div>
 
-        <h3 className="text-[14px] font-bold text-white/95 mb-1.5">{title}</h3>
-        <p className="text-[12px] text-white/55 leading-relaxed mb-3">{body}</p>
+        <h3 className="text-[14px] font-bold text-gray-900 dark:text-white/95 mb-1.5">{title}</h3>
+        <p className="text-[12px] text-gray-600 dark:text-white/55 leading-relaxed mb-3">{body}</p>
 
         <div className="flex items-center justify-between">
-          <button onClick={skip} className="text-[11px] text-white/30 hover:text-white/55 transition-colors">
+          <button onClick={skip} className="text-[11px] text-gray-400 hover:text-gray-600 dark:text-white/30 dark:hover:text-white/55 transition-colors">
             Skip
           </button>
           {step.advanceOn === 'click' ? (
-            <span className={`text-[11px] ${isWaiting ? 'text-white/25' : 'text-white/50'}`}>
+            <span className={`text-[11px] ${isWaiting ? 'text-gray-400 dark:text-white/25' : 'text-gray-500 dark:text-white/50'}`}>
               {isWaiting ? 'Waiting…' : 'Click the highlighted item →'}
             </span>
           ) : step.advanceOn === 'finish' ? (
-            <button onClick={advance} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/[0.12] border border-white/[0.18] hover:bg-white/[0.18] text-white/90 text-[11px] font-semibold transition-colors">
+            <button onClick={advance} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gray-900/[0.06] border border-gray-300 hover:bg-gray-900/[0.10] text-gray-700 dark:bg-white/[0.12] dark:border-white/[0.18] dark:hover:bg-white/[0.18] dark:text-white/90 text-[11px] font-semibold transition-colors">
               <GraduationCap size={12} /> Finish
             </button>
           ) : (
-            <button onClick={advance} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/[0.12] border border-white/[0.18] hover:bg-white/[0.18] text-white/90 text-[11px] font-semibold transition-colors">
+            <button onClick={advance} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gray-900/[0.06] border border-gray-300 hover:bg-gray-900/[0.10] text-gray-700 dark:bg-white/[0.12] dark:border-white/[0.18] dark:hover:bg-white/[0.18] dark:text-white/90 text-[11px] font-semibold transition-colors">
               Next <ArrowRight size={11} />
             </button>
           )}

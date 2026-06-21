@@ -7,9 +7,8 @@ import { WindowFrameContext } from '../../context/WindowFrameContext';
 // the macOS shell - covers the dock area but stays inside the browser
 // window). For TRUE OS-level fullscreen (taking over the whole monitor),
 // use ⌘⇧P - that calls the browser Fullscreen API.
-function MacTitleBar({ windowId, isActive, title, onDragStart, onDoubleClick, titlebarOpacity = 80, closeWindow, minimizeWindow, maximizeWindow }) {
+function MacTitleBar({ windowId, isActive, title, onDragStart, onDoubleClick, titlebarOpacity = 80, isDark = true, closeWindow, minimizeWindow, maximizeWindow }) {
   const [hovered, setHovered] = useState(false);
-  const isDark = document.documentElement.classList.contains('dark');
   const a = titlebarOpacity / 100;
   const barStyle = isDark
     ? {
@@ -31,7 +30,13 @@ function MacTitleBar({ windowId, isActive, title, onDragStart, onDoubleClick, ti
 }
 
 function Window({ win, isActive, children, focusWindow, moveWindow, resizeWindow, removeWindow, maximizeWindow, closeWindow, minimizeWindow }) {
-  const { windowOpacity, titlebarOpacity } = useUIPreference();
+  const { windowOpacity, titlebarOpacity, theme } = useUIPreference();
+  // Drive chrome colors off the reactive theme, NOT a render-time read of the
+  // root `.dark` class. The class is toggled in a post-render effect, so on a
+  // theme switch the already-open window would re-render once (via this context
+  // consumption) while `.dark` is still stale, lock in the wrong background, and
+  // never re-render again. Reading `theme` here keeps every open window in sync.
+  const isDark = theme !== 'light';
   const windowRef = useRef(null);
   const resizeRef = useRef(null);
   const [animState, setAnimState] = useState('opening');
@@ -194,9 +199,13 @@ function Window({ win, isActive, children, focusWindow, moveWindow, resizeWindow
         // the whole viewport. Kill the shadow when full-bleed.
         boxShadow: fullBleed
           ? 'none'
-          : isActive
-            ? '0 25px 50px -12px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.1)'
-            : '0 10px 30px -8px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.05)',
+          : isDark
+            ? (isActive
+              ? '0 25px 50px -12px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.1)'
+              : '0 10px 30px -8px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.05)')
+            : (isActive
+              ? '0 25px 50px -12px rgba(0,0,0,0.25), 0 0 0 1px rgba(0,0,0,0.08)'
+              : '0 10px 30px -8px rgba(0,0,0,0.16), 0 0 0 1px rgba(0,0,0,0.05)'),
         // box-shadow is intentionally NOT in this transition list.
         // When focus changes, every open window is a separate GPU compositor
         // layer. A 0.15s box-shadow transition means ~9 frames of sustained
@@ -246,13 +255,13 @@ function Window({ win, isActive, children, focusWindow, moveWindow, resizeWindow
         />
       )}
 
-      <TitleBar windowId={win.id} appId={win.appId} isMaximized={maxed} isActive={isActive} title={win.title} onDragStart={handleDragStart} onDoubleClick={maxed ? undefined : () => maximizeWindow(win.id)} onFullscreen={toggleFullscreen} titlebarOpacity={titlebarOpacity ?? 80} closeWindow={closeWindow} minimizeWindow={minimizeWindow} maximizeWindow={maximizeWindow} />
+      <TitleBar windowId={win.id} appId={win.appId} isMaximized={maxed} isActive={isActive} title={win.title} onDragStart={handleDragStart} onDoubleClick={maxed ? undefined : () => maximizeWindow(win.id)} onFullscreen={toggleFullscreen} titlebarOpacity={titlebarOpacity ?? 80} isDark={isDark} closeWindow={closeWindow} minimizeWindow={minimizeWindow} maximizeWindow={maximizeWindow} />
 
       <div
         className="flex-1 overflow-hidden"
         style={{
           position: 'relative', zIndex: 1,
-          background: document.documentElement.classList.contains('dark')
+          background: isDark
             ? `rgba(24, 24, 24, ${(windowOpacity ?? 100) / 100})`
             : `rgba(255,255,255,${(windowOpacity ?? 100) / 100})`
         }}

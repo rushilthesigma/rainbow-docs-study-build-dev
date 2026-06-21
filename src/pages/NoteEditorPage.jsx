@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Sparkles } from 'lucide-react';
+import { ArrowLeft, Wand2 } from 'lucide-react';
 import { getNote, updateNote, generateCues, generateSummary } from '../api/notes';
 import Button from '../components/shared/Button';
 import LoadingSpinner from '../components/shared/LoadingSpinner';
@@ -87,7 +87,7 @@ export default function NoteEditorPage() {
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Cues</span>
                 <button onClick={handleGenCues} disabled={genCues} className="text-blue-500 hover:text-blue-600 disabled:opacity-50 transition-colors">
-                  <Sparkles size={14} />
+                  <Wand2 size={14} />
                 </button>
               </div>
               {(note.cues || []).length > 0 ? (
@@ -117,7 +117,7 @@ export default function NoteEditorPage() {
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Summary</span>
               <button onClick={handleGenSummary} disabled={genSummary} className="flex items-center gap-1 text-xs text-blue-500 hover:text-blue-600 disabled:opacity-50 transition-colors">
-                <Sparkles size={12} /> Generate
+                <Wand2 size={12} /> Generate
               </button>
             </div>
             <textarea

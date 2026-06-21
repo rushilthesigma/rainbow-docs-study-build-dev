@@ -15,8 +15,9 @@ import ShareDialog from '../../shared/ShareDialog';
 import SharedWithMeView from '../../library/SharedWithMeView';
 import SharedItemViewer from '../../library/SharedItemViewer';
 import { useSharing } from '../../../context/SharingContext';
+import { useWindowManager } from '../../../context/WindowManagerContext';
 import useBrowserBack from '../../../hooks/useBrowserBack';
-import NoteActions, { QuizFromNotePanel } from '../../notes/NoteActions';
+import NoteActions, { QuizFromNotePanel, AIEditNotePanel } from '../../notes/NoteActions';
 import NoteMap from '../../notes/NoteMap';
 import MarkdownNoteEditor from '../../notes/MarkdownNoteEditor';
 import NoteFlashcards from '../../notes/NoteFlashcards';
@@ -74,7 +75,7 @@ function TopicSelect({ topics = [], value, onChange }) {
         <ChevronDown size={12} className={`flex-shrink-0 opacity-80 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
-        <div className="absolute left-0 top-full mt-1 z-50 min-w-[170px] max-h-60 overflow-y-auto rounded-lg border border-white/[0.10] bg-[#1b1b1b] py-1 shadow-xl shadow-black/40">
+        <div className="absolute left-0 top-full mt-1 z-50 min-w-[170px] max-h-60 overflow-y-auto rounded-lg border border-white/[0.10] bg-gray-100 dark:bg-[#1b1b1b] py-1 shadow-xl shadow-black/40">
           {item('', 'No topic')}
           {topics.map(t => item(t.id, t.name))}
         </div>
@@ -94,11 +95,12 @@ function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashca
   const [saveTimer, setSaveTimer] = useState(null);
   const [fc, setFc] = useState({ count: null, due: 0 });
   const [shareOpen, setShareOpen] = useState(false);
-  // The quiz lives in a real split column beside the editor (not an overlay),
-  // so the editor reflows when it opens. Close it when switching notes.
+  const [aiEditOpen, setAiEditOpen] = useState(false);
+  // Quiz/AI Edit/Share live in a real split column beside the editor (not an
+  // overlay). Close all panels when switching notes.
   const [quizOpen, setQuizOpen] = useState(false);
 
-  useEffect(() => { setQuizOpen(false); }, [noteId]);
+  useEffect(() => { setQuizOpen(false); setAiEditOpen(false); setShareOpen(false); }, [noteId]);
 
   useEffect(() => {
     getNoteFlashcards(noteId).then(d => setFc({ count: (d.cards || []).length, due: d.due || 0 })).catch(() => {});
@@ -187,13 +189,6 @@ function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashca
         </button>
         <div className="flex items-center gap-2.5">
           <TopicSelect topics={topics} value={note.topicId || ''} onChange={handleTopicChange} />
-          <button
-            onClick={() => { setShareOpen(true); setQuizOpen(false); }}
-            title="Share this note"
-            className="flex items-center gap-1.5 bg-blue-500 hover:bg-blue-400 rounded-lg px-2.5 py-1 text-[11px] font-medium text-white transition-colors"
-          >
-            <Share2 size={12} /> Share
-          </button>
           <span className="text-xs text-white/25">{saving ? 'Saving...' : 'Auto-saved'}</span>
         </div>
       </div>
@@ -208,7 +203,9 @@ function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashca
       <div className="mb-3 flex-shrink-0">
         <NoteActions
           note={note}
-          onMakeQuiz={() => { setQuizOpen(true); setShareOpen(false); }}
+          onMakeQuiz={() => { setQuizOpen(true); setAiEditOpen(false); setShareOpen(false); }}
+          onAiEdit={() => { setAiEditOpen(true); setQuizOpen(false); setShareOpen(false); }}
+          onShare={() => { setShareOpen(true); setQuizOpen(false); setAiEditOpen(false); }}
           onNoteUpdated={(patch) => setNote(prev => prev ? { ...prev, ...patch } : prev)}
         />
       </div>
@@ -282,15 +279,19 @@ function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashca
       </button>
       </div>
 
-      {/* Quiz and Share share the right-hand split column and are mutually
-          exclusive — opening one closes the other. The note column reflows to
-          make room; neither is an overlay. An "edit" share lets the recipient
-          co-edit, and the saves above carry baseUpdatedAt so concurrent edits
-          409 instead of silently reverting. */}
-      {(quizOpen || shareOpen) && (
+      {/* Quiz, AI Edit, and Share share the right-hand split column and are
+          mutually exclusive — opening one closes the others. The note column
+          reflows to make room; none are overlays. */}
+      {(quizOpen || aiEditOpen || shareOpen) && (
         <div className="flex-shrink-0 min-h-0" style={{ width: 'clamp(320px, 36%, 440px)' }}>
           {quizOpen ? (
             <QuizFromNotePanel note={note} onClose={() => setQuizOpen(false)} />
+          ) : aiEditOpen ? (
+            <AIEditNotePanel
+              note={note}
+              onClose={() => setAiEditOpen(false)}
+              onApplied={(patch) => setNote(prev => prev ? { ...prev, ...patch } : prev)}
+            />
           ) : (
             <ShareDialog
               asPanel
@@ -305,8 +306,95 @@ function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashca
   );
 }
 
+const TOPIC_COLORS = [
+  '#6366f1', '#8b5cf6', '#ec4899', '#f43f5e',
+  '#f97316', '#eab308', '#22c55e', '#14b8a6',
+  '#3b82f6', '#06b6d4', '#a78bfa', '#fb7185',
+];
+
+function NewTopicView({ onBack, onCreated }) {
+  const [name, setName] = useState('');
+  const [color, setColor] = useState(TOPIC_COLORS[0]);
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    const n = name.trim();
+    if (!n || busy) return;
+    setBusy(true);
+    try {
+      await createTopic(n, color);
+      onCreated();
+    } catch {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ViewFade viewKey="new-topic" className="h-full flex flex-col">
+      <div className="flex items-center gap-3 mb-8 flex-shrink-0">
+        <button
+          onClick={onBack}
+          className="flex items-center gap-1.5 text-sm text-white/35 hover:text-white/65 transition-colors"
+        >
+          <ArrowLeft size={15} /> Notes
+        </button>
+      </div>
+
+      <div className="flex-1 flex flex-col justify-center max-w-sm mx-auto w-full pb-16">
+        <h2 className="text-[22px] font-bold text-white/90 mb-1">New topic</h2>
+        <p className="text-[13px] text-white/40 mb-8">Group your notes by subject, class, or anything you like.</p>
+
+        <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+          <div>
+            <label className="text-[11px] font-semibold uppercase tracking-widest text-white/35 mb-2 block">Name</label>
+            <input
+              ref={inputRef}
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="e.g. Biology, Chapter 3, Exam prep"
+              className="w-full px-4 py-3 rounded-xl border border-white/[0.10] bg-white/[0.04] text-[15px] text-white/90 placeholder-white/25 outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20 transition-all"
+            />
+          </div>
+
+          <div>
+            <label className="text-[11px] font-semibold uppercase tracking-widest text-white/35 mb-3 block">Color</label>
+            <div className="flex flex-wrap gap-2.5">
+              {TOPIC_COLORS.map(c => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setColor(c)}
+                  className="w-7 h-7 rounded-full transition-transform hover:scale-110 focus:outline-none"
+                  style={{
+                    background: c,
+                    boxShadow: color === c ? `0 0 0 3px rgba(255,255,255,0.15), 0 0 0 5px ${c}` : 'none',
+                    transform: color === c ? 'scale(1.15)' : undefined,
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="flex gap-2 pt-2">
+            <Button type="button" variant="ghost" size="sm" onClick={onBack} disabled={busy}>Cancel</Button>
+            <Button type="submit" size="sm" disabled={!name.trim() || busy}>
+              {busy ? <Loader2 size={13} className="animate-spin" /> : null}
+              Create topic
+            </Button>
+          </div>
+        </form>
+      </div>
+    </ViewFade>
+  );
+}
+
 export default function NotesApp({ initialNoteId = null, initialMapId = null, initialView = null, initialFlashcardsNoteId = null, initialFlashcardsTitle = null } = {}) {
   const toast = useToast();
+  const { openApp } = useWindowManager();
   const startView = initialFlashcardsNoteId ? 'flashcards'
                     : initialNoteId ? 'editor'
                     : initialMapId ? 'map'
@@ -425,8 +513,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
       try {
         const d = await createNoteMap(trimmed);
         if (d?.map?.id) {
-          setSelectedMapId(d.map.id);
-          setView('map');
+          openApp('notes', trimmed, { initialView: 'map', initialMapId: d.map.id });
         }
         await reloadMaps(true);
       } catch (e) {
@@ -600,6 +687,15 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
     setView('editor');
   }
 
+  if (view === 'new-topic') {
+    return (
+      <NewTopicView
+        onBack={() => setView('list')}
+        onCreated={() => { reloadTopics(true); setView('list'); }}
+      />
+    );
+  }
+
   if (view === 'editor' && selectedNoteId) {
     return (
       <ViewFade viewKey="editor" className="h-full flex flex-col">
@@ -708,8 +804,8 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
     : notes.filter(n => n.topicId === activeTopicId);
 
   return (
-    <ViewFade viewKey="list">
-      <div className="flex items-center justify-between mb-5">
+    <ViewFade viewKey="list" className="h-full flex flex-col min-h-0">
+      <div className="flex items-center justify-between mb-5 flex-shrink-0">
         <h2 className="text-lg font-bold text-white/90">Notes</h2>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="secondary" onClick={() => setShowAI(true)}>
@@ -720,7 +816,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
       </div>
 
       {/* Maps */}
-      <div className="mb-5">
+      <div className="mb-5 flex-shrink-0">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 flex items-center gap-1.5">
             <Network size={12} /> Maps
@@ -787,12 +883,12 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
       </div>
 
       {/* Topics */}
-      <div className="mb-5">
+      <div className="mb-5 flex-shrink-0">
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 flex items-center gap-1.5">
             <Folder size={12} /> Topics
           </h3>
-          <Button size="sm" variant="secondary" onClick={() => setTopicDialog({ mode: 'create', initial: '' })}>
+          <Button size="sm" variant="secondary" onClick={() => setView('new-topic')}>
             <Plus size={12} /> New topic
           </Button>
         </div>
@@ -979,6 +1075,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
         </div>
       </Modal>
 
+      <div className="flex-1 overflow-y-auto min-h-0">
       {notes.length === 0 ? (
         <div className="text-center py-12">
           <FileText size={28} className="text-white/35 mx-auto mb-3" />
@@ -1013,6 +1110,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
       )}
 
       <SharedWithMeView className="mt-8" onOpen={(s) => { setOpenShare(s); setView('shared'); }} />
+    </div>
 
       {shareTarget && (
         <ShareDialog item={shareTarget} onClose={() => setShareTarget(null)} />

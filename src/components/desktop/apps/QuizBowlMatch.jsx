@@ -1105,10 +1105,10 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
                     onKeyDown={e => e.key === 'Enter' && answer.trim() && !timeUp && onSubmitAnswer()}
                     placeholder={timeUp ? "Time's up…" : 'Answer…'}
                     disabled={timeUp}
-                    className="flex-1 px-4 py-3 rounded-2xl border border-white/[0.08] bg-white/[0.04] text-[14px] text-white/85 placeholder-white/20 outline-none focus:border-white/15 transition-colors disabled:opacity-50"
+                    className="flex-1 px-4 py-3 rounded-2xl border border-blue-500/40 bg-white/[0.04] text-[14px] text-white/85 placeholder-white/20 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/25 transition-colors disabled:opacity-50"
                   />
                   <button onClick={onSubmitAnswer} disabled={!answer.trim() || timeUp}
-                    className="px-5 py-3 rounded-2xl bg-white/[0.07] hover:bg-white/[0.11] border border-white/[0.08] text-white/60 hover:text-white/80 text-[13px] font-semibold disabled:opacity-30 transition-colors">
+                    className="px-5 py-3 rounded-2xl bg-blue-500 hover:bg-blue-400 text-white text-[13px] font-semibold disabled:opacity-30 transition-colors">
                     →
                   </button>
                 </div>

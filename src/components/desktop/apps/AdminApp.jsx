@@ -5,9 +5,10 @@ import {
   RefreshCw, ChevronRight, Zap, ClipboardList, BarChart3, X, Check,
   Swords, Activity, ChevronDown, Sparkles, TrendingDown, Clock,
   Lock, Unlock, GraduationCap, Globe, AlertTriangle, Wand2, Edit3,
+  Gift, Users,
 } from 'lucide-react';
 import {
-  checkAdmin, listUsers, getUser, toggleBan, deleteUser,
+  checkAdmin, getMetrics, listUsers, getUser, toggleBan, deleteUser,
   getStudySession, getStandaloneLesson, getCurriculumLesson, getUserQuizBowl,
   unlockExam,
 } from '../../../api/admin';
@@ -27,8 +28,11 @@ export default function AdminApp() {
   const [isAdmin, setIsAdmin] = useState(null);
   const [canBan, setCanBan] = useState(false);
   const [users, setUsers] = useState([]);
+  // Global product metrics (landing-page visits etc.) — separate from the
+  // per-user list since landing visits are anonymous/pre-signup.
+  const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState('list'); // list | analytics | detail | chat | wiki
+  const [view, setView] = useState('list'); // list | analytics | detail | chat | wiki | referrals
   const [selectedUser, setSelectedUser] = useState(null);
   const [conv, setConv] = useState(null);
 
@@ -44,22 +48,25 @@ export default function AdminApp() {
     const cacheKey = `admin:users:${includeDemo ? '1' : '0'}`;
     const cachedUsers = peek(cacheKey);
     const cachedAdmin = peek('admin:check');
+    const cachedMetrics = peek('admin:metrics');
     // If we have prior caches, paint immediately - refresh runs in parallel below.
     if (cachedAdmin?.isAdmin !== undefined) { setIsAdmin(!!cachedAdmin.isAdmin); setCanBan(!!cachedAdmin.canBan); }
     if (cachedUsers?.users) setUsers(cachedUsers.users);
+    if (cachedMetrics) setMetrics(cachedMetrics);
     if (cachedAdmin && cachedUsers) setLoading(false);
-    // Always re-validate. checkAdmin + listUsers are independent - fire in parallel.
+    // Always re-validate. checkAdmin + listUsers + metrics are independent - fire in parallel.
     (async () => {
       try {
-        const [a, d] = await Promise.all([
+        const [a, d, m] = await Promise.all([
           fetchOnce('admin:check', checkAdmin),
           // listUsers depends on admin check passing, but the API rejects
           // non-admins anyway - racing them is safe and shaves ~150ms.
           fetchOnce(cacheKey, () => listUsers({ includeDemo })).catch(() => ({ users: [] })),
+          fetchOnce('admin:metrics', getMetrics).catch(() => null),
         ]);
         setIsAdmin(!!a.isAdmin);
         setCanBan(!!a.canBan);
-        if (a.isAdmin) setUsers(d.users || []);
+        if (a.isAdmin) { setUsers(d.users || []); if (m) setMetrics(m); }
       } catch {}
       setLoading(false);
     })();
@@ -69,8 +76,13 @@ export default function AdminApp() {
   async function refreshList() {
     const cacheKey = `admin:users:${includeDemo ? '1' : '0'}`;
     bust(cacheKey);
-    const d = await fetchOnce(cacheKey, () => listUsers({ includeDemo }));
+    bust('admin:metrics');
+    const [d, m] = await Promise.all([
+      fetchOnce(cacheKey, () => listUsers({ includeDemo })),
+      fetchOnce('admin:metrics', getMetrics).catch(() => null),
+    ]);
     setUsers(d.users || []);
+    if (m) setMetrics(m);
   }
 
   async function openUser(uid) {
@@ -197,6 +209,7 @@ export default function AdminApp() {
         <AnalyticsPanel
           users={users}
           total={users.length}
+          landing={metrics}
           onClose={() => setView('list')}
           standalone
         />
@@ -212,11 +225,20 @@ export default function AdminApp() {
     );
   }
 
+  if (view === 'referrals') {
+    return (
+      <ViewFade viewKey="referrals" className="h-full flex flex-col">
+        <ReferralsPanel users={users} onClose={() => setView('list')} />
+      </ViewFade>
+    );
+  }
+
   return (
     <ViewFade viewKey="list" className="h-full flex flex-col">
     <UserList
       users={filtered}
       total={users.length}
+      metrics={metrics}
       query={query} setQuery={setQuery}
       planFilter={planFilter} setPlanFilter={setPlanFilter}
       sort={sort} setSort={setSort}
@@ -225,6 +247,7 @@ export default function AdminApp() {
       onRefresh={refreshList}
       onAnalytics={() => setView('analytics')}
       onWiki={() => setView('wiki')}
+      onReferrals={() => setView('referrals')}
     />
     </ViewFade>
   );
@@ -256,7 +279,7 @@ function activenessScore(u) {
 }
 
 /* ====================== USER LIST ====================== */
-function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, sort, setSort, includeDemo, setIncludeDemo, onOpen, onRefresh, onAnalytics, onWiki }) {
+function UserList({ users, total, metrics, query, setQuery, planFilter, setPlanFilter, sort, setSort, includeDemo, setIncludeDemo, onOpen, onRefresh, onAnalytics, onWiki, onReferrals }) {
   const DAY = 86_400_000;
   const HOUR = 3_600_000;
   const now = Date.now();
@@ -275,6 +298,7 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
   const bannedCount = users.filter(u => u.banned).length;
   const demoCount = users.filter(u => u.isDemo).length;
   const totalMsgs = users.reduce((s, u) => s + sumMsgs(u), 0);
+  const totalReferrals = users.reduce((s, u) => s + (u.referralsUsed || 0), 0);
 
   return (
     <div>
@@ -310,6 +334,13 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
             <Globe size={13} /> Wiki
           </button>
           <button
+            onClick={onReferrals}
+            className="flex items-center gap-1 text-white/35 hover:text-white/75 px-2.5 py-1.5 rounded-lg hover:bg-white/[0.06] transition-colors text-[11px] font-medium"
+            title="Referrals"
+          >
+            <Gift size={13} /> Referrals
+          </button>
+          <button
             onClick={onAnalytics}
             className="flex items-center gap-1 text-white/35 hover:text-white/75 px-2.5 py-1.5 rounded-lg hover:bg-white/[0.06] transition-colors text-[11px] font-medium"
             title="Analytics"
@@ -328,12 +359,14 @@ function UserList({ users, total, query, setQuery, planFilter, setPlanFilter, so
 
       {/* Stat card row - six glanceable tiles. The accent dot color
           encodes status: green = activity, amber = paid, rose = blocked. */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 mb-4">
         <AdminStatCard label="Total users" value={total} />
         <AdminStatCard label="Daily active" value={dau} sub={total ? `${Math.round((dau/total)*100)}%` : null} dot="emerald" />
         <AdminStatCard label="Weekly active" value={wau} sub={total ? `${Math.round((wau/total)*100)}%` : null} dot="emerald" />
+        <AdminStatCard label="Landing visits" value={(metrics?.landingVisits ?? 0).toLocaleString()} sub={metrics?.landingVisitsToday ? `+${metrics.landingVisitsToday} today` : null} icon={<Globe size={11} />} />
         <AdminStatCard label="Pro" value={proCount} sub={total ? `${Math.round((proCount/total)*100)}%` : null} dot="amber" />
         <AdminStatCard label="Total messages" value={totalMsgs.toLocaleString()} icon={<MessageSquare size={11} />} />
+        <AdminStatCard label="Referrals" value={totalReferrals} icon={<Gift size={11} />} dot={totalReferrals ? 'emerald' : null} />
         <AdminStatCard label="Blocked" value={bannedCount} sub={demoCount ? `${demoCount} demo` : null} dot={bannedCount ? 'rose' : null} />
       </div>
 
@@ -578,7 +611,7 @@ function PlanPill({ plan }) {
  * stickiness ratio, churn signal, plan split, signup cohorts,
  * power users, time-on-site proxy (avg visits).
  * =====================================================*/
-function AnalyticsPanel({ users, total, onClose, standalone }) {
+function AnalyticsPanel({ users, total, landing, onClose, standalone }) {
   const stats = useMemo(() => {
     const now = Date.now();
     const DAY = 86_400_000;
@@ -688,7 +721,10 @@ function AnalyticsPanel({ users, total, onClose, standalone }) {
             <StatRow label="Churn (prior-30 not in last-7)" value={`${stats.churn.toFixed(1)}%`} />
             <StatRow label="Avg visits / active user" value={stats.avgVisits.toFixed(1)} />
             <StatRow label="Total chat messages" value={stats.totalMsgs.toLocaleString()} />
-            <StatRow label="Total visits" value={stats.totalVisits.toLocaleString()} />
+            <StatRow label="Total visits (signed-in)" value={stats.totalVisits.toLocaleString()} />
+            <StatRow label="Landing page visits" value={(landing?.landingVisits ?? 0).toLocaleString()} />
+            <StatRow label="Landing visits · today" value={(landing?.landingVisitsToday ?? 0).toLocaleString()} />
+            <StatRow label="Landing visits · last 7 days" value={(landing?.landingVisits7d ?? 0).toLocaleString()} />
           </div>
           <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
             <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-300/70 mb-2">Signups & plans</p>
@@ -1617,6 +1653,25 @@ function BillingTab({ u }) {
         <KV label="AI messages" value={u.usage?.messages ?? 0} />
         <KV label="Quiz Bowl games" value={u.usage?.quizBowlGames ?? 0} />
       </div>
+      <div className="rounded-2xl border border-white/[0.07] bg-white/[0.03] backdrop-blur-sm p-4 space-y-2">
+        <div className="flex items-center gap-1.5 mb-1">
+          <Gift size={12} className="text-white/45" />
+          <span className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-white/40">Referrals</span>
+        </div>
+        <KV label="Their code" value={u.referralCode || '-'} mono />
+        <KV label="Referrals given" value={u.referralsUsed ?? 0} />
+        <KV label="Referred by code" value={u.referredBy || 'none'} mono />
+        {u.referredUsers?.length > 0 && (
+          <div className="pt-1">
+            <p className="text-[10px] text-white/35 mb-1">Users who used their code:</p>
+            <div className="space-y-0.5">
+              {u.referredUsers.map((ru, i) => (
+                <div key={i} className="text-[11px] text-white/65 font-mono truncate">{ru.email}</div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1648,6 +1703,96 @@ function KV({ label, value, mono }) {
     <div className="flex items-center justify-between gap-2 text-xs">
       <span className="text-white/40">{label}</span>
       <span className={`text-white/75 ${mono ? 'font-mono text-[11px]' : ''} truncate max-w-[60%]`}>{value}</span>
+    </div>
+  );
+}
+
+/* ====================== REFERRALS PANEL ====================== */
+function ReferralsPanel({ users, onClose }) {
+  const stats = useMemo(() => {
+    const referrers = users.filter(u => (u.referralsUsed || 0) > 0);
+    const referred = users.filter(u => u.referredBy);
+    const totalReferrals = users.reduce((s, u) => s + (u.referralsUsed || 0), 0);
+    const top = [...referrers].sort((a, b) => (b.referralsUsed || 0) - (a.referralsUsed || 0)).slice(0, 10);
+    return { referrers: referrers.length, referred: referred.length, totalReferrals, top };
+  }, [users]);
+
+  const all = useMemo(() =>
+    [...users]
+      .filter(u => u.referralCode || u.referredBy || (u.referralsUsed || 0) > 0)
+      .sort((a, b) => (b.referralsUsed || 0) - (a.referralsUsed || 0)),
+    [users]
+  );
+
+  return (
+    <div className="h-full overflow-y-auto">
+      <div className="p-5 pb-8">
+        <button onClick={onClose} className="flex items-center gap-2 text-sm text-white/40 hover:text-white/70 mb-4 transition-colors">
+          <ArrowLeft size={16} /> Admin Panel
+        </button>
+
+        <div className="flex items-center gap-2 mb-4">
+          <div className="w-8 h-8 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-300 flex-shrink-0">
+            <Gift size={15} />
+          </div>
+          <div>
+            <h2 className="text-[15px] font-bold text-white/90">Referrals</h2>
+            <p className="text-[10.5px] text-white/40">{stats.totalReferrals} total referrals from {stats.referrers} users</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-2 mb-4">
+          <StatTile label="Total referrals" value={stats.totalReferrals} accent="emerald" />
+          <StatTile label="Referrers" value={stats.referrers} accent="blue" />
+          <StatTile label="Referred users" value={stats.referred} accent="indigo" />
+        </div>
+
+        {stats.top.length > 0 && (
+          <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 mb-4">
+            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-300/70 mb-2 flex items-center gap-1">
+              <Users size={10} /> Top Referrers
+            </p>
+            <div className="space-y-1">
+              {stats.top.map((u, i) => (
+                <div key={u.id || u.email} className="flex items-center gap-2 py-1">
+                  <span className="text-[10px] font-mono text-white/35 tabular-nums w-5">{String(i + 1).padStart(2, '0')}</span>
+                  <span className="text-[12.5px] text-white/85 flex-1 truncate">{u.name || u.email}</span>
+                  <span className="text-[11px] font-mono font-semibold tabular-nums text-emerald-300">{u.referralsUsed}</span>
+                  <span className="text-[10px] text-white/35">referrals</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-white/[0.06] grid grid-cols-[1fr_80px_80px_80px] gap-2 text-[10px] font-bold uppercase tracking-wider text-white/30">
+            <span>User</span>
+            <span className="text-center">Code</span>
+            <span className="text-center">Given</span>
+            <span className="text-center">Referred by</span>
+          </div>
+          {all.length === 0 ? (
+            <div className="px-4 py-8 text-center text-[12px] text-white/30">No referral activity yet.</div>
+          ) : (
+            <div className="divide-y divide-white/[0.04]">
+              {all.map((u, i) => (
+                <div key={u.id || i} className="px-4 py-2 grid grid-cols-[1fr_80px_80px_80px] gap-2 items-center">
+                  <div className="min-w-0">
+                    <p className="text-[12px] text-white/85 truncate">{u.name || u.email}</p>
+                    <p className="text-[10px] text-white/35 truncate">{u.email}</p>
+                  </div>
+                  <span className="text-[10px] font-mono text-white/50 text-center truncate">{u.referralCode || '-'}</span>
+                  <span className={`text-[12px] font-bold tabular-nums text-center ${(u.referralsUsed || 0) > 0 ? 'text-emerald-300' : 'text-white/25'}`}>
+                    {u.referralsUsed || 0}
+                  </span>
+                  <span className="text-[10px] font-mono text-white/40 text-center truncate">{u.referredBy || '-'}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

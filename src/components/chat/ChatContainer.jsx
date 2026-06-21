@@ -8,6 +8,8 @@ export default function ChatContainer({
   header, className = '', sourceMode, onToggleSource, searchStatus,
   showThinking = false, thinkingMode = true, thinkingLocked = false, onToggleThinking,
   composerExtras = null,
+  composerPrefix = null,
+  enableDictation = false,
   hideInput = false,
   editableIndices = null,
   onEditMessage = null,
@@ -119,6 +121,8 @@ export default function ChatContainer({
           thinkingLocked={thinkingLocked}
           onToggleThinking={onToggleThinking}
           composerExtras={composerExtras}
+          composerPrefix={composerPrefix}
+          enableDictation={enableDictation}
           flush={flush}
         />
       )}

@@ -17,7 +17,7 @@ export default function Input({ label, error, id, className = '', ...props }) {
   return (
     <div className="flex flex-col gap-1.5">
       {label && (
-        <label htmlFor={inputId} className="text-sm font-medium text-blue-200/55">
+        <label htmlFor={inputId} className="text-sm font-medium text-blue-700 dark:text-blue-200/55">
           {label}
         </label>
       )}
@@ -44,7 +44,7 @@ export function Textarea({ label, error, id, className = '', ...props }) {
   return (
     <div className="flex flex-col gap-1.5">
       {label && (
-        <label htmlFor={inputId} className="text-sm font-medium text-blue-200/55">
+        <label htmlFor={inputId} className="text-sm font-medium text-blue-700 dark:text-blue-200/55">
           {label}
         </label>
       )}

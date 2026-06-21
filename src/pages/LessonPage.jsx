@@ -220,7 +220,7 @@ export default function LessonPage() {
       </div>
 
       {/* Completion celebration - gradient card with trophy + XP */}
-      {completed && completionData && (
+      {completed && (
         <div
           className="relative overflow-hidden rounded-2xl p-5 mb-4 flex-shrink-0 border border-emerald-400/25"
           style={{
@@ -237,13 +237,22 @@ export default function LessonPage() {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-[16px] font-semibold text-white">Lesson complete</h3>
-                <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-emerald-200/90 bg-emerald-500/[0.18] border border-emerald-400/30 rounded-full px-2 py-0.5">
-                  <Sparkles size={10} /> +{completionData.xpEarned || 25} XP
-                </span>
+                {completionData?.xpEarned != null && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-emerald-200/90 bg-emerald-500/[0.18] border border-emerald-400/30 rounded-full px-2 py-0.5">
+                    <Sparkles size={10} /> +{completionData.xpEarned} XP
+                  </span>
+                )}
+                {!nextLesson && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-amber-200/90 bg-amber-500/[0.15] border border-amber-400/30 rounded-full px-2 py-0.5">
+                    <Sparkles size={10} /> All lessons done
+                  </span>
+                )}
               </div>
-              {completionData.summary && (
+              {completionData?.summary ? (
                 <p className="text-[13px] text-white/65 mt-1 leading-snug">{completionData.summary}</p>
-              )}
+              ) : !nextLesson ? (
+                <p className="text-[13px] text-white/65 mt-1 leading-snug">You've finished every lesson in this curriculum.</p>
+              ) : null}
             </div>
           </div>
         </div>
@@ -289,11 +298,26 @@ export default function LessonPage() {
           lesson={prevLesson}
           onClick={() => navigateToLesson(currentIndex - 1)}
         />
-        <LessonNavButton
-          dir="next"
-          lesson={nextLesson}
-          onClick={() => navigateToLesson(currentIndex + 1)}
-        />
+        {completed && !nextLesson ? (
+          <button
+            onClick={() => navigate(`/curriculum/${curriculumId}`)}
+            className="group flex items-center gap-3 rounded-xl border px-4 py-3 flex-row-reverse text-right transition-all border-emerald-500/30 bg-emerald-500/[0.07] hover:bg-emerald-500/[0.14] hover:border-emerald-400/50 active:scale-[0.99]"
+          >
+            <div className="w-8 h-8 rounded-lg grid place-items-center flex-shrink-0 bg-emerald-500/20 text-emerald-400 group-hover:bg-emerald-500/35 transition-all">
+              <Trophy size={15} strokeWidth={2.2} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[10.5px] font-bold uppercase tracking-[0.14em] text-emerald-300/60">Complete</p>
+              <p className="text-[13px] mt-0.5 truncate text-emerald-200/90">View lesson complete</p>
+            </div>
+          </button>
+        ) : (
+          <LessonNavButton
+            dir="next"
+            lesson={nextLesson}
+            onClick={() => navigateToLesson(currentIndex + 1)}
+          />
+        )}
       </div>
     </div>
   );

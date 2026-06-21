@@ -18,8 +18,13 @@
     "electron:build": "vite build && electron-builder --mac"
   },
   "build": {
-    "appId": "com.covalent.ai",
-    "productName": "Covalent",
+    "appId": "com.rushilai.app",
+    "productName": "RushilAI",
+    "asar": false,
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
     "mac": {
       "category": "public.app-category.education",
       "target": "dmg",
@@ -30,23 +35,17 @@
       "electron/**/*",
       "server.js",
       "prompts.js",
+      "data/**/*",
+      "presetBlocks.json",
+      ".env",
       "package.json",
       "node_modules/**/*"
-    ],
-    "extraResources": [
-      {
-        "from": "server.js",
-        "to": "server.js"
-      },
-      {
-        "from": "prompts.js",
-        "to": "prompts.js"
-      }
     ]
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.1",
     "@google/generative-ai": "^0.24.1",
+    "@tiptap/extension-mathematics": "^3.26.1",
     "@tiptap/extension-placeholder": "^3.24.0",
     "@tiptap/extension-table": "^3.24.0",
     "@tiptap/pm": "^3.24.0",
@@ -61,6 +60,7 @@
     "katex": "^0.16.45",
     "lucide-react": "^0.468.0",
     "multer": "^2.1.1",
+    "openai": "^6.44.0",
     "pdf-parse": "^1.1.1",
     "pptxgenjs": "^4.0.1",
     "react": "^19.2.0",

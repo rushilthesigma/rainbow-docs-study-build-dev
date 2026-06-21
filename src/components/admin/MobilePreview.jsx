@@ -32,14 +32,14 @@ export default function MobilePreview() {
   }, []);
 
   if (isAdmin === null) {
-    return <div className="h-full w-full grid place-items-center bg-black"><LoadingSpinner size={20} /></div>;
+    return <div className="h-full w-full grid place-items-center bg-white dark:bg-black"><LoadingSpinner size={20} /></div>;
   }
   if (!isAdmin) {
     return (
-      <div className="h-full w-full flex flex-col items-center justify-center bg-black text-white p-6 text-center">
+      <div className="h-full w-full flex flex-col items-center justify-center bg-white dark:bg-black text-gray-900 dark:text-white p-6 text-center">
         <Shield size={32} className="text-rose-400 mb-3" />
         <p className="text-sm font-bold">Admin access required</p>
-        <p className="text-[11px] text-white/60 mt-1">Mobile Preview is a developer-only tool.</p>
+        <p className="text-[11px] text-gray-500 dark:text-white/60 mt-1">Mobile Preview is a developer-only tool.</p>
       </div>
     );
   }
@@ -58,7 +58,7 @@ export default function MobilePreview() {
   }
 
   return (
-    <div className="h-full w-full flex flex-col bg-[#0d0d18]">
+    <div className="h-full w-full flex flex-col bg-neutral-50 dark:bg-[#0d0d18]">
       <DevToolbar onReload={reload} onOpenInTab={openInTab} />
       {/* Center the 375px phone viewport so the window is desktop-sized
           but the iframe stays phone-width (triggers the mobile breakpoint). */}
@@ -82,8 +82,8 @@ export default function MobilePreview() {
 // ===== Dev toolbar =====
 function DevToolbar({ onReload, onOpenInTab }) {
   return (
-    <div className="flex items-center gap-1 px-2 py-1.5 bg-[#0a0a14] border-b border-white/[0.08] flex-shrink-0">
-      <span className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-white/60 px-1.5">Mobile site</span>
+    <div className="flex items-center gap-1 px-2 py-1.5 bg-neutral-100 dark:bg-[#0a0a14] border-b border-black/[0.08] dark:border-white/[0.08] flex-shrink-0">
+      <span className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-gray-500 dark:text-white/60 px-1.5">Mobile site</span>
       <span className="ml-auto inline-flex items-center gap-1">
         <ToolbarButton onClick={onReload} title="Reload the iframe">
           <RotateCw size={11} /> Reload
@@ -92,7 +92,7 @@ function DevToolbar({ onReload, onOpenInTab }) {
           <ExternalLink size={11} /> Open
         </ToolbarButton>
       </span>
-      <span className="ml-2 text-[10px] font-mono text-white/40 tabular-nums tracking-tight">
+      <span className="ml-2 text-[10px] font-mono text-gray-400 dark:text-white/40 tabular-nums tracking-tight">
         375×812
       </span>
     </div>
@@ -104,7 +104,7 @@ function ToolbarButton({ onClick, title, children }) {
     <button
       onClick={onClick}
       title={title}
-      className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white/[0.06] text-white/80 hover:bg-white/[0.10] hover:text-white text-[10.5px] font-semibold tracking-tight transition-colors"
+      className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-black/[0.06] dark:bg-white/[0.06] text-gray-600 dark:text-white/80 hover:bg-black/[0.10] dark:hover:bg-white/[0.10] hover:text-gray-900 dark:hover:text-white text-[10.5px] font-semibold tracking-tight transition-colors"
     >
       {children}
     </button>

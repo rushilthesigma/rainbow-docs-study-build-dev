@@ -10,6 +10,7 @@ import multer from 'multer';
 import Stripe from 'stripe';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 import { createRequire } from 'module';
 const _require = createRequire(import.meta.url);
 const pdfParse = _require('pdf-parse');
@@ -54,6 +55,17 @@ const GEMINI_FLASH_LITE = 'gemini-3.1-flash-lite';
 const CLAUDE_HAIKU  = 'claude-haiku-4-5-20251001';
 const CLAUDE_SONNET = 'claude-sonnet-4-6';
 
+// OpenAI id. GPT-5.4 is offered as a user-selectable Study Mode model, with the
+// same non-paid 12/day free cap as Haiku (see STUDY_MODELS). Any OpenAI call
+// degrades to the equivalent-tier Gemini model on failure, so a bad/absent key
+// never breaks the app.
+const OPENAI_GPT = 'gpt-5.4';
+// GPT-5.4 mini: a smaller, faster OpenAI model offered FREE to everyone with no
+// per-model daily cap. Unlike gpt-5.4 it carries no freeDailyLimit, so it never
+// hits a separate model lockout — it only counts against the shared daily
+// message quota (consumeMessage / requireMessageQuota), like Flash Lite.
+const OPENAI_GPT_MINI = 'gpt-5.4-mini';
+
 // Tier → { gemini, claude } pairs. speed = flash-lite/haiku, balanced =
 // flash/sonnet, pro = pro/sonnet. providerForUser() picks which half runs.
 const TIER_MODELS = {
@@ -63,6 +75,7 @@ const TIER_MODELS = {
 };
 const CLAUDE_MODELS = new Set([CLAUDE_HAIKU, CLAUDE_SONNET]);
 const isClaudeModel = (id) => CLAUDE_MODELS.has(id) || /^claude/i.test(String(id || ''));
+const isOpenAIModel = (id) => /^gpt-/i.test(String(id || ''));
 
 const DEFAULT_MODEL = GEMINI_FLASH;
 const FALLBACK_MODEL = GEMINI_FLASH_LITE;
@@ -71,6 +84,7 @@ const FALLBACK_MODEL = GEMINI_FLASH_LITE;
 // Gemini only (no Anthropic streaming wired), so they call this to coerce a
 // Claude id back to the equivalent-tier Gemini model rather than 404-ing.
 const geminiSiblingOf = (id) => {
+  if (isOpenAIModel(id)) return /mini/i.test(String(id)) ? GEMINI_FLASH_LITE : GEMINI_FLASH; // GPT-5.4 → Flash, mini → Flash Lite
   if (!isClaudeModel(id)) return id || DEFAULT_MODEL;
   if (id === CLAUDE_HAIKU) return GEMINI_FLASH_LITE;
   return GEMINI_FLASH; // Sonnet → Flash (balanced); Pro tier streams on Flash too
@@ -101,6 +115,9 @@ const genAI = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
 if (!GEMINI_API_KEY) console.warn('GEMINI_API_KEY is not set - AI calls will fail');
 const anthropic = ANTHROPIC_API_KEY ? new Anthropic({ apiKey: ANTHROPIC_API_KEY }) : null;
 if (!ANTHROPIC_API_KEY) console.warn('ANTHROPIC_API_KEY is not set - Claude calls will fall back to Gemini');
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+const openai = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
+if (!OPENAI_API_KEY) console.warn('OPENAI_API_KEY is not set - GPT calls will fall back to Gemini');
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 
 // Data storage - try multiple locations until one works
@@ -433,9 +450,18 @@ function modelForUser(user, email, opts = {}) {
 // models with no per-model cap. Mirrors STUDY_MODELS in
 // src/components/study/studyModels.js — keep the two allow-lists in sync.
 const HAIKU_FREE_DAILY = 12;
+// Capped free models carry { freeDailyLimit, usageKey, lockKey }: non-paid users
+// get freeDailyLimit messages per rolling 24h on EACH such model independently
+// (separate usage windows), then it locks until UTC midnight and serves Flash
+// Lite. GPT-5.4 is a PAID-only model (plus / lifetime / pro), like Flash &
+// Sonnet — no free or plus-lite access, and no per-model cap. GPT-5.4 mini is
+// the free OpenAI option: free for everyone with NO per-model cap, so it only
+// draws down the shared daily message quota.
 const STUDY_MODELS = {
-  'flash-lite': { id: GEMINI_FLASH_LITE, label: 'Flash Lite', provider: 'gemini', paidOnly: false },
-  'haiku':      { id: CLAUDE_HAIKU,      label: 'Haiku 4.5',  provider: 'claude', paidOnly: false, freeDailyLimit: HAIKU_FREE_DAILY },
+  'flash-lite':   { id: GEMINI_FLASH_LITE, label: 'Flash Lite',   provider: 'gemini', paidOnly: false },
+  'haiku':        { id: CLAUDE_HAIKU,      label: 'Haiku 4.5',    provider: 'claude', paidOnly: false, freeDailyLimit: HAIKU_FREE_DAILY, usageKey: 'haikuWindow', lockKey: 'haikuLockedUntil' },
+  'gpt-5.4':      { id: OPENAI_GPT,        label: 'GPT-5.4',      provider: 'openai', paidOnly: true },
+  'gpt-5.4-mini': { id: OPENAI_GPT_MINI,   label: 'GPT-5.4 mini', provider: 'openai', paidOnly: false },
   'flash':      { id: GEMINI_FLASH,      label: 'Flash',      provider: 'gemini', paidOnly: true },
   'sonnet':     { id: CLAUDE_SONNET,     label: 'Sonnet 4.6', provider: 'claude', paidOnly: true },
   'gemini-pro': { id: GEMINI_PRO,        label: 'Gemini Pro', provider: 'gemini', paidOnly: true },
@@ -456,10 +482,18 @@ function studyModelAllowed(key, plan) {
   return m.paidOnly ? PAID_TIERS.has(plan) : true;
 }
 
-// Count Haiku study messages logged in the rolling 24h window (non-paid only).
-function rollingHaikuUsage(user) {
+// Cap config for a capped free model ({ freeDailyLimit, usageKey, lockKey }), or
+// null for uncapped/unknown keys.
+function freeCapConfig(key) {
+  const m = STUDY_MODELS[key];
+  return (m && m.freeDailyLimit && m.usageKey && m.lockKey) ? m : null;
+}
+
+// Count a capped model's study messages logged in the rolling 24h window
+// (non-paid only). usageKey selects the per-model window (haikuWindow, gptWindow).
+function rollingCapUsage(user, usageKey) {
   const cutoff = Date.now() - ROLLING_WINDOW_MS;
-  return (user?.data?.usage?.haikuWindow || []).filter(ts => ts > cutoff).length;
+  return (user?.data?.usage?.[usageKey] || []).filter(ts => ts > cutoff).length;
 }
 
 // Timestamp of the next UTC midnight (i.e. when today's Haiku lock expires).
@@ -487,29 +521,35 @@ function resolveStudyModel(requested, user, email) {
   // default itself (Haiku) carries a cap for non-paid users.
   if (!studyModelAllowed(key, plan)) { key = FALLBACK_STUDY_MODEL; switched = true; reason = 'plan'; }
 
-  // Gemini-only accounts may never use a Claude model, regardless of plan.
-  if (isGeminiOnly(email) && STUDY_MODELS[key]?.provider === 'claude') {
+  // Gemini-only accounts may never use a non-Gemini model (Claude OR OpenAI),
+  // regardless of plan.
+  if (isGeminiOnly(email) && STUDY_MODELS[key]?.provider !== 'gemini') {
     // Best available Gemini model for the plan: pro → flash → flash-lite
     const geminiModels = ['gemini-pro', 'flash', 'flash-lite'];
     key = geminiModels.find(k => studyModelAllowed(k, plan)) || FALLBACK_STUDY_MODEL;
     switched = true; reason = 'gemini-only';
   }
 
+  // Capped free models (Haiku, GPT-5.4) carry an independent non-paid daily cap.
+  // haikuRemaining is the generic "free messages left" field the client reads;
+  // reason 'haiku-limit' signals the cap was hit (the client snaps to Flash Lite).
   let haikuRemaining = null;
   const paid = PAID_TIERS.has(plan);
-  if (key === 'haiku' && !paid) {
+  const cap = freeCapConfig(key);
+  if (cap && !paid) {
+    const limit = cap.freeDailyLimit;
     // Check the day-level lock first (set at midnight UTC when limit was hit).
-    const lockedUntil = user?.data?.usage?.haikuLockedUntil || 0;
+    const lockedUntil = user?.data?.usage?.[cap.lockKey] || 0;
     if (lockedUntil > Date.now()) {
       key = HAIKU_LIMIT_FALLBACK; switched = true; reason = 'haiku-limit'; haikuRemaining = 0;
     } else {
-      const used = rollingHaikuUsage(user);
-      haikuRemaining = Math.max(0, HAIKU_FREE_DAILY - used);
-      if (used >= HAIKU_FREE_DAILY) {
-        // Lock Haiku until UTC midnight and serve Sonnet for the rest of the day.
+      const used = rollingCapUsage(user, cap.usageKey);
+      haikuRemaining = Math.max(0, limit - used);
+      if (used >= limit) {
+        // Lock this model until UTC midnight and serve Flash Lite the rest of the day.
         if (user?.data) {
           ensureUsageBucket(user);
-          user.data.usage.haikuLockedUntil = nextMidnightUTC();
+          user.data.usage[cap.lockKey] = nextMidnightUTC();
         }
         key = HAIKU_LIMIT_FALLBACK; switched = true; reason = 'haiku-limit'; haikuRemaining = 0;
       }
@@ -520,11 +560,14 @@ function resolveStudyModel(requested, user, email) {
   return { key, id: m.id, provider: m.provider, switched, reason, haikuRemaining };
 }
 
-// Log a Haiku study message into the rolling window (drives the non-paid cap).
-function recordHaikuUse(user) {
-  if (!user?.data) return;
+// Log a capped-model study message into its rolling window (drives the non-paid
+// cap). `key` selects the model (haiku → haikuWindow, gpt-5.4 → gptWindow).
+function recordFreeCapUse(user, key) {
+  const cap = freeCapConfig(key);
+  if (!cap || !user?.data) return;
   ensureUsageBucket(user);
-  user.data.usage.haikuWindow.push(Date.now());
+  if (!Array.isArray(user.data.usage[cap.usageKey])) user.data.usage[cap.usageKey] = [];
+  user.data.usage[cap.usageKey].push(Date.now());
 }
 
 // Daily limits are a ROLLING 24h window. Instead of a midnight reset,
@@ -544,10 +587,12 @@ function ensureUsageBucket(user) {
   if (!Array.isArray(user.data.usage.msgWindow)) user.data.usage.msgWindow = [];
   if (!Array.isArray(user.data.usage.qbWindow)) user.data.usage.qbWindow = [];
   if (!Array.isArray(user.data.usage.haikuWindow)) user.data.usage.haikuWindow = [];
+  if (!Array.isArray(user.data.usage.gptWindow)) user.data.usage.gptWindow = [];
   const cutoff = Date.now() - ROLLING_WINDOW_MS;
   user.data.usage.msgWindow = user.data.usage.msgWindow.filter(e => (e?.ts || 0) > cutoff);
   user.data.usage.qbWindow = user.data.usage.qbWindow.filter(ts => ts > cutoff);
   user.data.usage.haikuWindow = user.data.usage.haikuWindow.filter(ts => ts > cutoff);
+  user.data.usage.gptWindow = user.data.usage.gptWindow.filter(ts => ts > cutoff);
   if (user.data.usage.week !== week) {
     user.data.usage.week = week;
     user.data.usage.curricula = 0;
@@ -787,6 +832,9 @@ function createDefaultData() {
       lessonTempo: 'normal',
       aiPersonality: 'friendly',
       fluffLevel: 'normal',
+      // ON = terse, high-signal phrases (the shipped style). OFF = normal,
+      // conversational AI prose. Read in prompts.js buildToneRules().
+      succinctMode: true,
       customInstructions: '',
       // ----- UI prefs (moved off localStorage) -----
       theme: 'dark',
@@ -1351,12 +1399,23 @@ app.post('/api/auth/google', async (req, res) => {
     const { credential } = req.body;
     if (!credential) return res.status(400).json({ error: 'Missing credential' });
 
-    const verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${credential}`);
-    if (!verifyRes.ok) return res.status(401).json({ error: 'Invalid Google token' });
+    let verifyRes;
+    try {
+      verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${credential}`);
+    } catch (fetchErr) {
+      console.error('Google tokeninfo unreachable:', fetchErr);
+      return res.status(502).json({ error: 'Could not reach Google to verify your sign-in. Please try again.' });
+    }
+    if (!verifyRes.ok) {
+      const body = await verifyRes.json().catch(() => ({}));
+      // Expired/invalid credential — a transient client-side issue, not a server auth failure.
+      // Use 400 so apiFetch doesn't wipe the session token and hard-redirect.
+      return res.status(400).json({ error: body.error_description || 'Google credential was invalid or expired. Please try again.' });
+    }
 
     const payload = await verifyRes.json();
     if (payload.aud !== GOOGLE_CLIENT_ID) {
-      return res.status(401).json({ error: 'Token audience mismatch' });
+      return res.status(400).json({ error: 'Google token audience mismatch.' });
     }
 
     const googleEmail = payload.email;
@@ -2322,6 +2381,30 @@ function messagesToAnthropic(messages) {
   });
 }
 
+// Convert the same Claude-style messages into the OpenAI Chat Completions shape.
+// systemPrompt becomes a leading system message; images become image_url parts.
+function messagesToOpenAI(systemPrompt, messages) {
+  const out = [];
+  if (systemPrompt) out.push({ role: 'system', content: systemPrompt });
+  for (const m of (messages || [])) {
+    const imgs = Array.isArray(m.images) ? m.images : [];
+    const text = String(m.content ?? '');
+    const role = m.role === 'assistant' ? 'assistant' : 'user';
+    if (imgs.length) {
+      const parts = [];
+      if (text) parts.push({ type: 'text', text });
+      for (const img of imgs) {
+        const url = img?.dataUrl || img?.url || '';
+        if (/^data:[^;]+;base64,.+/.test(url)) parts.push({ type: 'image_url', image_url: { url } });
+      }
+      out.push({ role, content: parts.length ? parts : (text || '') });
+    } else {
+      out.push({ role, content: text });
+    }
+  }
+  return out;
+}
+
 // Non-streaming Anthropic call. Returns the SAME envelope as callGemini
 // ({ success, data: { content: [{ type:'text', text }], sources }, model })
 // so every existing call site works unchanged. On any failure it degrades to
@@ -2356,6 +2439,33 @@ async function callClaude(systemPrompt, messages, model, maxOutputTokens = 4096,
   }
 }
 
+// Non-streaming OpenAI call. Returns the SAME envelope as callGemini/callClaude
+// ({ success, data: { content: [{ type:'text', text }], sources }, model }) so
+// every existing call site works unchanged. Degrades to the tier's Gemini
+// sibling on any failure (bad key, unknown model, rate limit), keeping the app
+// resilient. Uses max_completion_tokens and omits temperature for GPT-5-family
+// compatibility (those models reject max_tokens / non-default temperature).
+async function callOpenAI(systemPrompt, messages, model, maxOutputTokens = 4096, opts = {}) {
+  if (!openai) return callGemini(systemPrompt, messages, geminiSiblingOf(model), maxOutputTokens, opts);
+  const resolved = isOpenAIModel(model) ? model : OPENAI_GPT;
+  const system = opts.jsonMode
+    ? `${systemPrompt || ''}\n\nRespond with ONLY valid JSON — no markdown, no code fences, no prose before or after.`.trim()
+    : (systemPrompt || '');
+  try {
+    const resp = await openai.chat.completions.create({
+      model: resolved,
+      max_completion_tokens: Math.min(Math.max(Number(maxOutputTokens) || 4096, 256), 32000),
+      ...(opts.jsonMode ? { response_format: { type: 'json_object' } } : {}),
+      messages: messagesToOpenAI(system, messages),
+    });
+    const text = resp?.choices?.[0]?.message?.content || '';
+    return { success: true, data: { content: [{ type: 'text', text }], sources: [] }, model: resolved };
+  } catch (err) {
+    console.warn(`OpenAI call (${resolved}) failed: ${err?.message || err}. Falling back to Gemini.`);
+    return callGemini(systemPrompt, messages, geminiSiblingOf(resolved), maxOutputTokens, opts);
+  }
+}
+
 function isInvalidModelError(errMsg = '') {
   const s = String(errMsg).toLowerCase();
   return s.includes('not found') || s.includes('invalid') || s.includes('unsupported')
@@ -2381,6 +2491,15 @@ async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096,
   if (isClaudeModel(currentModel)) {
     if (!opts.enableWebSearch && anthropic) {
       return callClaude(systemPrompt, messages, currentModel, maxOutputTokens, opts);
+    }
+    currentModel = geminiSiblingOf(currentModel);
+  }
+
+  // OpenAI (GPT-5.4) is served by callOpenAI. Web search is Gemini-only, so a
+  // GPT id that requests grounding is coerced to its Gemini sibling instead.
+  if (isOpenAIModel(currentModel)) {
+    if (!opts.enableWebSearch && openai) {
+      return callOpenAI(systemPrompt, messages, currentModel, maxOutputTokens, opts);
     }
     currentModel = geminiSiblingOf(currentModel);
   }
@@ -3762,9 +3881,9 @@ app.post('/api/curriculum/:id/lesson/:lessonId/complete', authMiddleware, (req, 
     for (const unit of curriculum.units || []) {
       const lesson = (unit.lessons || []).find(l => l.id === req.params.lessonId);
       if (lesson) {
-        if (bodyScore != null) {
+        if (bodyScore != null || req.query.force === 'complete') {
           lesson.isCompleted = true;
-          lesson.score = bodyScore;
+          if (bodyScore != null) lesson.score = bodyScore;
         } else {
           lesson.isCompleted = !lesson.isCompleted;
         }
@@ -3935,6 +4054,51 @@ async function streamClaudeResponse(res, sse, systemPrompt, messages, onComplete
   }
 }
 
+// Native OpenAI streaming path (same SSE schema as Gemini/Claude). On any early
+// failure it transparently falls back to the equivalent-tier Gemini stream.
+// OpenAI Chat Completions doesn't expose reasoning deltas, so there are no
+// `thinking` events — only text content streams through.
+async function streamOpenAIResponse(res, sse, systemPrompt, messages, onComplete, model, opts = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 300000);
+  const heartbeat = setInterval(() => {
+    try { res.write(`: keepalive ${Date.now()}\n\n`); res.flush?.(); } catch {}
+  }, 15000);
+
+  let buffered = '';
+  try {
+    const stream = await openai.chat.completions.create({
+      model,
+      max_completion_tokens: 8192,
+      stream: true,
+      messages: messagesToOpenAI(systemPrompt, messages),
+    }, { signal: controller.signal });
+
+    for await (const event of stream) {
+      const delta = event?.choices?.[0]?.delta?.content;
+      if (delta) { buffered += delta; sse({ content: delta }); }
+    }
+
+    clearTimeout(timeout);
+    clearInterval(heartbeat);
+    if (onComplete) {
+      try { await onComplete(buffered, []); }
+      catch (bookkeepErr) { console.error('streamOpenAIResponse onComplete threw:', bookkeepErr); }
+    }
+    sse({ done: true, sources: [] });
+    res.end();
+  } catch (e) {
+    clearTimeout(timeout);
+    clearInterval(heartbeat);
+    console.error('OpenAI stream error:', e);
+    // Nothing emitted yet → fall back to the Gemini sibling on the same socket.
+    if (!buffered && !res.writableEnded) {
+      return streamAIResponse(res, systemPrompt, messages, onComplete, geminiSiblingOf(model), opts);
+    }
+    if (!res.writableEnded) { sse({ error: e?.message || String(e) }); res.end(); }
+  }
+}
+
 // Helper: stream AI response as SSE, backed by Google Gemini.
 //
 // SSE event schema (unchanged from the old Anthropic impl - frontend consumers
@@ -3957,7 +4121,8 @@ async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOv
   // backed by Google Search grounding (Gemini only), so a Claude id in source
   // mode is coerced to its Gemini sibling instead of routing to Anthropic.
   const wantClaude = !!anthropic && isClaudeModel(modelOverride) && !enableWebSearch;
-  const requestedModel = wantClaude ? modelOverride : geminiSiblingOf(modelOverride || DEFAULT_MODEL);
+  const wantOpenAI = !!openai && isOpenAIModel(modelOverride) && !enableWebSearch;
+  const requestedModel = (wantClaude || wantOpenAI) ? modelOverride : geminiSiblingOf(modelOverride || DEFAULT_MODEL);
   if (!res.headersSent) {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -3979,6 +4144,9 @@ async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOv
   // transparently falls back to the equivalent-tier Gemini stream below.
   if (wantClaude) {
     return streamClaudeResponse(res, sse, systemPrompt, messages, onComplete, requestedModel, opts);
+  }
+  if (wantOpenAI) {
+    return streamOpenAIResponse(res, sse, systemPrompt, messages, onComplete, requestedModel, opts);
   }
 
   if (!genAI) {
@@ -4745,7 +4913,6 @@ function isUsableBlock(b) {
     case 'recap':      return arr(b.bullets);
     case 'challenge':  return has(b.prompt);
     case 'open':       return has(b.prompt);
-    case 'discussion': return has(b.prompt) || arr(b.talkingPoints);
     case 'matching':   return arr(b.pairs);
     case 'fill-blank': return arr(b.sentences);
     default:           return has(b.content) || has(b.prompt) || arr(b.questions);
@@ -4778,7 +4945,7 @@ function stampBlock(lessonId, b, i, opts = {}) {
   const typeLabel = {
     reading: 'Reading', quiz: 'Quiz', example: 'Worked Example',
     recap: 'Recap', application: 'In the Wild', challenge: 'Challenge', open: 'Graded Essay',
-    discussion: 'Discussion', matching: 'Matching', 'fill-blank': 'Fill in the Blank',
+    matching: 'Matching', 'fill-blank': 'Fill in the Blank',
   }[b.type] || 'Step';
   const base = {
     id: blockId,
@@ -4840,13 +5007,6 @@ function stampBlock(lessonId, b, i, opts = {}) {
       score: null,
     };
   }
-  if (b.type === 'discussion') {
-    return {
-      ...base,
-      prompt: String(b.prompt || ''),
-      talkingPoints: (Array.isArray(b.talkingPoints) ? b.talkingPoints : []).map(String),
-    };
-  }
   if (b.type === 'matching') {
     return {
       ...base,
@@ -4903,39 +5063,49 @@ function collectMissedFromLesson(lesson) {
 // (the curriculum path names the unit + course; standalone just names
 // the topic). `contextLines` are extra lines inserted before Difficulty.
 function buildVariedLessonPrompt({ title, contextLines = [], difficulty, blockCount }) {
-  const sys = `You generate one complete lesson as ${blockCount} blocks. You are a thoughtful curriculum designer — you choose the type of EVERY block based on what best teaches this specific topic. Output ONLY valid JSON - no markdown, no fences, no commentary.`;
+  const sys = `You generate one complete lesson as ${blockCount} blocks. You are a thoughtful curriculum designer — you choose the type of EVERY block based on what best teaches this specific topic. A lesson is for DOING, not just reading: the student should spend most of it actively working problems, not consuming prose. Output ONLY valid JSON - no markdown, no fences, no commentary.`;
   const context = contextLines.filter(Boolean).join('\n');
+  // Bias the mix hard toward active exercises over passive prose. "Summary"
+  // blocks (reading/recap/application) are expository — capped at ~30% of the
+  // lesson; the rest must be hands-on exercises the student answers/solves.
+  const maxSummaries = Math.max(1, Math.round(blockCount * 0.3));
+  const minExercises = blockCount - maxSummaries;
   const prompt = `Build ${title}.
 ${context ? context + '\n' : ''}Difficulty: ${difficulty}.
 
 EXACTLY ${blockCount} blocks total. You decide the type of EVERY block — there are no fixed slots. First, think about what kind of topic this is (vocabulary-heavy? procedural/math? conceptual? applied?) and design a sequence a skilled teacher would choose for it specifically.
 
+BLOCK MIX — EXERCISES OVER SUMMARIES (HIGHEST PRIORITY):
+  • Every block is either a SUMMARY block (expository prose the student just reads: "reading", "recap", "application") or an EXERCISE block (the student actively does something: "quiz", "example", "open", "challenge", "matching", "fill-blank").
+  • Use AT MOST ${maxSummaries} summary block${maxSummaries === 1 ? '' : 's'} in the entire lesson. The other ${minExercises} block${minExercises === 1 ? '' : 's'} MUST be exercises. This ratio is not optional.
+  • One "reading" at the very start is usually the only summary you need to establish the mental model. Do NOT stack readings, and do NOT pad with "application"/"recap" filler when an exercise would teach the same thing better.
+  • When torn between a summary and an exercise, pick the exercise. A worked "example", a "quiz", or an "open" essay teaches more than another paragraph of prose.
+
 AVAILABLE BLOCK TYPES — pick and sequence based on the topic:
-  • "reading"     - Teaching content. Use whenever new concepts need introducing. 350-500 words of markdown.
-  • "quiz"        - 3 multiple-choice questions. Only use AFTER the content it tests has been taught. 0-3 total depending on the topic.
-  • "example"     - A WORKED EXAMPLE. One concrete problem broken into 3-5 numbered steps revealed one at a time, then a "now you try" prompt. Best for procedural or math topics.
-  • "recap"       - A CONCEPT RECAP. 4-6 tight bullet points consolidating what's been covered. Use mid-lesson before moving to harder material.
-  • "application" - A REAL-WORLD APPLICATION. 200-300 words of markdown showing where this concept appears in practice.
-  • "challenge"   - A STRETCH PROBLEM with a hint and full solution. Use near the end for harder topics.
-  • "open"        - A GRADED ESSAY. Student writes a free-form response (40-150 words) that the AI grades against a 2-3 item rubric. Use when understanding and reasoning matter more than recall — "Explain why...", "Compare...", "Argue whether...". Great for conceptual, historical, and ethical topics.
-  • "discussion"  - AN AI DISCUSSION. Student chats with an AI tutor. Give an opening question + 3-5 talking points. Best near the end when the student has something to discuss.
-  • "matching"    - A MATCHING MINIGAME of 5-7 term/definition pairs. ONLY for truly vocabulary-heavy topics (glossaries, anatomy, foreign language, technical jargon). Avoid for conceptual, procedural, historical, or applied topics.
-  • "fill-blank"  - A FILL-IN-THE-BLANK exercise of 4-6 sentences. Good for keyword recall on definition-dense topics.
+  • "reading"     - [SUMMARY] Teaching content. Use whenever new concepts need introducing. 350-500 words of markdown. Usually just ONE, near the start.
+  • "quiz"        - [EXERCISE] 3 multiple-choice questions. Only use AFTER the content it tests has been taught. Use freely — these are the backbone of practice.
+  • "example"     - [EXERCISE] A WORKED EXAMPLE. One concrete problem broken into 3-5 numbered steps revealed one at a time, then a "now you try" prompt. Best for procedural or math topics.
+  • "recap"       - [SUMMARY] A CONCEPT RECAP. 4-6 tight bullet points consolidating what's been covered. At most one, mid-lesson — optional, never a default.
+  • "application" - [SUMMARY] A REAL-WORLD APPLICATION. 200-300 words of markdown showing where this concept appears in practice. Use sparingly.
+  • "challenge"   - [EXERCISE] A STRETCH PROBLEM with a hint and full solution. Use near the end for harder topics.
+  • "open"        - [EXERCISE] A GRADED ESSAY. Student writes a free-form response (40-150 words) that the AI grades against a 2-3 item rubric. Use when understanding and reasoning matter more than recall — "Explain why...", "Compare...", "Argue whether...". Great for conceptual, historical, and ethical topics.
+  • "matching"    - [EXERCISE] A MATCHING MINIGAME of 5-7 term/definition pairs. ONLY for truly vocabulary-heavy topics (glossaries, anatomy, foreign language, technical jargon). Avoid for conceptual, procedural, historical, or applied topics.
+  • "fill-blank"  - [EXERCISE] A FILL-IN-THE-BLANK exercise of 4-6 sentences. Good for keyword recall on definition-dense topics.
 
 PEDAGOGICAL SEQUENCING RULES:
-  • Start with at least one "reading" to establish the mental model before any exercises.
+  • Start with one "reading" to establish the mental model before any exercises (a second reading only if the topic genuinely needs it — and it counts against the summary cap above).
   • Never place a quiz, open, fill-blank, or matching before the content it tests.
   • A "recap" must come after at least one reading or example.
   • "matching" and "fill-blank" should immediately follow the reading that introduced the terms they use.
-  • "discussion" and "challenge" work best near the end once the student has built up knowledge.
+  • "challenge" works best near the end once the student has built up knowledge.
   • Avoid repeating the same type more than twice consecutively.
-  • Let the topic type guide the mix: vocabulary topic → consider matching + fill-blank + open. Procedural/math topic → favor example + quiz + challenge. Conceptual topic → favor reading + open (graded essay) + discussion. Historical/ethical topic → favor reading + open (graded essay) + application. Applied topic → favor application + open + example.
+  • Let the topic type guide the mix: vocabulary topic → consider matching + fill-blank + open. Procedural/math topic → favor example + quiz + challenge. Conceptual topic → favor reading + open (graded essay) + challenge. Historical/ethical topic → favor reading + open (graded essay) + application. Applied topic → favor application + open + example.
 
 VARIETY REQUIREMENT — CRITICAL:
   • Every lesson MUST have a different structure. Do NOT default to reading → matching → reading → quiz. This is overused and boring.
   • "matching" is NOT a default first exercise. Only include it when the topic genuinely has vocabulary to match (e.g., biology terms, legal definitions, foreign-language words). For history, math, science concepts, ethics, coding, economics — skip matching entirely and use quiz, open, example, or recap instead.
-  • The first non-reading block should vary by topic: a math lesson might open with "example", a history lesson with "open", a science lesson with "quiz", a philosophy lesson with "discussion".
-  • Aim for structural surprise: a lesson that goes reading → open → reading → challenge → recap is more engaging than the repetitive reading → matching pattern.
+  • The first non-reading block should vary by topic: a math lesson might open with "example", a history lesson with "open", a science lesson with "quiz", a philosophy lesson with "open".
+  • Aim for structural surprise AND exercise density: a lesson that goes reading → example → quiz → open → challenge is far more engaging than the repetitive reading → matching pattern or a prose-heavy reading → application → recap run.
 
 SHAPES - each block's fields by type:
   reading:     {"type":"reading","title":"...","content":"<markdown>"}
@@ -4945,7 +5115,6 @@ SHAPES - each block's fields by type:
   application: {"type":"application","title":"...","content":"<200-300 words of markdown>"}
   challenge:   {"type":"challenge","title":"...","prompt":"<markdown problem>","hint":"<1-2 sentences nudging without solving>","solution":"<markdown explanation>"}
   open:        {"type":"open","title":"...","prompt":"<markdown essay question, 1-3 sentences>","minWords":<40-80>,"rubric":[{"label":"...","criterion":"...","weight":<1-3>}, ...2-3 total...]}
-  discussion:  {"type":"discussion","title":"...","prompt":"<the AI's opening question to the student, 1-2 sentences>","talkingPoints":["<concept the AI should make sure gets discussed>", ...3-5 total...]}
   matching:    {"type":"matching","title":"...","instructions":"<one-line how-to>","pairs":[{"term":"<short term>","definition":"<definition or example, 1 sentence>"}, ...5-7 pairs...]}
   fill-blank:  {"type":"fill-blank","title":"...","instructions":"<one-line how-to>","sentences":[{"before":"<text before the blank>","answer":"<single word or short phrase>","after":"<text after the blank>","hint":"<optional short hint>"}, ...4-6 sentences...]}
 
@@ -5285,13 +5454,10 @@ app.post('/api/curriculum/:id/lesson/:lessonId/blocks/:bid/complete', authMiddle
 
     if (!block.completedAt) block.completedAt = new Date().toISOString();
 
-    // A lesson is done when every block has a completedAt AND the final
-    // quiz has been generated and completed. The old check hardcoded
-    // `length === 8` (intermediate=7 blocks + 1 final quiz) which left
-    // beginner / advanced / expert lessons stuck "in progress" forever.
+    // A lesson is done when every block has a completedAt. Final quiz is
+    // optional - if it fails to generate the student shouldn't be stuck.
     const blocks = found.lesson.blocks || [];
-    const hasFinalQuiz = blocks.some(b => b.isFinal === true);
-    const allDone = blocks.length > 0 && hasFinalQuiz && blocks.every(b => b.completedAt);
+    const allDone = blocks.length > 0 && blocks.every(b => b.completedAt);
     if (allDone && !found.lesson.isCompleted) {
       found.lesson.isCompleted = true;
       const quizScores = blocks
@@ -5696,11 +5862,14 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
     let effectiveStudyModel = null;
     let studyMeta = null;
     let billHaiku = false;
+    let billModelKey = null;
     if (!req.sourced) {
       const r = resolveStudyModel(requestedStudyModel, users[email], email);
       effectiveStudyModel = r.id;
       studyMeta = { key: r.key, switched: r.switched, reason: r.reason, haikuRemaining: r.haikuRemaining };
-      billHaiku = r.key === 'haiku' && !PAID_TIERS.has(planSM);
+      // Charge the non-paid rolling cap for any capped free model (Haiku, GPT-5.4).
+      billHaiku = !!freeCapConfig(r.key) && !PAID_TIERS.has(planSM);
+      billModelKey = r.key;
       if (STUDY_MODELS[requestedStudyModel] && studyModelAllowed(requestedStudyModel, planSM)) {
         users[email].data.preferences = { ...(users[email].data.preferences || {}), studyModel: requestedStudyModel };
       }
@@ -5757,10 +5926,10 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
         users[email].data.studySessions = users[email].data.studySessions.slice(0, 50);
       }
 
-      // Charge the non-paid rolling-24h Haiku quota only on a completed turn,
-      // so a failed/aborted stream never burns a message.
+      // Charge the non-paid rolling-24h cap for the chosen capped model only on
+      // a completed turn, so a failed/aborted stream never burns a message.
       if (billHaiku) {
-        recordHaikuUse(users[email]);
+        recordFreeCapUse(users[email], billModelKey);
         // Send the post-send count so the client pill reflects the deduction.
         const afterRemaining = Math.max(0, (studyMeta?.haikuRemaining ?? HAIKU_FREE_DAILY) - 1);
         try { res.write(`data: ${JSON.stringify({ studyModel: { haikuRemaining: afterRemaining } })}\n\n`); } catch {}
@@ -7082,15 +7251,18 @@ async function generateAssessmentOnce({ topic, type, questionCount, difficulty, 
     ? `Create an essay assessment on "${topic}" (${difficulty} level).${ctxBlock}
 Return this exact JSON:
 {"title":"Essay: ${topic}","type":"essay","prompt":"the essay question (1-2 sentences)","rubric":[{"criterion":"...","maxScore":5,"description":"..."},{"criterion":"...","maxScore":5,"description":"..."},{"criterion":"...","maxScore":5,"description":"..."}]}`
-    : `Create ${questionCount} multiple-choice questions on "${topic}" (${difficulty} level). Each option starts with "A) ", "B) ", "C) ", or "D) ". The "correct" field is just the letter.${ctxBlock}
+    : `Create ${questionCount} multiple-choice questions on "${topic}" (${difficulty} level). Each option starts with "A) ", "B) ", "C) ", or "D) ". The "correct" field is just the letter.
+
+MATH FORMATTING RULES — follow these exactly:
+- ALL mathematical expressions MUST use LaTeX inside dollar-sign delimiters.
+- Inline math: $\\lim_{x \\to 0}$, $\\frac{\\sin(5x)}{3x}$, $x^2 + 1$, $\\int_0^1 f(x)\\,dx$
+- Display math: $$\\int_0^\\infty e^{-x}\\,dx = 1$$
+- NEVER write lim(x→0), sin(5x)/3x, x^2, or any math as plain text or Unicode symbols.
+- NEVER use Unicode math characters (→, ∫, ∑, ∞, etc.) — use LaTeX commands instead (\\to, \\int, \\sum, \\infty).${ctxBlock}
 Return this exact JSON:
 {"title":"Quiz: ${topic}","type":"quiz","questions":[{"id":"q1","question":"...","options":["A) ...","B) ...","C) ...","D) ..."],"correct":"A","explanation":"why A is right"}]}`;
 
-  // Tight maxOutputTokens - 2k is plenty for 5 short MCQs and forces
-  // the model to wrap quickly instead of padding explanations.
-  // disableThinking: Gemini 3's CoT on a one-shot JSON quiz add ~3-8s of
-  // hidden-token latency without measurably improving question quality.
-  const result = await callGemini(sys, [{ role: 'user', content: usr }], GEMINI_FLASH_LITE, 2048, { jsonMode: true, temperature: 0.5, disableThinking: true });
+  const result = await callGemini(sys, [{ role: 'user', content: usr }], GEMINI_FLASH, 4096, { jsonMode: true, temperature: 0.5, disableThinking: true });
   if (!result.success) return null;
   const parsed = parseAIJson(result.data.content?.[0]?.text || '');
   if (!parsed) return null;
@@ -9169,6 +9341,72 @@ function saveSocial(data) {
   }
 }
 
+// ===== Global product metrics (non-user-scoped) =====
+// Landing-page visits are anonymous (they happen pre-signup), so they can't
+// hang off a user record like data.visitCount does. metrics.json holds a
+// single global object under the same shared-cache contract as
+// loadSocial/saveSocial. Shape: { landing: { total, byDay: { 'YYYY-MM-DD': n } } }.
+const METRICS_FILE = join(DATA_DIR, 'metrics.json');
+let metricsCache = null;
+let metricsCacheMtimeMs = 0;
+function loadMetrics() {
+  try {
+    if (existsSync(METRICS_FILE)) {
+      const mtimeMs = statSync(METRICS_FILE).mtimeMs;
+      if (metricsCache && mtimeMs === metricsCacheMtimeMs) return metricsCache;
+      metricsCache = JSON.parse(readFileSync(METRICS_FILE, 'utf-8'));
+      metricsCacheMtimeMs = mtimeMs;
+      return metricsCache;
+    }
+  } catch (e) { console.error('Error loading metrics:', e); }
+  return metricsCache || { landing: { total: 0, byDay: {} } };
+}
+function saveMetrics(data) {
+  try {
+    writeFileSync(METRICS_FILE, JSON.stringify(data, null, 2));
+    metricsCache = data;
+    try { metricsCacheMtimeMs = statSync(METRICS_FILE).mtimeMs; } catch {}
+  } catch (e) {
+    console.error('FAILED to save metrics to', METRICS_FILE, e.message);
+  }
+}
+// UTC day bucket key, e.g. "2026-06-20".
+function dayKeyUTC(ts = Date.now()) {
+  return new Date(ts).toISOString().slice(0, 10);
+}
+
+// Record one anonymous landing-page visit. Public (no auth) — the marketing
+// page is served to logged-out visitors. The client de-dupes to one ping per
+// browser session, so this counts sessions, not re-renders. Never throws: a
+// metrics hiccup must not break the public page.
+app.post('/api/metrics/landing-visit', (req, res) => {
+  try {
+    const m = loadMetrics();
+    if (!m.landing) m.landing = { total: 0, byDay: {} };
+    if (!m.landing.byDay) m.landing.byDay = {};
+    const day = dayKeyUTC();
+    m.landing.total = (m.landing.total || 0) + 1;
+    m.landing.byDay[day] = (m.landing.byDay[day] || 0) + 1;
+    saveMetrics(m);
+    res.json({ ok: true });
+  } catch (e) {
+    res.json({ ok: false });
+  }
+});
+
+// Admin: global product metrics for the analytics panel.
+app.get('/api/admin/metrics', authMiddleware, adminMiddleware, (req, res) => {
+  const landing = loadMetrics().landing || { total: 0, byDay: {} };
+  const byDay = landing.byDay || {};
+  let last7 = 0;
+  for (let i = 0; i < 7; i++) last7 += byDay[dayKeyUTC(Date.now() - i * 86_400_000)] || 0;
+  res.json({
+    landingVisits: landing.total || 0,
+    landingVisitsToday: byDay[dayKeyUTC()] || 0,
+    landingVisits7d: last7,
+  });
+});
+
 // Set/update social profile (handle + displayName)
 app.post('/api/social/profile', authMiddleware, (req, res) => {
   try {
@@ -10674,7 +10912,7 @@ app.post('/api/math-tutor/chat', authMiddleware, requireMessageQuota, async (req
       ? req.body.model
       : (users[email].data.preferences?.mathTutorModel || DEFAULT_MATH_TUTOR_MODEL);
     const r = resolveStudyModel(requestedMT, users[email], email);
-    const billHaiku = r.key === 'haiku' && !PAID_TIERS.has(planMT);
+    const billHaiku = !!freeCapConfig(r.key) && !PAID_TIERS.has(planMT);
     if (STUDY_MODELS[req.body?.model] && studyModelAllowed(req.body.model, planMT)) {
       users[email].data.preferences = { ...(users[email].data.preferences || {}), mathTutorModel: req.body.model };
       saveUsers(users);
@@ -10692,8 +10930,8 @@ app.post('/api/math-tutor/chat', authMiddleware, requireMessageQuota, async (req
       aiMessages,
       async () => {
         // No server-side persistence of the transcript - client holds state.
-        // Charge the non-paid rolling Haiku quota only on a completed turn.
-        if (billHaiku) { recordHaikuUse(users[email]); saveUsers(users); }
+        // Charge the non-paid rolling cap for the chosen capped model on a completed turn.
+        if (billHaiku) { recordFreeCapUse(users[email], r.key); saveUsers(users); }
       },
       r.id,
       { enableWebSearch: false },
@@ -11295,6 +11533,9 @@ app.get('/api/admin/users', authMiddleware, adminMiddleware, (req, res) => {
       firstVisitAt: u.data?.firstVisitAt || null,
       createdAt: u.createdAt,
       lastActiveAt: u.data?.studyStreaks?.lastActiveDate || null,
+      referralCode: u.data?.referralCode || null,
+      referralsUsed: u.data?.referralsUsed || 0,
+      referredBy: u.data?.referredBy || null,
     };
   });
   res.json({ users: list });
@@ -11440,6 +11681,15 @@ app.get('/api/admin/users/:uid', authMiddleware, adminMiddleware, (req, res) => 
       ),
       // Streaks / daily activity
       studyStreaks: u.data?.studyStreaks || null,
+      // Referral tracking
+      referralCode: u.data?.referralCode || null,
+      referralsUsed: u.data?.referralsUsed || 0,
+      referredBy: u.data?.referredBy || null,
+      referredUsers: u.data?.referralCode
+        ? Object.entries(users)
+            .filter(([, ru]) => ru.data?.referredBy === u.data.referralCode)
+            .map(([em, ru]) => ({ email: em, name: ru.name || em }))
+        : [],
       // Debate history - multiplayer / tournament matches the user has
       // finished. Recorded by recordDebateHistoryEntry on match end.
       // Lives on the user document (u.debateHistory), not under u.data.
@@ -12029,6 +12279,7 @@ app.get('/api/quizbowl/sets', authMiddleware, (req, res) => {
     const totalQuestions = sets.reduce((s, x) => s + (x.total || 0), 0);
     const totalCorrect = sets.reduce((s, x) => s + (x.score || 0), 0);
     const totalDurationMs = sets.reduce((s, x) => s + (x.durationMs || 0), 0);
+    const sp = users[email].data.secretProfile;
     res.json({
       sets,
       stats: {
@@ -12040,6 +12291,16 @@ app.get('/api/quizbowl/sets', authMiddleware, (req, res) => {
         categoryStats,
         lastPlayedAt: sets[0]?.finishedAt || null,
       },
+      secretProfile: sp ? {
+        strengths: sp.strengths || [],
+        weaknesses: sp.weaknesses || [],
+        struggleTopics: (sp.struggleTopics || []).slice(0, 12),
+        masteryTopics: (sp.masteryTopics || []).slice(0, 12),
+        buzzStyle: sp.buzzStyle || null,
+        categoryProfile: sp.categoryProfile || {},
+        totals: sp.totals || null,
+        updatedAt: sp.updatedAt || null,
+      } : null,
     });
   } catch (e) {
     console.error('QB list sets error:', e);
@@ -15340,6 +15601,62 @@ async function refreshQBpediaSources(slug, title) {
   }
 }
 
+// ─── Hub starter-article warming ───────────────────────────────────────────
+// The hub's "Quick start" chips and "Recommended" rows are a fixed, curated
+// set (kept in sync with POPULAR_TOPICS / RECOMMENDED_TOPICS in QBpediaApp.jsx
+// — the HubView component). A cold click on any of them would otherwise sit through a
+// ~60-120s grounded generation. So on boot we pre-generate any that aren't
+// cached yet — once warmed they persist in qbpedia.json, so the average user
+// clicks and gets the article instantly.
+const QBPEDIA_STARTER_TOPICS = [
+  // Quick start
+  'Napoleon Bonaparte', 'World War II', 'The French Revolution',
+  'William Shakespeare', 'The Civil War', 'Albert Einstein',
+  'The Renaissance', 'Ancient Rome', 'Charles Darwin', 'The Cold War',
+  'Marie Curie', 'The Ottoman Empire',
+  // Recommended
+  'Emmy Noether', 'Paul Dirac', 'Leonhard Euler', 'Niels Bohr',
+  'The Brothers Karamazov', 'Don Quixote', 'Doctor Faustus',
+  'One Hundred Years of Solitude', 'Robespierre', 'Simón Bolívar',
+  'Otto von Bismarck', 'Battle of Agincourt', 'Caravaggio',
+  'Johannes Vermeer', 'Dmitri Shostakovich', 'Gustav Mahler',
+  'Immanuel Kant', 'Søren Kierkegaard', 'Prometheus', 'Osiris',
+];
+
+// Runs once per process. Sequential with a short gap so a cold boot doesn't
+// fire 30+ grounded generations at once (which would trip the rate limit).
+// Idempotent: a topic already cached (by slug or canonical title) is skipped,
+// so once the file is warmed later boots do effectively nothing. A topic that
+// failed this boot is left for the next boot to retry (e.g. when a rate-limit
+// window resets).
+let qbpediaWarmStarted = false;
+async function warmQBpediaStarters() {
+  if (qbpediaWarmStarted) return;
+  qbpediaWarmStarted = true;
+  const pending = QBPEDIA_STARTER_TOPICS.filter(title => {
+    const slug = qbpediaSlugify(title);
+    const data = loadQBpedia();
+    return !(data.pages[slug] || Object.values(data.pages).find(p => qbpediaSlugify(p.title) === slug));
+  });
+  if (!pending.length) return;
+  console.log(`QBpedia warm: ${pending.length}/${QBPEDIA_STARTER_TOPICS.length} starter article(s) missing — pre-generating in background`);
+  let generated = 0;
+  for (const title of pending) {
+    const slug = qbpediaSlugify(title);
+    // A late-arriving real visit may have cached it since we listed pending.
+    const data = loadQBpedia();
+    if (data.pages[slug] || qbpediaGenerating.has(slug) || qbpediaFailed.has(slug)) continue;
+    try {
+      await generateQBpediaPage(slug, title); // resolves once cached or failed
+      if (loadQBpedia().pages[slug]) generated++;
+    } catch (e) {
+      console.warn('QBpedia warm failed for', title, e.message);
+    }
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  console.log(`QBpedia warm complete: generated ${generated} starter article(s)`);
+}
+
 // GET /api/wiki/pages — list recently generated pages
 app.get('/api/wiki/pages', authMiddleware, (req, res) => {
   const data = loadQBpedia();
@@ -15568,6 +15885,9 @@ app.get('/{*path}', (req, res) => {
 
 const httpServer = app.listen(PORT, () => {
   console.log(`Covalent server running on port ${PORT}`);
+  // Pre-generate the hub's starter articles so they open instantly. Delayed
+  // and fire-and-forget so it never blocks startup or request handling.
+  setTimeout(() => { warmQBpediaStarters().catch(() => {}); }, 4000);
 });
 // A second instance that can't bind the port must DIE, not linger: a
 // zombie instance keeps its setInterval jobs and in-memory users cache

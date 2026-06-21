@@ -12,6 +12,10 @@ import { useToast } from '../shared/Toast';
 import { useAuth } from '../../context/AuthContext';
 import { planFromUser } from '../billing/modelAccess';
 import { STUDY_MODELS, resolveStudyModel, canUseStudyModel, requiredPlanLabelFor, studyModelLabel, studyModelHasFreeCap, studyModelDailyCap, studyModelBlurb, studyModelSupportsThinking, isGeminiOnlyEmail, visibleStudyModels, resolveGeminiOnlyModel } from './studyModels';
+import VoiceMenu from './voice/VoiceMenu';
+import { useSpeechSynthesis, speechSynthesisSupported } from '../../hooks/useSpeechSynthesis';
+import { speechRecognitionSupported } from '../../hooks/useSpeechRecognition';
+import { speakableText } from '../../utils/voiceText';
 
 // Quick-start prompts shown in the empty state. Replaces the bland
 // "Start the conversation..." default with concrete suggestions tied to
@@ -83,6 +87,8 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   const [streamingArtifacts, setStreamingArtifacts] = useState([]);
   const [searchStatus, setSearchStatus] = useState(null);
   const [sourceMode, setSourceMode] = useState(false);
+  const sourceModeRef = useRef(false);
+  sourceModeRef.current = sourceMode;
   const [streaming, setStreaming] = useState(false);
   const [sessionId, setSessionId] = useState(null);
   // Debate sub-view - replaces the chat with the DebatePanel when true.
@@ -92,6 +98,8 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   // header buttons. Sources are { id, title, url?, content }.
   const [linkedCurriculumId, setLinkedCurriculumId] = useState(null);
   const [sources, setSources] = useState([]);
+  const sourcesRef = useRef([]);
+  sourcesRef.current = sources;
   const [showCurriculumPicker, setShowCurriculumPicker] = useState(false);
   const [showSourcesSheet, setShowSourcesSheet] = useState(false);
   const abortRef = useRef(null);
@@ -100,14 +108,34 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   const streamSourcesRef = useRef([]);
   const streamArtifactsRef = useRef([]);
   const initialSent = useRef(false);
+  // Counts consecutive "restart" submissions so a double-restart re-runs the
+  // previous real user turn. Neither "restart" message is ever sent to the server.
+  const restartCountRef = useRef(0);
 
   // History state
   const [showHistory, setShowHistory] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
+  // ===== Voice mode (BETA) =====
+  const [voiceRate, setVoiceRate] = useState(() => {
+    const r = parseFloat(localStorage.getItem('covalent-voice-rate'));
+    return Number.isFinite(r) && r > 0 ? r : 1;
+  });
+  const [voiceURI, setVoiceURI] = useState(() => localStorage.getItem('covalent-voice-uri') || null);
+  // Panel-level synthesizer drives voice mode. The conversation overlay owns
+  // its own synth instance, so we cancel this one whenever the overlay opens.
+  const synth = useSpeechSynthesis({ rate: voiceRate, voiceURI });
+
+  function persistRate(r) { setVoiceRate(r); localStorage.setItem('covalent-voice-rate', String(r)); }
+  function persistVoiceURI(uri) {
+    setVoiceURI(uri);
+    if (uri) localStorage.setItem('covalent-voice-uri', uri);
+    else localStorage.removeItem('covalent-voice-uri');
+  }
   function doSend(text, opts = {}) {
-    const wasSourced = !!(opts.sourced ?? sourceMode);
+    synth.cancel();
+    const wasSourced = !!(opts.sourced ?? sourceModeRef.current);
     const images = opts.images || [];
     const userMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
     if (images.length) userMsg.images = images.map(i => ({ dataUrl: i.dataUrl, name: i.name }));
@@ -130,8 +158,9 @@ export default function StudyModePanel({ className = '', flush = false, initialM
     // /extract-url so the server doesn't have to re-fetch.
     const ctx = {};
     if (linkedCurriculumId) ctx.curriculumId = linkedCurriculumId;
-    if (sources.length) {
-      ctx.sources = sources.map((s) => ({
+    const currentSources = sourcesRef.current;
+    if (currentSources.length) {
+      ctx.sources = currentSources.map((s) => ({
         title: s.title || s.name || s.url || 'Source',
         url: s.url || null,
         content: s.content || s.text || '',
@@ -160,9 +189,12 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         // pick). Snap the toggle to whatever model the server actually used,
         // then tell the user once rather than silently swapping models.
         if (data.studyModel?.switched && data.studyModel.key) {
+          // reason 'haiku-limit' is generic across capped free models; name the
+          // one the user actually had selected (Haiku or GPT-5.4).
+          const cappedName = studyModelRef.current === 'gpt-5.4' ? 'GPT-5.4' : 'Haiku';
           setStudyModel(data.studyModel.key);
           if (data.studyModel.reason === 'haiku-limit') {
-            toast.info('Daily Haiku limit reached — switched to Flash Lite until tomorrow.');
+            toast.info(`Daily ${cappedName} limit reached — switched to Flash Lite until tomorrow.`);
           } else if (data.studyModel.reason === 'plan') {
             toast.info('That model needs an upgrade — using Flash Lite.');
           }
@@ -205,6 +237,10 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         streamSourcesRef.current = [];
         streamArtifactsRef.current = [];
         setStreaming(false);
+        if (opts.autoPlay && fullContent) {
+          const speech = speakableText(fullContent);
+          if (speech) synth.speak(speech);
+        }
       },
       onError: (err) => {
         // eslint-disable-next-line no-use-before-define
@@ -224,10 +260,35 @@ export default function StudyModePanel({ className = '', flush = false, initialM
     abortRef.current = abort;
   }
 
-  const handleSend = useCallback((text, images) => {
+  const handleSend = useCallback((text, images, opts = {}) => {
     if (streaming) return;
-    doSend(text, { images });
-  }, [streaming, sessionId]);
+    if (text.trim().toLowerCase() === 'restart') {
+      restartCountRef.current += 1;
+      if (restartCountRef.current >= 2) {
+        // Double restart: re-run the last real user message with a fresh response.
+        restartCountRef.current = 0;
+        const lastRealUserMsg = [...messages].reverse().find(
+          m => m.role === 'user'
+        );
+        if (lastRealUserMsg) {
+          // Drop the last assistant reply so the new one replaces it cleanly.
+          setMessages(prev => {
+            const lastAsstIdx = [...prev].reduceRight((found, m, i) =>
+              found === -1 && m.role === 'assistant' ? i : found, -1);
+            return lastAsstIdx !== -1 ? prev.slice(0, lastAsstIdx) : prev;
+          });
+          doSend(lastRealUserMsg.content, {
+            images: lastRealUserMsg.images || [],
+            hideUserInDisplay: true,
+          });
+        }
+      }
+      // First "restart" — wait silently for a second one.
+      return;
+    }
+    restartCountRef.current = 0;
+    doSend(text, { images, autoPlay: !!opts.isVoice });
+  }, [streaming, sessionId, messages]);
 
   // Seed sources from a parent page (e.g. "Study this note" launches the
   // panel with the note text pre-attached as a source). Only runs once on
@@ -290,9 +351,13 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   }
 
   function newChat() {
+    synth.cancel();
     setMessages([]);
     setSessionId(null);
     setShowHistory(false);
+    setSourceMode(false);
+    setSources([]);
+    setLinkedCurriculumId(null);
   }
 
   function formatDate(d) {
@@ -466,6 +531,18 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         thinkingMode={thinkingOn}
         thinkingLocked={thinkingLocked}
         onToggleThinking={setThinkingPref}
+        composerPrefix={
+          <VoiceMenu
+            voices={synth.voices}
+            voiceURI={voiceURI}
+            onPickVoice={persistVoiceURI}
+            rate={voiceRate}
+            onRate={persistRate}
+            sttSupported={speechRecognitionSupported}
+            ttsSupported={speechSynthesisSupported}
+            variant="surface"
+          />
+        }
         composerExtras={
           <div className="flex items-center gap-1.5">
             <StudyModelDropdown
@@ -478,7 +555,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
             {studyModelHasFreeCap(studyModel, plan) && (
               <ModelCapPill
                 cap={studyModelDailyCap(studyModel, plan)}
-                remaining={studyModel === 'haiku' ? haikuRemaining : sonnetRemaining}
+                remaining={studyModel === 'sonnet' ? sonnetRemaining : haikuRemaining}
                 model={studyModel}
               />
             )}
@@ -487,6 +564,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         onUserEditMessage={handleUserEdit}
         onAiInstruct={handleAiInstruct}
         emptyState={emptyState}
+        enableDictation={speechRecognitionSupported}
         flush={flush}
       />
       {showCurriculumPicker && (
@@ -517,7 +595,7 @@ function ModelCapPill({ cap, remaining, model }) {
   const known = typeof remaining === 'number';
   const low = known && remaining <= 3;
   const label = `${known ? remaining : cap}/${cap}`;
-  const modelName = model === 'haiku' ? 'Haiku' : 'Sonnet';
+  const modelName = { haiku: 'Haiku', 'gpt-5.4': 'GPT-5.4', sonnet: 'Sonnet' }[model] || model;
   return (
     <span
       title={`${cap} ${modelName} messages per day on your plan`}
@@ -854,7 +932,7 @@ function ModalShell({ title, onClose, children }) {
   }, [onClose]);
   return (
     <div className="fixed inset-0 flex items-center justify-center px-4" style={{ zIndex: Z.modal }}>
-      <button aria-label="Close" onClick={onClose} className="absolute inset-0 bg-black/55 backdrop-blur-[2px] animate-fade-in" />
+      <button aria-label="Close" onClick={onClose} className="absolute inset-0 bg-black/30 dark:bg-black/55 backdrop-blur-[2px] animate-fade-in" />
       <div className="relative w-full max-w-md rounded-2xl bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-2xl p-5">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-[14.5px] font-bold text-gray-900 dark:text-white">{title}</h3>

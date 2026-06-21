@@ -8,7 +8,7 @@ import PillGroup from '../components/shared/PillGroup';
 import { DIFFICULTY_OPTIONS } from '../utils/constants';
 import LoadingSpinner from '../components/shared/LoadingSpinner';
 import Modal from '../components/shared/Modal';
-import MathText from '../components/shared/MathText';
+import MarkdownMath from '../components/shared/MarkdownMath';
 
 export default function AssessmentsPage() {
   const location = useLocation();
@@ -164,7 +164,7 @@ export default function AssessmentsPage() {
         {q && (
           <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] backdrop-blur-sm p-6">
             <p className="text-[11px] text-white/30 mb-3">Question {currentQ + 1} of {total}</p>
-            <MathText as="h2" className="text-[15px] font-semibold text-white/90 mb-5">{q.question}</MathText>
+            <MarkdownMath className="mb-5">{q.question}</MarkdownMath>
 
             <div className="flex flex-col gap-2.5">
               {(q.options || []).map((opt) => {
@@ -185,7 +185,7 @@ export default function AssessmentsPage() {
                     }`}>
                       {letter}
                     </span>
-                    <MathText>{opt.slice(3)}</MathText>
+                    <MarkdownMath inline>{opt.slice(3)}</MarkdownMath>
                   </button>
                 );
               })}

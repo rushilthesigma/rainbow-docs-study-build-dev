@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { ArrowRight, Check, RotateCcw } from 'lucide-react';
+import MathText from '../shared/MathText';
 
 // Matching game block. Block shape:
 //   { type: 'matching', title, instructions, pairs: [{ term, definition }] }
@@ -90,10 +91,10 @@ export default function MatchingBlock({ block, onComplete }) {
     <div className="cl-anim-in">
       <div className="border-t border-white/[0.07] pt-7 lg:pt-9 mb-6">
         <div className="mx-auto max-w-[68ch]">
-          <h2 className="text-[22px] font-semibold text-white mb-2">{block.title || 'Match the pairs'}</h2>
-          <p className="text-[13px] text-white/55 mb-5 leading-relaxed">
+          <MathText as="h2" className="text-[22px] font-semibold text-white mb-2">{block.title || 'Match the pairs'}</MathText>
+          <MathText as="p" className="text-[13px] text-white/55 mb-5 leading-relaxed">
             {block.instructions || 'Click a term, then click its matching definition. Wrong pairs flash and reset.'}
-          </p>
+          </MathText>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {/* TERMS column */}
@@ -120,7 +121,7 @@ export default function MatchingBlock({ block, onComplete }) {
                   >
                     <div className="flex items-center gap-2">
                       {isMatched && <Check size={12} className="text-emerald-300 flex-shrink-0" />}
-                      <span className="font-medium">{p.term}</span>
+                      <MathText as="span" className="font-medium">{p.term}</MathText>
                     </div>
                   </button>
                 );
@@ -149,7 +150,7 @@ export default function MatchingBlock({ block, onComplete }) {
                             : 'bg-white/[0.03] border-white/[0.08] text-white/80 hover:bg-white/[0.07] hover:border-white/[0.18]'
                     }`}
                   >
-                    {definition}
+                    <MathText as="span">{definition}</MathText>
                   </button>
                 );
               })}

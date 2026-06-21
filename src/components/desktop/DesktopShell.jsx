@@ -66,7 +66,7 @@ function MacOSContent() {
   const anyMaximized = windows.some(w => w.isMaximized && !w.isMinimized && !w.isClosing);
 
   return (
-    <div className="h-screen w-screen overflow-hidden relative">
+    <div className="h-screen w-screen overflow-hidden overscroll-none relative">
       <SnapGridShortcut />
       <DesktopBackground />
       {!anyMaximized && <MenuBar onSpotlight={toggleSpotlight} />}

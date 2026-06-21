@@ -6,6 +6,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { InlineProgress } from '../shared/ProgressBar';
+import MathText from '../shared/MathText';
 
 // Open-answer block. The student types a free-form response and the
 // AI grades it inline against a small rubric - no separate Assignment
@@ -50,13 +51,10 @@ export default function OpenAnswerBlock({ block, onComplete, gradeFn, hideContin
 
   return (
     <div className="cl-anim-in">
-      <div className="border-t border-sky-300/[0.18] pt-7 lg:pt-9 mb-6">
+      <div className="border-t border-white/[0.07] pt-7 lg:pt-9 mb-6">
         <div className="mx-auto max-w-[68ch]">
           {/* Type chip */}
           <div className="flex items-center gap-2 mb-3">
-            <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-sky-200/85 bg-sky-400/[0.10] border border-sky-300/[0.22] rounded-full px-2.5 py-0.5">
-              <PenTool size={10} strokeWidth={2.4} /> Graded Essay
-            </span>
             {submission && (
               <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide ${gradeStyle(submission.score)}`}>
                 <Award size={10} /> {submission.letter || letterFor(submission.score)} · {submission.score}/100
@@ -65,9 +63,9 @@ export default function OpenAnswerBlock({ block, onComplete, gradeFn, hideContin
           </div>
 
           {block.title && (
-            <h2 className="text-[22px] font-semibold tracking-[-0.01em] text-white mb-5">
+            <MathText as="h2" className="text-[22px] font-semibold tracking-[-0.01em] text-white mb-5">
               {block.title}
-            </h2>
+            </MathText>
           )}
 
           {/* Prompt */}
@@ -83,28 +81,28 @@ export default function OpenAnswerBlock({ block, onComplete, gradeFn, hideContin
 
           {/* Rubric - what the grader will look for */}
           {rubric.length > 0 && (
-            <div className="mt-5 rounded-xl border border-white/[0.07] bg-white/[0.02] px-4 py-3.5">
+            <div className="mt-5 px-0 py-0">
               <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/45 mb-2">Rubric</p>
               <ul className="space-y-1.5">
                 {rubric.map((r, i) => {
                   const ps = submission?.perRubric?.find(p => String(p.label).toLowerCase() === String(r.label).toLowerCase());
                   return (
                     <li key={i} className="flex items-start gap-2.5 text-[12.5px]">
-                      <span className="grid place-items-center w-4 h-4 mt-[2px] rounded text-[9px] font-bold bg-sky-400/[0.18] text-sky-200/85 tabular-nums flex-shrink-0">
+                      <span className="grid place-items-center w-4 h-4 mt-[2px] rounded text-[9px] font-bold bg-blue-500/[0.25] text-blue-200/90 tabular-nums flex-shrink-0">
                         {i + 1}
                       </span>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="font-semibold text-white/85">{r.label}</span>
+                          <MathText as="span" className="font-semibold text-white/85">{r.label}</MathText>
                           {ps && (
                             <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold tabular-nums ${gradeStyle(ps.score)}`}>
                               {ps.score}
                             </span>
                           )}
                         </div>
-                        <p className="text-white/55 mt-0.5 leading-snug">{r.criterion}</p>
+                        <MathText as="p" className="text-white/55 mt-0.5 leading-snug">{r.criterion}</MathText>
                         {ps?.note && (
-                          <p className="text-white/75 italic mt-1 leading-snug">{ps.note}</p>
+                          <MathText as="p" className="text-white/75 italic mt-1 leading-snug">{ps.note}</MathText>
                         )}
                       </div>
                     </li>
@@ -118,7 +116,7 @@ export default function OpenAnswerBlock({ block, onComplete, gradeFn, hideContin
           {submission ? (
             <div className="mt-5 rounded-xl border border-emerald-400/[0.22] bg-emerald-500/[0.05] px-4 py-3.5">
               <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-emerald-300/80 mb-1.5">Feedback</p>
-              <p className="text-[14px] text-white/85 leading-relaxed whitespace-pre-wrap">{submission.feedback}</p>
+              <MathText as="p" className="text-[14px] text-white/85 leading-relaxed whitespace-pre-wrap">{submission.feedback}</MathText>
               <details className="mt-3 group">
                 <summary className="cursor-pointer text-[11.5px] text-white/45 hover:text-white/75 select-none">
                   Show your submitted response
@@ -153,9 +151,9 @@ export default function OpenAnswerBlock({ block, onComplete, gradeFn, hideContin
                 <button
                   onClick={handleSubmit}
                   disabled={submitting || wordCount < minWords}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-[13.5px] text-white bg-sky-500 hover:bg-sky-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-[13.5px] text-white bg-blue-500 hover:bg-blue-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {submitting ? <InlineProgress active /> : <PenTool size={13} strokeWidth={2.4} />}
+                  {submitting ? <InlineProgress active /> : null}
                   {submitting ? 'Grading…' : 'Submit for grading'}
                 </button>
               </div>

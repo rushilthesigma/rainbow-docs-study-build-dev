@@ -68,6 +68,50 @@ body {
   color: var(--color-text-primary-dark);
 }
 
+/* ===== Mobile per-app accent =====
+ * `--app-accent` is set on the MobileShell root (see mobileAccents.js)
+ * per active app, so the shared chrome (tab bar, header, eyebrows) and
+ * each screen's accent track that app's logo color. Falls back to brand
+ * blue when no app context is set. */
+.acc-bg      { background-color: var(--app-accent, #3b82f6); }
+.acc-text    { color: var(--app-accent, #3b82f6); }
+.acc-border  { border-color: var(--app-accent, #3b82f6); }
+.acc-on      { color: var(--app-accent-contrast, #ffffff); }
+.acc-soft    { background-color: color-mix(in srgb, var(--app-accent, #3b82f6) 12%, transparent); }
+.acc-soft-15 { background-color: color-mix(in srgb, var(--app-accent, #3b82f6) 15%, transparent); }
+
+/* Blue-scale remap: inside the mobile shell, every `*-blue-*` utility is
+ * the app accent. Across all live mobile screens blue is always the
+ * accent color (Study, QBpedia, Curricula, Settings rows, Home), so
+ * overriding the Tailwind blue scale here recolors each screen's body to
+ * its app's logo color automatically - all shades, opacity variants, and
+ * dark: variants included - without touching the page markup. Lightness
+ * steps are approximated by mixing the accent toward white/black so the
+ * 50-900 ramp still reads as a ramp. Scoped to the mobile shell only, so
+ * desktop blues are untouched. */
+.mobile-accent-scope {
+  --color-blue-50:  color-mix(in srgb, var(--app-accent) 8%,  white);
+  --color-blue-100: color-mix(in srgb, var(--app-accent) 16%, white);
+  --color-blue-200: color-mix(in srgb, var(--app-accent) 32%, white);
+  --color-blue-300: color-mix(in srgb, var(--app-accent) 58%, white);
+  --color-blue-400: color-mix(in srgb, var(--app-accent) 82%, white);
+  --color-blue-500: var(--app-accent);
+  --color-blue-600: color-mix(in srgb, var(--app-accent) 84%, black);
+  --color-blue-700: color-mix(in srgb, var(--app-accent) 70%, black);
+  --color-blue-800: color-mix(in srgb, var(--app-accent) 56%, black);
+  --color-blue-900: color-mix(in srgb, var(--app-accent) 44%, black);
+}
+
+/* Native form controls (range thumbs/tracks, checkboxes, radios) default
+ * to the OS accent (blue on macOS) and ignore the blue-scale remap above
+ * since they carry no utility class. Point them at the app accent too so
+ * e.g. the Quiz Bowl speed slider is gold, not system blue. */
+.mobile-accent-scope input[type="range"],
+.mobile-accent-scope input[type="checkbox"],
+.mobile-accent-scope input[type="radio"] {
+  accent-color: var(--app-accent);
+}
+
 /* Light-mode shim for desktop chrome built dark-first.
  *
  * Many surfaces (widgets, dock contents, app windows) use `text-white/...`,
@@ -603,21 +647,120 @@ input[data-spotlight-input]:hover,
   outline: none !important;
 }
 
-/* ===== TipTap WYSIWYG note editor ===== */
-.tiptap { outline: none; caret-color: #fff; }
+/* ===== TipTap WYSIWYG note editor =====
+   Written light-first (dark caret/placeholder/borders read on a white note
+   surface) with `.dark` overrides for the dark theme. The accent-blue text
+   selection is shared by both. */
+.tiptap { outline: none; caret-color: #111827; }
+.dark .tiptap { caret-color: #fff; }
 .tiptap:focus { outline: none; }
 /* Placeholder text for an empty editor (extension-placeholder) */
 .tiptap p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
-  color: rgba(255, 255, 255, 0.25);
+  color: rgba(17, 17, 24, 0.30);
   float: left;
   height: 0;
   pointer-events: none;
 }
+.dark .tiptap p.is-editor-empty:first-child::before { color: rgba(255, 255, 255, 0.25); }
 /* Editable table chrome */
 .tiptap table { border-collapse: collapse; width: 100%; margin: 0.75rem 0; table-layout: fixed; overflow: hidden; }
-.tiptap th, .tiptap td { border: 1px solid rgba(255, 255, 255, 0.15); padding: 4px 8px; vertical-align: top; position: relative; }
-.tiptap th { background: rgba(255, 255, 255, 0.05); font-weight: 600; }
+.tiptap th, .tiptap td { border: 1px solid rgba(0, 0, 0, 0.12); padding: 4px 8px; vertical-align: top; position: relative; }
+.tiptap th { background: rgba(0, 0, 0, 0.04); font-weight: 600; }
+.dark .tiptap th, .dark .tiptap td { border-color: rgba(255, 255, 255, 0.15); }
+.dark .tiptap th { background: rgba(255, 255, 255, 0.05); }
 .tiptap .tableWrapper { overflow-x: auto; }
 /* ProseMirror selection highlight */
 .tiptap ::selection { background: rgba(96, 165, 250, 0.35); }
+
+/* ===== Voice mode orb (hands-free conversation overlay) ===== */
+/* One clean breathing orb whose color + motion encode the conversation
+   state. No nested translucent boxes — just a radial-gradient sphere with a
+   soft glow ring driven by keyframes. */
+.voice-orb {
+  position: relative;
+  width: 168px;
+  height: 168px;
+  border-radius: 9999px;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.2s ease;
+}
+.voice-orb:active { transform: scale(0.96); }
+.voice-orb__core {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: radial-gradient(circle at 35% 30%, #93c5fd 0%, #3b82f6 45%, #1e3a8a 100%);
+  box-shadow: 0 0 60px 6px rgba(59, 130, 246, 0.45), inset 0 0 30px rgba(255, 255, 255, 0.25);
+}
+/* The glow ring lives in ::before so it can pulse independently of the core. */
+.voice-orb::before {
+  content: '';
+  position: absolute;
+  inset: -14px;
+  border-radius: 9999px;
+  border: 2px solid rgba(96, 165, 250, 0.45);
+  opacity: 0;
+}
+
+/* Listening: gentle breathing + an expanding sonar ring. */
+.voice-orb--listening .voice-orb__core { animation: voice-breathe 3.4s ease-in-out infinite; }
+.voice-orb--listening::before { animation: voice-sonar 2.2s ease-out infinite; }
+
+/* Thinking: dimmer, slow shimmering pulse, indigo. */
+.voice-orb--thinking .voice-orb__core {
+  background: radial-gradient(circle at 35% 30%, #a5b4fc 0%, #6366f1 45%, #312e81 100%);
+  animation: voice-think 1.5s ease-in-out infinite;
+}
+
+/* Speaking: brighter cyan, quicker pulse. */
+.voice-orb--speaking .voice-orb__core {
+  background: radial-gradient(circle at 35% 30%, #a5f3fc 0%, #22d3ee 40%, #0e7490 100%);
+  box-shadow: 0 0 70px 10px rgba(34, 211, 238, 0.5), inset 0 0 30px rgba(255, 255, 255, 0.3);
+  animation: voice-speak 0.9s ease-in-out infinite;
+}
+
+/* Idle (muted) + error states. */
+.voice-orb--idle .voice-orb__core {
+  background: radial-gradient(circle at 35% 30%, #cbd5e1 0%, #64748b 50%, #334155 100%);
+  box-shadow: 0 0 30px 2px rgba(100, 116, 139, 0.3);
+}
+.voice-orb--error .voice-orb__core {
+  background: radial-gradient(circle at 35% 30%, #fca5a5 0%, #ef4444 50%, #7f1d1d 100%);
+  box-shadow: 0 0 40px 4px rgba(239, 68, 68, 0.4);
+}
+
+@keyframes voice-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+@keyframes voice-sonar {
+  0% { transform: scale(0.95); opacity: 0.55; }
+  100% { transform: scale(1.5); opacity: 0; }
+}
+@keyframes voice-think {
+  0%, 100% { transform: scale(0.97); opacity: 0.78; }
+  50% { transform: scale(1.03); opacity: 1; }
+}
+@keyframes voice-speak {
+  0%, 100% { transform: scale(1); }
+  25% { transform: scale(1.09); }
+  60% { transform: scale(1.02); }
+}
+.voice-orb--sm {
+  width: 64px;
+  height: 64px;
+}
+.voice-orb--sm::before {
+  inset: -6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-orb__core, .voice-orb::before { animation: none !important; }
+}

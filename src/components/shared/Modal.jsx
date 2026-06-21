@@ -86,23 +86,23 @@ export default function Modal({
           aria-describedby={description ? descId : undefined}
           tabIndex={-1}
           data-modal-surface
-          className="absolute right-0 top-0 bottom-0 w-[360px] flex flex-col bg-[#141414] border-l border-white/[0.09] shadow-[-12px_0_48px_rgba(0,0,0,0.55)] outline-none animate-slide-in-right overflow-hidden"
+          className="absolute right-0 top-0 bottom-0 w-[360px] flex flex-col bg-white dark:bg-[#141414] border-l border-gray-200 dark:border-white/[0.09] shadow-[-12px_0_48px_rgba(0,0,0,0.55)] outline-none animate-slide-in-right overflow-hidden"
         >
           {/* Header */}
-          <div className="flex items-center gap-3 px-4 pt-4 pb-3 flex-shrink-0 border-b border-white/[0.07]">
+          <div className="flex items-center gap-3 px-4 pt-4 pb-3 flex-shrink-0 border-b border-gray-200 dark:border-white/[0.07]">
             {onClose && (
               <button
                 type="button"
                 onClick={onClose}
                 aria-label="Back"
-                className="flex items-center gap-1.5 text-white/40 hover:text-white/80 transition-colors text-sm"
+                className="flex items-center gap-1.5 text-gray-500 hover:text-gray-900 dark:text-white/40 dark:hover:text-white/80 transition-colors text-sm"
               >
                 <ArrowLeft size={14} />
                 Back
               </button>
             )}
             {title && (
-              <h3 id={titleId} className="text-[14px] font-semibold text-white/90 flex-1">
+              <h3 id={titleId} className="text-[14px] font-semibold text-gray-900 dark:text-white/90 flex-1">
                 {title}
               </h3>
             )}
@@ -110,7 +110,7 @@ export default function Modal({
 
           {/* Scrollable content */}
           <div className="flex-1 overflow-y-auto px-4 py-4">
-            {description && <p id={descId} className="text-xs text-white/55 mb-3">{description}</p>}
+            {description && <p id={descId} className="text-xs text-gray-600 dark:text-white/55 mb-3">{description}</p>}
             {children}
           </div>
         </div>
@@ -135,24 +135,24 @@ export default function Modal({
         aria-describedby={description ? descId : undefined}
         tabIndex={-1}
         data-modal-surface
-        className={`rounded-2xl shadow-[0_8px_48px_rgba(0,0,0,0.6)] w-full ${widthClass} mx-4 p-6 outline-none max-h-[90vh] overflow-y-auto bg-[#141414] border border-white/[0.12] animate-modal-in`}
+        className={`rounded-2xl shadow-[0_8px_48px_rgba(0,0,0,0.6)] w-full ${widthClass} mx-4 p-6 outline-none max-h-[90vh] overflow-y-auto bg-white dark:bg-[#141414] border border-gray-200 dark:border-white/[0.12] animate-modal-in`}
       >
         {(title || onClose) && (
           <div className="flex items-center justify-between mb-4">
-            {title ? <h3 id={titleId} className="text-[16px] font-bold text-white/90">{title}</h3> : <span />}
+            {title ? <h3 id={titleId} className="text-[16px] font-bold text-gray-900 dark:text-white/90">{title}</h3> : <span />}
             {onClose && (
               <button
                 type="button"
                 onClick={onClose}
                 aria-label="Close"
-                className="text-white/25 hover:text-white/65 transition-colors"
+                className="text-gray-400 hover:text-gray-700 dark:text-white/25 dark:hover:text-white/65 transition-colors"
               >
                 <X size={16} />
               </button>
             )}
           </div>
         )}
-        {description && <p id={descId} className="text-xs text-white/55 mb-3">{description}</p>}
+        {description && <p id={descId} className="text-xs text-gray-600 dark:text-white/55 mb-3">{description}</p>}
         {children}
       </div>
     </div>,

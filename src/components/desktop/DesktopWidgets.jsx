@@ -27,9 +27,7 @@ function snapToGrid(x, y) {
 
 function GridOverlay() {
   const { snapGrid, isDragging, widgets } = useWidgets();
-  // Show the grid whenever snap is on (so the toggle in the menu bar has a
-  // visible effect), or while a widget is in flight even if snap is off.
-  if (!snapGrid && !isDragging) return null;
+  if (!snapGrid) return null;
 
   const numCols = Math.floor((window.innerWidth  - GRID_OX + GRID_GAP_X) / STEP_X);
   const numRows = Math.floor((window.innerHeight - GRID_OY - GRID_MB + GRID_GAP_Y) / STEP_Y);

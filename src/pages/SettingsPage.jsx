@@ -172,6 +172,11 @@ function AITab({ prefs, update, onSave, saving, saved }) {
       <Block label="Fluff level">
         <PillGroup options={FLUFF_OPTIONS} value={prefs.fluffLevel} onChange={v => update('fluffLevel', v)} />
       </Block>
+      <Block label="Response style" hint="On: short, high-signal phrases (default). Off: normal, conversational AI prose.">
+        <InlineRow label="Succinct phrases">
+          <Toggle checked={prefs.succinctMode ?? true} onChange={v => update('succinctMode', v)} />
+        </InlineRow>
+      </Block>
       <Block label="Rigor">
         <PillGroup options={RIGOR_OPTIONS} value={prefs.rigor} onChange={v => update('rigor', v)} />
       </Block>

@@ -145,7 +145,7 @@ export default function GradebookView({ gradebook, loading, onBack, onRefresh })
                 <table className="w-full border-collapse text-sm">
                   <thead>
                     <tr className="border-b border-white/[0.08]">
-                      <th className="text-left font-semibold text-white/50 text-[11px] uppercase tracking-wider px-4 py-2.5 sticky left-0 bg-[#1a1d26]/80 backdrop-blur-sm">Lesson</th>
+                      <th className="text-left font-semibold text-white/50 text-[11px] uppercase tracking-wider px-4 py-2.5 sticky left-0 bg-gray-50 dark:bg-[#1a1d26]/80 backdrop-blur-sm">Lesson</th>
                       {participants.map((p) => (
                         <th key={p.userId} className="px-2 py-2.5 text-center font-semibold text-white/55 text-[11px] min-w-[52px]" title={p.name}>
                           <div className="flex flex-col items-center gap-0.5">
@@ -188,7 +188,7 @@ function GroupRows({ group, participants }) {
       </tr>
       {group.lessons.map((les) => (
         <tr key={les.id} className="border-t border-white/[0.05]">
-          <td className="px-4 py-2 text-white/75 sticky left-0 bg-[#1a1d26]/80 backdrop-blur-sm max-w-[260px]">
+          <td className="px-4 py-2 text-white/75 sticky left-0 bg-gray-50 dark:bg-[#1a1d26]/80 backdrop-blur-sm max-w-[260px]">
             <span className="line-clamp-1">{les.title}</span>
           </td>
           {participants.map((p) => {

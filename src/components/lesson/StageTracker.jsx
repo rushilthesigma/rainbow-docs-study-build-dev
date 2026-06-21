@@ -1,4 +1,4 @@
-import { BookOpen, ListChecks, Trophy, Sparkles, Globe, Flame, ClipboardList, PenTool, MessagesSquare, Puzzle, PencilLine } from 'lucide-react';
+import { BookOpen, ListChecks, Trophy, Sparkles, Globe, Flame, ClipboardList, PenTool, Puzzle, PencilLine } from 'lucide-react';
 
 // Maps a block's `type` to the label + icon shown in the stage tracker
 // chip. Reading + quiz keep the original wording; the variety types
@@ -11,7 +11,6 @@ const TYPE_LABELS = {
   application:  'In the Wild',
   challenge:    'Challenge',
   open:         'Graded Essay',
-  discussion:   'Discussion',
   matching:     'Matching',
   'fill-blank': 'Fill in the Blank',
 };
@@ -23,7 +22,6 @@ const TYPE_ICONS = {
   application:  Globe,
   challenge:    Flame,
   open:         PenTool,
-  discussion:   MessagesSquare,
   matching:     Puzzle,
   'fill-blank': PencilLine,
 };
@@ -78,7 +76,7 @@ export default function StageTracker({ blocks = [], activeIdx = 0, onJump }) {
             if (!raw) return null;
             const stripped = raw
               .replace(new RegExp(`^${stageName}\\s*[-\\-:·]\\s*`, 'i'), '')
-              .replace(/^(Reading|Quiz|Example|Recap|Application|Challenge|Graded Essay|Open Answer|Open|Discussion|Matching|Fill in the Blank)\s+\d*\s*[-\-:·]\s*/i, '');
+              .replace(/^(Reading|Quiz|Example|Recap|Application|Challenge|Graded Essay|Open Answer|Open|Matching|Fill in the Blank)\s+\d*\s*[-\-:·]\s*/i, '');
             const display = stripped || raw;
             if (display === stageName) return null;
             return (

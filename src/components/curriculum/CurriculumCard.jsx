@@ -12,23 +12,23 @@ export default function CurriculumCard({ curriculum }) {
   return (
     <button
       onClick={() => navigate(`/curriculum/${id}`)}
-      className="w-full text-left bg-white dark:bg-[#161622] rounded-xl border border-gray-200 dark:border-[#2A2A40] hover:border-blue-300 dark:hover:border-blue-700 p-5 transition-colors group"
+      className="w-full text-left bg-white/[0.03] rounded-xl border border-white/[0.07] hover:border-blue-400/[0.30] hover:bg-white/[0.05] backdrop-blur-sm p-5 transition-colors group"
     >
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0">
-          <h3 className="font-semibold text-gray-900 dark:text-gray-100 truncate transition-colors">
+          <h3 className="font-semibold text-white/90 group-hover:text-white/95 truncate transition-colors">
             {title}
           </h3>
           {description && (
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">{description}</p>
+            <p className="text-sm text-white/45 mt-1 line-clamp-2">{description}</p>
           )}
         </div>
-        <ArrowRight size={16} className="text-gray-300 dark:text-gray-600 group-hover:text-gray-500 dark:group-hover:text-gray-400 transition-colors mt-1 flex-shrink-0 ml-3" />
+        <ArrowRight size={16} className="text-white/25 group-hover:text-blue-300 transition-colors mt-1 flex-shrink-0 ml-3" />
       </div>
 
       <ProgressBar value={completedLessons} max={totalLessons} size="sm" showLabel={false} className="mb-3" />
 
-      <div className="flex items-center gap-4 text-xs text-gray-400 dark:text-gray-500">
+      <div className="flex items-center gap-4 text-xs text-white/40">
         <span className="flex items-center gap-1">
           <BookOpen size={13} className="text-blue-400" />
           {unitCount} unit{unitCount !== 1 ? 's' : ''} &middot; {totalLessons} lesson{totalLessons !== 1 ? 's' : ''}

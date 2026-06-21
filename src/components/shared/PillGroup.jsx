@@ -6,7 +6,7 @@ import { Lock } from 'lucide-react';
 export default function PillGroup({ label, options, value, onChange }) {
   return (
     <div className="flex flex-col gap-2">
-      {label && <label className="text-sm font-medium text-blue-200/55">{label}</label>}
+      {label && <label className="text-sm font-medium text-blue-700 dark:text-blue-200/55">{label}</label>}
       <div className="flex flex-wrap gap-2">
         {options.map((opt) => {
           const isActive = value === opt.value;
@@ -22,14 +22,14 @@ export default function PillGroup({ label, options, value, onChange }) {
                 locked
                   ? 'bg-white/[0.02] border border-white/[0.06] text-white/35 cursor-not-allowed'
                   : isActive
-                  ? 'bg-blue-500 hover:bg-blue-400 text-white'
-                  : 'bg-blue-500/[0.04] border border-blue-400/[0.10] text-blue-100/55 hover:bg-blue-500/[0.10] hover:border-blue-400/[0.22] hover:text-blue-100/85 backdrop-blur-sm'
+                  ? 'bg-blue-600 hover:bg-blue-500 text-blue-50 dark:bg-blue-500 dark:hover:bg-blue-400'
+                  : 'bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300 dark:bg-blue-500/[0.04] dark:border-blue-400/[0.10] dark:text-blue-100/55 dark:hover:bg-blue-500/[0.10] dark:hover:border-blue-400/[0.22] dark:hover:text-blue-100/85 backdrop-blur-sm'
               }`}
             >
               {locked && <Lock size={11} className="mr-1 opacity-70" />}
               {opt.label}
               {opt.description && !locked && (
-                <span className={`ml-1 text-xs ${isActive ? 'text-white/85' : 'text-white/30'}`}>
+                <span className={`ml-1 text-xs ${isActive ? 'text-blue-100' : 'text-white/30'}`}>
                   {opt.description}
                 </span>
               )}

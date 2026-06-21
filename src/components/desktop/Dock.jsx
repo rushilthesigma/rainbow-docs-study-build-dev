@@ -49,7 +49,7 @@ function DockIcon({ app, mouseX, isOpen, isActive, onClick, size, iconStyle }) {
   return (
     <div className="relative flex flex-col items-center" ref={iconRef}>
       {tooltipVisible && (
-        <div className="absolute -top-9 left-1/2 -translate-x-1/2 px-2.5 py-1 rounded-md bg-[#1f1f1f]/95 text-white text-[11px] font-medium whitespace-nowrap pointer-events-none z-10 shadow-[0_4px_12px_rgba(0,0,0,0.4)] border border-white/[0.08]">
+        <div className="absolute -top-9 left-1/2 -translate-x-1/2 px-2.5 py-1 rounded-md bg-neutral-200/95 dark:bg-[#1f1f1f]/95 text-gray-900 dark:text-white text-[11px] font-medium whitespace-nowrap pointer-events-none z-10 shadow-[0_4px_12px_rgba(0,0,0,0.4)] border border-black/[0.08] dark:border-white/[0.08]">
           {app.label}
         </div>
       )}
@@ -68,7 +68,7 @@ function DockIcon({ app, mouseX, isOpen, isActive, onClick, size, iconStyle }) {
       >
         <div
           className={`w-full h-full rounded-[13px] flex items-center justify-center ${
-            iconStyle === 'mono' ? 'bg-[#2a2a2e]' :
+            iconStyle === 'mono' ? 'bg-neutral-100 dark:bg-[#2a2a2e]' :
             iconStyle === 'glass' ? 'border border-white/20' :
             iconStyle === 'accent' ? '' :
             `bg-gradient-to-br ${app.gradient}`
@@ -81,7 +81,11 @@ function DockIcon({ app, mouseX, isOpen, isActive, onClick, size, iconStyle }) {
         >
           <Icon
             size={iconSize}
-            className={iconStyle === 'accent' ? 'drop-shadow-sm' : 'text-white drop-shadow-sm'}
+            className={
+              iconStyle === 'accent' ? 'drop-shadow-sm' :
+              iconStyle === 'mono' ? 'text-gray-900 dark:text-white drop-shadow-sm' :
+              'text-white drop-shadow-sm'
+            }
             style={iconStyle === 'accent' ? { color: app.color } : undefined}
           />
         </div>
@@ -95,7 +99,7 @@ function DockIcon({ app, mouseX, isOpen, isActive, onClick, size, iconStyle }) {
       <div className="h-1.5 mt-1 flex items-center justify-center">
         {isOpen && (
           <span
-            className="rounded-full bg-white block"
+            className="rounded-full bg-gray-700 dark:bg-white block"
             style={{
               width: 4, height: 4,
               opacity: isActive ? 1 : 0.7,

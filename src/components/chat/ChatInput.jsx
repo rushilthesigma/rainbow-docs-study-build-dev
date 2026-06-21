@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Send, Globe, Paperclip, X, FileText, Loader2, Upload, Brain } from 'lucide-react';
 import { getToken } from '../../api/client';
 import { InlineProgress } from '../shared/ProgressBar';
+import DictationButton from '../study/voice/DictationButton';
 
 // Read a File into a base64 data URL string.
 function fileToDataUrl(file) {
@@ -43,6 +44,10 @@ export default function ChatInput({
   // Optional node rendered in the composer top rail (e.g. Study Mode's model
   // dropdown). Sits between the tool buttons and the char count.
   composerExtras = null,
+  // Optional node rendered just before the DictationButton (e.g. VoiceMenu).
+  composerPrefix = null,
+  // When true, shows a push-to-talk mic button that dictates into the textarea.
+  enableDictation = false,
   flush = false,
 }) {
   const [text, setText] = useState('');
@@ -179,17 +184,12 @@ export default function ChatInput({
     if (files?.length) await handleFiles(files);
   }
 
-  function handleSubmit(e) {
-    e.preventDefault();
-    const trimmed = text.trim();
-    // Block submit while any doc is still extracting - otherwise we'd
-    // send the message with empty doc text.
+  function doSend(textOverride, opts = {}) {
+    const trimmed = (textOverride ?? text).trim();
     const stillExtracting = docs.some(d => d.status === 'extracting');
-    if (stillExtracting) return;
-    if ((!trimmed && !images.length && !docs.some(d => d.status === 'ready')) || disabled) return;
+    if (stillExtracting || disabled) return;
+    if (!trimmed && !images.length && !docs.some(d => d.status === 'ready')) return;
 
-    // Prepend each ready doc's extracted text to the message as a fenced
-    // quote so the model sees the full context.
     const readyDocs = docs.filter(d => d.status === 'ready' && d.text);
     let composed = trimmed;
     if (readyDocs.length) {
@@ -197,16 +197,16 @@ export default function ChatInput({
       composed = `${blocks}\n\n${trimmed || '(see attached file)'}`.trim();
     }
 
-    onSend(composed, images);
+    onSend(composed, images, opts);
     setText('');
     setImages([]);
     setDocs([]);
-    // Reset the textarea's auto-grown height back to its default - the
-    // onInput auto-grow only fires on USER input, so without this the
-    // textarea would stay at the size it grew to during a long paste.
-    if (inputRef.current) {
-      inputRef.current.style.height = 'auto';
-    }
+    if (inputRef.current) inputRef.current.style.height = 'auto';
+  }
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    doSend();
   }
 
   function handleKeyDown(e) {
@@ -214,6 +214,81 @@ export default function ChatInput({
       e.preventDefault();
       handleSubmit(e);
     }
+  }
+
+  const [dictationActive, setDictationActive] = useState(false);
+
+  // Live dictation. The spoken words stream into the textarea as they're
+  // recognized: we snapshot whatever was typed when dictation started
+  // (dictBaseRef), then on each live update show base + the growing
+  // transcript. On stop we commit it as the new base so a second dictation
+  // pass appends rather than overwrites.
+  const dictBaseRef = useRef('');
+  // Mirror of `text` kept in a ref so voice-command callbacks always read the
+  // latest value without stale-closure issues.
+  const textRef = useRef(text);
+  useEffect(() => { textRef.current = text; }, [text]);
+  function growTextarea() {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+  }
+  function handleDictationStart() {
+    dictBaseRef.current = text.trim();
+  }
+  function handleDictationLive(combined) {
+    const base = dictBaseRef.current;
+    setText(base ? `${base} ${combined}` : combined);
+    requestAnimationFrame(growTextarea);
+  }
+  function handleDictationAutoSend(chunk) {
+    const base = dictBaseRef.current;
+    const merged = (base && chunk ? `${base} ${chunk}` : base || chunk).trim();
+    dictBaseRef.current = '';
+    doSend(merged);
+  }
+
+  function handleDictationAutoRestart() {
+    setText('');
+    dictBaseRef.current = '';
+    requestAnimationFrame(growTextarea);
+  }
+
+  function handleDictationAutoDelete(countWord) {
+    const NUMBER_WORDS = {
+      one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,
+      eleven:11,twelve:12,thirteen:13,fourteen:14,fifteen:15,
+      sixteen:16,seventeen:17,eighteen:18,nineteen:19,twenty:20,
+    };
+    const n = parseInt(countWord, 10) || NUMBER_WORDS[countWord.toLowerCase()] || 0;
+    if (!n) return;
+    const words = textRef.current.trim().split(/\s+/).filter(Boolean);
+    const remaining = words.slice(0, Math.max(0, words.length - n)).join(' ');
+    setText(remaining);
+    dictBaseRef.current = remaining;
+    requestAnimationFrame(growTextarea);
+  }
+
+  const SEND_TRIGGER = /\bsend\s+send\s*$/i;
+
+  function handleDictationFinal(finalText) {
+    const base = dictBaseRef.current;
+    const chunk = (finalText || '').trim();
+    const merged = (base ? (chunk ? `${base} ${chunk}` : base) : chunk).trim();
+
+    if (SEND_TRIGGER.test(merged)) {
+      const payload = merged.replace(SEND_TRIGGER, '').trim();
+      setText(payload);
+      dictBaseRef.current = '';
+      requestAnimationFrame(() => { inputRef.current?.focus(); growTextarea(); });
+      doSend(payload);
+      return;
+    }
+
+    setText(merged);
+    dictBaseRef.current = merged;
+    requestAnimationFrame(() => { inputRef.current?.focus(); growTextarea(); });
   }
 
   const stillExtracting = docs.some(d => d.status === 'extracting');
@@ -246,7 +321,7 @@ export default function ChatInput({
 
       {/* Drag overlay - full-card highlight while user drags a file in. */}
       {dragOver && (
-        <div className="absolute inset-x-3 top-2 bottom-3 z-20 rounded-xl border-2 border-dashed border-white/40 bg-black/40 dark:bg-black/60 flex items-center justify-center pointer-events-none">
+        <div className="absolute inset-x-3 top-2 bottom-3 z-20 rounded-xl border-2 border-dashed border-white/40 bg-black/30 dark:bg-black/60 flex items-center justify-center pointer-events-none">
           <div className="text-center">
             <Upload size={22} className="text-white/70 mx-auto mb-1.5" />
             <p className="text-sm font-bold text-white">Drop to attach</p>
@@ -259,9 +334,11 @@ export default function ChatInput({
       <div
         data-tour="chat-input"
         className={`rounded-xl bg-white/75 dark:bg-transparent backdrop-blur-md transition-all overflow-hidden ${
-          sourceMode
-            ? 'ring-2 ring-blue-400/70 bg-white/[0.06] dark:bg-blue-500/[0.05]'
-            : 'ring-1 ring-white/20 dark:ring-transparent focus-within:ring-2 focus-within:ring-blue-400/80 dark:focus-within:ring-blue-400/85'
+          dictationActive
+            ? 'ring-2 ring-pink-500/80 dark:ring-pink-500/70'
+            : sourceMode
+              ? 'ring-2 ring-blue-400/70 bg-white/[0.06] dark:bg-blue-500/[0.05]'
+              : 'ring-1 ring-white/20 dark:ring-transparent focus-within:ring-2 focus-within:ring-blue-400/80 dark:focus-within:ring-blue-400/85'
         }`}
       >
         {/* TOP RAIL - tools + mode toggle + char count */}
@@ -308,6 +385,19 @@ export default function ChatInput({
               <Brain size={13} />
             </button>
           )}
+          {composerPrefix}
+          {enableDictation && (
+            <DictationButton
+              onStart={handleDictationStart}
+              onLiveText={handleDictationLive}
+              onTranscript={handleDictationFinal}
+              onListeningChange={setDictationActive}
+              onAutoSend={handleDictationAutoSend}
+              onAutoRestart={handleDictationAutoRestart}
+              onAutoDelete={handleDictationAutoDelete}
+              disabled={disabled}
+            />
+          )}
           {composerExtras}
           <span className="flex-1" />
           {text.length > 0 && (
@@ -326,7 +416,7 @@ export default function ChatInput({
                 <button
                   type="button"
                   onClick={() => setImages(prev => prev.filter((_, idx) => idx !== i))}
-                  className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 text-white flex items-center justify-center hover:bg-black"
+                  className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-gray-800 dark:bg-black/70 text-white flex items-center justify-center hover:bg-gray-900 dark:hover:bg-black"
                   aria-label="Remove image"
                 >
                   <X size={10} />
@@ -395,9 +485,11 @@ export default function ChatInput({
             title="Send (Enter)"
             className={`m-1.5 px-3.5 h-9 rounded-lg inline-flex items-center gap-1.5 text-[12px] font-semibold transition-colors flex-shrink-0 ${
               canSend
-                ? (sourceMode
-                    ? 'bg-blue-500/20 hover:bg-blue-500/30 text-blue-50'
-                    : 'bg-blue-500 hover:bg-blue-400 text-white')
+                ? (dictationActive
+                    ? 'bg-pink-500 hover:bg-pink-400 text-white'
+                    : sourceMode
+                      ? 'bg-blue-500/20 hover:bg-blue-500/30 text-blue-50'
+                      : 'bg-blue-500 hover:bg-blue-400 text-white')
                 : 'bg-gray-100 dark:bg-blue-500/[0.08] text-gray-400 dark:text-blue-200/35 cursor-not-allowed'
             }`}
           >

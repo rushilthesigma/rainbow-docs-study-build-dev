@@ -4,6 +4,7 @@ import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import { TableKit } from '@tiptap/extension-table';
 import { Markdown } from 'tiptap-markdown';
+import { Mathematics } from '@tiptap/extension-mathematics';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -37,7 +38,7 @@ const PROSE_TWEAKS =
   'prose-p:my-2 prose-headings:mt-4 prose-headings:mb-2 prose-h1:text-xl prose-h2:text-lg prose-h3:text-base ' +
   'prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-blockquote:my-2 prose-blockquote:border-white/20 ' +
   'prose-code:bg-white/[0.08] prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-[12.5px] prose-code:before:content-none prose-code:after:content-none ' +
-  'prose-pre:bg-black/50 prose-pre:rounded-lg prose-table:text-[13px] prose-th:border-white/15 prose-td:border-white/10';
+  'prose-pre:bg-gray-800 dark:prose-pre:bg-black/50 prose-pre:rounded-lg prose-table:text-[13px] prose-th:border-gray-300 dark:prose-th:border-white/15 prose-td:border-gray-300 dark:prose-td:border-white/10';
 const PROSE_CLASS = `prose prose-sm prose-invert max-w-none ${PROSE_TWEAKS}`;
 const EDITOR_CLASS = `tiptap ${PROSE_CLASS} focus:outline-none p-4 min-h-full`;
 
@@ -81,6 +82,7 @@ export default function MarkdownNoteEditor({
       Placeholder.configure({ placeholder }),
       Markdown.configure({ html: true, transformPastedText: true, transformCopiedText: true }),
       TableKit.configure({ table: { resizable: false } }),
+      Mathematics.configure({ katexOptions: { throwOnError: false, errorColor: '#94a3b8' } }),
     ],
     content: value,
     autofocus: autoFocus ? 'end' : false,

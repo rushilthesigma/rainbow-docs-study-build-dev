@@ -94,6 +94,13 @@ export async function toggleLessonComplete(curriculumId, lessonId) {
   });
 }
 
+// Idempotent version: always marks complete, never toggles back to false.
+export async function markLessonComplete(curriculumId, lessonId) {
+  return apiFetch(`/api/curriculum/${curriculumId}/lesson/${lessonId}/complete?force=complete`, {
+    method: 'POST',
+  });
+}
+
 export async function getStreak() {
   return apiFetch('/api/study/streak');
 }

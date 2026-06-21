@@ -132,8 +132,8 @@ export default function NoteMapReview({ open, onClose, mapId, api: apiProp, onCh
   // In-app floating panel (not a screen-dimming modal): anchored top-right of
   // the note map, leaves the rest of the app visible and interactive.
   return (
-    <div className="absolute z-30 top-2 right-2 w-[340px] max-h-[calc(100%-1rem)] overflow-y-auto rounded-2xl border border-white/[0.12] bg-[#0f0f0f]/95 backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.45)] animate-view-fade">
-      <div className="sticky top-0 z-10 flex items-center justify-between px-4 pt-3.5 pb-2.5 bg-[#0f0f0f]/95 backdrop-blur-xl border-b border-white/[0.06]">
+    <div className="absolute z-30 top-2 right-2 w-[340px] max-h-[calc(100%-1rem)] overflow-y-auto rounded-2xl border border-white/[0.12] bg-white/95 dark:bg-[#0f0f0f]/95 backdrop-blur-xl shadow-[0_10px_40px_rgba(0,0,0,0.45)] animate-view-fade">
+      <div className="sticky top-0 z-10 flex items-center justify-between px-4 pt-3.5 pb-2.5 bg-white/95 dark:bg-[#0f0f0f]/95 backdrop-blur-xl border-b border-white/[0.06]">
         <h3 className="text-[14px] font-bold text-white/90">Spaced Repetition</h3>
         <button
           onClick={onClose}

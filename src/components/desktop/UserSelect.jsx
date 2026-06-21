@@ -52,7 +52,7 @@ export default function UserSelect({ parentName, students, onSelectStudent, onSe
 
           <div className="flex gap-2 mb-4">
             {[0,1,2,3].map(i => (
-              <div key={i} className={`w-3 h-3 rounded-full ${pin.length > i ? 'bg-white' : dark ? 'bg-white/20' : 'bg-gray-300'}`} />
+              <div key={i} className={`w-3 h-3 rounded-full ${pin.length > i ? (dark ? 'bg-white' : 'bg-gray-900') : dark ? 'bg-white/20' : 'bg-gray-300'}`} />
             ))}
           </div>
 

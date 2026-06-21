@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { ArrowRight, Check, X } from 'lucide-react';
+import MathText from '../shared/MathText';
 
 // Fill-in-the-blank block. Block shape:
 //   { type: 'fill-blank', title, instructions, sentences: [
@@ -66,10 +67,10 @@ export default function FillBlankBlock({ block, onComplete }) {
     <div className="cl-anim-in">
       <div className="border-t border-white/[0.07] pt-7 lg:pt-9 mb-6">
         <div className="mx-auto max-w-[68ch]">
-          <h2 className="text-[22px] font-semibold text-white mb-2">{block.title || 'Fill in the blanks'}</h2>
-          <p className="text-[13px] text-white/55 mb-5 leading-relaxed">
+          <MathText as="h2" className="text-[22px] font-semibold text-white mb-2">{block.title || 'Fill in the blanks'}</MathText>
+          <MathText as="p" className="text-[13px] text-white/55 mb-5 leading-relaxed">
             {block.instructions || 'Type the missing word or phrase in each blank, then check your work.'}
-          </p>
+          </MathText>
 
           <form onSubmit={handleCheck} className="space-y-4">
             {sentences.map((s, i) => {
@@ -84,7 +85,7 @@ export default function FillBlankBlock({ block, onComplete }) {
               const widthCh = Math.max(6, Math.min(28, (s.answer?.length || 6) + 2));
               return (
                 <div key={i} className="leading-[2]">
-                  <span className="text-[15px] text-white/85">{s.before || ''}</span>
+                  <MathText as="span" className="text-[15px] text-white/85">{s.before || ''}</MathText>
                   <input
                     type="text"
                     value={answers[i]}
@@ -96,7 +97,7 @@ export default function FillBlankBlock({ block, onComplete }) {
                     autoComplete="off"
                     spellCheck={false}
                   />
-                  <span className="text-[15px] text-white/85">{s.after || ''}</span>
+                  <MathText as="span" className="text-[15px] text-white/85">{s.after || ''}</MathText>
                   {checked && (
                     <div className="mt-1 ml-1 text-[11.5px] inline-flex items-center gap-1.5">
                       {correct ? (
@@ -105,13 +106,13 @@ export default function FillBlankBlock({ block, onComplete }) {
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-rose-300">
-                          <X size={11} /> Answer: <span className="text-emerald-200 font-medium">{s.answer}</span>
+                          <X size={11} /> Answer: <MathText as="span" className="text-emerald-200 font-medium">{s.answer}</MathText>
                         </span>
                       )}
                     </div>
                   )}
                   {!checked && s.hint && (
-                    <p className="text-[11px] text-white/35 mt-0.5 ml-1 italic">Hint: {s.hint}</p>
+                    <p className="text-[11px] text-white/35 mt-0.5 ml-1 italic">Hint: <MathText as="span">{s.hint}</MathText></p>
                   )}
                 </div>
               );

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { ClipboardCheck, Award, AlertCircle, PenTool } from 'lucide-react';
 import { generateAssignment, submitAssignment } from '../../api/curriculum';
 import LoadingSpinner from '../shared/LoadingSpinner';
+import MathText from '../shared/MathText';
 
 // Graded-mode assignment surface for a single lesson. Styled to match
 // the lesson's variety blocks (top hairline, colored chip, 68ch column,
@@ -90,9 +91,9 @@ export default function AssignmentCard({ curriculumId, lessonId, initialAssignme
           </div>
 
           {/* Prompt */}
-          <p className="text-[15.5px] text-white/82 leading-[1.75] whitespace-pre-wrap">
+          <MathText as="p" className="text-[15.5px] text-white/82 leading-[1.75] whitespace-pre-wrap">
             {assignment.prompt}
-          </p>
+          </MathText>
 
           {/* Rubric */}
           {rubric.length > 0 && (
@@ -108,7 +109,7 @@ export default function AssignmentCard({ curriculumId, lessonId, initialAssignme
                       </span>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="font-semibold text-white/85">{r.label}</span>
+                          <MathText as="span" className="font-semibold text-white/85">{r.label}</MathText>
                           <div className="flex items-center gap-1.5 flex-shrink-0">
                             <span className="text-[10px] text-white/35">weight {r.weight}</span>
                             {ps && (
@@ -118,9 +119,9 @@ export default function AssignmentCard({ curriculumId, lessonId, initialAssignme
                             )}
                           </div>
                         </div>
-                        <p className="text-white/55 mt-0.5 leading-snug">{r.criterion}</p>
+                        <MathText as="p" className="text-white/55 mt-0.5 leading-snug">{r.criterion}</MathText>
                         {ps?.note && (
-                          <p className="text-white/75 italic mt-1 leading-snug">{ps.note}</p>
+                          <MathText as="p" className="text-white/75 italic mt-1 leading-snug">{ps.note}</MathText>
                         )}
                       </div>
                     </li>
@@ -134,7 +135,7 @@ export default function AssignmentCard({ curriculumId, lessonId, initialAssignme
           {submission ? (
             <div className="mt-5 rounded-xl border border-emerald-400/[0.22] bg-emerald-500/[0.05] px-4 py-3.5">
               <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-emerald-300/80 mb-1.5">Feedback</p>
-              <p className="text-[14px] text-white/85 leading-relaxed whitespace-pre-wrap">{submission.feedback}</p>
+              <MathText as="p" className="text-[14px] text-white/85 leading-relaxed whitespace-pre-wrap">{submission.feedback}</MathText>
               <details className="mt-3 group">
                 <summary className="cursor-pointer text-[11.5px] text-white/45 hover:text-white/75 select-none">
                   Show your submitted response

@@ -3,13 +3,15 @@
 // picker UI and pre-empts obviously-locked selections. Keep in sync.
 //
 // Plan access matrix:
-//   flash-lite : everyone
-//   haiku      : free / plus-lite (12/day cap) · lifetime / pro (unlimited)
+//   flash-lite   : everyone
+//   haiku        : free / plus-lite (12/day cap) · lifetime / pro (unlimited)
+//   gpt-5.4      : plus / lifetime / pro (unlimited) — paid only, no free access
+//   gpt-5.4-mini : everyone (no per-model cap — only counts toward daily messages)
 //   flash      : plus / lifetime / pro (unlimited)
 //   sonnet     : plus (24/day cap) · lifetime / pro (unlimited)
 //   gemini-pro : pro only (unlimited)
 
-// Accounts that may only use Gemini models. Claude options are hidden
+// Accounts that may only use Gemini models. Claude + OpenAI options are hidden
 // from the picker and rejected server-side for these emails.
 export const GEMINI_ONLY_EMAILS = new Set(['kelapure@gmail.com']);
 export function isGeminiOnlyEmail(email) {
@@ -22,6 +24,8 @@ export const SONNET_PLUS_DAILY = 24;
 export const STUDY_MODELS = [
   { key: 'flash-lite', label: 'Flash Lite', provider: 'Gemini', blurb: 'Fastest · everyday study',                                     plans: ['free', 'plus-lite', 'plus', 'lifetime', 'pro'] },
   { key: 'haiku',      label: 'Haiku 4.5',  provider: 'Claude', blurb: `Quick + sharp · ${HAIKU_FREE_DAILY}/day free`,                  plans: ['free', 'plus-lite', 'lifetime', 'pro'] },
+  { key: 'gpt-5.4',    label: 'GPT-5.4',    provider: 'OpenAI', blurb: 'Versatile + capable · paid',                                    plans: ['plus', 'lifetime', 'pro'] },
+  { key: 'gpt-5.4-mini', label: 'GPT-5.4 mini', provider: 'OpenAI', blurb: 'Fast + free · counts toward daily messages',                plans: ['free', 'plus-lite', 'plus', 'lifetime', 'pro'] },
   { key: 'flash',      label: 'Flash',      provider: 'Gemini', blurb: 'Balanced reasoning',                                            plans: ['plus', 'lifetime', 'pro'] },
   { key: 'sonnet',     label: 'Sonnet 4.6', provider: 'Claude', blurb: `Deepest writing + explanation · ${SONNET_PLUS_DAILY}/day`,      plans: ['plus', 'lifetime', 'pro'] },
   { key: 'gemini-pro', label: 'Gemini Pro', provider: 'Gemini', blurb: 'Hardest math + code',                                           plans: ['pro'] },
@@ -76,6 +80,9 @@ export function studyModelBlurb(key, plan) {
   if (key === 'haiku') {
     if (['lifetime', 'pro'].includes(plan)) return 'Quick + sharp · Unlimited';
     return m.blurb; // "Quick + sharp · 12/day free"
+  }
+  if (key === 'gpt-5.4') {
+    return 'Versatile + capable · Unlimited'; // paid only (plus/lifetime/pro), no cap
   }
   if (key === 'sonnet') {
     if (['lifetime', 'pro'].includes(plan)) return 'Deepest writing + explanation · Unlimited';

@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useCallback } from 'react';
 
 const WidgetContext = createContext(null);
-const KEY = 'cov-widgets-v4'; // v4: removed insight default
+const KEY = 'cov-widgets-v5'; // v5: no default widgets (clean desktop after onboarding)
 
 // Mirror of the grid constants in DesktopWidgets.jsx - kept in sync manually.
 // STEP_X = GRID_CELL_W(190) + GRID_GAP_X(10), STEP_Y = GRID_CELL_H(160) + GRID_GAP_Y(10)
@@ -41,32 +41,20 @@ function firstFreeCell(existing) {
   return { x: G_OX, y: G_OY };
 }
 
-// Defaults use grid-aligned positions (col 0 rows 0-2)
-const DEFAULTS = [
-  { id: 'w-clock-default',  type: 'clock',  position: { x: 20, y: 42  }, cols: 1 },
-  { id: 'w-streak-default', type: 'streak', position: { x: 20, y: 212 }, cols: 1 },
-  { id: 'w-review-default', type: 'review', position: { x: 20, y: 382 }, cols: 1 },
-];
-
-const REVIEW_MIGRATION_KEY = 'cov-widgets-review-added';
+// Default loadout: none. New users land on a clean desktop after onboarding and
+// can add widgets themselves from the Dock.
+function getDefaults() {
+  return [];
+}
 
 function load() {
   try {
     const stored = localStorage.getItem(KEY);
-    let parsed = stored ? JSON.parse(stored) : DEFAULTS;
-    parsed = parsed.map(w => ({ cols: 1, rows: 1, radius: 'normal', ...w }));
-    // One-time: surface the Review widget for users who already have a saved
-    // layout from before it existed. Runs once; if they remove it, it stays gone.
-    if (stored && !localStorage.getItem(REVIEW_MIGRATION_KEY)) {
-      localStorage.setItem(REVIEW_MIGRATION_KEY, '1');
-      if (!parsed.some(w => w.type === 'review')) {
-        parsed = [...parsed, { id: 'w-review-default', type: 'review', position: firstFreeCell(parsed), cols: 1, rows: 1, radius: 'normal' }];
-        save(parsed);
-      }
-    }
+    const parsed = (stored ? JSON.parse(stored) : getDefaults())
+      .map(w => ({ cols: 1, rows: 1, radius: 'normal', ...w }));
     return parsed;
   }
-  catch { return DEFAULTS; }
+  catch { return getDefaults(); }
 }
 function save(w) {
   try { localStorage.setItem(KEY, JSON.stringify(w)); } catch {}
