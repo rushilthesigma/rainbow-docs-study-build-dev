@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import { Check, X, Copy, Pencil, FileText, ExternalLink, FileText as NoteIcon, Zap, Swords, Brain, ChevronRight, Volume2, Square } from 'lucide-react';
+import { Check, X, Copy, Pencil, FileText, ExternalLink, FileText as NoteIcon, Zap, Swords, Brain, ChevronRight, Volume2, Square, PanelRightOpen } from 'lucide-react';
 import MathText from '../shared/MathText';
 import { useWindowManager } from '../../context/WindowManagerContext';
 
@@ -105,10 +106,7 @@ function normalizeMathDelimiters(s) {
 
 const CURSOR = '\u200B@@CURSOR@@';
 
-function InlineQuiz({ quizJson }) {
-  const [answers, setAnswers] = useState({});
-  const [submitted, setSubmitted] = useState(false);
-
+function InlineQuiz({ quizJson, answers, submitted, onAnswer, onSubmit, unboxed = false }) {
   let quiz;
   try { quiz = JSON.parse(quizJson); } catch { return null; }
   if (!quiz?.questions?.length) return null;
@@ -123,7 +121,13 @@ function InlineQuiz({ quizJson }) {
         const isCorrect = submitted && userAnswer === q.correct;
         const isWrong = submitted && userAnswer && userAnswer !== q.correct;
         return (
-          <div key={i} className={`rounded-lg border p-3 ${submitted ? (isCorrect ? 'border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/10' : isWrong ? 'border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-900/10' : 'border-gray-200 dark:border-[#2A2A40]') : 'border-gray-200 dark:border-[#2A2A40]'}`}>
+          <div
+            key={i}
+            className={unboxed
+              ? 'px-1 py-4 border-b border-gray-200/80 last:border-b-0 dark:border-white/[0.07]'
+              : `rounded-lg border p-3 ${submitted ? (isCorrect ? 'border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/10' : isWrong ? 'border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-900/10' : 'border-gray-200 dark:border-[#2A2A40]') : 'border-gray-200 dark:border-[#2A2A40]'}`
+            }
+          >
             <MathText as="p" className="text-sm font-medium mb-2">{`${i + 1}. ${q.question.replace(/^\d+[.,)\s:]+/, '')}`}</MathText>
             <div className="space-y-1">
               {(q.options || []).map(opt => {
@@ -134,10 +138,10 @@ function InlineQuiz({ quizJson }) {
                   <button
                     key={opt}
                     disabled={submitted}
-                    onClick={() => setAnswers(prev => ({ ...prev, [q.question]: letter }))}
+                    onClick={() => onAnswer(q.question, letter)}
                     className={`w-full text-left px-3 py-1.5 rounded text-xs transition-colors ${
                       submitted ? (correctOpt ? 'bg-emerald-100 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 font-medium' : selected && !correctOpt ? 'bg-rose-100 dark:bg-rose-900/20 text-rose-600' : 'text-gray-500') :
-                      selected ? 'bg-gray-200 dark:bg-white/[0.12] text-gray-900 dark:text-white font-medium' : 'hover:bg-gray-50 dark:hover:bg-white/[0.05] text-gray-700 dark:text-gray-300'
+                      selected ? 'bg-blue-500 text-white font-medium' : 'hover:bg-gray-50 dark:hover:bg-white/[0.05] text-gray-700 dark:text-gray-300'
                     }`}
                   >
                     <MathText>{opt}</MathText>
@@ -151,9 +155,9 @@ function InlineQuiz({ quizJson }) {
       })}
       {!submitted ? (
         <button
-          onClick={() => setSubmitted(true)}
+          onClick={onSubmit}
           disabled={Object.keys(answers).length < quiz.questions.length}
-          className="px-4 py-2 rounded-lg bg-gray-900 dark:bg-white/[0.12] text-white text-xs font-medium hover:bg-gray-800 dark:hover:bg-white/[0.18] disabled:opacity-40"
+          className="px-4 py-2 rounded-lg bg-blue-500 text-white text-xs font-medium hover:bg-blue-600 disabled:bg-gray-200 disabled:text-gray-400 dark:disabled:bg-white/[0.08] dark:disabled:text-white/30 disabled:cursor-not-allowed transition-colors"
         >
           Check Answers
         </button>
@@ -178,7 +182,18 @@ function ThinkingDots() {
   );
 }
 
-export default function ChatMessage({ message, isStreaming, canEdit = false, onEdit, onUserEdit, onAiInstruct }) {
+export default function ChatMessage({
+  message,
+  quizId,
+  sideScreenQuizId = null,
+  quizSideScreenTarget = null,
+  onSideScreenQuiz,
+  isStreaming,
+  canEdit = false,
+  onEdit,
+  onUserEdit,
+  onAiInstruct,
+}) {
   const isUser = message.role === 'user';
   const raw = message.content || '';
   const [editing, setEditing] = useState(false);
@@ -186,6 +201,8 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
   const [instructText, setInstructText] = useState('');
   const [copied, setCopied] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  const [quizAnswers, setQuizAnswers] = useState({});
+  const [quizSubmitted, setQuizSubmitted] = useState(false);
   const utterRef = useRef(null);
 
   useEffect(() => () => { window.speechSynthesis?.cancel(); }, []);
@@ -272,6 +289,45 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
   const quizMatch = raw.match(/\[QUIZ_START\]\s*([\s\S]*?)\s*\[QUIZ_END\]/);
   const quizJson = quizMatch ? quizMatch[1].trim() : null;
   const quizStreaming = !quizJson && raw.includes('[QUIZ_START]');
+  const quizIsSideScreened = !!quizJson && sideScreenQuizId === quizId;
+  const wasQuizSideScreened = useRef(quizIsSideScreened);
+  const [quizReturning, setQuizReturning] = useState(false);
+  useEffect(() => {
+    let timer;
+    if (wasQuizSideScreened.current && !quizIsSideScreened) {
+      setQuizReturning(true);
+      timer = window.setTimeout(() => setQuizReturning(false), 180);
+    } else if (quizIsSideScreened) {
+      setQuizReturning(false);
+    }
+    wasQuizSideScreened.current = quizIsSideScreened;
+    return () => window.clearTimeout(timer);
+  }, [quizIsSideScreened]);
+  let quizTopic = 'Practice';
+  if (quizJson) {
+    try { quizTopic = JSON.parse(quizJson)?.topic || 'Practice'; } catch { /* rendered quiz handles invalid JSON */ }
+  }
+  const quizView = quizJson ? (
+    <InlineQuiz
+      quizJson={quizJson}
+      answers={quizAnswers}
+      submitted={quizSubmitted}
+      onAnswer={(question, letter) => setQuizAnswers(prev => ({ ...prev, [question]: letter }))}
+      onSubmit={() => setQuizSubmitted(true)}
+      unboxed={quizIsSideScreened}
+    />
+  ) : null;
+
+  // Extract tutor `board` drawing blocks. Each closed ```board ... ``` becomes an
+  // inline figure rendered below the bubble text; an unclosed one (still
+  // streaming) shows a "drawing…" chip. The DSL is stripped from the visible
+  // text so the raw commands never flash. (Only the math tutor emits these.)
+  const boardSrcs = [];
+  const boardRe = /```board[ \t]*\n?([\s\S]*?)```/g;
+  let bm;
+  while ((bm = boardRe.exec(raw))) boardSrcs.push(bm[1]);
+  const lastBoardOpen = raw.lastIndexOf('```board');
+  const boardStreaming = lastBoardOpen >= 0 && raw.indexOf('```', lastBoardOpen + 8) < 0;
 
   let displayContent = raw;
 
@@ -279,6 +335,11 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
   // Also drop an unclosed [LESSON_DONE]{... block so the JSON tail doesn't show up either.
   if (quizStreaming) displayContent = displayContent.replace(/\[QUIZ_START\][\s\S]*$/, '');
   displayContent = displayContent.replace(/\[LESSON_DONE\]\s*\{[^}]*$/g, '');
+
+  // Strip board blocks (closed and any unclosed trailing one) from the bubble text.
+  displayContent = displayContent
+    .replace(/```board[ \t]*\n?[\s\S]*?```/g, '')
+    .replace(/```board[\s\S]*$/g, '');
 
   // Balanced-brace stripper: removes `[LESSON_DONE|LESSON_COMPLETE]` + its
   // trailing JSON even when the JSON has nested braces or is wrapped in a
@@ -325,7 +386,13 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
   displayContent = normalizeMathDelimiters(displayContent);
 
   const artifacts = Array.isArray(message.artifacts) ? message.artifacts : [];
-  if (!displayContent && !quizJson && !artifacts.length && !isStreaming) return null;
+  if (!displayContent && !quizJson && !artifacts.length && !boardSrcs.length && !isStreaming) return null;
+  const quizOnlySideScreened = quizIsSideScreened
+    && !displayContent
+    && !message.thinking
+    && !artifacts.length
+    && !boardSrcs.length
+    && !boardStreaming;
 
   const contentWithCursor = isStreaming ? displayContent + CURSOR : displayContent;
 
@@ -434,7 +501,11 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
   // color. iMessage style: user = blue, AI = gray. Symmetric, no extra
   // chrome (no accent stripes, no header labels).
   return (
-    <div className="flex justify-start mb-3 animate-fade-in">
+    <div className={`justify-start ${
+      quizOnlySideScreened
+        ? 'hidden'
+        : `flex mb-3 ${quizReturning ? 'animate-quiz-fade' : 'animate-fade-in'}`
+    }`}>
       <div className={`max-w-[88%] rounded-2xl rounded-tl-md px-4 py-2.5 shadow-sm backdrop-blur-sm ${
         isError
           ? 'bg-rose-100/70 dark:bg-rose-900/30'
@@ -468,7 +539,36 @@ export default function ChatMessage({ message, isStreaming, canEdit = false, onE
             <span className="text-xs text-gray-600 dark:text-gray-300 font-medium">Generating quiz…</span>
           </div>
         )}
-        {quizJson && <InlineQuiz quizJson={quizJson} />}
+        {quizJson && (
+          <>
+            <div
+              aria-hidden={quizIsSideScreened}
+              inert={quizIsSideScreened ? true : undefined}
+              className={quizIsSideScreened ? 'hidden' : (quizReturning ? 'animate-quiz-fade' : '')}
+            >
+              {quizView}
+              {typeof onSideScreenQuiz === 'function' && (
+                <button
+                  type="button"
+                  onClick={() => onSideScreenQuiz({ id: quizId, title: `Quiz: ${quizTopic}` })}
+                  className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/[0.07] transition-colors"
+                  title="Open quiz in sidescreen"
+                >
+                  <PanelRightOpen size={13} />
+                  Sidescreen
+                </button>
+              )}
+            </div>
+            {quizIsSideScreened && quizSideScreenTarget && createPortal(quizView, quizSideScreenTarget)}
+          </>
+        )}
+        {boardStreaming && !boardSrcs.length && (
+          <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-100 dark:bg-white/[0.06] border border-gray-200 dark:border-white/[0.08]">
+            <span className="inline-block w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" />
+            <span className="text-xs text-gray-600 dark:text-gray-300 font-medium">Drawing on the board…</span>
+          </div>
+        )}
+        {/* Tutor figures render on the Math Tutor canvas, not inline in chat. */}
         {artifacts.length > 0 && <ArtifactCards artifacts={artifacts} />}
         {Array.isArray(message.sources) && message.sources.length > 0 && (
           <Sources sources={message.sources} />

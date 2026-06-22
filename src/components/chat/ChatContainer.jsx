@@ -10,6 +10,10 @@ export default function ChatContainer({
   composerExtras = null,
   composerPrefix = null,
   enableDictation = false,
+  onPreviewFile = null,
+  sideScreenQuizId = null,
+  quizSideScreenTarget = null,
+  onSideScreenQuiz = null,
   hideInput = false,
   editableIndices = null,
   onEditMessage = null,
@@ -18,11 +22,37 @@ export default function ChatContainer({
   emptyState = null,
   // When true, renders flush (no glass-card, no rounded corners) - use for full-page panels
   flush = false,
+  attachmentSlot = null,
 }) {
   const scrollRef = useRef(null);
+  const chatInputRef = useRef(null);
   // Track whether the user has intentionally scrolled up. If so, we stop
   // auto-scrolling so they can read older messages while the AI streams.
   const [stick, setStick] = useState(true);
+
+  // Forward drops on the messages area to ChatInput so the whole panel is a
+  // drop zone, not just the input form.
+  function handleMsgDragOver(e) {
+    if (e.dataTransfer?.types?.includes('Files')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  }
+  function handleMsgDrop(e) {
+    e.preventDefault();
+    const files = e.dataTransfer?.files;
+    if (!files?.length) return;
+    chatInputRef.current?.handleFiles(files);
+    // Call onPreviewFile directly for PDFs — the ref's handleFiles may have a
+    // stale closure that doesn't fire it.
+    if (typeof onPreviewFile === 'function') {
+      for (const f of Array.from(files)) {
+        if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)) {
+          onPreviewFile(f);
+        }
+      }
+    }
+  }
 
   function handleScroll() {
     const el = scrollRef.current;
@@ -64,6 +94,8 @@ export default function ChatContainer({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
+        onDragOver={handleMsgDragOver}
+        onDrop={handleMsgDrop}
         className="flex-1 overflow-y-auto p-4 space-y-1"
       >
         {displayMessages.length === 0 && (
@@ -85,6 +117,10 @@ export default function ChatContainer({
             <ChatMessage
               key={i}
               message={msg}
+              quizId={`quiz-message-${i}`}
+              sideScreenQuizId={sideScreenQuizId}
+              quizSideScreenTarget={quizSideScreenTarget}
+              onSideScreenQuiz={onSideScreenQuiz}
               isStreaming={msg._streaming}
               canEdit={isEditable}
               onEdit={typeof onEditMessage === 'function' ? (newContent) => onEditMessage(i, newContent) : undefined}
@@ -111,6 +147,7 @@ export default function ChatContainer({
       )}
       {!hideInput && (
         <ChatInput
+          ref={chatInputRef}
           onSend={onSend}
           disabled={disabled}
           placeholder={placeholder}
@@ -123,7 +160,9 @@ export default function ChatContainer({
           composerExtras={composerExtras}
           composerPrefix={composerPrefix}
           enableDictation={enableDictation}
+          onPreviewFile={onPreviewFile}
           flush={flush}
+          attachmentSlot={attachmentSlot}
         />
       )}
     </div>

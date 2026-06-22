@@ -43,7 +43,7 @@ const FLEX_APPS = new Set(['notes', 'study', 'debate', 'mathtutor', 'mobileprevi
 // double-pad the layout.
 const FULLBLEED_APPS = new Set(['widgets']);
 
-export default function AppWindow({ appId, meta = {} }) {
+export default function AppWindow({ appId, meta = {}, windowId }) {
   const Component = APP_COMPONENTS[appId];
   const { theme } = useUIPreference();
   // The desktop apps are written dark-first with `text-white/X` and
@@ -57,7 +57,7 @@ export default function AppWindow({ appId, meta = {} }) {
 
   const safe = (
     <ErrorBoundary label={`The ${appId} app crashed`}>
-      <Component {...meta} />
+      <Component windowId={windowId} {...meta} />
     </ErrorBoundary>
   );
 

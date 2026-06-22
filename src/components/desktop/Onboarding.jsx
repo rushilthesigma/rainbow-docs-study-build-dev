@@ -285,11 +285,7 @@ function Tour({ onSkip, onTour, dark }) {
       <div className="mt-8 flex items-center justify-center gap-2.5">
         <button
           onClick={onSkip}
-          className={`px-5 py-2.5 rounded-lg border text-[13.5px] font-semibold transition-colors ${
-            dark
-              ? 'border-white/15 text-white/80 hover:bg-white/[0.08]'
-              : 'border-gray-300 text-gray-700 hover:bg-black/[0.04]'
-          }`}
+          className="px-5 py-2.5 rounded-lg border border-blue-500 text-blue-400 text-[13.5px] font-semibold transition-colors hover:bg-blue-500/10 active:scale-[0.98]"
         >
           Skip
         </button>

@@ -570,6 +570,56 @@ function recordFreeCapUse(user, key) {
   user.data.usage[cap.usageKey].push(Date.now());
 }
 
+// ===== Debate opponent model picker =====
+// Debate has its OWN per-message model toggle (separate from Study Mode), with
+// STRICTER free gating: free accounts may pick ONLY Flash Lite and GPT-5.4 mini
+// (no free Haiku, unlike study). Every other tier matches the study allow-list.
+// Mirrors canUseDebateModel() in src/components/study/DebatePanel.jsx.
+function debateModelAllowed(key, plan) {
+  const m = STUDY_MODELS[key];
+  if (!m) return false;
+  if (plan === 'free') return key === 'flash-lite' || key === 'gpt-5.4-mini';
+  return studyModelAllowed(key, plan);
+}
+
+// Resolve the opponent model a debate request actually gets. Same shape and
+// fallback discipline as resolveStudyModel() but using the debate allow-list:
+// an unaffordable pick drops to Flash Lite, Gemini-only accounts are forced onto
+// Gemini, and the shared capped-model windows (Haiku) still apply for non-paid.
+function resolveDebateModel(requested, user, email) {
+  const plan = getPlan(user, email);
+  let key = STUDY_MODELS[requested] ? requested : FALLBACK_STUDY_MODEL;
+  let switched = false, reason = null;
+  if (!debateModelAllowed(key, plan)) { key = FALLBACK_STUDY_MODEL; switched = true; reason = 'plan'; }
+
+  if (isGeminiOnly(email) && STUDY_MODELS[key]?.provider !== 'gemini') {
+    const geminiModels = ['gemini-pro', 'flash', 'flash-lite'];
+    key = geminiModels.find(k => debateModelAllowed(k, plan)) || FALLBACK_STUDY_MODEL;
+    switched = true; reason = 'gemini-only';
+  }
+
+  let haikuRemaining = null;
+  const paid = PAID_TIERS.has(plan);
+  const cap = freeCapConfig(key);
+  if (cap && !paid) {
+    const limit = cap.freeDailyLimit;
+    const lockedUntil = user?.data?.usage?.[cap.lockKey] || 0;
+    if (lockedUntil > Date.now()) {
+      key = HAIKU_LIMIT_FALLBACK; switched = true; reason = 'haiku-limit'; haikuRemaining = 0;
+    } else {
+      const used = rollingCapUsage(user, cap.usageKey);
+      haikuRemaining = Math.max(0, limit - used);
+      if (used >= limit) {
+        if (user?.data) { ensureUsageBucket(user); user.data.usage[cap.lockKey] = nextMidnightUTC(); }
+        key = HAIKU_LIMIT_FALLBACK; switched = true; reason = 'haiku-limit'; haikuRemaining = 0;
+      }
+    }
+  }
+
+  const m = STUDY_MODELS[key];
+  return { key, id: m.id, provider: m.provider, switched, reason, haikuRemaining };
+}
+
 // Daily limits are a ROLLING 24h window. Instead of a midnight reset,
 // every message + QB game gets timestamped and we count entries inside
 // the trailing window. Weekly limits (curricula / debates) still reset
@@ -2790,6 +2840,59 @@ app.post('/api/debate/start', authMiddleware, (req, res) => {
     }
     saveUsers(users);
     res.json({ ok: true, remaining: quota.remaining, limit: quota.limit });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Debate opponent chat. Like /api/chat (non-streaming, consumes the daily
+// message bucket) but honors a chosen opponent `model` with debate plan-gating.
+// `sourced` (web search) is Gemini-only, so in source mode we run the user's
+// Gemini tier and skip the picker — exactly how Study Mode behaves. callGemini
+// auto-routes the resolved id to Claude/OpenAI when web search is off.
+app.post('/api/debate/chat', authMiddleware, async (req, res) => {
+  try {
+    const { messages, system, max_tokens, sourced, model } = req.body;
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const cost = sourced ? 2 : 1;
+    const quota = consumeMessage(users, email, cost);
+    if (!quota.allowed) {
+      const upgradeKind = quota.plan === 'free' ? 'refer' : 'upgrade';
+      const upgradeHint = upgradeKind === 'refer'
+        ? 'Refer 2 friends to unlock Plus-Lite (free) for higher limits.'
+        : 'Upgrade to the next plan for more daily messages.';
+      return res.status(402).json({
+        error: 'message_limit_reached',
+        message: `You've hit today's message limit (${quota.limit}). ${upgradeHint}`,
+        limit: quota.limit, remaining: quota.remaining, plan: quota.plan, upgradeKind,
+      });
+    }
+    const systemPrompt = system || 'You are a sharp debate opponent.';
+    let modelId, studyMeta = null, billKey = null;
+    if (sourced) {
+      // Web search forces the Gemini tier; the picker is a no-op this turn.
+      modelId = modelForUser(users[email], email, { stream: true });
+    } else {
+      const r = resolveDebateModel(model, users[email], email);
+      modelId = r.id;
+      studyMeta = { key: r.key, switched: r.switched, reason: r.reason, haikuRemaining: r.haikuRemaining };
+      const cap = freeCapConfig(r.key);
+      if (cap && !PAID_TIERS.has(getPlan(users[email], email))) billKey = r.key;
+    }
+    saveUsers(users);
+    const result = await callGemini(systemPrompt, messages, modelId, max_tokens || 4096, {
+      enableWebSearch: !!sourced,
+    });
+    if (!result.success) return res.status(result.status || 500).json({ error: result.error });
+    // Bill the capped free model only on a completed turn, then report the
+    // post-send count so the client's cap pill reflects the deduction.
+    if (billKey) {
+      recordFreeCapUse(users[email], billKey);
+      saveUsers(users);
+      if (studyMeta) studyMeta.haikuRemaining = Math.max(0, (studyMeta.haikuRemaining ?? HAIKU_FREE_DAILY) - 1);
+    }
+    return res.json({ ...result.data, studyModel: studyMeta });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -5824,9 +5927,13 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
         studentId: activeChildIdSC,
       };
       users[email].data.studySessions.unshift(session);
-    } else if (context && (context.curriculumId !== undefined || context.sources !== undefined)) {
-      // Mid-session context updates: caller flipped on curriculum
-      // integration or attached sources after the session started.
+    } else if (context && (
+      context.curriculumId !== undefined
+      || context.sources !== undefined
+      || context.liveMathCanvas !== undefined
+    )) {
+      // Mid-session context updates: curriculum, attached sources, and the
+      // current-turn live math-canvas signal.
       // Merge into the persisted context so subsequent turns inherit it.
       session.context = { ...(session.context || {}), ...context };
     }
@@ -10894,6 +11001,7 @@ app.post('/api/math-tutor/chat', authMiddleware, requireMessageQuota, async (req
       users[email].data.preferences,
       users[email].data.assessmentHistory || [],
       validPhase,
+      !!req.body?.draw,
     );
 
     // Attach any images sent this turn to the last user message.

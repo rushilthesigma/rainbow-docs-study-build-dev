@@ -1115,6 +1115,9 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
             <Wand2 size={14} /> AI
           </Button>
           <Button size="sm" onClick={() => setView('create')}><Plus size={14} /> New</Button>
+          <Button size="sm" variant="secondary" onClick={handleCreateMap} disabled={creatingMap || maps.length >= 20}>
+            <Plus size={12} /> New map
+          </Button>
         </div>
       </div>
 
@@ -1124,9 +1127,6 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
           <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 flex items-center gap-1.5">
             <Network size={12} /> Maps
           </h3>
-          <Button size="sm" variant="secondary" onClick={handleCreateMap} disabled={creatingMap || maps.length >= 20}>
-            <Plus size={12} /> New map
-          </Button>
         </div>
         {mapsLoading && maps.length === 0 ? (
           <div className="text-[11px] text-white/30 italic px-1">Loading maps…</div>
@@ -1176,11 +1176,6 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
                 )}
               </div>
             ))}
-            {maps.length === 0 && !mapsLoading && (
-              <div className="col-span-full text-[11px] text-white/30 italic px-1">
-                No maps yet - click <span className="font-semibold text-white/55">New map</span> to start one.
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -1222,9 +1217,6 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
             >
               Unfiled <span className="text-white/35">{unfiled}</span>
             </button>
-          )}
-          {topics.length === 0 && (
-            <span className="text-[11px] text-white/30 italic px-1 py-1">No topics yet — make one to group your notes.</span>
           )}
         </div>
       </div>

@@ -1,17 +1,21 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { History, Trash2, Plus, ChevronLeft, ChevronDown, Compass, Lightbulb, Calculator, Beaker, Sparkles, Swords, BookOpen, Link2, X, Check, Paperclip, Globe, Cpu, Lock } from 'lucide-react';
+import { History, Trash2, Plus, ChevronLeft, ChevronDown, Compass, Lightbulb, Calculator, Beaker, Sparkles, Swords, BookOpen, Link2, X, Check, Paperclip, Globe, Cpu, Lock, PanelRightOpen } from 'lucide-react';
 import { sendStudyMessage, listStudySessions, getStudySession, deleteStudySession, listCurricula, extractSourceUrl, extractFiles } from '../../api/curriculum';
 import { syncData } from '../../api/auth';
 import ChatContainer from '../chat/ChatContainer';
 import DebatePanel from './DebatePanel';
+import PdfPreviewPane from './PdfPreviewPane';
+import QuizPreviewPane from './QuizPreviewPane';
+import MathTutorPreviewPane from './MathTutorPreviewPane';
 import { errorChatMessage } from '../../utils/aiErrors';
 import { InlineProgress } from '../shared/ProgressBar';
 import { Z } from '../../styles/tokens';
 import { useToast } from '../shared/Toast';
 import { useAuth } from '../../context/AuthContext';
+import { useWindowManagerOptional } from '../../context/WindowManagerContext';
 import { planFromUser } from '../billing/modelAccess';
-import { STUDY_MODELS, resolveStudyModel, canUseStudyModel, requiredPlanLabelFor, studyModelLabel, studyModelHasFreeCap, studyModelDailyCap, studyModelBlurb, studyModelSupportsThinking, isGeminiOnlyEmail, visibleStudyModels, resolveGeminiOnlyModel } from './studyModels';
+import { STUDY_MODELS, resolveStudyModel, canUseStudyModel, requiredPlanLabelFor, studyModelLabel, studyModelHasFreeCap, studyModelDailyCap, studyModelSupportsThinking, isGeminiOnlyEmail, visibleStudyModels, resolveGeminiOnlyModel } from './studyModels';
 import VoiceMenu from './voice/VoiceMenu';
 import { useSpeechSynthesis, speechSynthesisSupported } from '../../hooks/useSpeechSynthesis';
 import { speechRecognitionSupported } from '../../hooks/useSpeechRecognition';
@@ -28,7 +32,10 @@ const QUICK_PROMPTS = [
   { icon: Compass,    label: 'What\'s a good thing to study right now?', prompt: 'What should I work on right now?' },
 ];
 
-export default function StudyModePanel({ className = '', flush = false, initialMessage, initialSources }) {
+const MATH_CANVAS_WIDTH = 460;
+const MATH_CANVAS_MIN_WIDTH = 360;
+
+export default function StudyModePanel({ className = '', flush = false, initialMessage, initialSources, windowId }) {
   const toast = useToast();
   // Thinking toggle: only models that support thinking show the Brain button.
   // Pro always thinks (locked on); Flash / Flash-Lite default off for snappy
@@ -102,6 +109,220 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   sourcesRef.current = sources;
   const [showCurriculumPicker, setShowCurriculumPicker] = useState(false);
   const [showSourcesSheet, setShowSourcesSheet] = useState(false);
+
+  // ===== Side PDF preview (Claude-style) — as a window EXTENSION =====
+  // PDFs pasted/dropped/attached in the composer open in a dedicated pane on the
+  // right. Instead of splitting the existing chat width, we WIDEN the Study
+  // window to the right by the pane's width, so the chat keeps its size and the
+  // PDF gets its own UI; the window is restored when the last PDF closes. Each
+  // entry is { id, name, url } (blob URL, revoked on close/unmount). The pane is
+  // visual-only — the AI still reads the PDF via /api/files/extract.
+  const wm = useWindowManagerOptional();
+  const [previewDocs, setPreviewDocs] = useState([]);
+  const previewDocsRef = useRef([]);
+  previewDocsRef.current = previewDocs;
+  const [activePreviewId, setActivePreviewId] = useState(null);
+  // Collapsed = PDFs stay loaded, but the pane is hidden and the window shrunk
+  // back; a toggle at the window's top-right brings it back. Distinct from
+  // closing a PDF (which removes it entirely).
+  const [previewCollapsed, setPreviewCollapsed] = useState(false);
+  const [previewWidth, setPreviewWidth] = useState(480);
+  const [sideScreenQuiz, setSideScreenQuiz] = useState(null);
+  const [quizSideScreenTarget, setQuizSideScreenTarget] = useState(null);
+  const [mathTutorSideScreen, setMathTutorSideScreen] = useState(false);
+  const mathTutorSideScreenRef = useRef(false);
+  mathTutorSideScreenRef.current = mathTutorSideScreen;
+  const [mathCanvasStrokes, setMathCanvasStrokes] = useState([]);
+  const [canvasSnapshot, setCanvasSnapshot] = useState(null);
+  const mathCanvasRef = useRef(null);
+  const handleMathCanvasReady = useCallback((api) => {
+    mathCanvasRef.current = api;
+  }, []);
+  const handleMathCanvasStrokesChange = useCallback((strokes) => {
+    setMathCanvasStrokes(strokes);
+    if (strokes.length === 0) {
+      setCanvasSnapshot(null);
+    } else {
+      const snap = mathCanvasRef.current?.capture?.();
+      if (snap) setCanvasSnapshot(snap);
+    }
+  }, []);
+  const splitRef = useRef(null);
+  const resizingRef = useRef(false);
+  const resizeStartRef = useRef(null);
+  const openingPreviewIds = useRef(new Set());
+  // Whether the window has been widened for the preview (null when not running
+  // inside a desktop window — then we fall back to an in-place split).
+  const baseWinRef = useRef(null);
+
+  // The live, resizable window this panel lives in (null in the mobile/classic
+  // shells, or when maximized/fixed-size — both fall back to splitting).
+  function liveWindow() {
+    if (!wm || !windowId) return null;
+    const win = wm.state.windows[windowId];
+    if (!win || win.isMaximized || win.fixedSize) return null;
+    return win;
+  }
+  // Grow the window so content width = base + desiredPaneW, clamped to the
+  // viewport. Returns the pane width actually achieved so the fixed-width pane
+  // never overflows a window that couldn't grow far enough.
+  function applyWindowWidth(desiredPaneW) {
+    const win = liveWindow();
+    if (!win || !baseWinRef.current) return desiredPaneW;
+    const PAD = 8;
+    const vw = window.innerWidth;
+    const targetW = Math.min(baseWinRef.current.w + desiredPaneW, vw - 2 * PAD);
+    let x = win.position.x;
+    if (x + targetW > vw - PAD) x = Math.max(PAD, vw - PAD - targetW);
+    wm.resizeWindow(windowId, { w: targetW, h: win.size.h }, { x, y: win.position.y });
+    return Math.max(0, targetW - baseWinRef.current.w);
+  }
+  // Shrink the window back by the current pane width (respects any manual
+  // resize the user did while the PDF was open).
+  function restoreWindowWidth() {
+    const hadBase = baseWinRef.current;
+    baseWinRef.current = null;
+    const win = liveWindow();
+    if (!hadBase || !win) return;
+    const targetW = Math.max(400, win.size.w - previewWidth);
+    wm.resizeWindow(windowId, { w: targetW, h: win.size.h }, { x: win.position.x, y: win.position.y });
+  }
+  // Extend the window to the right by the pane width (recording the pre-extend
+  // size so we can restore it). No-op outside a desktop window.
+  function extendWindowForPreview(desiredPaneW = previewWidth) {
+    const win = liveWindow();
+    if (!win) {
+      if (desiredPaneW !== previewWidth) setPreviewWidth(desiredPaneW);
+      return;
+    }
+    if (baseWinRef.current) return;
+    baseWinRef.current = { w: win.size.w, x: win.position.x };
+    const achieved = applyWindowWidth(desiredPaneW);
+    if (achieved !== previewWidth) setPreviewWidth(achieved);
+  }
+  // Hide/show the pane without unloading the PDFs, resizing the window to match.
+  function setPreviewCollapsedAndResize(next) {
+    setPreviewCollapsed(next);
+    if (next) restoreWindowWidth();
+    else extendWindowForPreview();
+  }
+
+  function openQuizSideScreen(quiz) {
+    const paneIsVisible = mathTutorSideScreen || !!sideScreenQuiz || (previewDocsRef.current.length > 0 && !previewCollapsed);
+    if (!paneIsVisible) extendWindowForPreview();
+    setMathTutorSideScreen(false);
+    setSideScreenQuiz(quiz);
+  }
+
+  function collapseQuizSideScreen() {
+    setSideScreenQuiz(null);
+    setQuizSideScreenTarget(null);
+    if (previewDocsRef.current.length === 0 || previewCollapsed) restoreWindowWidth();
+  }
+
+  function openMathTutorSideScreen() {
+    const paneIsVisible = mathTutorSideScreen || !!sideScreenQuiz || (previewDocsRef.current.length > 0 && !previewCollapsed);
+    const splitMax = splitRef.current
+      ? Math.max(320, splitRef.current.getBoundingClientRect().width - 360)
+      : MATH_CANVAS_WIDTH;
+    const desiredWidth = liveWindow()
+      ? MATH_CANVAS_WIDTH
+      : Math.min(MATH_CANVAS_WIDTH, splitMax);
+    if (!paneIsVisible) {
+      extendWindowForPreview(desiredWidth);
+    } else if (baseWinRef.current) {
+      setPreviewWidth(applyWindowWidth(desiredWidth));
+    } else {
+      setPreviewWidth(desiredWidth);
+    }
+    setSideScreenQuiz(null);
+    setQuizSideScreenTarget(null);
+    setMathTutorSideScreen(true);
+  }
+
+  function collapseMathTutorSideScreen() {
+    setMathTutorSideScreen(false);
+    setCanvasSnapshot(null);
+    if (previewDocsRef.current.length === 0 || previewCollapsed) restoreWindowWidth();
+  }
+
+  function showPdfSideScreen() {
+    const paneIsVisible = mathTutorSideScreen || !!sideScreenQuiz || (previewDocsRef.current.length > 0 && !previewCollapsed);
+    if (!paneIsVisible) extendWindowForPreview();
+    setMathTutorSideScreen(false);
+    setSideScreenQuiz(null);
+    setQuizSideScreenTarget(null);
+    setPreviewCollapsed(false);
+  }
+
+  function openPdfPreview(file) {
+    if (!file) return;
+    const id = `${file.name}::${file.size}::${file.lastModified}`;
+    if (previewDocsRef.current.some(d => d.id === id)) { setActivePreviewId(id); return; }
+    if (openingPreviewIds.current.has(id)) return;
+    openingPreviewIds.current.add(id);
+    const paneIsVisible = mathTutorSideScreen || !!sideScreenQuiz || (previewDocsRef.current.length > 0 && !previewCollapsed);
+    // First visible side pane: extend the window to the right rather than
+    // squeezing the chat. A new PDF also becomes the active side-screen tool.
+    if (!paneIsVisible) extendWindowForPreview();
+    setMathTutorSideScreen(false);
+    setSideScreenQuiz(null);
+    setQuizSideScreenTarget(null);
+    setPreviewCollapsed(false); // a freshly added PDF always shows
+    const url = URL.createObjectURL(file);
+    setPreviewDocs(prev => {
+      openingPreviewIds.current.delete(id);
+      if (prev.some(d => d.id === id)) { URL.revokeObjectURL(url); return prev; }
+      return [...prev, { id, name: file.name, url }];
+    });
+    setActivePreviewId(id);
+  }
+  function closePdfPreview(id) {
+    const doc = previewDocsRef.current.find(d => d.id === id);
+    if (doc) URL.revokeObjectURL(doc.url);
+    const remaining = previewDocsRef.current.filter(d => d.id !== id);
+    setPreviewDocs(remaining);
+    setActivePreviewId(cur => (cur === id ? (remaining[remaining.length - 1]?.id ?? null) : cur));
+    if (remaining.length === 0) { restoreWindowWidth(); setPreviewCollapsed(false); }
+  }
+  // Drag-to-resize the divider. Inside a desktop window we grow/shrink the
+  // WINDOW (keeping the chat fixed); outside one we split the panel in place.
+  function handleResizeMove(e) {
+    if (!resizingRef.current) return;
+    if (baseWinRef.current && resizeStartRef.current) {
+      const start = resizeStartRef.current;
+      const dx = start.x - e.clientX; // drag left → wider PDF pane
+      const min = mathTutorSideScreen ? MATH_CANVAS_MIN_WIDTH : 320;
+      const desired = Math.min(Math.max(start.paneW + dx, min), 1100);
+      setPreviewWidth(applyWindowWidth(desired));
+    } else if (splitRef.current) {
+      const rect = splitRef.current.getBoundingClientRect();
+      const max = Math.max(300, rect.width - 360);
+      const min = mathTutorSideScreen ? Math.min(MATH_CANVAS_MIN_WIDTH, max) : 300;
+      setPreviewWidth(Math.min(Math.max(rect.right - e.clientX, min), max));
+    }
+  }
+  function endResize() {
+    resizingRef.current = false;
+    resizeStartRef.current = null;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    window.removeEventListener('mousemove', handleResizeMove);
+    window.removeEventListener('mouseup', endResize);
+  }
+  function startResize(e) {
+    e.preventDefault();
+    resizingRef.current = true;
+    resizeStartRef.current = { x: e.clientX, paneW: previewWidth };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', handleResizeMove);
+    window.addEventListener('mouseup', endResize);
+  }
+  // Free blob URLs if the panel unmounts with PDFs still open.
+  useEffect(() => () => {
+    for (const d of previewDocsRef.current) URL.revokeObjectURL(d.url);
+  }, []);
   const abortRef = useRef(null);
   const streamContentRef = useRef('');
   const streamThinkingRef = useRef('');
@@ -136,9 +357,23 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   function doSend(text, opts = {}) {
     synth.cancel();
     const wasSourced = !!(opts.sourced ?? sourceModeRef.current);
-    const images = opts.images || [];
+    const attachedImages = opts.images || [];
+    // Read the live ref instead of a render-captured value so opening the
+    // canvas immediately affects every send, including memoized send handlers.
+    const canvasApi = mathTutorSideScreenRef.current ? mathCanvasRef.current : null;
+    const canvasDataUrl = canvasApi && !canvasApi.isEmpty?.()
+      ? canvasApi.capture?.()
+      : null;
+    const canvasImage = canvasDataUrl
+      ? { dataUrl: canvasDataUrl, mimeType: 'image/png', name: 'Live math canvas' }
+      : null;
+    // Keep the live canvas invisible in the user bubble while still sending it
+    // as current-turn visual context. Preserve the API's four-image budget.
+    const images = canvasImage
+      ? [...attachedImages.slice(0, 3), canvasImage]
+      : attachedImages;
     const userMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
-    if (images.length) userMsg.images = images.map(i => ({ dataUrl: i.dataUrl, name: i.name }));
+    if (attachedImages.length) userMsg.images = attachedImages.map(i => ({ dataUrl: i.dataUrl, name: i.name }));
     // Used by the AI-instruct regenerate flow: hide the hidden-instruction
     // user turn from the visible transcript while still sending it to the API.
     if (!opts.hideUserInDisplay) setMessages(prev => [...prev, userMsg]);
@@ -157,6 +392,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
     // about. `sources` already contains extracted text from /api/files
     // /extract-url so the server doesn't have to re-fetch.
     const ctx = {};
+    ctx.liveMathCanvas = !!canvasImage;
     if (linkedCurriculumId) ctx.curriculumId = linkedCurriculumId;
     const currentSources = sourcesRef.current;
     if (currentSources.length) {
@@ -424,6 +660,19 @@ export default function StudyModePanel({ className = '', flush = false, initialM
       <span className="text-[13px] font-bold text-gray-900 dark:text-white">Study</span>
       <div className="flex-1" />
       <button
+        type="button"
+        onClick={mathTutorSideScreen ? collapseMathTutorSideScreen : openMathTutorSideScreen}
+        title={mathTutorSideScreen ? 'Close Math Tutor side screen' : 'Open Math Tutor in side screen'}
+        aria-label={mathTutorSideScreen ? 'Close Math Tutor side screen' : 'Open Math Tutor in side screen'}
+        className={`p-1.5 rounded-lg transition-colors ${
+          mathTutorSideScreen
+            ? 'text-blue-400 bg-blue-500/20 ring-1 ring-blue-500/30'
+            : 'text-white/70 hover:text-white hover:bg-white/[0.15]'
+        }`}
+      >
+        <Calculator size={14} />
+      </button>
+      <button
         onClick={() => setShowCurriculumPicker(true)}
         title="Integrate with a curriculum"
         className={`p-1.5 rounded-lg transition-colors ${linkedCurriculumId ? 'text-white bg-white/20' : 'text-white/70 hover:text-white hover:bg-white/[0.15]'}`}
@@ -452,6 +701,18 @@ export default function StudyModePanel({ className = '', flush = false, initialM
           className="p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/[0.15] transition-colors"
         >
           <Plus size={14} />
+        </button>
+      )}
+      {/* Show-PDF toggle: appears at the window's top-right whenever a PDF is
+          loaded but the pane has been collapsed, so the preview can be reopened. */}
+      {previewDocs.length > 0 && (previewCollapsed || mathTutorSideScreen || !!sideScreenQuiz) && (
+        <button
+          onClick={showPdfSideScreen}
+          title="Show PDF"
+          aria-label="Show PDF side screen"
+          className="p-1.5 rounded-lg text-white bg-white/20 hover:bg-white/30 transition-colors"
+        >
+          <PanelRightOpen size={14} />
         </button>
       )}
     </div>
@@ -513,6 +774,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
 
   return (
     <>
+      <div ref={splitRef} className={`flex flex-row min-h-0 ${className}`}>
       <ChatContainer
         messages={messages}
         streamingContent={streamingContent}
@@ -524,7 +786,11 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         disabled={streaming}
         placeholder={streaming ? 'AI is thinking...' : 'Message...'}
         header={header}
-        className={className}
+        className="flex-1 min-w-0 min-h-0"
+        onPreviewFile={openPdfPreview}
+        sideScreenQuizId={sideScreenQuiz?.id || null}
+        quizSideScreenTarget={quizSideScreenTarget}
+        onSideScreenQuiz={openQuizSideScreen}
         sourceMode={sourceMode}
         onToggleSource={setSourceMode}
         showThinking={studyModelSupportsThinking(studyModel)}
@@ -566,7 +832,55 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         emptyState={emptyState}
         enableDictation={speechRecognitionSupported}
         flush={flush}
+        attachmentSlot={mathTutorSideScreen && canvasSnapshot ? (
+          <div className="flex items-center gap-2 px-3 pt-2.5">
+            <div className="w-[68px] h-10 rounded overflow-hidden bg-[#0c1322] border border-blue-400/25 flex-shrink-0">
+              <img src={canvasSnapshot} alt="Canvas preview" className="w-full h-full object-contain" />
+            </div>
+            <span className="text-[11px] text-blue-400 font-medium flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse flex-shrink-0" />
+              Canvas attached
+            </span>
+          </div>
+        ) : null}
       />
+      {(mathTutorSideScreen || sideScreenQuiz || (previewDocs.length > 0 && !previewCollapsed)) && (
+        <>
+          <div
+            onMouseDown={startResize}
+            title="Drag to resize"
+            className="w-1.5 flex-shrink-0 cursor-col-resize relative group"
+          >
+            <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-gray-200 dark:bg-white/[0.08] group-hover:bg-blue-400/60 group-active:bg-blue-400" />
+          </div>
+          {mathTutorSideScreen ? (
+            <MathTutorPreviewPane
+              onCollapse={collapseMathTutorSideScreen}
+              width={previewWidth}
+              initialStrokes={mathCanvasStrokes}
+              onStrokesChange={handleMathCanvasStrokesChange}
+              onCaptureReady={handleMathCanvasReady}
+            />
+          ) : sideScreenQuiz ? (
+            <QuizPreviewPane
+              title={sideScreenQuiz.title}
+              onCollapse={collapseQuizSideScreen}
+              width={previewWidth}
+              setPortalTarget={setQuizSideScreenTarget}
+            />
+          ) : (
+            <PdfPreviewPane
+              docs={previewDocs}
+              activeId={activePreviewId}
+              onSelect={setActivePreviewId}
+              onClose={closePdfPreview}
+              onCollapse={() => setPreviewCollapsedAndResize(true)}
+              width={previewWidth}
+            />
+          )}
+        </>
+      )}
+      </div>
       {showCurriculumPicker && (
         <CurriculumPickerModal
           activeId={linkedCurriculumId}
@@ -732,7 +1046,6 @@ function StudyModelDropdown({ active, plan, email, onPick, disabled }) {
                       </span>
                     )}
                   </p>
-                  <p className="text-[10px] text-gray-500 dark:text-white/45 truncate">{studyModelBlurb(m.key, plan)}</p>
                 </div>
                 {active === m.key && <Check size={13} className="text-gray-500 dark:text-white/80 shrink-0" strokeWidth={3} />}
               </button>

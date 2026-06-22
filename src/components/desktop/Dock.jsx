@@ -3,6 +3,7 @@ import APP_REGISTRY from './appRegistry';
 import { useWindowManager } from '../../context/WindowManagerContext';
 import { useUIPreference } from '../../context/UIPreferenceContext';
 import { checkAdmin } from '../../api/admin';
+import Modal from '../shared/Modal';
 import { Z } from '../../styles/tokens';
 
 
@@ -115,12 +116,13 @@ function DockIcon({ app, mouseX, isOpen, isActive, onClick, size, iconStyle }) {
 }
 
 export default function Dock(_props) {
-  const { state, openApp, restoreWindow, focusWindow } = useWindowManager();
+  const { state, openApp } = useWindowManager();
   const { dockSize, iconStyle, theme } = useUIPreference();
   const dark = theme !== 'light';
   const size = DOCK_SIZES[dockSize] || 50;
 
   const [isAdmin, setIsAdmin] = useState(false);
+  const [pendingApp, setPendingApp] = useState(null);
   // Cursor x-position, tracked while the pointer is inside the dock.
   // Each DockIcon reads this on every render to compute its scale -
   // when null (mouse left the dock) every icon snaps back to base size.
@@ -139,10 +141,20 @@ export default function Dock(_props) {
   const activeAppId = state.activeWindowId ? state.windows[state.activeWindowId]?.appId : null;
 
   function handleIconClick(app) {
-    const existing = Object.values(state.windows).find(w => w.appId === app.id);
-    if (existing?.isMinimized) restoreWindow(existing.id);
-    else if (existing) focusWindow(existing.id);
-    else openApp(app.id, app.label, true);
+    const alreadyOpen = Object.values(state.windows).some(
+      w => w.appId === app.id && !w.isClosing
+    );
+    if (alreadyOpen) {
+      setPendingApp(app);
+      return;
+    }
+    openApp(app.id, app.label);
+  }
+
+  function confirmNewInstance() {
+    if (!pendingApp) return;
+    openApp(pendingApp.id, pendingApp.label);
+    setPendingApp(null);
   }
 
   return (
@@ -203,6 +215,39 @@ export default function Dock(_props) {
         ))}
 
       </div>
+
+      <Modal
+        open={!!pendingApp}
+        onClose={() => setPendingApp(null)}
+        title="Open another window?"
+        closeOnOverlay
+        size="sm"
+      >
+        {pendingApp && (
+          <div className="font-sans">
+            <p className="text-[13px] leading-5 text-gray-600 dark:text-white/55">
+              {pendingApp.label} is already open. Would you like to open another window?
+            </p>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingApp(null)}
+                className="h-9 px-3.5 rounded-lg text-[12px] font-semibold text-gray-600 dark:text-white/55 hover:bg-gray-100 dark:hover:bg-white/[0.06] transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmNewInstance}
+                className="h-9 px-3.5 rounded-lg bg-blue-500 hover:bg-blue-400 text-[12px] font-semibold text-white transition-colors"
+              >
+                Open Window
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </>
   );
 }

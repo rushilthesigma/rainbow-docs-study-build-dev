@@ -1,7 +1,7 @@
 import { useSearchParams, useLocation } from 'react-router-dom';
 import StudyModePanel from '../components/study/StudyModePanel';
 
-export default function StudyPage({ initialMessage: propMsg, initialSources: propSources }) {
+export default function StudyPage({ initialMessage: propMsg, initialSources: propSources, windowId }) {
   const [searchParams] = useSearchParams();
   const location = useLocation();
   // Two paths into this page seed it with data:
@@ -18,6 +18,7 @@ export default function StudyPage({ initialMessage: propMsg, initialSources: pro
       <StudyModePanel
         className="flex-1 min-h-0"
         flush
+        windowId={windowId}
         initialMessage={initialMessage}
         initialSources={initialSources}
       />

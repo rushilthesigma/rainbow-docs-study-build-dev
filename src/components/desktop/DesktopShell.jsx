@@ -77,7 +77,7 @@ function MacOSContent() {
           removeWindow={removeWindow} maximizeWindow={maximizeWindow}
           closeWindow={closeWindow} minimizeWindow={minimizeWindow}
         >
-          <AppWindow appId={win.appId} meta={win.meta} />
+          <AppWindow appId={win.appId} meta={win.meta} windowId={win.id} />
         </Window>
       ))}
       {/* Both the dock and the menu bar hide when a window is maximized

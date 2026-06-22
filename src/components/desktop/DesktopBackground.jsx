@@ -6,6 +6,9 @@ function isDark() {
 }
 
 export const WALLPAPERS = {
+  // ===== Default (matches landing page) =====
+  milkyway:   { label: 'Milky Way',        type: 'image', url: 'https://images.unsplash.com/photo-1509773896068-7fd415d91e2e?w=3840&q=80' },
+
   // ===== Landscapes =====
   lavender:  { label: 'Lavender Fields',   type: 'image', url: 'https://images.unsplash.com/photo-1499002238440-d264edd596ec?w=3840&q=80' },
   forest:    { label: 'Redwood Forest',    type: 'image', url: 'https://images.unsplash.com/photo-1448375240586-882707db888b?w=3840&q=80' },
@@ -23,7 +26,6 @@ export const WALLPAPERS = {
 
   // ===== Space =====
   galaxy:     { label: 'Galaxy',           type: 'image', url: 'https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=3840&q=80' },
-  milkyway:   { label: 'Milky Way',        type: 'image', url: 'https://images.unsplash.com/photo-1509773896068-7fd415d91e2e?w=3840&q=80' },
   cosmos:     { label: 'Cosmos',           type: 'image', url: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=3840&q=80' },
   earthnight: { label: 'Earth at Night',   type: 'image', url: 'https://images.unsplash.com/photo-1446776811953-b23d57bd21aa?w=3840&q=80' },
   nebula:     { label: 'Nebula',           type: 'image', url: 'https://images.unsplash.com/photo-1462332420958-a05d1e002413?w=3840&q=80' },

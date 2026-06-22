@@ -87,11 +87,7 @@ export default function SharedWithMeView({ className = '', onOpen = null }) {
         </ul>
       )}
 
-      {accepted.length === 0 && pending.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-gray-300 dark:border-white/[0.08] px-4 py-6 text-center text-sm text-gray-400 dark:text-white/30 italic">
-          Nothing has been shared with you yet.
-        </div>
-      ) : accepted.length > 0 && (
+      {accepted.length > 0 && (
         <ul className="flex flex-col gap-1.5">
           {accepted.map(s => {
             const meta = TYPE_META[s.itemType] || TYPE_META.note;

@@ -7,7 +7,7 @@ import { Z } from '../../styles/tokens';
 import useKeyboardInset from '../../hooks/useKeyboardInset';
 import { useAuth } from '../../context/AuthContext';
 import { planFromUser } from '../billing/modelAccess';
-import { STUDY_MODELS, HAIKU_FREE_DAILY, resolveStudyModel, canUseStudyModel, requiredPlanLabelFor, studyModelLabel, studyModelHasFreeCap, studyModelBlurb } from '../study/studyModels';
+import { STUDY_MODELS, HAIKU_FREE_DAILY, resolveStudyModel, canUseStudyModel, requiredPlanLabelFor, studyModelLabel, studyModelHasFreeCap } from '../study/studyModels';
 
 // Mobile-native Study Mode: full-bleed chat, slim title, no Debate
 // button (head-to-head needs a wider canvas), no sidebar. The empty
@@ -329,7 +329,6 @@ function ModelSheet({ active, plan, onClose, onPick }) {
                         </span>
                       )}
                     </p>
-                    <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">{studyModelBlurb(m.key, plan)}</p>
                   </div>
                   {active === m.key && <Check size={16} className="text-blue-500 shrink-0" strokeWidth={3} />}
                 </button>

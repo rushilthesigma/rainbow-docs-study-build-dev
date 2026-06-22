@@ -1,11 +1,13 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Calculator, Pen, Eraser, Undo2, Trash2, Check,
   ArrowLeft, ClipboardCheck, Settings, MessageSquare, Layers, RotateCcw,
-  Play, ChevronLeft, ChevronRight, ListChecks, Cpu, ChevronDown, Lock,
+  Play, ChevronLeft, ChevronRight, ListChecks, Cpu, ChevronDown, Lock, Shapes,
 } from 'lucide-react';
 import { sendMathTutorMessage, generateProblemSet } from '../../../api/mathTutor';
+import { parseBoard } from '../../../utils/boardDSL';
+import { synthBoard } from '../../../utils/strokeSynth';
 import MathProblemSet from './MathProblemSet';
 import ChatContainer from '../../chat/ChatContainer';
 import { errorChatMessage } from '../../../utils/aiErrors';
@@ -51,7 +53,12 @@ function saveState(s) {
 // re-rendered and animated back ("replay your work"). `initialStrokes` seeds
 // the canvas with persisted work (remount per problem via `key`);
 // `onStrokesChange` reports the live stroke list so the parent can persist it.
-export function TutorCanvas({ onCaptureReady, initialStrokes = null, onStrokesChange = null }) {
+export function TutorCanvas({
+  onCaptureReady,
+  initialStrokes = null,
+  onStrokesChange = null,
+  hint = 'Draw · tap "Get feedback" to share with tutor',
+}) {
   const canvasRef = useRef(null);
   const ctxRef    = useRef(null);
   const [tool, setTool]       = useState('pen');
@@ -63,6 +70,14 @@ export function TutorCanvas({ onCaptureReady, initialStrokes = null, onStrokesCh
   );
   const currentStrokeRef = useRef([]);
   const animRef          = useRef(null);
+  // Tutor overlay — the model's figure is drawn here, on a SEPARATE layer
+  // stacked over the student canvas, so it never mixes with the student's own
+  // strokes / capture / undo / clear.
+  const tutorCanvasRef = useRef(null);
+  const tutorCtxRef    = useRef(null);
+  const tutorRef       = useRef(null);  // { ops, aspect, caption }
+  const tutorAnimRef   = useRef(null);
+  const [tutorMarks, setTutorMarks] = useState(false);
 
   function clearCanvas(ctx, w, h) { ctx.clearRect(0, 0, w, h); }
   const cloneStrokes = () => strokesRef.current.map(s => ({ ...s, points: [...s.points] }));
@@ -135,6 +150,100 @@ export function TutorCanvas({ onCaptureReady, initialStrokes = null, onStrokesCh
     animRef.current = requestAnimationFrame(step);
   }
 
+  // ── Tutor overlay drawing ────────────────────────────────────────────────
+  function prefersReduced() {
+    try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
+  }
+  function stopTutorAnim() {
+    if (tutorAnimRef.current) { cancelAnimationFrame(tutorAnimRef.current); tutorAnimRef.current = null; }
+  }
+  // Fit the figure's aspect box into the canvas, centered, with padding.
+  function tutorFit(cw, ch, aspect) {
+    const pad = 14;
+    const aw = Math.max(10, cw - 2 * pad), ah = Math.max(10, ch - 2 * pad);
+    let w, h;
+    if (aw / ah > aspect) { h = ah; w = h * aspect; } else { w = aw; h = w / aspect; }
+    return { x: (cw - w) / 2, y: (ch - h) / 2, w, h };
+  }
+  function drawTutorOp(ctx, fit, op, count) {
+    const P = (p) => ({ x: fit.x + p.x * fit.w, y: fit.y + p.y * fit.h });
+    if (op.k === 'stroke') {
+      const n = Math.min(count, op.pts.length);
+      if (n < 1) return;
+      ctx.strokeStyle = op.color; ctx.lineWidth = op.w || 2;
+      ctx.beginPath();
+      for (let i = 0; i < n; i++) { const q = P(op.pts[i]); if (i === 0) ctx.moveTo(q.x, q.y); else ctx.lineTo(q.x, q.y); }
+      ctx.stroke();
+    } else if (op.k === 'dot') {
+      const q = P(op);
+      ctx.beginPath(); ctx.arc(q.x, q.y, op.r || 4.5, 0, Math.PI * 2);
+      if (op.open) { ctx.fillStyle = '#0c1322'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = op.color; ctx.stroke(); }
+      else { ctx.fillStyle = op.color; ctx.fill(); }
+    } else if (op.k === 'text') {
+      const q = P(op);
+      ctx.fillStyle = op.color; ctx.textAlign = op.anchor || 'start'; ctx.textBaseline = 'alphabetic';
+      ctx.font = `${op.size || 11}px -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif`;
+      ctx.fillText(op.text, q.x, q.y);
+    }
+  }
+  function drawTutorStatic() {
+    const canvas = tutorCanvasRef.current, ctx = tutorCtxRef.current;
+    if (!canvas || !ctx || !tutorRef.current) return;
+    const rect = canvas.getBoundingClientRect();
+    ctx.clearRect(0, 0, rect.width, rect.height);
+    const fit = tutorFit(rect.width, rect.height, tutorRef.current.aspect);
+    for (const op of tutorRef.current.ops) drawTutorOp(ctx, fit, op, op.k === 'stroke' ? op.pts.length : 1);
+  }
+  // Animate the figure being drawn, op by op, like a teacher at the board.
+  function animateTutor() {
+    const canvas = tutorCanvasRef.current, ctx = tutorCtxRef.current;
+    if (!canvas || !ctx || !tutorRef.current) return;
+    const { ops, aspect } = tutorRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const fit = tutorFit(rect.width, rect.height, aspect);
+    const cost = ops.map(op => op.k === 'stroke' ? Math.max(2, op.pts.length) : 6);
+    const total = cost.reduce((a, b) => a + b, 0);
+    if (!total) return;
+    const DURATION = Math.min(4200, Math.max(1500, total * 7));
+    stopTutorAnim();
+    const start = performance.now();
+    const step = (now) => {
+      const frac = Math.min(1, (now - start) / DURATION);
+      const reveal = frac * total;
+      ctx.clearRect(0, 0, rect.width, rect.height);
+      let acc = 0;
+      for (let i = 0; i < ops.length; i++) {
+        if (acc >= reveal) break;
+        const op = ops[i], c = cost[i];
+        if (op.k === 'stroke') {
+          const lf = Math.min(1, (reveal - acc) / c);
+          drawTutorOp(ctx, fit, op, Math.max(1, Math.ceil(lf * op.pts.length)));
+        } else {
+          drawTutorOp(ctx, fit, op, 1);
+        }
+        acc += c;
+      }
+      if (frac < 1) tutorAnimRef.current = requestAnimationFrame(step);
+      else { tutorAnimRef.current = null; drawTutorStatic(); }
+    };
+    tutorAnimRef.current = requestAnimationFrame(step);
+  }
+  function clearTutor() {
+    stopTutorAnim();
+    tutorRef.current = null;
+    const canvas = tutorCanvasRef.current, ctx = tutorCtxRef.current;
+    if (canvas && ctx) { const rect = canvas.getBoundingClientRect(); ctx.clearRect(0, 0, rect.width, rect.height); }
+    setTutorMarks(false);
+  }
+  function drawBoard(board, { animate = true } = {}) {
+    const synth = synthBoard(board);
+    if (!synth || !synth.ops.length) { clearTutor(); return; }
+    tutorRef.current = synth;
+    setTutorMarks(true);
+    if (animate && !prefersReduced()) animateTutor();
+    else drawTutorStatic();
+  }
+
   useEffect(() => {
     if (typeof onCaptureReady !== 'function') return;
     onCaptureReady({
@@ -143,6 +252,9 @@ export function TutorCanvas({ onCaptureReady, initialStrokes = null, onStrokesCh
       isEmpty: () => strokesRef.current.length === 0,
       getStrokes: () => cloneStrokes(),
       replay: () => animateReplay(),
+      drawBoard,
+      clearTutor,
+      hasTutor: () => !!tutorRef.current,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onCaptureReady]);
@@ -163,11 +275,24 @@ export function TutorCanvas({ onCaptureReady, initialStrokes = null, onStrokesCh
       ctxRef.current = ctx;
       clearCanvas(ctx, rect.width, rect.height);
       replayStrokes();
+
+      // Mirror size/DPR onto the tutor overlay, then re-render its figure.
+      const overlay = tutorCanvasRef.current;
+      if (overlay) {
+        overlay.width  = Math.round(rect.width  * dpr);
+        overlay.height = Math.round(rect.height * dpr);
+        const tctx = overlay.getContext('2d');
+        tctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        tctx.lineCap  = 'round';
+        tctx.lineJoin = 'round';
+        tutorCtxRef.current = tctx;
+        if (tutorRef.current) drawTutorStatic();
+      }
     }
     sync();
     const ro = new ResizeObserver(sync);
     ro.observe(canvas);
-    return () => { ro.disconnect(); stopAnim(); };
+    return () => { ro.disconnect(); stopAnim(); stopTutorAnim(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -267,8 +392,17 @@ export function TutorCanvas({ onCaptureReady, initialStrokes = null, onStrokesCh
         {iconBtn(false, handleUndo,  <Undo2  size={13} />, 'Undo')}
         {iconBtn(false, handleClear, <Trash2 size={13} />, 'Clear')}
         {iconBtn(replaying, animateReplay, <Play size={13} />, 'Replay your work')}
+        {tutorMarks && (
+          <button
+            onClick={clearTutor}
+            title="Clear tutor's drawing"
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-blue-300/80 hover:text-blue-200 hover:bg-blue-500/15 transition-colors"
+          >
+            <Shapes size={13} />
+          </button>
+        )}
         <div className="flex-1" />
-        <span className="text-[10px] text-white/25">{replaying ? 'Replaying…' : 'Draw · tap "Get feedback" to share with tutor'}</span>
+        <span className="max-w-[45%] truncate text-[10px] text-white/25">{replaying ? 'Replaying…' : hint}</span>
       </div>
       <div className="flex-1 relative min-h-0">
         <canvas
@@ -278,6 +412,8 @@ export function TutorCanvas({ onCaptureReady, initialStrokes = null, onStrokesCh
           onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
           onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw}
         />
+        {/* Tutor's figure draws on this overlay — clicks pass through to the canvas below */}
+        <canvas ref={tutorCanvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />
       </div>
     </div>
   );
@@ -351,7 +487,6 @@ function MathModelPicker({ active, plan, onPick, disabled = false }) {
                       </span>
                     )}
                   </p>
-                  <p className="text-[10px] text-white/45 truncate">{m.blurb}</p>
                 </div>
                 {active === m.key && <Check size={13} className="text-white/80 shrink-0" strokeWidth={3} />}
               </button>
@@ -380,6 +515,8 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
     if (persisted?.mode && valid.includes(persisted.mode)) return persisted.mode;
     return 'both';
   });
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
   useBrowserBack(!onBack && view === 'tutor', () => setView('setup'));
   const [topic, setTopic]                       = useState(seedTopic || persisted?.topic || '');
   const [customInstructions, setCustomInstructions] = useState(persisted?.customInstructions || '');
@@ -390,13 +527,26 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
   const [error, setError]                       = useState(null);
   const [input, setInput]                       = useState('');
   const [showSettings, setShowSettings]         = useState(false);
+  // Tutor-generated board drawings are intentionally disabled. Keep the
+  // request flag fixed off even if an older session persisted the beta as on.
+  const drawRef = useRef(false);
   const seedKickedOff = useRef(false);
   const streamRef  = useRef('');
   const thinkRef   = useRef('');
   const abortRef   = useRef(null);
   const captureRef = useRef(null);
+  const pendingBoardRef = useRef(null);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
+
+  // Stable callback: when the canvas (re)mounts it hands us its API; draw any
+  // figure that was waiting on it. Stable identity (deps []) so TutorCanvas's
+  // onCaptureReady effect runs once per mount, never on every parent render.
+  const handleCaptureReady = useCallback((api) => {
+    captureRef.current = api;
+    const p = pendingBoardRef.current;
+    if (p && api?.drawBoard) { api.drawBoard(p.board, { animate: p.animate }); pendingBoardRef.current = null; }
+  }, []);
 
   // Per-session model picker (shares the Study Mode registry; persisted under
   // preferences.mathTutorModel). A ref mirrors the pick so doSend reads the
@@ -423,10 +573,43 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
     const trimmed = messages.slice(-50).map(m => ({
       role: m.role, content: (m.content || '').slice(0, 3000), _edited: m._edited, _error: m._error,
     }));
-    saveState({ view, mode, topic, customInstructions, messages: trimmed, strokes: standaloneStrokes });
+    saveState({ view, mode, topic, customInstructions, messages: trimmed, strokes: standaloneStrokes, drawEnabled: false });
   }, [view, mode, topic, customInstructions, messages, standaloneStrokes, seedTopic]);
 
   useEffect(() => () => abortRef.current?.(), []);
+
+  // ── Route a ```board block from an assistant reply onto the canvas ──────────
+  function extractBoard(content) {
+    if (!content) return null;
+    const m = content.match(/```board[ \t]*\n?([\s\S]*?)```/);
+    if (!m) return null;
+    try { return parseBoard(m[1]); } catch { return null; }
+  }
+  function flushPendingBoard() {
+    const pend = pendingBoardRef.current;
+    if (pend && captureRef.current?.drawBoard) {
+      captureRef.current.drawBoard(pend.board, { animate: pend.animate });
+      pendingBoardRef.current = null;
+    }
+  }
+  // Parse the latest figure out of an assistant reply and draw it on the canvas.
+  // If the canvas is hidden (tutor-only mode), reveal it first so the student
+  // sees the teacher draw.
+  function showBoardOnCanvas(content, { animate = true } = {}) {
+    if (!drawRef.current) return;
+    const board = extractBoard(content);
+    if (!board) return;
+    pendingBoardRef.current = { board, animate };
+    if (modeRef.current === 'tutor') setMode('both');
+    flushPendingBoard();
+  }
+  // On open, re-draw the most recent figure (static, no animation).
+  useEffect(() => {
+    if (!drawRef.current) return;
+    const last = [...messagesRef.current].reverse().find(m => m.role === 'assistant' && /```board/.test(m.content || ''));
+    if (last) showBoardOnCanvas(last.content, { animate: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function doSend({ text, phase = 'lesson', imageDataUrl = null, hidden = false, topicOverride = null }) {
     if (streaming) return;
@@ -450,6 +633,7 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
       customInstructions: customInstructions.trim(),
       phase,
       model: modelRef.current,
+      draw: drawRef.current,
       messages: history.map(({ role, content }) => ({ role, content })),
       images: imageDataUrl ? [{ dataUrl: imageDataUrl, mimeType: 'image/png' }] : [],
     };
@@ -461,6 +645,7 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
         const full = streamRef.current;
         const think = thinkRef.current;
         if (full) setMessages(m => [...m, { role: 'assistant', content: full, thinking: think || undefined, timestamp: new Date().toISOString() }]);
+        if (full) showBoardOnCanvas(full);
         setStreaming(false); setStreamingContent(''); setStreamingThinking(''); streamRef.current = ''; thinkRef.current = '';
       },
       onError: (err) => {
@@ -515,7 +700,7 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
   function handleReset() {
     if (!confirm('Reset this tutor session? Your conversation and canvas will be cleared.')) return;
     setMessages([]); setStreamingContent(''); streamRef.current = '';
-    captureRef.current?.clear?.(); setError(null); saveState(null);
+    captureRef.current?.clear?.(); captureRef.current?.clearTutor?.(); setError(null); saveState(null);
   }
   function handleStop() { abortRef.current?.(); setStreaming(false); }
 
@@ -647,7 +832,7 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
       };
     }
     setStreaming(true); setStreamingContent(''); setStreamingThinking(''); streamRef.current = ''; thinkRef.current = '';
-    const body = { topic: topic.trim(), customInstructions: customInstructions.trim(), phase: 'practice', model: modelRef.current, messages: apiHistory, images: [] };
+    const body = { topic: topic.trim(), customInstructions: customInstructions.trim(), phase: 'practice', model: modelRef.current, draw: drawRef.current, messages: apiHistory, images: [] };
     const abort = sendMathTutorMessage(body, {
       onChunk: (c) => { streamRef.current += c; setStreamingContent(streamRef.current); },
       onThinking: (t) => { thinkRef.current += t; setStreamingThinking(thinkRef.current); },
@@ -655,6 +840,7 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
         const full = streamRef.current;
         const think = thinkRef.current;
         if (full) setMessages(m => [...m, { role: 'assistant', content: full, thinking: think || undefined, timestamp: new Date().toISOString(), _edited: true }]);
+        if (full) showBoardOnCanvas(full);
         setStreaming(false); setStreamingContent(''); setStreamingThinking(''); streamRef.current = ''; thinkRef.current = '';
       },
       onError: (err) => {
@@ -805,7 +991,7 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
         {/* Canvas column */}
         <div className={`min-h-[280px] ${mode === 'tutor' ? 'hidden' : ''}`}>
           <TutorCanvas
-            onCaptureReady={(api) => { captureRef.current = api; }}
+            onCaptureReady={handleCaptureReady}
             initialStrokes={standaloneStrokes}
             onStrokesChange={setStandaloneStrokes}
           />

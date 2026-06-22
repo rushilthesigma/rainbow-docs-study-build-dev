@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { Send, Globe, Paperclip, X, FileText, Loader2, Upload, Brain } from 'lucide-react';
 import { getToken } from '../../api/client';
 import { InlineProgress } from '../shared/ProgressBar';
@@ -29,7 +29,7 @@ function isTextFile(f) {
 // When `sourceMode` + `onToggleSource` are passed, a small "Source mode"
 // toggle appears. It tells the parent to flip the flag; the parent decides
 // whether to forward that to the server. Source mode costs 2x messages.
-export default function ChatInput({
+const ChatInput = forwardRef(function ChatInput({
   onSend,
   disabled,
   placeholder = 'Type a message...',
@@ -48,8 +48,14 @@ export default function ChatInput({
   composerPrefix = null,
   // When true, shows a push-to-talk mic button that dictates into the textarea.
   enableDictation = false,
+  // Called with each pasted/dropped/attached PDF File so the parent can mirror
+  // it into a side-by-side preview pane (Study Mode splitscreen).
+  onPreviewFile = null,
   flush = false,
-}) {
+  // Optional node rendered between the doc strip and the textarea (e.g. a
+  // live canvas thumbnail when the Math Canvas split-screen is open).
+  attachmentSlot = null,
+}, ref) {
   const [text, setText] = useState('');
   // images: [{ dataUrl, mimeType, name }]
   const [images, setImages] = useState([]);
@@ -61,6 +67,10 @@ export default function ChatInput({
   const inputRef = useRef(null);
   const fileRef = useRef(null);
   const dragDepth = useRef(0);
+
+  // Expose handleFiles so parent containers can programmatically add files
+  // (e.g. when a PDF is dropped on the messages area above this form).
+  useImperativeHandle(ref, () => ({ handleFiles }));
 
   useEffect(() => {
     if (!disabled) inputRef.current?.focus();
@@ -103,6 +113,9 @@ export default function ChatInput({
       } else if (isPdfFile(f) || isTextFile(f)) {
         if (f.size > 25 * 1024 * 1024) continue; // 25MB doc cap
         pdfsAndText.push(f);
+        // Mirror PDFs into the side-by-side preview pane, in addition to
+        // extracting their text below for the AI.
+        if (isPdfFile(f) && typeof onPreviewFile === 'function') onPreviewFile(f);
       }
     }
     if (newImages.length) setImages(prev => [...prev, ...newImages]);
@@ -463,6 +476,8 @@ export default function ChatInput({
           </div>
         )}
 
+        {attachmentSlot}
+
         {/* TEXTAREA + SEND */}
         <div className="flex items-end">
           <textarea
@@ -500,4 +515,6 @@ export default function ChatInput({
 
     </form>
   );
-}
+});
+
+export default ChatInput;

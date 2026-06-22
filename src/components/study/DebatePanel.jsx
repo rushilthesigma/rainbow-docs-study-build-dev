@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import {
-  Swords, RotateCcw, ArrowLeft, ArrowRight, Trophy, Users, User, Copy, Check, Loader2, X, Zap, FileText, AlertCircle, Paperclip, Clock, Camera, Download, Eye, Sparkles,
+  Swords, RotateCcw, ArrowLeft, ArrowRight, Trophy, Users, User, Copy, Check, Loader2, X, Zap, FileText, AlertCircle, Paperclip, Clock, Camera, Download, Eye, Sparkles, Cpu, ChevronDown,
 } from 'lucide-react';
 import { apiFetch, getToken } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
@@ -9,6 +10,25 @@ import { errorChatMessage } from '../../utils/aiErrors';
 import { InlineProgress } from '../shared/ProgressBar';
 import { useToast } from '../shared/Toast';
 import ViewFade from '../shared/ViewFade';
+import { planFromUser } from '../billing/modelAccess';
+import { canUseStudyModel, studyModelLabel, studyModelBlurb, visibleStudyModels } from './studyModels';
+import VoiceMenu from './voice/VoiceMenu';
+import { useSpeechSynthesis, speechSynthesisSupported } from '../../hooks/useSpeechSynthesis';
+import { speechRecognitionSupported } from '../../hooks/useSpeechRecognition';
+
+// Debate's opponent-model gating: free accounts get ONLY Flash Lite + GPT-5.4
+// mini (stricter than Study Mode, which also gives free Haiku); every other
+// tier matches study. Mirrors debateModelAllowed() in server.js.
+function canUseDebateModel(key, plan) {
+  if (plan === 'free') return key === 'flash-lite' || key === 'gpt-5.4-mini';
+  return canUseStudyModel(key, plan);
+}
+// Models offered in the debate picker for this account — only the ones the
+// user can actually pick (no locked rows), filtered to Gemini for
+// gemini-only accounts via visibleStudyModels().
+function debateModelsFor(email, plan) {
+  return visibleStudyModels(email).filter(m => canUseDebateModel(m.key, plan));
+}
 
 // Group sub-modes by which top-level component owns them. Switching
 // between groups (e.g. menu → single-setup) triggers a fade + remount;
@@ -89,6 +109,180 @@ const TOPIC_CATEGORIES = [
     'Esports deserves Olympic status',
   ] },
 ];
+
+// The 128-topic bank the debate bot draws "Recommended for you" from.
+// These stand in for the resolutions the model used to generate live on
+// the menu — instead of a per-load AI call, the menu just picks two of
+// these presets, so the recommendations are instant and never fail.
+const PRESET_DEBATE_TOPICS = [
+  // Tech
+  { topic: 'AI will replace most jobs within 20 years', category: 'Tech' },
+  { topic: 'Social media does more harm than good', category: 'Tech' },
+  { topic: 'Smartphones should be banned in schools', category: 'Tech' },
+  { topic: 'Cryptocurrency is a net negative for society', category: 'Tech' },
+  { topic: 'Open-source AI models are safer than closed ones', category: 'Tech' },
+  { topic: 'Self-driving cars are safer than human drivers', category: 'Tech' },
+  { topic: 'Big tech companies should be broken up', category: 'Tech' },
+  { topic: 'Facial recognition should be banned in public spaces', category: 'Tech' },
+  { topic: 'The metaverse is a passing fad', category: 'Tech' },
+  { topic: 'Tech platforms should be liable for user content', category: 'Tech' },
+  { topic: 'AI-generated images count as real art', category: 'Tech' },
+  { topic: 'Remote work is better than working in an office', category: 'Tech' },
+  // Society
+  { topic: 'Social media should be banned for under-16s', category: 'Society' },
+  { topic: 'Cancel culture has gone too far', category: 'Society' },
+  { topic: 'A four-day work week should be the standard', category: 'Society' },
+  { topic: 'Voting should be mandatory', category: 'Society' },
+  { topic: 'A universal basic income would work', category: 'Society' },
+  { topic: 'Cities should be car-free', category: 'Society' },
+  { topic: 'Gentrification does more harm than good', category: 'Society' },
+  { topic: 'Privacy matters more than security', category: 'Society' },
+  { topic: 'The death penalty should be abolished', category: 'Society' },
+  { topic: 'Cash should be phased out entirely', category: 'Society' },
+  { topic: 'Billionaires should not exist', category: 'Society' },
+  { topic: 'Immigration strengthens a nation', category: 'Society' },
+  // Education
+  { topic: 'College is no longer worth the cost', category: 'Education' },
+  { topic: 'Standardized testing should be abolished', category: 'Education' },
+  { topic: 'Homework should be eliminated in K-12', category: 'Education' },
+  { topic: 'Trade school is a better choice than university', category: 'Education' },
+  { topic: 'AI should be allowed for student essays', category: 'Education' },
+  { topic: 'School should start later in the day', category: 'Education' },
+  { topic: 'Letter grades should be abolished', category: 'Education' },
+  { topic: 'Student loan debt should be forgiven', category: 'Education' },
+  { topic: 'Coding should be a required school subject', category: 'Education' },
+  { topic: 'Single-sex schools outperform coed schools', category: 'Education' },
+  { topic: 'A gap year before college is worth it', category: 'Education' },
+  // Science
+  { topic: 'Space exploration deserves more funding than ocean exploration', category: 'Science' },
+  { topic: 'Nuclear power is essential for the climate transition', category: 'Science' },
+  { topic: 'Genetic engineering of human embryos should be legal', category: 'Science' },
+  { topic: 'Animal testing should be banned', category: 'Science' },
+  { topic: 'Mars colonization should be a global priority', category: 'Science' },
+  { topic: 'De-extinction of lost species should be pursued', category: 'Science' },
+  { topic: 'Geoengineering is a necessary climate tool', category: 'Science' },
+  { topic: 'All publicly funded research should be open-access', category: 'Science' },
+  { topic: 'Human cloning research should be permitted', category: 'Science' },
+  { topic: 'Curing aging should be a top scientific goal', category: 'Science' },
+  { topic: 'Basic research matters more than applied research', category: 'Science' },
+  // Ethics
+  { topic: 'Lying is sometimes the right thing to do', category: 'Ethics' },
+  { topic: 'Eating meat is morally wrong', category: 'Ethics' },
+  { topic: 'Zoos do more harm than good', category: 'Ethics' },
+  { topic: 'The ends can justify the means', category: 'Ethics' },
+  { topic: 'People have a moral duty to give to charity', category: 'Ethics' },
+  { topic: 'Free will is an illusion', category: 'Ethics' },
+  { topic: 'It is wrong to have children given climate change', category: 'Ethics' },
+  { topic: 'Loyalty matters more than honesty', category: 'Ethics' },
+  { topic: 'We owe more to future generations than to ourselves', category: 'Ethics' },
+  { topic: 'Whistleblowing is always justified', category: 'Ethics' },
+  { topic: 'There is a moral difference between killing and letting die', category: 'Ethics' },
+  // Economics
+  { topic: 'Capitalism causes more harm than good', category: 'Economics' },
+  { topic: 'Rent control does more harm than good', category: 'Economics' },
+  { topic: 'A wealth tax would help the economy', category: 'Economics' },
+  { topic: 'Free trade benefits everyone', category: 'Economics' },
+  { topic: 'The minimum wage should be abolished', category: 'Economics' },
+  { topic: 'Tariffs protect domestic jobs', category: 'Economics' },
+  { topic: 'Inheritance should be taxed heavily', category: 'Economics' },
+  { topic: 'The gig economy exploits workers', category: 'Economics' },
+  { topic: 'Economic growth should no longer be the goal', category: 'Economics' },
+  { topic: 'Globalization has hurt the middle class', category: 'Economics' },
+  { topic: 'Government should guarantee everyone a job', category: 'Economics' },
+  // Politics
+  { topic: 'Democracy is the best form of government', category: 'Politics' },
+  { topic: 'The voting age should be lowered to 16', category: 'Politics' },
+  { topic: 'Term limits should apply to all elected officials', category: 'Politics' },
+  { topic: 'The electoral college should be abolished', category: 'Politics' },
+  { topic: 'Lobbying should be banned', category: 'Politics' },
+  { topic: 'Compulsory national service strengthens a country', category: 'Politics' },
+  { topic: 'Social media has damaged democracy', category: 'Politics' },
+  { topic: 'Direct democracy beats representative democracy', category: 'Politics' },
+  { topic: 'Political parties do more harm than good', category: 'Politics' },
+  { topic: 'The UN is no longer fit for purpose', category: 'Politics' },
+  // Environment
+  { topic: 'Individual action matters in fighting climate change', category: 'Environment' },
+  { topic: 'A carbon tax is the best climate policy', category: 'Environment' },
+  { topic: 'Single-use plastic should be banned outright', category: 'Environment' },
+  { topic: 'Economic degrowth is necessary to save the planet', category: 'Environment' },
+  { topic: 'Nuclear energy is greener than solar and wind', category: 'Environment' },
+  { topic: 'Eating local is better for the environment', category: 'Environment' },
+  { topic: 'Fast fashion should be illegal', category: 'Environment' },
+  { topic: 'Private jets should be banned', category: 'Environment' },
+  { topic: 'We should prioritize climate adaptation over prevention', category: 'Environment' },
+  { topic: 'National parks should be expanded at any cost', category: 'Environment' },
+  // Health
+  { topic: 'Sugar should be taxed like tobacco', category: 'Health' },
+  { topic: 'Vaccines should be mandatory', category: 'Health' },
+  { topic: 'Healthcare should be fully government-funded', category: 'Health' },
+  { topic: 'Junk food advertising should be banned', category: 'Health' },
+  { topic: 'Mental health days should be a legal right', category: 'Health' },
+  { topic: 'Recreational drugs should be legalized', category: 'Health' },
+  { topic: 'Fitness should be a graded school subject', category: 'Health' },
+  { topic: 'Genetic screening of newborns should be routine', category: 'Health' },
+  { topic: 'Assisted dying should be legal', category: 'Health' },
+  { topic: 'Social media should carry health warnings like cigarettes', category: 'Health' },
+  // Culture
+  { topic: 'Video games are a legitimate art form', category: 'Culture' },
+  { topic: 'Remakes and reboots are killing creativity', category: 'Culture' },
+  { topic: 'Streaming has ruined the music industry', category: 'Culture' },
+  { topic: 'Reading fiction makes you a better person', category: 'Culture' },
+  { topic: 'Museums should return artifacts to their origin countries', category: 'Culture' },
+  { topic: 'Celebrity culture is harmful to society', category: 'Culture' },
+  { topic: 'Subtitles are better than dubbing', category: 'Culture' },
+  { topic: 'Physical books are better than e-books', category: 'Culture' },
+  { topic: 'Tipping culture should be abolished', category: 'Culture' },
+  { topic: 'Influencers are a net negative for culture', category: 'Culture' },
+  // Media
+  { topic: 'Print journalism is worth saving', category: 'Media' },
+  { topic: 'The news should be free of opinion', category: 'Media' },
+  { topic: 'Platforms should label all AI-generated content', category: 'Media' },
+  { topic: 'Online anonymity does more harm than good', category: 'Media' },
+  { topic: 'Clickbait has ruined journalism', category: 'Media' },
+  { topic: 'Documentaries are more valuable than fiction films', category: 'Media' },
+  { topic: 'The 24-hour news cycle harms society', category: 'Media' },
+  { topic: 'Public broadcasting should be government-funded', category: 'Media' },
+  { topic: 'Deepfakes should be illegal', category: 'Media' },
+  { topic: 'Algorithms should not curate our news feeds', category: 'Media' },
+  // Sports
+  { topic: 'College athletes should be paid', category: 'Sports' },
+  { topic: 'Olympic athletes should be allowed to use PEDs', category: 'Sports' },
+  { topic: 'Esports deserve Olympic status', category: 'Sports' },
+  { topic: 'Replay review ruins live sports', category: 'Sports' },
+  { topic: 'Soccer is more skillful than American football', category: 'Sports' },
+  { topic: 'Hosting the Olympics does more harm than good', category: 'Sports' },
+  { topic: 'Salary caps make sports fairer', category: 'Sports' },
+  { topic: 'Youth sports have become too competitive', category: 'Sports' },
+  { topic: 'Sports betting should be banned', category: 'Sports' },
+  { topic: 'Football is too dangerous to continue', category: 'Sports' },
+];
+
+// Flavor lines that make a preset read like a real bot pick rather than a
+// static row. Paired with a topic at roll time, varied so two cards never
+// show the same line.
+const RECOMMEND_REASONS = [
+  'The bot will take the other side.',
+  'A sharp one for practicing rebuttals.',
+  'No easy answer — build your strongest case.',
+  'Pick a side and defend it.',
+  'Great for testing your reasoning under pressure.',
+  'A contentious classic the bot loves.',
+  'Fresh resolution — make it concrete.',
+  'The bot picked this one for you.',
+];
+
+// Pull `n` distinct presets at random and pin a (distinct) reason to each.
+function rollRecommended(n = 2) {
+  const idxs = new Set();
+  while (idxs.size < n && idxs.size < PRESET_DEBATE_TOPICS.length) {
+    idxs.add(Math.floor(Math.random() * PRESET_DEBATE_TOPICS.length));
+  }
+  const reasonStart = Math.floor(Math.random() * RECOMMEND_REASONS.length);
+  return [...idxs].map((i, k) => ({
+    ...PRESET_DEBATE_TOPICS[i],
+    reason: RECOMMEND_REASONS[(reasonStart + k) % RECOMMEND_REASONS.length],
+  }));
+}
 
 // Reusable topic chip row used by every debate setup screen (solo,
 // 1v1 lobby, tournament setup). Starts with the QUICK_TOPICS defaults
@@ -190,52 +384,24 @@ export default function DebatePanel({ onBack, initialTopic = null, initialSide =
   // - the Tournament component reads `rejoinTournament` and skips its
   // own create/join screen.
   const [rejoinTournament, setRejoinTournament] = useState(null);
+  // Topic chosen from the menu's "Recommended for you" cards. Drives the
+  // solo setup screen so the user lands one click from picking a side.
+  // Cleared whenever we return to the menu or open a blank solo setup.
+  const [menuTopic, setMenuTopic] = useState(null);
   const selectMode = (m) => {
     if (m === 'mp-menu-timed') {
       setForceTimed(true);
       setMode('mp-menu');
     } else {
-      if (m === 'menu') setForceTimed(false);
+      if (m === 'menu') { setForceTimed(false); setMenuTopic(null); }
+      if (m === 'single-setup') setMenuTopic(null);
       setMode(m);
     }
   };
 
-  // Top-bar back behavior:
-  //   - In any sub-mode (single-*, mp-*): step back to the mode menu.
-  //   - On the mode menu:
-  //       · if onBack is provided (e.g., mounted inside StudyMode as a
-  //         sub-view, with a parent that wants to take over) call it.
-  //       · otherwise (mounted as its own top-level app) hide the arrow -
-  //         the window's own close button is the only sensible exit.
-  const onMenu = mode === 'menu';
-  // Lock the header back arrow during active games - leaving must go
-  // through the in-match Leave flow so the opponent gets notified and
-  // the match state advances correctly.
-  const isActiveGame = mode === 'mp-game' || mode === 'single-debate';
-  const headerBackTarget = onMenu ? (onBack || null) : (isActiveGame ? null : () => selectMode('menu'));
-
-  const header = (
-    <div className="flex items-center gap-2 pl-2 pr-4 py-2.5 bg-transparent">
-      {headerBackTarget && (
-        <button onClick={headerBackTarget} className="p-1 rounded text-white/70 hover:text-white transition-colors">
-          <ArrowLeft size={14} />
-        </button>
-      )}
-      <span className="text-[13px] font-bold text-white">Debate</span>
-      <span className="text-[10px] font-semibold uppercase tracking-wider text-white/50">
-        {mode === 'menu' && 'Pick a mode'}
-        {mode === 'history' && 'History'}
-        {mode === 'single-setup' && 'Solo · Setup'}
-        {mode === 'single-debate' && 'Solo · Live'}
-        {mode === 'single-verdict' && 'Solo · Verdict'}
-        {mode === 'mp-menu' && 'Multiplayer · Setup'}
-        {mode === 'mp-lobby' && 'Multiplayer · Lobby'}
-        {mode === 'mp-game' && 'Multiplayer · Live'}
-        {mode === 'mp-verdict' && 'Multiplayer · Verdict'}
-        {(mode === 'tour-menu' || mode === 'tour-lobby' || mode === 'tour-bracket') && 'Tournament'}
-      </span>
-    </div>
-  );
+  // The old "Debate · PICK A MODE" header strip is gone — each view owns its
+  // own heading/back now (the menu shows a big "Debate" title and an optional
+  // back arrow for the Study-Mode embed; sub-views have their own Back/Leave).
 
   // Active-chat modes need to fill the parent and let their internal
   // ChatContainer handle scrolling. Other modes (menu, setup, history,
@@ -246,12 +412,13 @@ export default function DebatePanel({ onBack, initialTopic = null, initialSide =
   const isLiveChatMode = mode === 'single-debate' || mode === 'mp-game';
   return (
     <div className="h-full flex flex-col">
-      {header}
       <div className={`flex-1 min-h-0 ${isLiveChatMode ? 'flex flex-col' : 'overflow-y-auto'}`}>
         <ViewFade viewKey={modeGroup(mode)} className={isLiveChatMode ? 'flex-1 min-h-0 flex flex-col' : ''}>
         {mode === 'menu' && (
           <ModeMenu
             onSelect={selectMode}
+            onBack={onBack}
+            onPickTopic={(t) => { setMenuTopic(t); setMode('single-setup'); }}
             onRejoinTournament={(t) => {
               setRejoinTournament(t);
               setMode(t.state === 'waiting' ? 'tour-lobby' : 'tour-bracket');
@@ -272,9 +439,9 @@ export default function DebatePanel({ onBack, initialTopic = null, initialSide =
             mode={mode}
             setMode={selectMode}
             onExit={() => selectMode('menu')}
-            initialTopic={initialTopic}
+            initialTopic={menuTopic || initialTopic}
             initialSide={initialSide === 'con' ? 'against' : initialSide === 'pro' ? 'for' : null}
-            initialContext={initialContext}
+            initialContext={menuTopic ? null : initialContext}
           />
         )}
         {(mode === 'mp-menu' || mode === 'mp-lobby' || mode === 'mp-game' || mode === 'mp-verdict') && (
@@ -294,13 +461,15 @@ export default function DebatePanel({ onBack, initialTopic = null, initialSide =
 // =========================================================
 // MENU
 // =========================================================
-function ModeMenu({ onSelect, onRejoinTournament }) {
-  const card = 'flex flex-col items-center justify-center gap-2.5 p-6 rounded-xl border transition-colors group';
+function ModeMenu({ onSelect, onPickTopic, onRejoinTournament, onBack }) {
   // Detect a tournament this user is already in (created/joined on
   // another device or earlier session). If found, surface a Rejoin
   // banner at the top - clicking it routes straight to lobby/bracket
   // without going through create/join.
   const [activeTour, setActiveTour] = useState(null);
+  // Two presets the "debate bot" recommends. Rolled once on mount (no
+  // live AI call) and re-rollable from the section's refresh button.
+  const [recommended, setRecommended] = useState(() => rollRecommended(2));
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -313,11 +482,12 @@ function ModeMenu({ onSelect, onRejoinTournament }) {
   }, []);
 
   return (
-    <div className="p-6 md:p-10 max-w-md md:max-w-3xl mx-auto">
+    <div className="p-5 pb-8 space-y-4 max-w-md md:max-w-2xl mx-auto">
+      {/* Rejoin banner - only when this user is mid-tournament */}
       {activeTour && onRejoinTournament && (
         <button
           onClick={() => onRejoinTournament(activeTour)}
-          className="w-full mb-5 flex items-center gap-3 p-3.5 rounded-xl border border-blue-400/45 bg-gradient-to-b from-blue-500/[0.18] to-blue-600/[0.10] hover:from-blue-500/[0.24] hover:to-blue-600/[0.14] hover:border-blue-400/65 transition-colors text-left"
+          className="w-full flex items-center gap-3 p-3.5 rounded-xl border border-blue-400/45 bg-gradient-to-b from-blue-500/[0.18] to-blue-600/[0.10] hover:from-blue-500/[0.24] hover:to-blue-600/[0.14] hover:border-blue-400/65 transition-colors text-left"
           title="Rejoin your active tournament"
         >
           <div className="w-10 h-10 rounded-xl bg-blue-500 text-white flex items-center justify-center flex-shrink-0">
@@ -338,58 +508,71 @@ function ModeMenu({ onSelect, onRejoinTournament }) {
           <ArrowRight size={14} className="text-blue-100 flex-shrink-0" />
         </button>
       )}
-      <div className="flex items-center justify-between mb-5">
-        <h2 className="text-base md:text-xl font-bold text-gray-900 dark:text-white">Pick a mode</h2>
-        <button
-          onClick={() => onSelect('history')}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-blue-200 bg-blue-500/10 border border-blue-500/25 hover:bg-blue-500/20 hover:border-blue-500/45 hover:text-blue-100 transition-colors"
-        >
-          <Trophy size={11} className="text-blue-300" /> History
-        </button>
-      </div>
-      <div className="grid gap-3 md:gap-4 md:grid-cols-3 mb-3 md:mb-4">
-        <button
-          onClick={() => onSelect('single-setup')}
-          className={`${card} border-blue-400/40 bg-gradient-to-b from-blue-500/[0.12] to-blue-600/[0.08] hover:from-blue-500/[0.18] hover:to-blue-600/[0.12] hover:border-blue-400/60`}
-        >
-          <div className="w-12 h-12 rounded-xl bg-blue-500 text-white flex items-center justify-center"><User size={22} /></div>
-          <p className="text-sm font-semibold text-gray-900 dark:text-white">Solo</p>
-          <p className="text-[11px] text-blue-100/75">vs AI</p>
-        </button>
 
-        <button
-          onClick={() => onSelect('mp-menu')}
-          className={`${card} border-blue-400/40 bg-gradient-to-b from-blue-500/[0.12] to-blue-600/[0.08] hover:from-blue-500/[0.18] hover:to-blue-600/[0.12] hover:border-blue-400/60`}
-        >
-          <div className="w-12 h-12 rounded-xl bg-blue-500 text-white flex items-center justify-center"><Users size={22} /></div>
-          <p className="text-sm font-semibold text-gray-900 dark:text-white">1v1</p>
-          <p className="text-[11px] text-blue-100/75">with a friend</p>
-        </button>
-
-        <button
-          onClick={() => onSelect('mp-menu-timed')}
-          className={`${card} border-blue-400/40 bg-gradient-to-b from-blue-500/[0.12] to-blue-600/[0.08] hover:from-blue-500/[0.18] hover:to-blue-600/[0.12] hover:border-blue-400/60 relative`}
-        >
-          <span className="absolute top-2.5 right-2.5 inline-flex items-center gap-0.5 text-[10px] font-semibold tabular-nums px-1.5 py-0.5 rounded bg-blue-500 text-white border border-blue-400/60">
-            <Clock size={9} strokeWidth={3} /> 2:00
-          </span>
-          <div className="w-12 h-12 rounded-xl bg-blue-500 text-white flex items-center justify-center"><Clock size={22} /></div>
-          <p className="text-sm font-semibold text-gray-900 dark:text-white">Timed 1v1</p>
-          <p className="text-[11px] text-blue-100/75">2 min per turn</p>
-        </button>
+      {/* Title */}
+      <div className="flex items-center gap-2 mb-1">
+        {onBack && (
+          <button onClick={onBack} title="Back" className="p-1 -ml-1 rounded text-white/45 hover:text-white/80 hover:bg-white/[0.06] transition-colors">
+            <ArrowLeft size={16} />
+          </button>
+        )}
+        <h2 className="text-lg font-bold text-white/90">Debate</h2>
       </div>
 
+      {/* Multiplayer debate CTA (mirrors Quiz Bowl's "Play vs AI" card) */}
       <button
-        onClick={() => onSelect('tour-menu')}
-        className="w-full flex items-center gap-4 p-5 rounded-xl border border-blue-400/40 bg-gradient-to-b from-blue-500/[0.12] to-blue-600/[0.08] hover:from-blue-500/[0.18] hover:to-blue-600/[0.12] hover:border-blue-400/60 transition-colors text-left"
+        onClick={() => onSelect('mp-menu')}
+        className="w-full text-left rounded-lg border border-white/[0.08] bg-white/[0.03] p-4 hover:bg-white/[0.06] hover:border-white/[0.14] transition-all"
       >
-        <div className="w-12 h-12 rounded-xl bg-blue-500 text-white flex items-center justify-center flex-shrink-0"><Trophy size={22} /></div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-gray-900 dark:text-white">Tournament</p>
-          <p className="text-[11px] text-blue-100/75 mt-0.5">Single-elimination bracket · 4, 8, or 16 players</p>
+        <div className="flex items-center gap-1.5 mb-1.5">
+          <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Multiplayer</span>
         </div>
-        <ArrowRight size={16} className="text-blue-200/70 flex-shrink-0" />
+        <p className="text-[14px] font-bold text-white/90 mb-0.5">Debate a Friend Head-to-Head</p>
+        <p className="text-[11px] text-white/55">Create a room or join with a code, pick your side, and argue a live 1v1 with the AI scoring every turn. Timed mode optional.</p>
       </button>
+
+      {/* Quick access: solo vs AI + tournament */}
+      <div className="grid grid-cols-2 gap-2">
+        <button onClick={() => onSelect('single-setup')}
+          className="py-2.5 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[12px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
+          Solo
+        </button>
+        <button onClick={() => onSelect('tour-menu')}
+          className="py-2.5 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[12px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
+          Tournament
+        </button>
+      </div>
+
+      {/* Recommended for you - two topics the bot picked from its bank */}
+      <div>
+        <div className="flex items-center gap-1.5 mb-1.5">
+          <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Recommended for you</span>
+          <button
+            onClick={() => setRecommended(rollRecommended(2))}
+            title="Re-roll topics"
+            className="ml-auto inline-flex items-center justify-center w-6 h-6 rounded-md text-white/30 hover:text-white/70 hover:bg-white/[0.06] transition-colors"
+          >
+            <RotateCcw size={12} />
+          </button>
+        </div>
+        <div className="space-y-1.5">
+          {recommended.map((r) => (
+            <button
+              key={r.topic}
+              onClick={() => onPickTopic(r.topic)}
+              className="group w-full text-left rounded-lg border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] hover:border-white/[0.14] p-3 transition-colors flex items-center gap-3"
+            >
+              <div className="flex-1 min-w-0">
+                <p className="text-[13px] font-semibold text-white/90 leading-snug">{r.topic}</p>
+                <p className="text-[11px] text-white/45 truncate mt-0.5">
+                  <span className="text-white/25">{r.category} · </span>{r.reason}
+                </p>
+              </div>
+              <ArrowRight size={14} className="text-white/25 group-hover:text-white/55 transition-colors flex-shrink-0" />
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -516,65 +699,47 @@ function HistoryView({ onExit }) {
 function HistoryDetail({ entry, onBack }) {
   const me = { side: entry.mySide, score: entry.myScore };
   const opp = entry.opponent || { name: 'AI', side: entry.mySide === 'for' ? 'against' : 'for' };
-  const v = entry.verdict || {};
   return (
-    <div className="p-6 md:p-10 max-w-md md:max-w-2xl mx-auto">
-      <button onClick={onBack} className="text-xs text-white/40 hover:text-white/70 mb-3 inline-flex items-center gap-1 transition-colors">
-        <ArrowLeft size={12} /> History
-      </button>
-      <p className="text-xs text-white/40 mb-1">{new Date(entry.finishedAt).toLocaleString()}</p>
-      {entry.tournament && (
-        <p className="inline-flex items-center gap-1 text-[10.5px] font-bold uppercase tracking-wider text-blue-200 bg-blue-500/10 border border-blue-500/25 rounded px-2 py-0.5 mb-2">
-          <Trophy size={10} /> {entry.tournament.name}{entry.tournament.round ? ` · R${entry.tournament.round}${entry.tournament.totalRounds ? `/${entry.tournament.totalRounds}` : ''}` : ''}
-        </p>
-      )}
-      {entry.forfeit && (
-        <p className="inline-flex items-center gap-1 text-[10.5px] font-bold uppercase tracking-wider text-rose-300 bg-rose-500/10 border border-rose-500/25 rounded px-2 py-0.5 mb-2 ml-2">
-          Forfeit
-        </p>
-      )}
-      <h2 className="text-base font-bold text-gray-900 dark:text-white mb-4">{entry.topic}</h2>
-      <div className={`rounded-2xl p-4 mb-4 text-center border ${
-        entry.result === 'win' ? 'bg-emerald-500/10 border-emerald-500/30' :
-        entry.result === 'loss' ? 'bg-rose-500/10 border-rose-500/30' :
-        'bg-amber-500/10 border-amber-500/30'
-      }`}>
-        <Trophy size={24} className={`mx-auto mb-1.5 ${
-          entry.result === 'win' ? 'text-emerald-300' : entry.result === 'loss' ? 'text-rose-300' : 'text-amber-300'
-        }`} />
-        <p className="text-base font-black uppercase tracking-wider text-white">
-          {entry.result === 'win' ? 'You won' : entry.result === 'loss' ? 'You lost' : 'Tie'}
-        </p>
-        <p className="text-[11px] text-white/45 mt-1 tabular-nums">
-          You ({me.side?.toUpperCase()}): {me.score} · {opp.name} ({opp.side?.toUpperCase()}): {entry.opponentScore}
-        </p>
+    <div className="h-full flex flex-col min-h-0">
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-white/[0.06] flex-shrink-0">
+        <button onClick={onBack} className="text-xs text-white/40 hover:text-white/70 inline-flex items-center gap-1 transition-colors flex-shrink-0">
+          <ArrowLeft size={12} /> History
+        </button>
+        <span className="text-sm font-semibold text-white/80 truncate flex-1 min-w-0">{entry.topic}</span>
+        <span className="text-xs text-white/35 tabular-nums flex-shrink-0">{new Date(entry.finishedAt).toLocaleDateString()}</span>
       </div>
-      {v.summary && (
-        <div className="bg-white/[0.04] border border-white/[0.08] rounded-xl p-3 mb-3">
-          <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-white/40 mb-1.5">Verdict</p>
-          <p className="text-xs text-gray-800 dark:text-gray-100 leading-relaxed">{v.summary}</p>
-        </div>
-      )}
-      {Array.isArray(entry.turns) && entry.turns.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-white/40">Transcript</p>
-          {entry.turns.map((t, i) => {
-            const isMe = t.side === me.side;
-            return (
-              <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] rounded-2xl p-3 ${
-                  isMe ? 'bg-blue-500/15 border border-blue-500/30 text-gray-900 dark:text-white' : 'bg-white/[0.05] border border-white/[0.08] text-gray-800 dark:text-gray-100'
-                }`}>
-                  <p className="text-[9px] font-bold uppercase tracking-wider text-white/40 mb-1">
-                    {t.side?.toUpperCase()} {t.score?.total != null ? `· ${t.score.total}/30` : ''}
-                  </p>
-                  <p className="text-xs leading-relaxed whitespace-pre-wrap">{t.content}</p>
-                </div>
+
+      {/* Score summary */}
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.06] flex-shrink-0">
+        <span className="text-[13px] tabular-nums text-white/60">
+          You ({me.side?.toUpperCase()}) <span className="font-semibold text-white/90">{me.score}</span>
+          <span className="text-white/25 mx-2">·</span>
+          {opp.name} ({opp.side?.toUpperCase()}) <span className="font-semibold text-white/90">{entry.opponentScore}</span>
+        </span>
+        <span className={`text-xs font-semibold ${entry.result === 'win' ? 'text-blue-300' : 'text-white/35'}`}>
+          {entry.result === 'win' ? 'Win' : entry.result === 'loss' ? 'Loss' : 'Tie'}
+        </span>
+      </div>
+
+      {/* Chat transcript */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
+        {Array.isArray(entry.turns) && entry.turns.map((t, i) => {
+          const isMe = t.side === me.side;
+          return (
+            <div key={i} className={`flex flex-col gap-0.5 ${isMe ? 'items-end' : 'items-start'}`}>
+              <div className={`max-w-[80%] rounded-xl px-3 py-2.5 ${
+                isMe ? 'bg-blue-500/[0.12] border border-blue-500/20' : 'bg-white/[0.04] border border-white/[0.07]'
+              }`}>
+                <p className="text-xs leading-relaxed text-white/85 whitespace-pre-wrap">{t.content}</p>
               </div>
-            );
-          })}
-        </div>
-      )}
+              {t.score?.total != null && (
+                <span className="text-[10px] text-white/30 tabular-nums px-1">{t.score.total}/30</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -592,7 +757,7 @@ function buildAdversarialSystem(side, source = null) {
     ? `- Use THE SOURCE NOTES below and NOTHING else. Every fact, date, name, and number you cite must appear in the notes — no web knowledge, no outside examples, even ones you're sure of. Quote the notes directly ("The notes say…") and name the section when you can.
 - POLICE the source. When the user asserts a fact, check it against the notes: if the notes contradict it, quote the line that does; if the notes don't mention it, say so and refuse to grant the point until they ground it in the notes.
 - If the notes don't settle a point, attack the user's reading of the notes instead of importing outside facts.`
-    : `- Use REAL DATA. You have web search - pull specific numbers, studies, examples, dates. Cite them inline naturally (no separate Sources section - the UI shows one). If you can't find data, attack the user's lack of data instead.`;
+    : `- Use REAL, SPECIFIC evidence - numbers, studies, examples, dates - cited inline naturally (no separate Sources section; the UI shows sources when web search is on). If you can't cite specifics, attack the user's lack of data instead.`;
   return `You are a sharp, openly adversarial debate opponent. The user is arguing ${side === 'for' ? 'FOR' : 'AGAINST'} the topic - you argue ${opp}. Your job is to make this hard for them.${source?.text ? `
 
 This is a SOURCE-GROUNDED debate on the encyclopedia page "${source.title}". The notes below are the complete and only evidence base for both sides.
@@ -1516,7 +1681,128 @@ function SnapshotPlayerRow({ player, score, won, matchFinished }) {
   );
 }
 
+// Compact opponent-model picker for the debate composer. Portaled to <body>
+// and opens upward (the composer card is overflow-hidden, which would clip an
+// in-flow popover) - same trick as Study Mode's StudyModelDropdown. Lists only
+// the models this account can actually pick (debateModelsFor); no locked rows.
+function DebateModelDropdown({ active, plan, email, onPick, disabled }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState(null);
+  const btnRef = useRef(null);
+  const popRef = useRef(null);
+  const WIDTH = 248;
+  const models = debateModelsFor(email, plan);
+  function place() {
+    const b = btnRef.current?.getBoundingClientRect();
+    if (!b) return;
+    setPos({
+      left: Math.max(8, Math.min(b.left, window.innerWidth - WIDTH - 8)),
+      bottom: window.innerHeight - b.top + 6,
+    });
+  }
+  function toggle() { if (!open) place(); setOpen(o => !o); }
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e) { if (btnRef.current?.contains(e.target) || popRef.current?.contains(e.target)) return; setOpen(false); }
+    function reposition() { place(); }
+    document.addEventListener('mousedown', onDoc);
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
+    };
+  }, [open]);
+  return (
+    <div className="relative">
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={toggle}
+        disabled={disabled}
+        title="Choose opponent model"
+        className="flex items-center gap-1 pl-1.5 pr-1 py-1 rounded-lg text-gray-500 dark:text-blue-200/65 hover:text-gray-800 dark:hover:text-blue-50 hover:bg-white/40 dark:hover:bg-blue-500/[0.12] disabled:opacity-40 transition-colors"
+      >
+        <Cpu size={13} />
+        <span className="text-[11px] font-semibold max-w-[88px] truncate">{studyModelLabel(active)}</span>
+        <ChevronDown size={11} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && pos && createPortal(
+        <div
+          ref={popRef}
+          style={{ position: 'fixed', left: pos.left, bottom: pos.bottom, width: WIDTH, zIndex: 9999 }}
+          className="rounded-xl border border-gray-200 dark:border-white/[0.12] bg-white dark:bg-[#1b1b1f] shadow-2xl p-1.5"
+        >
+          <p className="px-2 pt-1 pb-1.5 text-[9px] font-bold uppercase tracking-[0.14em] text-gray-400 dark:text-white/35">Opponent model</p>
+          {models.map(m => (
+            <button
+              key={m.key}
+              type="button"
+              onClick={() => { onPick(m.key); setOpen(false); }}
+              className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left transition-colors ${
+                active === m.key ? 'bg-gray-100 dark:bg-white/[0.09]' : 'hover:bg-gray-50 dark:hover:bg-white/[0.06]'
+              }`}
+            >
+              <div className="flex-1 min-w-0">
+                <p className="text-[12px] font-bold text-gray-900 dark:text-white flex items-center gap-1.5 truncate">
+                  {m.label}
+                  <span className="text-[9px] font-medium text-gray-400 dark:text-white/40">{m.provider}</span>
+                </p>
+                <p className="text-[10px] text-gray-500 dark:text-white/45 truncate">{studyModelBlurb(m.key, plan)}</p>
+              </div>
+              {active === m.key && <Check size={13} className="text-blue-500 dark:text-blue-300 flex-shrink-0" />}
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
 function Singleplayer({ mode, setMode, onExit, initialTopic = null, initialSide = null, initialContext = null }) {
+  const { user } = useAuth();
+  const plan = planFromUser(user);
+  const email = user?.email || '';
+  // Opponent model (separate from Study Mode's pick). Persisted to localStorage
+  // and validated against the debate allow-list whenever plan/account changes.
+  const [oppModel, setOppModel] = useState(() => {
+    const saved = localStorage.getItem('covalent-debate-model');
+    return saved || 'flash-lite';
+  });
+  useEffect(() => {
+    setOppModel(prev => (canUseDebateModel(prev, plan) ? prev : 'flash-lite'));
+  }, [plan, email]);
+  function pickOppModel(key) {
+    if (!canUseDebateModel(key, plan)) return;
+    setOppModel(key);
+    try { localStorage.setItem('covalent-debate-model', key); } catch {}
+  }
+  // Web-search toggle (the "search button"). Notes-grounded debates can't search
+  // - the article is the only evidence - so it's forced off and hidden there.
+  const canSearch = !initialContext;
+  const [sourceMode, setSourceMode] = useState(false);
+  // Shared voice settings (same localStorage keys as Study Mode) drive the
+  // composer's VoiceMenu + dictation.
+  const [voiceRate, setVoiceRate] = useState(() => {
+    const v = parseFloat(localStorage.getItem('covalent-voice-rate'));
+    return Number.isFinite(v) ? v : 1;
+  });
+  const [voiceURI, setVoiceURI] = useState(() => localStorage.getItem('covalent-voice-uri') || null);
+  const synth = useSpeechSynthesis({ rate: voiceRate, voiceURI });
+  function persistRate(r) { setVoiceRate(r); localStorage.setItem('covalent-voice-rate', String(r)); }
+  function persistVoiceURI(uri) {
+    setVoiceURI(uri);
+    if (uri) localStorage.setItem('covalent-voice-uri', uri);
+    else localStorage.removeItem('covalent-voice-uri');
+  }
+  const toast = useToast();
+  const [capRemaining, setCapRemaining] = useState(null);
+  const oppModelRef = useRef(oppModel);
+  oppModelRef.current = oppModel;
+  const sourceModeRef = useRef(sourceMode);
+  sourceModeRef.current = sourceMode;
   const [topic, setTopic] = useState(initialTopic || '');
   const [side, setSide] = useState(initialSide || null);
   const [messages, setMessages] = useState([]);
@@ -1582,24 +1868,44 @@ function Singleplayer({ mode, setMode, onExit, initialTopic = null, initialSide 
     const userMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
     if (!hideFromTranscript) setMessages(prev => [...prev, userMsg]);
     setStreaming(true);
-    // Force a streaming bubble with ThinkingDots even though /api/chat is
-    // non-streaming. Without this the chat sits empty for 10-30s while
-    // Gemini runs web search + composes the counter.
+    // Force a streaming bubble with ThinkingDots even though /api/debate/chat
+    // is non-streaming. Without this the chat sits empty for 10-30s while the
+    // opponent model composes (and Gemini runs web search in source mode).
     setStreamingContent(' ');
     try {
       const allMessages = [...messages, userMsg].map(m => ({ role: m.role, content: m.content }));
-      // Notes-grounded debates (QBpedia handoff) run with web search OFF -
-      // the article is the entire evidence base, and a searching opponent
-      // inevitably argues from the web instead of the notes.
-      const result = await apiFetch('/api/chat', {
+      // Notes-grounded debates (QBpedia handoff) always run with web search OFF
+      // - the article is the entire evidence base. Otherwise the search toggle
+      // controls it: ON → Gemini tier + grounding; OFF → the chosen opponent
+      // model with no web search (exactly how Study Mode behaves).
+      const useSearch = canSearch && sourceModeRef.current;
+      const result = await apiFetch('/api/debate/chat', {
         method: 'POST',
-        body: JSON.stringify({ system: systemRef.current, messages: allMessages, max_tokens: 4096, sourced: !initialContext }),
+        body: JSON.stringify({
+          system: systemRef.current,
+          messages: allMessages,
+          max_tokens: 4096,
+          sourced: useSearch,
+          model: oppModelRef.current,
+        }),
       });
       const reply = result.content?.[0]?.text || 'I need a moment to formulate my argument...';
       const sources = Array.isArray(result.sources) ? result.sources : [];
       const msg = { role: 'assistant', content: reply, timestamp: new Date().toISOString() };
       if (sources.length) msg.sources = sources;
       setMessages(prev => [...prev, msg]);
+      // Mirror Study Mode's model-meta handling: reflect the rolling cap, and if
+      // the server had to swap the pick (cap hit / plan), snap the picker + say so.
+      const sm = result.studyModel;
+      if (sm) {
+        if (typeof sm.haikuRemaining === 'number') setCapRemaining(sm.haikuRemaining);
+        if (sm.switched && sm.key) {
+          setOppModel(sm.key);
+          try { localStorage.setItem('covalent-debate-model', sm.key); } catch {}
+          if (sm.reason === 'haiku-limit') toast.info('Daily limit reached - opponent switched to Flash Lite.');
+          else if (sm.reason === 'plan') toast.info('That model needs an upgrade - using Flash Lite.');
+        }
+      }
     } catch (err) {
       setMessages(prev => [...prev, errorChatMessage(err)]);
     }
@@ -1757,6 +2063,9 @@ function Singleplayer({ mode, setMode, onExit, initialTopic = null, initialSide 
     </div>
   );
 
+  // The rolling-cap pill only makes sense once the server reports a live count
+  // for a capped non-paid model (Haiku); paid plans and uncapped models get null.
+  const showCapPill = typeof capRemaining === 'number';
   return (
     <ViewFade viewKey="single-debate" className="h-full flex flex-col">
       {error && <p className="px-4 py-2 text-xs text-rose-300 bg-rose-500/10 border-b border-rose-500/20">{error}</p>}
@@ -1769,6 +2078,34 @@ function Singleplayer({ mode, setMode, onExit, initialTopic = null, initialSide 
         header={debateHeader}
         className="h-full"
         flush
+        sourceMode={canSearch ? sourceMode : undefined}
+        onToggleSource={canSearch ? setSourceMode : undefined}
+        composerPrefix={
+          <VoiceMenu
+            voices={synth.voices}
+            voiceURI={voiceURI}
+            onPickVoice={persistVoiceURI}
+            rate={voiceRate}
+            onRate={persistRate}
+            sttSupported={speechRecognitionSupported}
+            ttsSupported={speechSynthesisSupported}
+            variant="surface"
+          />
+        }
+        composerExtras={
+          <div className="flex items-center gap-1.5">
+            <DebateModelDropdown active={oppModel} plan={plan} email={email} onPick={pickOppModel} disabled={streaming} />
+            {showCapPill && (
+              <span
+                title="Daily messages left on this model for your plan"
+                className="inline-flex items-center px-2 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap text-gray-500 dark:text-blue-200/65 bg-white/30 dark:bg-blue-500/[0.10]"
+              >
+                {capRemaining}
+              </span>
+            )}
+          </div>
+        }
+        enableDictation={speechRecognitionSupported}
       />
     </ViewFade>
   );
@@ -2316,6 +2653,15 @@ function Multiplayer({ mode, setMode, onExit, forceTimed = false, presetCode = n
         )}
 
         {error && <p className="mt-3 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/25 rounded-lg px-3 py-2">{error}</p>}
+
+        {/* The global header (with its back arrow) is gone, so the lobby needs
+            its own exit. Leaving notifies the server and drops back to the menu. */}
+        <button
+          onClick={handleLeave}
+          className="w-full mt-3 py-2 rounded-xl text-[12px] text-rose-300/80 hover:text-rose-200 transition-colors"
+        >
+          {isHost ? 'Cancel match' : 'Leave'}
+        </button>
       </ViewFade>
     );
   }

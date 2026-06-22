@@ -82,15 +82,11 @@ export default function UpgradeChip() {
 
       {open && (
         <div
-          className="absolute right-0 top-7 w-80 rounded-xl overflow-hidden shadow-xl border border-white/[0.10] animate-modal-in"
-          style={{ zIndex: Z.menubarMenu, background: 'rgb(28, 28, 28)' }}
+          className="absolute right-0 top-7 w-[520px] rounded-xl overflow-hidden shadow-2xl border border-white/[0.07] animate-modal-in"
+          style={{ zIndex: Z.menubarMenu, background: '#181818' }}
         >
-          {/* Caller's current usage vs caps. If the live usage endpoint
-              hasn't loaded yet (or 404s on an older server), fall back
-              to "0 / cap" using the static limits from the user's tier
-              so the block always renders. */}
           <UsageBlock usage={usage || fallbackUsage(plan, tiers)} />
-          <ul className="divide-y divide-white/[0.05]">
+          <div className="grid grid-cols-5 divide-x divide-white/[0.05]">
             {order.map(id => {
               const t = tiers[id];
               if (!t) return null;
@@ -98,50 +94,48 @@ export default function UpgradeChip() {
               const isReferral = t.unlock === 'referral';
               const isCurrent = t.id === plan || (isReferral && refsUnlocked && plan === 'free');
               return (
-                <li key={id} className="px-3 py-3">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-[14px] font-bold text-white">{t.label}</span>
-                    {/* Free tier: name already says "Free"; don't duplicate. */}
-                    {isReferral ? (
-                      <span className="text-[13px] font-bold text-emerald-300 inline-flex items-center gap-1">
-                        <Gift size={11} /> Free
-                      </span>
-                    ) : !isFree && (
-                      <>
-                        <span className="text-[13px] font-bold text-white tabular-nums">${t.amountUsd}</span>
-                        <span className="text-[11px] text-white/45">
-                          {t.interval === 'once' ? 'once' : `/${t.interval}`}
+                <div key={id} className="px-3 py-3 flex flex-col gap-2.5">
+                  <div>
+                    <div className="text-[12px] font-bold text-white leading-tight">{t.label}</div>
+                    <div className="text-[11px] mt-0.5">
+                      {isFree ? (
+                        <span className="text-white/35">Free</span>
+                      ) : isReferral ? (
+                        <span className="text-emerald-400 inline-flex items-center gap-0.5"><Gift size={9} /> Gift</span>
+                      ) : (
+                        <span className="text-white/45 tabular-nums">
+                          ${t.amountUsd}{t.interval !== 'once' && `/${t.interval}`}
                         </span>
-                      </>
-                    )}
-                    {isCurrent && (
-                      <span className="ml-auto inline-flex items-center gap-0.5 text-[10px] text-emerald-300 font-semibold">
-                        <Check size={9} /> Current
-                      </span>
-                    )}
+                      )}
+                    </div>
                   </div>
-                  <p className="text-[11px] text-white/55 mt-1 tabular-nums">
-                    {fmtLimits(t.limits)}
-                  </p>
-                  {isReferral ? (
-                    <p className={`text-[10.5px] mt-1.5 ${refsUnlocked ? 'text-emerald-300' : 'text-white/45'}`}>
-                      {refsUnlocked
-                        ? `${refsUsed}/${refsNeeded} friends joined`
-                        : `${refsUsed}/${refsNeeded} friends joined. Share from gift icon.`}
-                    </p>
+                  <div className="text-[10px] text-white/30 space-y-0.5 tabular-nums flex-1 leading-relaxed">
+                    <div>{fmtCap(t.limits?.dailyMessages)} msgs</div>
+                    <div>{fmtCap(t.limits?.dailyQB)} QB</div>
+                    <div>{fmtCap(t.limits?.weeklyCurricula)} curr</div>
+                    <div>{fmtCap(t.limits?.weeklyDebates)} debates</div>
+                  </div>
+                  {isCurrent ? (
+                    <div className="text-[10px] text-emerald-400 font-semibold flex items-center gap-0.5">
+                      <Check size={9} /> Current
+                    </div>
+                  ) : isReferral ? (
+                    <div className={`text-[10px] ${refsUnlocked ? 'text-emerald-400' : 'text-white/30'}`}>
+                      {refsUsed}/{refsNeeded} joined
+                    </div>
                   ) : !isFree && (
                     <button
                       onClick={() => buy(id)}
-                      disabled={busy === id || !t.buyable || isCurrent}
-                      className="mt-2 w-full px-2 py-1.5 rounded-md bg-blue-500 hover:bg-blue-400 text-white text-[12px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      disabled={busy === id || !t.buyable}
+                      className="w-full py-1 rounded bg-white/[0.08] hover:bg-white/[0.15] text-white/70 hover:text-white text-[11px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     >
-                      {busy === id ? 'Opening' : (isCurrent ? 'Current' : `Get ${t.label}`)}
+                      {busy === id ? '…' : 'Get'}
                     </button>
                   )}
-                </li>
+                </div>
               );
             })}
-          </ul>
+          </div>
         </div>
       )}
     </div>
@@ -202,40 +196,36 @@ function fmtLimits(L = {}) {
 function UsageBlock({ usage }) {
   const L = usage.limits || {};
   const U = usage.used || {};
-  const rows = [
-    { label: 'Messages sent (last 24h)',        used: U.dailyMessages,    cap: L.dailyMessages },
-    { label: 'Quiz Bowl games (last 24h)',      used: U.dailyQB,          cap: L.dailyQB },
-    { label: 'Curricula generated this week',   used: U.weeklyCurricula,  cap: L.weeklyCurricula },
-    { label: 'Debates started this week',       used: U.weeklyDebates,    cap: L.weeklyDebates },
-    { label: 'Note maps created',               used: U.noteMaps,         cap: L.noteMaps },
+  const cols = [
+    { short: 'Msgs',   used: U.dailyMessages,   cap: L.dailyMessages },
+    { short: 'QB',     used: U.dailyQB,         cap: L.dailyQB },
+    { short: 'Curr',  used: U.weeklyCurricula, cap: L.weeklyCurricula },
+    { short: 'Debates', used: U.weeklyDebates,  cap: L.weeklyDebates },
+    { short: 'Maps',   used: U.noteMaps,        cap: L.noteMaps },
   ];
   return (
-    <div className="px-3 py-2.5 border-b border-white/[0.06] bg-white/[0.02]">
-      <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/40 mb-2">Your usage</p>
-      <div className="space-y-1.5">
-        {rows.map(r => <UsageRow key={r.label} {...r} />)}
-      </div>
+    <div className="flex divide-x divide-white/[0.06] border-b border-white/[0.06]">
+      {cols.map(c => <UsageCol key={c.short} {...c} />)}
     </div>
   );
 }
 
-function UsageRow({ label, used = 0, cap }) {
-  // null / undefined cap from the server = serialized Infinity = unlimited.
+function UsageCol({ short, used = 0, cap }) {
   const isInf = cap === null || cap === undefined || cap === Infinity || cap > 9999;
   const pct = isInf ? 0 : Math.min(100, Math.round((used / Math.max(1, cap)) * 100));
-  const tone = isInf ? 'bg-white/15'
+  const tone = isInf ? 'bg-white/20'
     : pct >= 100 ? 'bg-rose-400'
     : pct >= 75 ? 'bg-amber-400'
-    : 'bg-blue-400';
+    : 'bg-white/50';
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-[11px] text-white/70 flex-1 truncate">{label}</span>
-      <span className="text-[11px] tabular-nums text-white/80 font-semibold w-14 text-right">
-        {used}{isInf ? ' / ∞' : ` / ${cap}`}
-      </span>
-      <span className="w-12 h-1 rounded-full bg-white/[0.06] overflow-hidden flex-shrink-0">
-        <span className={`block h-full ${tone}`} style={{ width: `${isInf ? 8 : pct}%` }} />
-      </span>
+    <div className="flex-1 px-3 py-2.5">
+      <div className="text-[9px] font-semibold uppercase tracking-widest text-white/30 mb-1">{short}</div>
+      <div className="text-[13px] font-semibold text-white tabular-nums leading-none">
+        {used}<span className="text-white/25 text-[10px]"> /{isInf ? '∞' : cap}</span>
+      </div>
+      <div className="mt-1.5 h-px rounded-full bg-white/[0.07]">
+        <div className={`h-full rounded-full ${tone}`} style={{ width: `${isInf ? 10 : pct}%` }} />
+      </div>
     </div>
   );
 }

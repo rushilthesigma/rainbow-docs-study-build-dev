@@ -135,6 +135,7 @@ export default function MiniOS() {
           {DOCK.map(app => {
             const Icon = app.icon;
             const isActive = app.id === activeApp;
+            const isSelectedCalculator = isActive && app.id === 'mathtutor';
             return (
               <button
                 key={app.id}
@@ -144,8 +145,12 @@ export default function MiniOS() {
                   isActive ? '' : 'hover:-translate-y-0.5'
                 }`}
               >
-                <div className={`w-14 h-14 md:w-16 md:h-16 rounded-2xl flex items-center justify-center shadow-sm border border-gray-200 dark:border-[#2A2A40] ${app.color} ${
-                  isActive ? 'ring-2 ring-blue-500/70 shadow-md' : 'group-hover:shadow-md'
+                <div className={`w-14 h-14 md:w-16 md:h-16 rounded-2xl flex items-center justify-center shadow-sm border ${
+                  isSelectedCalculator
+                    ? 'border-blue-500 bg-blue-500 text-white ring-2 ring-blue-500 shadow-md'
+                    : `border-gray-200 dark:border-[#2A2A40] ${app.color} ${
+                        isActive ? 'ring-2 ring-blue-500/70 shadow-md' : 'group-hover:shadow-md'
+                      }`
                 }`}>
                   <Icon size={26} />
                 </div>

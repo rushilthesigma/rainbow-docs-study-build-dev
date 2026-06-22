@@ -369,7 +369,7 @@ export default function GuidedTour() {
               <GraduationCap size={12} /> Finish
             </button>
           ) : (
-            <button onClick={advance} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gray-900/[0.06] border border-gray-300 hover:bg-gray-900/[0.10] text-gray-700 dark:bg-white/[0.12] dark:border-white/[0.18] dark:hover:bg-white/[0.18] dark:text-white/90 text-[11px] font-semibold transition-colors">
+            <button onClick={advance} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-500 border border-transparent hover:bg-blue-400 text-white text-[11px] font-semibold transition-colors">
               Next <ArrowRight size={11} />
             </button>
           )}

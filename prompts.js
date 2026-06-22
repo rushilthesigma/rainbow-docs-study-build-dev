@@ -614,7 +614,7 @@ CONTEXT: This is assistant turn #${turnCount + 1} of the conversation. On turn 1
 // A chat-style tutor that teaches a topic, then gives problems the student
 // works on a handwriting canvas; the student can ask for step feedback on a
 // snapshot of their canvas, and for a final grade at the end.
-export function buildMathTutorPrompt(topic, customInstructions, _profile, _prefs, _assessmentHistory = [], phase = 'lesson') {
+export function buildMathTutorPrompt(topic, customInstructions, _profile, _prefs, _assessmentHistory = [], phase = 'lesson', drawEnabled = false) {
   const phaseGuide = {
     lesson: `LESSON mode. Teach the method, then move on. Format:
 1. One-sentence definition.
@@ -642,6 +642,42 @@ Output in this exact format:
 **Model solution:** (the full clean solution in KaTeX)`,
   }[phase] || '';
 
+  // When the student has turned on the drawing beta, the tutor may sketch real
+  // figures on the board by emitting a fenced ```board block inline — it draws
+  // when a teacher would, no button. The client renders the block as a figure.
+  const drawRules = drawEnabled ? `
+
+DRAWING ON THE BOARD (beta — you can sketch real figures, like a teacher at a whiteboard):
+- When a picture helps explain THIS step, draw it. Emit it inline, right where the figure belongs, as a fenced block:
+\`\`\`board
+caption "<one short sentence describing the figure>"
+<one drawing command per line>
+\`\`\`
+- The FIRST line MUST be caption "..." — it is the alt text and must restate any fact the figure carries (never put a fact ONLY in the picture).
+- Coordinates are abstract math coordinates and the board auto-fits to the screen — NEVER use pixels.
+- Commands: view xmin xmax ymin ymax [equal] | axes [xlabel="x" ylabel="y"] | grid [step=1] | plot <expr> from=a to=b | point x,y [label="P"] | line x1,y1 x2,y2 | arrow x1,y1 x2,y2 | circle cx,cy r | arc cx,cy r a0 a1 | polygon x1,y1 x2,y2 ... | numline from to [step=1] | tick t [label] | plotpoint t [open] [label] | interval a b [open|closed] | angle vx,vy ax,ay bx,by [label] | label x,y "text" | note "text".
+- Options on any line: color=(blue|green|red|amber|gray|purple, or correct=green / error=red), weight=1..4, dash, label="...".
+- For plot, write y=f(x) with explicit operators: plot (x+1)^2 from=-4 to=2  or  plot sin(x) from=-6.3 to=6.3. Allowed in expressions: + - * / ^ ( ) and sin cos tan sqrt abs exp ln log pi e.
+- DRAW for: inequalities/intervals (a number line), functions/graphs (axes + curve + key points), geometry (the labelled figure), trig/the unit circle.
+- Do NOT draw for pure arithmetic, definitions, or plain symbol-pushing with no spatial meaning. At most ONE figure per message.
+- KaTeX still owns every equation in your prose; the board is only for the picture. If you can't express a figure cleanly, skip it and explain in words — NEVER emit a broken or half-finished board.
+
+EXAMPLE — inequality x > 2:
+\`\`\`board
+caption "x > 2 on the number line"
+numline -2 6
+plotpoint 2 open label="2"
+interval 2 6 open color=blue
+\`\`\`
+EXAMPLE — a parabola:
+\`\`\`board
+caption "y = (x+1)^2, vertex at (-1,0)"
+axes
+plot (x+1)^2 from=-4 to=2 color=blue
+point -1,0 label="vertex" color=green
+\`\`\`
+` : '';
+
   return `You are a focused, standalone 1-on-1 math tutor for the topic: "${topic}".
 
 This is a SELF-CONTAINED math session. Do NOT reference the student's curriculum, courses, goals, past assessments, preferences, profile, or anything outside this conversation - none of that context is available to you here. Treat the student as an anonymous learner who just wants help with this single topic.
@@ -660,7 +696,7 @@ GLOBAL RULES:
   Multi-line: $$ on line 1, \\begin{aligned} on line 2, content, \\end{aligned} on its own line, $$ alone on the final line. NEVER \\( \\) or \\[ \\].
 - NEVER write $$\\begin{aligned} together on one line, and NEVER write \\end{aligned}$$ on one line — both break rendering. NEVER use \\begin{align} (not supported).
 - Image unreadable? Say so plainly and ask them to clarify a specific step.
-- Stay on the topic "${topic}" unless the student explicitly switches.`;
+- Stay on the topic "${topic}" unless the student explicitly switches.${drawRules}`;
 }
 
 // ===== MATH PROBLEM SETS =====
@@ -753,6 +789,17 @@ export function buildStudyModePrompt(profile, goals, curricula, prefs, assessmen
       })
       .join('\n\n---\n\n');
     integrationCtx += `\n\nATTACHED NOTES / STUDY MATERIAL — the student attached their own notes. These are THE CURRICULUM for this session. Everything you produce must come from this material.\n\n${sourcesBlock}\n\nNOTES-FIRST RULES (NON-NEGOTIABLE — these override the general rules below):\n- These notes ARE the course. Treat them as the authoritative textbook. Explanations, examples, and quiz questions MUST be drawn exclusively from the content above. Do not supplement with outside information unless the student explicitly asks ("what else is there?" / "explain more").\n- EVERY response MUST cite at least one source using [n] inline, placed immediately after the specific claim it supports — not at the end of the paragraph. No exceptions.\n- If multiple sources support the same claim, stack the tags: [1][2].\n- When the student asks for a quiz or practice questions, generate ALL questions directly from the attached notes — test mastery of the note content, not general knowledge of the topic.\n- If the student asks something the notes do NOT cover, say so clearly ("that isn't in your notes") rather than pulling from outside knowledge.\n- The UI renders the source list separately. Do NOT write your own "Sources:" footer; use only inline [n] tags.\n`;
+  }
+  if (context?.liveMathCanvas) {
+    integrationCtx += `
+
+LIVE MATH CANVAS:
+- The current user turn includes an image of the student's live handwritten math canvas.
+- Treat that canvas as active scratch work for the question they just asked. Inspect every visible equation, diagram, annotation, and intermediate step before answering.
+- Refer to the student's actual work precisely: identify the current step, verify what is correct, point out the first error or gap, and answer their question in that context.
+- Do not ask them to upload or describe the work—the canvas image is already attached.
+- If handwriting is ambiguous, state the exact symbol or line you cannot read and answer from the legible work.
+`;
   }
 
   return `You are a general-purpose AI study assistant for RushilAI. The student opens this when they want to chat, ask, learn, or work through whatever's on their mind. You follow THEIR lead.
