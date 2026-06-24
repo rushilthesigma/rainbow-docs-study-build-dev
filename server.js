@@ -17,7 +17,7 @@ const pdfParse = _require('pdf-parse');
 import {
   buildCurriculumPrompt, buildLessonPrompt, buildLessonChatPrompt,
   buildStandaloneLessonPrompt, buildMathTutorPrompt, buildMathProblemSetPrompt,
-  buildStudyModePrompt, buildGoalMilestonesPrompt, buildAssessmentPrompt,
+  buildStudyModePrompt, buildHumanizePrompt, buildGoalMilestonesPrompt, buildAssessmentPrompt,
   buildFlashcardPrompt, buildNodeFlashcardPrompt, buildCueGenerationPrompt, buildSummaryPrompt,
   buildTopicSuggestionsPrompt, buildSlideshowPrompt, buildFlashSlideshowPrompt,
   buildSlideshowCriticPrompt, buildSlideshowReviserPrompt,
@@ -66,6 +66,22 @@ const OPENAI_GPT = 'gpt-5.4';
 // message quota (consumeMessage / requireMessageQuota), like Flash Lite.
 const OPENAI_GPT_MINI = 'gpt-5.4-mini';
 
+// DeepSeek V4 ids. DeepSeek speaks the OpenAI Chat Completions protocol, so it's
+// served through the `openai` SDK pointed at the DeepSeek base URL (no new
+// dependency). V4 ships two models, both offered as user-selectable Study Mode
+// picks (the legacy deepseek-chat / deepseek-reasoner ids retire 2026-07-24):
+//   deepseek-v4-flash — fast/cheap, runs in NON-thinking mode here. FREE for
+//                     everyone with NO per-model cap; only draws down the shared
+//                     daily message quota, like Flash Lite.
+//   deepseek-v4-pro   — flagship, runs in THINKING mode here (thinking:{enabled}
+//                     + reasoning_effort), streaming its chain-of-thought on
+//                     delta.reasoning_content → thinking events. Non-paid 12/day
+//                     cap (like Haiku); unlimited for every paid tier.
+// Any DeepSeek call degrades to the equivalent-tier Gemini model on failure, so
+// a bad/absent key never breaks the app.
+const DEEPSEEK_FLASH = 'deepseek-v4-flash';
+const DEEPSEEK_PRO   = 'deepseek-v4-pro';
+
 // Tier → { gemini, claude } pairs. speed = flash-lite/haiku, balanced =
 // flash/sonnet, pro = pro/sonnet. providerForUser() picks which half runs.
 const TIER_MODELS = {
@@ -76,6 +92,32 @@ const TIER_MODELS = {
 const CLAUDE_MODELS = new Set([CLAUDE_HAIKU, CLAUDE_SONNET]);
 const isClaudeModel = (id) => CLAUDE_MODELS.has(id) || /^claude/i.test(String(id || ''));
 const isOpenAIModel = (id) => /^gpt-/i.test(String(id || ''));
+const isDeepSeekModel = (id) => /^deepseek/i.test(String(id || ''));
+
+// Topics where DeepSeek's training may produce censored / politically-slanted
+// output. Matched against the trailing messages so the reroute fires on the
+// turn that introduces the topic, not retroactively on unrelated turns.
+const GEOPOLITICS_RE = /\b(china|chinese|prc|ccp|cpc|taiwan(?:ese)?|roc|hong\s*kong|tibet(?:an)?|xinjiang|uyghur|tiananmen|south\s+china\s+sea|one[\s-]china|cross[\s-]strait|taiwan\s+strait|sino[\s-]|beijing\s+(policy|govern|leader|regime)|geopolit|sovereignty\s+(dispute|claim)|territorial\s+(claim|dispute|integrit)|taiwan\s+independen|reunif|separati[st]|sanctions|trade\s+war|military\s+tension|nuclear\s+threat)\b/i;
+
+function messageText(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content.map(part => {
+      if (typeof part === 'string') return part;
+      if (part && typeof part === 'object') return part.text || part.content || '';
+      return '';
+    }).join(' ');
+  }
+  if (content && typeof content === 'object') return content.text || content.content || '';
+  return String(content || '');
+}
+
+// Check the last three user messages for geopolitically-sensitive content.
+function isGeopoliticsTopic(messages) {
+  if (!Array.isArray(messages)) return false;
+  const recent = messages.filter(m => m.role === 'user').slice(-3);
+  return recent.some(m => GEOPOLITICS_RE.test(messageText(m.content)));
+}
 
 const DEFAULT_MODEL = GEMINI_FLASH;
 const FALLBACK_MODEL = GEMINI_FLASH_LITE;
@@ -85,6 +127,7 @@ const FALLBACK_MODEL = GEMINI_FLASH_LITE;
 // Claude id back to the equivalent-tier Gemini model rather than 404-ing.
 const geminiSiblingOf = (id) => {
   if (isOpenAIModel(id)) return /mini/i.test(String(id)) ? GEMINI_FLASH_LITE : GEMINI_FLASH; // GPT-5.4 → Flash, mini → Flash Lite
+  if (isDeepSeekModel(id)) return /pro/i.test(String(id)) ? GEMINI_FLASH : GEMINI_FLASH_LITE; // V4 Pro → Flash, V4 Flash → Flash Lite
   if (!isClaudeModel(id)) return id || DEFAULT_MODEL;
   if (id === CLAUDE_HAIKU) return GEMINI_FLASH_LITE;
   return GEMINI_FLASH; // Sonnet → Flash (balanced); Pro tier streams on Flash too
@@ -117,7 +160,12 @@ const anthropic = ANTHROPIC_API_KEY ? new Anthropic({ apiKey: ANTHROPIC_API_KEY 
 if (!ANTHROPIC_API_KEY) console.warn('ANTHROPIC_API_KEY is not set - Claude calls will fall back to Gemini');
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const openai = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
-if (!OPENAI_API_KEY) console.warn('OPENAI_API_KEY is not set - GPT calls will fall back to Gemini');
+if (!OPENAI_API_KEY) console.warn('OPENAI_API_KEY is not set - GPT calls will fail');
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
+// DeepSeek is OpenAI-compatible, so we reuse the OpenAI SDK pointed at the
+// DeepSeek base URL rather than adding a new dependency.
+const deepseek = DEEPSEEK_API_KEY ? new OpenAI({ apiKey: DEEPSEEK_API_KEY, baseURL: 'https://api.deepseek.com' }) : null;
+if (!DEEPSEEK_API_KEY) console.warn('DEEPSEEK_API_KEY is not set - DeepSeek calls will fall back to Gemini');
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 
 // Data storage - try multiple locations until one works
@@ -293,6 +341,11 @@ const LIMITS = {
 };
 const PAID_TIERS = new Set(['plus', 'lifetime', 'pro']);
 
+function deepSeekRerouteTarget(messages, opts = {}) {
+  if (opts.deepseekReroute === false || !isGeopoliticsTopic(messages)) return null;
+  return PAID_TIERS.has(opts.userPlan) ? OPENAI_GPT : GEMINI_FLASH_LITE;
+}
+
 // Referrals: each user owns one 8-char alphanumeric code. When two
 // different users redeem the same code, the owner unlocks Plus-Lite.
 // Codes are stamped on user creation + backfilled on migrate.
@@ -450,18 +503,27 @@ function modelForUser(user, email, opts = {}) {
 // models with no per-model cap. Mirrors STUDY_MODELS in
 // src/components/study/studyModels.js — keep the two allow-lists in sync.
 const HAIKU_FREE_DAILY = 12;
+// DeepSeek V4 Pro carries the same non-paid 12/day cap as Haiku, on its own
+// independent rolling window; unlimited for every paid tier.
+const DEEPSEEK_FREE_DAILY = 12;
 // Capped free models carry { freeDailyLimit, usageKey, lockKey }: non-paid users
 // get freeDailyLimit messages per rolling 24h on EACH such model independently
 // (separate usage windows), then it locks until UTC midnight and serves Flash
 // Lite. GPT-5.4 is a PAID-only model (plus / lifetime / pro), like Flash &
-// Sonnet — no free or plus-lite access, and no per-model cap. GPT-5.4 mini is
-// the free OpenAI option: free for everyone with NO per-model cap, so it only
-// draws down the shared daily message quota.
+// Sonnet — no free or plus-lite access, and no per-model cap. GPT-5.4 mini and
+// DeepSeek V4 Flash are the free uncapped options: free for everyone with NO
+// per-model cap, so they only draw down the shared daily message quota. DeepSeek
+// V4 Pro is the free-but-capped reasoning option: 12/day for non-paid (own
+// window), unlimited for every paid tier, exactly like Haiku.
 const STUDY_MODELS = {
   'flash-lite':   { id: GEMINI_FLASH_LITE, label: 'Flash Lite',   provider: 'gemini', paidOnly: false },
   'haiku':        { id: CLAUDE_HAIKU,      label: 'Haiku 4.5',    provider: 'claude', paidOnly: false, freeDailyLimit: HAIKU_FREE_DAILY, usageKey: 'haikuWindow', lockKey: 'haikuLockedUntil' },
   'gpt-5.4':      { id: OPENAI_GPT,        label: 'GPT-5.4',      provider: 'openai', paidOnly: true },
   'gpt-5.4-mini': { id: OPENAI_GPT_MINI,   label: 'GPT-5.4 mini', provider: 'openai', paidOnly: false },
+  // DeepSeek V4 Flash: free for everyone, no per-model cap (only draws the shared daily quota).
+  'deepseek-flash': { id: DEEPSEEK_FLASH, label: 'DeepSeek V4', provider: 'deepseek', paidOnly: false },
+  // DeepSeek V4 Pro: free for everyone but capped at 12/day for non-paid (own window), unlimited for paid.
+  'deepseek-pro':   { id: DEEPSEEK_PRO,   label: 'DeepSeek V4 Pro',   provider: 'deepseek', paidOnly: false, freeDailyLimit: DEEPSEEK_FREE_DAILY, usageKey: 'deepseekWindow', lockKey: 'deepseekLockedUntil' },
   'flash':      { id: GEMINI_FLASH,      label: 'Flash',      provider: 'gemini', paidOnly: true },
   'sonnet':     { id: CLAUDE_SONNET,     label: 'Sonnet 4.6', provider: 'claude', paidOnly: true },
   'gemini-pro': { id: GEMINI_PRO,        label: 'Gemini Pro', provider: 'gemini', paidOnly: true },
@@ -570,6 +632,51 @@ function recordFreeCapUse(user, key) {
   user.data.usage[cap.usageKey].push(Date.now());
 }
 
+function studyModelPublicMeta(key) {
+  const m = STUDY_MODELS[key];
+  if (!m) return { key, label: key || 'Model', provider: 'AI' };
+  const provider = ({
+    gemini: 'Gemini',
+    claude: 'Claude',
+    openai: 'OpenAI',
+    deepseek: 'DeepSeek',
+  })[m.provider] || m.provider || 'AI';
+  return { key, label: m.label, provider };
+}
+
+function resolveBestOfStudyModels(bestOf, user, email) {
+  if (!bestOf || typeof bestOf !== 'object') return null;
+  const requestedModels = Array.isArray(bestOf.models)
+    ? bestOf.models.filter((key, index, arr) => STUDY_MODELS[key] && arr.indexOf(key) === index).slice(0, 3)
+    : [];
+  const requestedJudge = STUDY_MODELS[bestOf.judgeModel] ? bestOf.judgeModel : null;
+  if (requestedModels.length !== 3 || !requestedJudge || requestedModels.includes(requestedJudge)) return null;
+
+  const candidates = requestedModels.map((requestedKey) => {
+    const resolved = resolveStudyModel(requestedKey, user, email);
+    return {
+      ...studyModelPublicMeta(resolved.key),
+      requestedKey,
+      requestedLabel: studyModelPublicMeta(requestedKey).label,
+      id: resolved.id,
+      switched: resolved.switched,
+      reason: resolved.reason,
+      haikuRemaining: resolved.haikuRemaining,
+    };
+  });
+  const judgeResolved = resolveStudyModel(requestedJudge, user, email);
+  const judge = {
+    ...studyModelPublicMeta(judgeResolved.key),
+    requestedKey: requestedJudge,
+    requestedLabel: studyModelPublicMeta(requestedJudge).label,
+    id: judgeResolved.id,
+    switched: judgeResolved.switched,
+    reason: judgeResolved.reason,
+    haikuRemaining: judgeResolved.haikuRemaining,
+  };
+  return { candidates, judge };
+}
+
 // ===== Debate opponent model picker =====
 // Debate has its OWN per-message model toggle (separate from Study Mode), with
 // STRICTER free gating: free accounts may pick ONLY Flash Lite and GPT-5.4 mini
@@ -638,11 +745,13 @@ function ensureUsageBucket(user) {
   if (!Array.isArray(user.data.usage.qbWindow)) user.data.usage.qbWindow = [];
   if (!Array.isArray(user.data.usage.haikuWindow)) user.data.usage.haikuWindow = [];
   if (!Array.isArray(user.data.usage.gptWindow)) user.data.usage.gptWindow = [];
+  if (!Array.isArray(user.data.usage.deepseekWindow)) user.data.usage.deepseekWindow = [];
   const cutoff = Date.now() - ROLLING_WINDOW_MS;
   user.data.usage.msgWindow = user.data.usage.msgWindow.filter(e => (e?.ts || 0) > cutoff);
   user.data.usage.qbWindow = user.data.usage.qbWindow.filter(ts => ts > cutoff);
   user.data.usage.haikuWindow = user.data.usage.haikuWindow.filter(ts => ts > cutoff);
   user.data.usage.gptWindow = user.data.usage.gptWindow.filter(ts => ts > cutoff);
+  user.data.usage.deepseekWindow = user.data.usage.deepseekWindow.filter(ts => ts > cutoff);
   if (user.data.usage.week !== week) {
     user.data.usage.week = week;
     user.data.usage.curricula = 0;
@@ -885,6 +994,10 @@ function createDefaultData() {
       // ON = terse, high-signal phrases (the shipped style). OFF = normal,
       // conversational AI prose. Read in prompts.js buildToneRules().
       succinctMode: true,
+      // When true (default), DeepSeek requests on geopolitically-sensitive
+      // topics are silently rerouted to Gemini Flash Lite (free) or GPT-5.4
+      // (paid) so the user gets an unfiltered answer.
+      deepseekReroute: true,
       customInstructions: '',
       // ----- UI prefs (moved off localStorage) -----
       theme: 'dark',
@@ -1594,7 +1707,13 @@ app.post('/api/auth/sync', authMiddleware, (req, res) => {
     const users = loadUsers();
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
-    users[email].data = { ...users[email].data, ...data };
+    users[email].data = {
+      ...users[email].data,
+      ...data,
+      preferences: data?.preferences
+        ? { ...(users[email].data?.preferences || {}), ...data.preferences }
+        : users[email].data?.preferences,
+    };
     saveUsers(users);
     res.json({ success: true, data: users[email].data });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -2491,12 +2610,11 @@ async function callClaude(systemPrompt, messages, model, maxOutputTokens = 4096,
 
 // Non-streaming OpenAI call. Returns the SAME envelope as callGemini/callClaude
 // ({ success, data: { content: [{ type:'text', text }], sources }, model }) so
-// every existing call site works unchanged. Degrades to the tier's Gemini
-// sibling on any failure (bad key, unknown model, rate limit), keeping the app
-// resilient. Uses max_completion_tokens and omits temperature for GPT-5-family
-// compatibility (those models reject max_tokens / non-default temperature).
+// every existing call site works unchanged. Throws on missing key or API error —
+// no Gemini fallback. Uses max_completion_tokens and omits temperature for
+// GPT-5-family compatibility (those models reject max_tokens / non-default temperature).
 async function callOpenAI(systemPrompt, messages, model, maxOutputTokens = 4096, opts = {}) {
-  if (!openai) return callGemini(systemPrompt, messages, geminiSiblingOf(model), maxOutputTokens, opts);
+  if (!openai) throw new Error('OPENAI_API_KEY is not configured');
   const resolved = isOpenAIModel(model) ? model : OPENAI_GPT;
   const system = opts.jsonMode
     ? `${systemPrompt || ''}\n\nRespond with ONLY valid JSON — no markdown, no code fences, no prose before or after.`.trim()
@@ -2511,7 +2629,43 @@ async function callOpenAI(systemPrompt, messages, model, maxOutputTokens = 4096,
     const text = resp?.choices?.[0]?.message?.content || '';
     return { success: true, data: { content: [{ type: 'text', text }], sources: [] }, model: resolved };
   } catch (err) {
-    console.warn(`OpenAI call (${resolved}) failed: ${err?.message || err}. Falling back to Gemini.`);
+    console.error(`OpenAI call (${resolved}) failed: ${err?.message || err}`);
+    throw err;
+  }
+}
+
+// Non-streaming DeepSeek call. Same envelope as callGemini/callClaude/callOpenAI.
+// DeepSeek V4 is OpenAI-compatible (classic Chat Completions), so it uses
+// max_tokens (NOT max_completion_tokens). This path runs in NON-thinking mode
+// (`thinking` defaults to enabled on DeepSeek, so disable it explicitly), so
+// temperature / json mode apply normally — the streaming study path is where V4
+// Pro's thinking mode is enabled. Degrades to
+// the Gemini sibling on any failure, keeping the app resilient if the key is
+// absent/bad or DeepSeek is down.
+async function callDeepSeek(systemPrompt, messages, model, maxOutputTokens = 4096, opts = {}) {
+  const rerouteModel = deepSeekRerouteTarget(messages, opts);
+  if (rerouteModel) {
+    if (isOpenAIModel(rerouteModel)) return callOpenAI(systemPrompt, messages, rerouteModel, maxOutputTokens, opts);
+    return callGemini(systemPrompt, messages, rerouteModel, maxOutputTokens, opts);
+  }
+  if (!deepseek) return callGemini(systemPrompt, messages, geminiSiblingOf(model), maxOutputTokens, opts);
+  const resolved = isDeepSeekModel(model) ? model : DEEPSEEK_FLASH;
+  const system = opts.jsonMode
+    ? `${systemPrompt || ''}\n\nRespond with ONLY valid JSON — no markdown, no code fences, no prose before or after.`.trim()
+    : (systemPrompt || '');
+	try {
+		const resp = await deepseek.chat.completions.create({
+			model: resolved,
+			max_tokens: Math.min(Math.max(Number(maxOutputTokens) || 4096, 256), 8192),
+			thinking: { type: 'disabled' },
+			temperature: Number.isFinite(opts.temperature) ? opts.temperature : 0.7,
+			...(opts.jsonMode ? { response_format: { type: 'json_object' } } : {}),
+			messages: messagesToOpenAI(system, messages),
+    });
+    const text = resp?.choices?.[0]?.message?.content || '';
+    return { success: true, data: { content: [{ type: 'text', text }], sources: [] }, model: resolved };
+  } catch (err) {
+    console.warn(`DeepSeek call (${resolved}) failed: ${err?.message || err}. Falling back to Gemini.`);
     return callGemini(systemPrompt, messages, geminiSiblingOf(resolved), maxOutputTokens, opts);
   }
 }
@@ -2552,6 +2706,23 @@ async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096,
       return callOpenAI(systemPrompt, messages, currentModel, maxOutputTokens, opts);
     }
     currentModel = geminiSiblingOf(currentModel);
+  }
+
+  // DeepSeek (V3 / R1) is served by callDeepSeek. Web search is Gemini-only, so a
+  // DeepSeek id that requests grounding is coerced to its Gemini sibling instead.
+  if (isDeepSeekModel(currentModel)) {
+    const rerouteModel = deepSeekRerouteTarget(messages, opts);
+    if (rerouteModel) {
+      if (isOpenAIModel(rerouteModel)) {
+        return callOpenAI(systemPrompt, messages, rerouteModel, maxOutputTokens, opts);
+      }
+      currentModel = rerouteModel;
+    } else {
+      if (!opts.enableWebSearch && deepseek) {
+        return callDeepSeek(systemPrompt, messages, currentModel, maxOutputTokens, opts);
+      }
+      currentModel = geminiSiblingOf(currentModel);
+    }
   }
 
   if (!genAI) return { success: false, error: 'GEMINI_API_KEY not configured', status: 500 };
@@ -2788,7 +2959,7 @@ function extractLessonDoneJson(text) {
 // on overflow so the client can pop the upgrade chip.
 app.post('/api/chat', authMiddleware, async (req, res) => {
   try {
-    const { messages, system, max_tokens, sourced, jsonMode, disableThinking } = req.body;
+    const { messages, system, max_tokens, sourced, jsonMode, disableThinking, model: requestedModel } = req.body;
     const users = loadUsers();
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
@@ -2806,18 +2977,30 @@ app.post('/api/chat', authMiddleware, async (req, res) => {
         limit: quota.limit, remaining: quota.remaining, plan: quota.plan, upgradeKind,
       });
     }
+    // Resolve model: if the caller supplied a study-model key, honour it with
+    // full plan-gating and cap logic (same as /api/study/chat). Otherwise fall
+    // back to the user's tier model so callers that never set the field still work.
+    let modelId = modelForUser(users[email], email);
+    let resolvedModel = null;
+    if (requestedModel && STUDY_MODELS[requestedModel]) {
+      resolvedModel = resolveStudyModel(requestedModel, users[email], email);
+      modelId = resolvedModel.id;
+      recordFreeCapUse(users[email], resolvedModel.key);
+    }
     saveUsers(users);
     const systemPrompt = system || 'You are a helpful AI assistant.';
-    // Resolve the model from the user's saved tier (Pro / Flash / Flash-Lite)
-    // with plan gating, exactly like every streaming AI route. Previously this
-    // trusted a client-supplied `model` that no caller ever set, so every
-    // /api/chat feature silently ran on Flash regardless of the picker.
-    const result = await callGemini(systemPrompt, messages, modelForUser(users[email], email), max_tokens || 4096, {
+    const result = await callGemini(systemPrompt, messages, modelId, max_tokens || 4096, {
       enableWebSearch: !!sourced,
       jsonMode: !!jsonMode,
       disableThinking: !!disableThinking,
+      userPlan: quota.plan,
+      deepseekReroute: users[email].data.preferences?.deepseekReroute !== false,
     });
-    if (result.success) return res.json(result.data);
+    if (result.success) {
+      const payload = result.data;
+      if (resolvedModel) payload.noteEditModel = { key: resolvedModel.key, switched: resolvedModel.switched, reason: resolvedModel.reason, haikuRemaining: resolvedModel.haikuRemaining };
+      return res.json(payload);
+    }
     return res.status(result.status || 500).json({ error: result.error });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -2882,7 +3065,7 @@ app.post('/api/debate/chat', authMiddleware, async (req, res) => {
     }
     saveUsers(users);
     const result = await callGemini(systemPrompt, messages, modelId, max_tokens || 4096, {
-      enableWebSearch: !!sourced,
+      enableWebSearch: !!sourced, userPlan: getPlan(users[email], email), deepseekReroute: users[email].data.preferences?.deepseekReroute !== false,
     });
     if (!result.success) return res.status(result.status || 500).json({ error: result.error });
     // Bill the capped free model only on a completed turn, then report the
@@ -4158,7 +4341,7 @@ async function streamClaudeResponse(res, sse, systemPrompt, messages, onComplete
 }
 
 // Native OpenAI streaming path (same SSE schema as Gemini/Claude). On any early
-// failure it transparently falls back to the equivalent-tier Gemini stream.
+// failure it emits an SSE error and closes the stream — no Gemini fallback.
 // OpenAI Chat Completions doesn't expose reasoning deltas, so there are no
 // `thinking` events — only text content streams through.
 async function streamOpenAIResponse(res, sse, systemPrompt, messages, onComplete, model, opts = {}) {
@@ -4194,6 +4377,56 @@ async function streamOpenAIResponse(res, sse, systemPrompt, messages, onComplete
     clearTimeout(timeout);
     clearInterval(heartbeat);
     console.error('OpenAI stream error:', e);
+    if (!res.writableEnded) { sse({ error: e?.message || String(e) }); res.end(); }
+  }
+}
+
+// Native DeepSeek V4 streaming path (same SSE schema as Gemini/Claude/OpenAI).
+// V4 is OpenAI-compatible, so this reuses the OpenAI SDK pointed at the DeepSeek
+// base URL. V4 Pro runs in THINKING mode (thinking:{enabled} + reasoning_effort)
+// unless the caller disabled thinking, streaming its chain-of-thought on
+// `delta.reasoning_content`, which we forward as `thinking` events. V4 Flash runs
+// non-thinking. On any early failure it falls back to the Gemini stream.
+async function streamDeepSeekResponse(res, sse, systemPrompt, messages, onComplete, model, opts = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 300000);
+  const heartbeat = setInterval(() => {
+    try { res.write(`: keepalive ${Date.now()}\n\n`); res.flush?.(); } catch {}
+  }, 15000);
+
+  // Only V4 Pro thinks, and only when the caller didn't turn thinking off.
+  const useThinking = /pro/i.test(String(model)) && !opts.disableThinking;
+  let buffered = '';
+  try {
+    const stream = await deepseek.chat.completions.create({
+      model,
+      max_tokens: 8192,
+      stream: true,
+	  // Thinking defaults to enabled on DeepSeek, so non-thinking turns must turn it off explicitly.
+	  ...(useThinking
+	    ? { thinking: { type: 'enabled' }, reasoning_effort: 'high' }
+	    : { thinking: { type: 'disabled' }, temperature: 0.7 }),
+	  messages: messagesToOpenAI(systemPrompt, messages),
+	}, { signal: controller.signal });
+
+    for await (const event of stream) {
+      const delta = event?.choices?.[0]?.delta || {};
+      if (useThinking && delta.reasoning_content) sse({ thinking: delta.reasoning_content });
+      if (delta.content) { buffered += delta.content; sse({ content: delta.content }); }
+    }
+
+    clearTimeout(timeout);
+    clearInterval(heartbeat);
+    if (onComplete) {
+      try { await onComplete(buffered, []); }
+      catch (bookkeepErr) { console.error('streamDeepSeekResponse onComplete threw:', bookkeepErr); }
+    }
+    sse({ done: true, sources: [] });
+    res.end();
+  } catch (e) {
+    clearTimeout(timeout);
+    clearInterval(heartbeat);
+    console.error('DeepSeek stream error:', e);
     // Nothing emitted yet → fall back to the Gemini sibling on the same socket.
     if (!buffered && !res.writableEnded) {
       return streamAIResponse(res, systemPrompt, messages, onComplete, geminiSiblingOf(model), opts);
@@ -4220,12 +4453,15 @@ async function streamOpenAIResponse(res, sse, systemPrompt, messages, onComplete
 //     event followed by per-source events + the done event.
 async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOverride, opts = {}) {
   const enableWebSearch = !!opts.enableWebSearch;
+  const rerouteModel = isDeepSeekModel(modelOverride) ? deepSeekRerouteTarget(messages, opts) : null;
+  const effectiveModelOverride = rerouteModel || modelOverride;
   // Claude models stream natively for non-sourced requests. Source mode is
   // backed by Google Search grounding (Gemini only), so a Claude id in source
   // mode is coerced to its Gemini sibling instead of routing to Anthropic.
-  const wantClaude = !!anthropic && isClaudeModel(modelOverride) && !enableWebSearch;
-  const wantOpenAI = !!openai && isOpenAIModel(modelOverride) && !enableWebSearch;
-  const requestedModel = (wantClaude || wantOpenAI) ? modelOverride : geminiSiblingOf(modelOverride || DEFAULT_MODEL);
+  const wantClaude = !!anthropic && isClaudeModel(effectiveModelOverride) && !enableWebSearch;
+  const wantOpenAI = !!openai && isOpenAIModel(effectiveModelOverride) && (!enableWebSearch || !!rerouteModel);
+  const wantDeepSeek = !!deepseek && isDeepSeekModel(effectiveModelOverride) && !enableWebSearch;
+  const requestedModel = (wantClaude || wantOpenAI || wantDeepSeek) ? effectiveModelOverride : geminiSiblingOf(effectiveModelOverride || DEFAULT_MODEL);
   if (!res.headersSent) {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -4248,8 +4484,16 @@ async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOv
   if (wantClaude) {
     return streamClaudeResponse(res, sse, systemPrompt, messages, onComplete, requestedModel, opts);
   }
+  if (rerouteModel && isOpenAIModel(rerouteModel) && !openai) {
+    sse({ error: 'OPENAI_API_KEY is not configured' });
+    res.end();
+    return;
+  }
   if (wantOpenAI) {
     return streamOpenAIResponse(res, sse, systemPrompt, messages, onComplete, requestedModel, opts);
+  }
+  if (wantDeepSeek) {
+    return streamDeepSeekResponse(res, sse, systemPrompt, messages, onComplete, requestedModel, opts);
   }
 
   if (!genAI) {
@@ -4449,6 +4693,135 @@ SOURCE MODE - NON-NEGOTIABLE RULES:
       res.end();
     }
   }
+}
+
+function bestOfText(result) {
+  return (result?.data?.content || [])
+    .map((part) => part?.text || '')
+    .join('')
+    .trim();
+}
+
+function judgeTranscript(messages) {
+  return (messages || [])
+    .slice(-8)
+    .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'Student'}: ${messageText(m.content).slice(0, 4000)}`)
+    .join('\n\n');
+}
+
+async function runBestOfStudyResponse({ sse, systemPrompt, messages, bestOf, opts = {} }) {
+  sse({ status: 'Generating three model responses...' });
+  // Best of 3 compares THREE DISTINCT models. Web search is Gemini-only, so
+  // callGemini() coerces every Claude/OpenAI/DeepSeek id to its Gemini sibling
+  // when grounding is on — which silently collapses all three picks onto the
+  // same underlying model and defeats the comparison. Force grounding off here
+  // so each candidate runs as the exact model the student chose. (The judge
+  // already runs with enableWebSearch:false below.)
+  const candidateOpts = { ...opts, enableWebSearch: false };
+  const candidateResults = await Promise.all(bestOf.candidates.map(async (candidate, index) => {
+    try {
+      const result = await callGemini(systemPrompt, messages, candidate.id, 8192, candidateOpts);
+      if (!result?.success) {
+        return {
+          index,
+          candidate,
+          content: '',
+          sources: [],
+          error: result?.error || 'Model failed to answer.',
+        };
+      }
+      return {
+        index,
+        candidate,
+        content: bestOfText(result),
+        sources: result?.data?.sources || [],
+        actualModel: result.model || candidate.id,
+      };
+    } catch (err) {
+      return {
+        index,
+        candidate,
+        content: '',
+        sources: [],
+        error: err?.message || String(err),
+      };
+    }
+  }));
+
+  const successful = candidateResults.filter((r) => r.content);
+  if (!successful.length) throw new Error('None of the selected Best-of models returned a response.');
+
+  sse({ status: 'Judging the best response...' });
+  let winnerIndex = successful[0].index;
+  let rationale = 'The judge could not return a structured choice, so the first completed response was used.';
+  let judgeError = null;
+  try {
+    const judgeSystem = `You are the fourth AI in a Study Mode "Best of" workflow. Pick the candidate answer that best helps the student learn.
+
+Judge for accuracy, directness, teaching value, and whether the answer follows the user's request. Do not rewrite the answer. Return ONLY JSON:
+{"winner":1,"rationale":"one concise sentence"}`;
+    const judgeUser = [
+      'Conversation:',
+      judgeTranscript(messages),
+      '',
+      ...successful.map((r) => (
+        `Candidate ${r.index + 1} (${r.candidate.requestedLabel || r.candidate.label}):\n${r.content.slice(0, 12000)}`
+      )),
+    ].join('\n\n---\n\n');
+    const judgeResult = await callGemini(judgeSystem, [{ role: 'user', content: judgeUser }], bestOf.judge.id, 1024, {
+      ...opts,
+      enableWebSearch: false,
+      disableThinking: true,
+      jsonMode: true,
+      temperature: 0.2,
+    });
+    const parsed = parseAIJson(bestOfText(judgeResult));
+    const candidateNumber = Number(parsed?.winner ?? parsed?.winnerIndex ?? parsed?.choice);
+    const chosen = successful.find((r) => r.index === candidateNumber - 1);
+    if (chosen) winnerIndex = chosen.index;
+    if (typeof parsed?.rationale === 'string' && parsed.rationale.trim()) {
+      rationale = parsed.rationale.trim();
+    }
+  } catch (err) {
+    judgeError = err?.message || String(err);
+  }
+
+  const winner = successful.find((r) => r.index === winnerIndex) || successful[0];
+  const responses = candidateResults.map((r) => ({
+    key: r.candidate.key,
+    requestedKey: r.candidate.requestedKey,
+    label: r.candidate.requestedLabel || r.candidate.label,
+    servedLabel: r.candidate.label,
+    provider: r.candidate.provider,
+    selected: r.index === winner.index,
+    switched: !!r.candidate.switched,
+    reason: r.candidate.reason || null,
+    content: r.content,
+    sources: r.sources || [],
+    error: r.error || null,
+  }));
+
+  return {
+    content: winner.content,
+    sources: winner.sources || [],
+    bestOfMeta: {
+      mode: 'best-of',
+      judge: {
+        key: bestOf.judge.key,
+        requestedKey: bestOf.judge.requestedKey,
+        label: bestOf.judge.requestedLabel || bestOf.judge.label,
+        servedLabel: bestOf.judge.label,
+        provider: bestOf.judge.provider,
+        switched: !!bestOf.judge.switched,
+        reason: bestOf.judge.reason || null,
+      },
+      winnerKey: winner.candidate.key,
+      winnerLabel: winner.candidate.requestedLabel || winner.candidate.label,
+      rationale,
+      judgeError,
+      responses,
+    },
+  };
 }
 
 // Lesson chat (conversational 5-phase)
@@ -5870,7 +6243,25 @@ app.post('/api/curriculum/:id/exams/:examId/grade', authMiddleware, (req, res) =
 
 app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res) => {
   try {
-    const { message, sessionId, context, sourced, images, disableThinking } = req.body;
+    const { message, sessionId, context, sourced, images, canvasImage, disableThinking, humanize, bestOf } = req.body;
+    // Humanize (essay) mode swaps the entire tutoring prompt for a natural
+    // prose prompt. Web-search citation scaffolding fights that output shape,
+    // so humanize wins over sourced.
+    const humanizeMode = !!humanize;
+    const canvasDataUrl = canvasImage?.dataUrl || canvasImage?.url || '';
+    const validCanvasImage = /^data:image\/[^;]+;base64,.+/.test(canvasDataUrl)
+      ? {
+          dataUrl: canvasDataUrl,
+          mimeType: canvasImage?.mimeType || 'image/png',
+          name: canvasImage?.name || 'Live math canvas',
+        }
+      : null;
+    const requestContext = {
+      ...(context && typeof context === 'object' ? context : {}),
+      // Server truth wins over a stale client flag: the special context is on
+      // only when this exact request actually contains a readable canvas.
+      liveMathCanvas: !!validCanvasImage,
+    };
     // Source-mode + attached sources interaction:
     //   • If the user has attached PDFs/URLs (`context.sources`), the
     //     model must answer ONLY from those - no web fallback. So when
@@ -5879,10 +6270,17 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
     //     SOURCES rules already enforce no-fabrication.
     //   • Otherwise, `sourced=true` keeps the existing Google-Search
     //     grounding path.
-    const hasAttachedSources = !!(context && Array.isArray(context.sources) && context.sources.length > 0);
-    req.sourced = !!sourced && !hasAttachedSources;
+    const hasAttachedSources = Array.isArray(requestContext.sources) && requestContext.sources.length > 0;
+    req.sourced = !!sourced && !hasAttachedSources && !humanizeMode;
     req.hasAttachedSources = hasAttachedSources;
-    req.images = Array.isArray(images) ? images : [];
+    const manualImages = Array.isArray(images)
+      ? images.slice(0, validCanvasImage ? 3 : 4)
+      : [];
+    // The canvas is a dedicated final image, not a best-effort member of the
+    // manual attachment list. Every Study turn with active canvas work gets it.
+    req.images = validCanvasImage
+      ? [...manualImages, validCanvasImage]
+      : manualImages;
     // Thinking: web-search mode always thinks (it must plan its searches);
     // otherwise honor the client's Thinking toggle. Older clients that send
     // nothing keep the old "quick answers" default of thinking off.
@@ -5923,19 +6321,15 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
         startedAt: new Date().toISOString(),
         lastMessageAt: null,
         messages: [],
-        context: context || {},
+        context: requestContext,
         studentId: activeChildIdSC,
       };
       users[email].data.studySessions.unshift(session);
-    } else if (context && (
-      context.curriculumId !== undefined
-      || context.sources !== undefined
-      || context.liveMathCanvas !== undefined
-    )) {
+    } else {
       // Mid-session context updates: curriculum, attached sources, and the
       // current-turn live math-canvas signal.
       // Merge into the persisted context so subsequent turns inherit it.
-      session.context = { ...(session.context || {}), ...context };
+      session.context = { ...(session.context || {}), ...requestContext };
     }
 
     session.messages.push({ role: 'user', content: message, timestamp: new Date().toISOString() });
@@ -5945,12 +6339,15 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
       const aid = users[email].data?.parent?.activeStudentId;
       return aid ? (users[email].data.parent.students || []).find(s => s.id === aid) : null;
     })();
-    const systemPrompt = buildStudyModePrompt(
-      users[email].data.profile, users[email].data.goals,
-      users[email].data.curricula, users[email].data.preferences,
-      users[email].data.assessmentHistory || [],
-      session.context || null,
-      !!req.sourced
+    const systemPrompt = (humanizeMode
+      ? buildHumanizePrompt()
+      : buildStudyModePrompt(
+          users[email].data.profile, users[email].data.goals,
+          users[email].data.curricula, users[email].data.preferences,
+          users[email].data.assessmentHistory || [],
+          session.context || null,
+          !!req.sourced
+        )
     ) + buildChildGuardrails(_activeChildSM);
 
     const aiMessages = session.messages.map(m => ({ role: m.role, content: m.content }));
@@ -5966,11 +6363,21 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
     // auto-switched fallback) so the preference sticks across messages.
     const requestedStudyModel = req.body.model;
     const planSM = getPlan(users[email], email);
+    const bestOfConfig = resolveBestOfStudyModels(bestOf, users[email], email);
     let effectiveStudyModel = null;
     let studyMeta = null;
     let billHaiku = false;
     let billModelKey = null;
-    if (!req.sourced) {
+    const bestOfBillKeys = [];
+    if (bestOfConfig) {
+      // Best of 3 ignores web search (runBestOfStudyResponse forces grounding
+      // off), so its capped candidate/judge models really do run — the sourced
+      // exemption that spares single-model turns never applies here. Charge
+      // every free-capped candidate plus the judge, regardless of req.sourced.
+      for (const model of [...bestOfConfig.candidates, bestOfConfig.judge]) {
+        if (freeCapConfig(model.key) && !PAID_TIERS.has(planSM)) bestOfBillKeys.push(model.key);
+      }
+    } else if (!req.sourced) {
       const r = resolveStudyModel(requestedStudyModel, users[email], email);
       effectiveStudyModel = r.id;
       studyMeta = { key: r.key, switched: r.switched, reason: r.reason, haikuRemaining: r.haikuRemaining };
@@ -5987,13 +6394,20 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders();
-    res.write(`data: ${JSON.stringify({ sessionId: session.id })}\n\n`);
-    if (studyMeta) res.write(`data: ${JSON.stringify({ studyModel: studyMeta })}\n\n`);
+    const sse = (obj) => {
+      try { res.write(`data: ${JSON.stringify(obj)}\n\n`); res.flush?.(); } catch {}
+    };
+    sse({
+      sessionId: session.id,
+      canvasContext: { attached: !!validCanvasImage },
+    });
+    if (studyMeta) sse({ studyModel: studyMeta });
 
     const tierModel = effectiveStudyModel || modelForUser(users[email], email);
-    await streamAIResponse(res, systemPrompt, aiMessages, async (fullContent, sources) => {
+    const completeStudyAssistantTurn = async (fullContent, sources, extra = {}) => {
       const msg = { role: 'assistant', content: fullContent, timestamp: new Date().toISOString() };
       if (sources && sources.length) msg.sources = sources;
+      if (extra.bestOf) msg.bestOf = extra.bestOf;
 
       // [MAKE_*] action tokens: create the real artifact(s), attach them
       // to the assistant message (so reloads restore the Open cards),
@@ -6004,7 +6418,7 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
         if (artifacts.length) {
           msg.artifacts = artifacts;
           for (const a of artifacts) {
-            try { res.write(`data: ${JSON.stringify({ artifact: a })}\n\n`); } catch {}
+            sse({ artifact: a });
           }
         }
       } catch (e) {
@@ -6039,14 +6453,46 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
         recordFreeCapUse(users[email], billModelKey);
         // Send the post-send count so the client pill reflects the deduction.
         const afterRemaining = Math.max(0, (studyMeta?.haikuRemaining ?? HAIKU_FREE_DAILY) - 1);
-        try { res.write(`data: ${JSON.stringify({ studyModel: { haikuRemaining: afterRemaining } })}\n\n`); } catch {}
+        sse({ studyModel: { haikuRemaining: afterRemaining } });
+      }
+      if (bestOfBillKeys.length) {
+        for (const key of bestOfBillKeys) recordFreeCapUse(users[email], key);
       }
 
       saveUsers(users);
+    };
+
+    const responseOpts = {
+      enableWebSearch: !!req.sourced,
+      disableThinking: studyThinkingOff,
+      includeThoughts: !studyThinkingOff,
+      userPlan: planSM,
+      deepseekReroute: users[email].data.preferences?.deepseekReroute !== false,
+    };
+
+    if (bestOfConfig) {
+      const result = await runBestOfStudyResponse({
+        sse,
+        systemPrompt,
+        messages: aiMessages,
+        bestOf: bestOfConfig,
+        opts: responseOpts,
+      });
+      sse({ bestOf: result.bestOfMeta });
+      for (const source of result.sources || []) sse({ source });
+      sse({ content: result.content });
+      await completeStudyAssistantTurn(result.content, result.sources, { bestOf: result.bestOfMeta });
+      sse({ done: true, sources: result.sources || [] });
+      res.end();
+      return;
+    }
+
+    await streamAIResponse(res, systemPrompt, aiMessages, async (fullContent, sources) => {
+      await completeStudyAssistantTurn(fullContent, sources);
       // Thinking is driven by `studyThinkingOff` (computed above from the
       // client's Thinking toggle + web-search mode). When thinking is on we
       // also surface the reasoning so the client's "Thinking" panel streams.
-    }, tierModel, { enableWebSearch: !!req.sourced, disableThinking: studyThinkingOff, includeThoughts: !studyThinkingOff });
+    }, tierModel, responseOpts);
   } catch (e) {
     console.error('Study chat error:', e);
     if (!res.headersSent) res.status(500).json({ error: e.message });
@@ -11042,7 +11488,7 @@ app.post('/api/math-tutor/chat', authMiddleware, requireMessageQuota, async (req
         if (billHaiku) { recordFreeCapUse(users[email], r.key); saveUsers(users); }
       },
       r.id,
-      { enableWebSearch: false },
+      { enableWebSearch: false, userPlan: planMT, deepseekReroute: users[email].data.preferences?.deepseekReroute !== false },
     );
   } catch (e) {
     console.error('Math tutor chat error:', e);
@@ -11631,6 +12077,7 @@ app.get('/api/admin/users', authMiddleware, adminMiddleware, (req, res) => {
       xp: u.data?.profile?.xp || 0,
       curriculaCount: (u.data?.curricula || []).length,
       notesCount: (u.data?.notes || []).length,
+      noteMapsCount: (u.data?.noteMaps || []).length,
       studySessionCount: (u.data?.studySessions || []).length,
       lessonCount: (u.data?.lessons || []).length,
       // Cheap chat totals for the list view
@@ -11725,6 +12172,18 @@ app.get('/api/admin/users/:uid', authMiddleware, adminMiddleware, (req, res) => 
         };
       }),
       notes: (u.data?.notes || []).map(n => ({ id: n.id, title: n.title, type: n.type, updatedAt: n.updatedAt })),
+      // Note maps (graph view). Every user has at least the default
+      // "Main Map"; node/edge counts show which maps are actually used.
+      noteMaps: (u.data?.noteMaps || []).map(m => ({
+        id: m.id,
+        name: m.name,
+        color: m.color || null,
+        isDefault: !!m.isDefault,
+        nodeCount: (m.nodes || []).length,
+        edgeCount: (m.edges || []).length,
+        createdAt: m.createdAt || null,
+        updatedAt: m.updatedAt || null,
+      })),
       goals: (u.data?.goals || []).map(g => ({ id: g.id, title: g.title, status: g.status })),
       flashcardDecks: (u.data?.flashcardDecks || []).map(d => ({ id: d.id, title: d.title, cardCount: d.cards?.length || 0 })),
       // Study sessions (metadata only - full content via /chats/study/:sid)

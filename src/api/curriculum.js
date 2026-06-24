@@ -1,4 +1,7 @@
 import { apiFetch, getToken } from './client';
+import { buildStudyChatBody } from '../utils/studyChatRequest';
+
+export { buildStudyChatBody } from '../utils/studyChatRequest';
 
 // `sources` is an optional array of { title, kind, content, url? }.
 // Each entry is already-extracted plain text (PDFs/text files via
@@ -318,7 +321,7 @@ function streamSSE(url, body, { onChunk, onDone, onError, onMeta, onSource, onSt
               else if (data.source) onSource?.(data.source);
               else if (data.status) onStatus?.(data.status);
               else if (data.artifact) onArtifact?.(data.artifact);
-              else if (data.sessionId || data.studyModel) onMeta?.(data);
+              else if (data.sessionId || data.studyModel || data.canvasContext || data.bestOf) onMeta?.(data);
             } catch {}
           }
         }
@@ -356,7 +359,19 @@ export function sendLessonMessage(curriculumId, lessonId, message, handlersOrIma
 }
 
 // Study mode chat
-export function sendStudyMessage(message, sessionId, context, handlersOrImages, handlersOrSourced, maybeSourced, disableThinking) {
+export function sendStudyMessage(
+  message,
+  sessionId,
+  context,
+  handlersOrImages,
+  handlersOrSourced,
+  maybeSourced,
+  disableThinking,
+  model,
+  canvasImage,
+  humanize,
+  bestOf,
+) {
   let images = [], handlers, sourced = false;
   if (Array.isArray(handlersOrImages)) {
     images = handlersOrImages;
@@ -368,7 +383,18 @@ export function sendStudyMessage(message, sessionId, context, handlersOrImages, 
   }
   return streamSSE(
     '/api/study/chat',
-    { message, sessionId, context, sourced, disableThinking: !!disableThinking, images: (images || []).map(i => ({ dataUrl: i.dataUrl, mimeType: i.mimeType })) },
+    buildStudyChatBody({
+      message,
+      sessionId,
+      context,
+      images,
+      canvasImage,
+      sourced,
+      disableThinking,
+      model,
+      humanize,
+      bestOf,
+    }),
     handlers,
   );
 }

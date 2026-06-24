@@ -355,9 +355,9 @@ const STEP_BG_DARK = {
   tour:       'radial-gradient(at 25% 30%, #047857 0%, transparent 55%),' +
               'radial-gradient(at 75% 75%, #1e40af 0%, transparent 55%),' +
               'linear-gradient(135deg, #051613 0%, #08182a 50%, #0a0e1f 100%)',
-  'qb-ready': 'radial-gradient(at 30% 20%, #92400e 0%, transparent 55%),' +
-              'radial-gradient(at 70% 80%, #1e3a8a 0%, transparent 55%),' +
-              'linear-gradient(135deg, #0a0700 0%, #180e04 50%, #080d1e 100%)',
+  'qb-ready': 'radial-gradient(at 25% 20%, #1e3a8a 0%, transparent 50%),' +
+              'radial-gradient(at 75% 80%, #312e81 0%, transparent 50%),' +
+              'linear-gradient(135deg, #050714 0%, #0a0f24 50%, #0d0f1f 100%)',
 };
 const STEP_BG_LIGHT = {
   welcome:    'radial-gradient(at 25% 20%, #dbeafe 0%, transparent 50%),' +
@@ -372,7 +372,7 @@ const STEP_BG_LIGHT = {
   tour:       'radial-gradient(at 25% 30%, #d1fae5 0%, transparent 55%),' +
               'radial-gradient(at 75% 75%, #c7d2fe 0%, transparent 55%),' +
               'linear-gradient(135deg, #f8fafc 0%, #ecfdf5 50%, #eef2ff 100%)',
-  'qb-ready': 'radial-gradient(at 30% 20%, #fef3c7 0%, transparent 55%),' +
-              'radial-gradient(at 70% 80%, #dbeafe 0%, transparent 55%),' +
-              'linear-gradient(135deg, #fffbf0 0%, #fffaeb 50%, #eef2ff 100%)',
+  'qb-ready': 'radial-gradient(at 25% 20%, #dbeafe 0%, transparent 50%),' +
+              'radial-gradient(at 75% 80%, #ede9fe 0%, transparent 50%),' +
+              'linear-gradient(135deg, #f8fafc 0%, #f1f5ff 50%, #f5f3ff 100%)',
 };

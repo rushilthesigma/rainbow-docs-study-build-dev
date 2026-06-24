@@ -68,6 +68,92 @@ body {
   color: var(--color-text-primary-dark);
 }
 
+:root {
+  --canvas-accent: oklch(0.623 0.214 70);
+  --canvas-accent-text: oklch(0.809 0.105 61.998);
+  --canvas-accent-light: oklch(0.809 0.105 61.998);
+  --canvas-accent-dark: oklch(0.379 0.146 75.707);
+  --canvas-accent-soft: oklch(0.623 0.214 70 / 0.20);
+  --canvas-accent-hover: oklch(0.623 0.214 70 / 0.12);
+  --canvas-accent-ring: oklch(0.707 0.165 64.809 / 0.50);
+  --canvas-accent-glow: oklch(0.623 0.214 70 / 0.36);
+
+  --voice-accent: oklch(0.623 0.214 330);
+  --voice-accent-text: oklch(0.809 0.105 321.998);
+  --voice-accent-light: oklch(0.809 0.105 321.998);
+  --voice-accent-dark: oklch(0.379 0.146 335.707);
+  --voice-accent-soft: oklch(0.623 0.214 330 / 0.20);
+  --voice-accent-hover: oklch(0.623 0.214 330 / 0.12);
+  --voice-accent-ring: oklch(0.707 0.165 324.809 / 0.50);
+  --voice-accent-glow: oklch(0.623 0.214 330 / 0.36);
+
+  --humanize-accent: oklch(0.623 0.214 300);
+  --humanize-accent-text: oklch(0.809 0.105 291.998);
+  --humanize-accent-light: oklch(0.809 0.105 291.998);
+  --humanize-accent-dark: oklch(0.379 0.146 305.707);
+  --humanize-accent-soft: oklch(0.623 0.214 300 / 0.20);
+  --humanize-accent-hover: oklch(0.623 0.214 300 / 0.12);
+  --humanize-accent-ring: oklch(0.707 0.165 294.809 / 0.50);
+  --humanize-accent-glow: oklch(0.623 0.214 300 / 0.36);
+
+  --web-search-accent: oklch(0.623 0.214 259.815);
+  --web-search-accent-text: oklch(0.809 0.105 251.813);
+  --web-search-accent-light: oklch(0.809 0.105 251.813);
+  --web-search-accent-dark: oklch(0.379 0.146 265.522);
+  --web-search-accent-soft: oklch(0.623 0.214 259.815 / 0.20);
+  --web-search-accent-hover: oklch(0.623 0.214 259.815 / 0.12);
+  --web-search-accent-ring: oklch(0.707 0.165 254.624 / 0.50);
+  --web-search-accent-glow: oklch(0.623 0.214 259.815 / 0.36);
+}
+
+.tool-accent-button {
+  --tool-accent: var(--color-blue-500, #3b82f6);
+  --tool-accent-text: var(--color-blue-300, #93c5fd);
+  --tool-accent-hover: color-mix(in srgb, var(--tool-accent) 12%, transparent);
+  --tool-accent-soft: color-mix(in srgb, var(--tool-accent) 20%, transparent);
+  --tool-accent-ring: color-mix(in srgb, var(--tool-accent) 50%, transparent);
+}
+
+.tool-accent-button:hover:not(:disabled) {
+  color: var(--tool-accent-text);
+  background-color: var(--tool-accent-hover);
+}
+
+.tool-accent-button:focus-visible {
+  outline: 2px solid var(--tool-accent-ring);
+  outline-offset: 2px;
+}
+
+.tool-accent-button.is-active {
+  color: var(--tool-accent-text);
+  background-color: transparent;
+  box-shadow: 0 0 0 1px var(--tool-accent-ring);
+}
+
+.tool-accent-button.is-fill {
+  color: #fff;
+  background-color: var(--tool-accent);
+}
+
+.tool-accent-button.is-fill:hover:not(:disabled) {
+  color: #fff;
+  background-color: color-mix(in srgb, var(--tool-accent) 82%, white);
+}
+
+.tool-accent-button.is-disabled {
+  color: color-mix(in srgb, var(--tool-accent-text) 70%, transparent);
+  background-color: color-mix(in srgb, var(--tool-accent) 8%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--tool-accent-ring) 55%, transparent);
+}
+
+.tool-accent-mode {
+  --tw-ring-color: var(--tool-accent-ring);
+}
+
+.tool-accent-meter {
+  background-color: var(--tool-accent);
+}
+
 /* ===== Mobile per-app accent =====
  * `--app-accent` is set on the MobileShell root (see mobileAccents.js)
  * per active app, so the shared chrome (tab bar, header, eyebrows) and
@@ -510,7 +596,7 @@ input[data-spotlight-input]:hover,
 
 /* GNOME-ish sidebar: tighter rows, subtle blue tint hover */
 .os-linux nav button { padding-top: 0.35rem !important; padding-bottom: 0.35rem !important; }
-.os-linux nav button:hover { background-color: rgba(59, 130, 246, 0.1) !important; }
+.os-linux nav button:hover { background-color: color-mix(in srgb, var(--color-blue-500, #3b82f6) 10%, transparent) !important; }
 
 /* No forced borders / focus rings. */
 .os-linux input:focus,
@@ -648,8 +734,8 @@ input[data-spotlight-input]:hover,
 }
 .dark .glass-input:focus {
   background: rgba(255, 255, 255, 0.08) !important;
-  border-color: rgba(96, 165, 250, 0.45) !important;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.30), 0 0 0 3px rgba(59, 130, 246, 0.18) !important;
+  border-color: color-mix(in srgb, var(--color-blue-400, #60a5fa) 45%, transparent) !important;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.30), 0 0 0 3px color-mix(in srgb, var(--color-blue-500, #3b82f6) 18%, transparent) !important;
   outline: none !important;
 }
 
@@ -677,7 +763,7 @@ input[data-spotlight-input]:hover,
 .dark .tiptap th { background: rgba(255, 255, 255, 0.05); }
 .tiptap .tableWrapper { overflow-x: auto; }
 /* ProseMirror selection highlight */
-.tiptap ::selection { background: rgba(96, 165, 250, 0.35); }
+.tiptap ::selection { background: color-mix(in srgb, var(--color-blue-400, #60a5fa) 35%, transparent); }
 
 /* ===== Voice mode orb (hands-free conversation overlay) ===== */
 /* One clean breathing orb whose color + motion encode the conversation
@@ -702,8 +788,8 @@ input[data-spotlight-input]:hover,
   position: absolute;
   inset: 0;
   border-radius: 9999px;
-  background: radial-gradient(circle at 35% 30%, #93c5fd 0%, #3b82f6 45%, #1e3a8a 100%);
-  box-shadow: 0 0 60px 6px rgba(59, 130, 246, 0.45), inset 0 0 30px rgba(255, 255, 255, 0.25);
+  background: radial-gradient(circle at 35% 30%, var(--voice-accent-light, #93c5fd) 0%, var(--voice-accent, #3b82f6) 45%, var(--voice-accent-dark, #1e3a8a) 100%);
+  box-shadow: 0 0 60px 6px var(--voice-accent-glow, rgba(59, 130, 246, 0.45)), inset 0 0 30px rgba(255, 255, 255, 0.25);
 }
 /* The glow ring lives in ::before so it can pulse independently of the core. */
 .voice-orb::before {
@@ -711,7 +797,7 @@ input[data-spotlight-input]:hover,
   position: absolute;
   inset: -14px;
   border-radius: 9999px;
-  border: 2px solid rgba(96, 165, 250, 0.45);
+  border: 2px solid var(--voice-accent-ring, rgba(96, 165, 250, 0.45));
   opacity: 0;
 }
 

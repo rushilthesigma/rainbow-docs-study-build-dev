@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Calculator, Pen, Eraser, Undo2, Trash2, Check,
+  Calculator, Pen, Eraser, Undo2, Trash2, Check, Send,
   ArrowLeft, ClipboardCheck, Settings, MessageSquare, Layers, RotateCcw,
   Play, ChevronLeft, ChevronRight, ListChecks, Cpu, ChevronDown, Lock, Shapes,
 } from 'lucide-react';
@@ -9,6 +9,7 @@ import { sendMathTutorMessage, generateProblemSet } from '../../../api/mathTutor
 import { parseBoard } from '../../../utils/boardDSL';
 import { synthBoard } from '../../../utils/strokeSynth';
 import MathProblemSet from './MathProblemSet';
+import { useMathCanvasOptional } from '../../../context/MathCanvasContext';
 import ChatContainer from '../../chat/ChatContainer';
 import { errorChatMessage } from '../../../utils/aiErrors';
 import useBrowserBack from '../../../hooks/useBrowserBack';
@@ -58,7 +59,15 @@ export function TutorCanvas({
   initialStrokes = null,
   onStrokesChange = null,
   hint = 'Draw · tap "Get feedback" to share with tutor',
+  canvasContextId = null,
+  canvasContextLabel = 'Live math canvas',
 }) {
+  const sharedCanvas = useMathCanvasOptional();
+  const sharedCanvasIdRef = useRef(
+    canvasContextId || `math-canvas-${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`
+  );
+  const publishSharedCanvas = sharedCanvas?.publishCanvas;
+  const removeSharedCanvas = sharedCanvas?.removeCanvas;
   const canvasRef = useRef(null);
   const ctxRef    = useRef(null);
   const [tool, setTool]       = useState('pen');
@@ -81,6 +90,41 @@ export function TutorCanvas({
 
   function clearCanvas(ctx, w, h) { ctx.clearRect(0, 0, w, h); }
   const cloneStrokes = () => strokesRef.current.map(s => ({ ...s, points: [...s.points] }));
+  // Canvas CSS supplies the dark board color, but CSS backgrounds are not
+  // included by toDataURL(). Export onto an opaque dark surface so white ink
+  // remains visible to Study Mode / vision models instead of becoming
+  // white-on-transparent (which is often composited onto white).
+  function captureForContext() {
+    const canvas = canvasRef.current;
+    if (!canvas || !canvas.width || !canvas.height) return null;
+    const output = document.createElement('canvas');
+    output.width = canvas.width;
+    output.height = canvas.height;
+    const outputCtx = output.getContext('2d');
+    if (!outputCtx) return null;
+    outputCtx.fillStyle = '#0c1322';
+    outputCtx.fillRect(0, 0, output.width, output.height);
+    outputCtx.drawImage(canvas, 0, 0);
+    return output.toDataURL('image/png');
+  }
+
+  function reportCanvasState() {
+    const strokes = cloneStrokes();
+    onStrokesChange?.(strokes);
+    if (!strokes.length) {
+      removeSharedCanvas?.(sharedCanvasIdRef.current);
+      return;
+    }
+    const dataUrl = captureForContext();
+    if (dataUrl) {
+      publishSharedCanvas?.(sharedCanvasIdRef.current, {
+        dataUrl,
+        mimeType: 'image/png',
+        name: canvasContextLabel,
+        source: 'tutor-canvas',
+      });
+    }
+  }
 
   // Draw the first `count` points of a single stroke with its tool/size.
   function drawStrokeUpTo(ctx, s, count) {
@@ -247,8 +291,8 @@ export function TutorCanvas({
   useEffect(() => {
     if (typeof onCaptureReady !== 'function') return;
     onCaptureReady({
-      capture: () => canvasRef.current?.toDataURL('image/png') || null,
-      clear:   () => { strokesRef.current = []; stopAnim(); setReplaying(false); replayStrokes(); onStrokesChange?.([]); },
+      capture: captureForContext,
+      clear:   () => { strokesRef.current = []; stopAnim(); setReplaying(false); replayStrokes(); reportCanvasState(); },
       isEmpty: () => strokesRef.current.length === 0,
       getStrokes: () => cloneStrokes(),
       replay: () => animateReplay(),
@@ -275,6 +319,7 @@ export function TutorCanvas({
       ctxRef.current = ctx;
       clearCanvas(ctx, rect.width, rect.height);
       replayStrokes();
+      if (strokesRef.current.length) reportCanvasState();
 
       // Mirror size/DPR onto the tutor overlay, then re-render its figure.
       const overlay = tutorCanvasRef.current;
@@ -292,7 +337,7 @@ export function TutorCanvas({
     sync();
     const ro = new ResizeObserver(sync);
     ro.observe(canvas);
-    return () => { ro.disconnect(); stopAnim(); stopTutorAnim(); };
+    return () => { ro.disconnect(); stopAnim(); stopTutorAnim(); removeSharedCanvas?.(sharedCanvasIdRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -343,12 +388,12 @@ export function TutorCanvas({
     if (tool === 'eraser') ctx.restore();
     if (currentStrokeRef.current.length > 1) {
       strokesRef.current.push({ points: currentStrokeRef.current, tool, size: tool === 'eraser' ? 22 : PEN_SIZES[penSize] });
-      onStrokesChange?.(cloneStrokes());
+      reportCanvasState();
     }
     currentStrokeRef.current = [];
   }
-  function handleUndo()  { strokesRef.current.pop(); replayStrokes(); onStrokesChange?.(cloneStrokes()); }
-  function handleClear() { strokesRef.current = []; replayStrokes(); onStrokesChange?.([]); }
+  function handleUndo()  { strokesRef.current.pop(); replayStrokes(); reportCanvasState(); }
+  function handleClear() { strokesRef.current = []; replayStrokes(); reportCanvasState(); }
 
   const iconBtn = (active, onClick, children, title, disabled = false) => (
     <button
@@ -961,9 +1006,13 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
                 <button
                   onClick={() => handleSend(input)}
                   disabled={!input.trim()}
-                  className="text-white/35 hover:text-white text-[13px] font-medium disabled:opacity-0 transition-colors"
+                  className={`px-3 h-8 rounded-lg inline-flex items-center gap-1.5 text-[13px] font-medium transition-colors ${
+                    input.trim()
+                      ? 'text-white/35 hover:text-white'
+                      : 'tool-accent-button is-disabled cursor-not-allowed'
+                  }`}
                 >
-                  Send ↗
+                  Send <Send size={11} />
                 </button>
               )}
             </div>

@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import { Check, X, Copy, Pencil, FileText, ExternalLink, FileText as NoteIcon, Zap, Swords, Brain, ChevronRight, Volume2, Square, PanelRightOpen } from 'lucide-react';
+import { Check, X, Copy, Pencil, FileText, ExternalLink, FileText as NoteIcon, Zap, Swords, Brain, ChevronRight, ChevronDown, Volume2, Square, PanelRightOpen } from 'lucide-react';
 import MathText from '../shared/MathText';
 import { useWindowManager } from '../../context/WindowManagerContext';
 
@@ -36,6 +36,116 @@ function ThinkingPanel({ text, streaming }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Best of 3 result. The WINNER is rendered as the normal message body below;
+// this is the quiet "see what the other models said" control that sits ABOVE
+// the answer — collapsed by default so the thread stays clean, and expandable
+// to compare every candidate side by side.
+function BestOfResponses({ bestOf }) {
+  const responses = Array.isArray(bestOf?.responses) ? bestOf.responses : [];
+  const firstOther = Math.max(0, responses.findIndex((r) => !r.selected));
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(firstOther);
+
+  useEffect(() => {
+    setActiveIndex(firstOther);
+  }, [firstOther, bestOf]);
+
+  // Nothing to compare against → don't surface the control at all.
+  if (responses.length < 2) return null;
+  const active = responses[activeIndex] || responses[0];
+  const winner = responses.find((r) => r.selected) || responses[0];
+  const otherCount = Math.max(0, responses.length - 1);
+
+  return (
+    <div className="mb-1 max-w-[88%] pl-1">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className={`inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 -ml-1.5 text-left transition-colors ${
+          open
+            ? 'text-white/75'
+            : 'text-white/40 hover:text-white/70 hover:bg-white/[0.04]'
+        }`}
+      >
+        <span className="text-[11.5px] font-semibold">
+          {open ? 'Other responses' : 'See other responses'}
+        </span>
+        <span className="text-[10.5px] font-medium text-white/35 truncate">
+          · {otherCount} other model{otherCount === 1 ? '' : 's'}
+          {winner?.label && <span className="text-white/30"> · {winner.label} won</span>}
+        </span>
+        <ChevronDown size={12} className={`shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="mt-1.5 rounded-xl border border-white/[0.10] bg-white/[0.03] px-2.5 py-2.5 space-y-2">
+          {bestOf?.judge?.label && (
+            <p className="px-1 text-[10px] font-semibold uppercase tracking-[0.13em] text-white/35">
+              Judged by {bestOf.judge.label}
+            </p>
+          )}
+          {bestOf?.rationale && (
+            <p className="px-1 text-[11px] leading-snug text-white/45">{bestOf.rationale}</p>
+          )}
+          <div className="grid gap-1">
+            {responses.map((r, index) => {
+              const selected = index === activeIndex;
+              const isWinner = !!r.selected;
+              return (
+                <button
+                  key={`${r.key || r.label}-${index}`}
+                  type="button"
+                  onClick={() => setActiveIndex(index)}
+                  className={`w-full flex items-center gap-2 px-1 py-1 text-left transition-colors ${
+                    selected
+                      ? 'text-white'
+                      : 'text-white/40 hover:text-white/70'
+                  }`}
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[12px] font-semibold truncate">
+                      {r.label || r.servedLabel || 'Model'}
+                      {r.switched && r.servedLabel && r.servedLabel !== r.label && (
+                        <span className="font-normal text-white/35"> to {r.servedLabel}</span>
+                      )}
+                    </span>
+                    <span className="block text-[10px] text-white/35 truncate">
+                      {isWinner ? 'Winner' : (r.error ? 'Failed' : 'Alternative')} · {r.provider || 'AI'}
+                    </span>
+                  </span>
+                  {isWinner && <Check size={12} className="text-blue-200/90 shrink-0" strokeWidth={3} />}
+                </button>
+              );
+            })}
+          </div>
+          {active && (
+            <div className="rounded-lg border border-white/[0.08] bg-black/[0.14] px-3 py-2 max-h-72 overflow-y-auto">
+              {active.error ? (
+                <p className="text-[12px] text-rose-200/90">{active.error}</p>
+              ) : (
+                <div className="prose prose-sm prose-invert max-w-none prose-p:my-1.5 prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-code:bg-white/[0.08] prose-code:px-1 prose-code:rounded prose-pre:bg-black/40 prose-pre:rounded-lg text-[12px] leading-relaxed text-white/78">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm, remarkMath]}
+                    rehypePlugins={[[rehypeKatex, { throwOnError: false, errorColor: '#94a3b8' }]]}
+                    components={{
+                      p: ({ children, ...props }) => <p {...props}>{styleCitations(children, active.sources)}</p>,
+                      li: ({ children, ...props }) => <li {...props}>{styleCitations(children, active.sources)}</li>,
+                      strong: ({ children, ...props }) => <strong {...props}>{styleCitations(children, active.sources)}</strong>,
+                      em: ({ children, ...props }) => <em {...props}>{styleCitations(children, active.sources)}</em>,
+                    }}
+                  >
+                    {normalizeMathDelimiters(active.content || '')}
+                  </ReactMarkdown>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -501,11 +611,15 @@ export default function ChatMessage({
   // color. iMessage style: user = blue, AI = gray. Symmetric, no extra
   // chrome (no accent stripes, no header labels).
   return (
-    <div className={`justify-start ${
+    <div className={
       quizOnlySideScreened
         ? 'hidden'
-        : `flex mb-3 ${quizReturning ? 'animate-quiz-fade' : 'animate-fade-in'}`
-    }`}>
+        : `flex flex-col items-start mb-3 ${quizReturning ? 'animate-quiz-fade' : 'animate-fade-in'}`
+    }>
+      {/* The "see other responses" meta sits ABOVE the bubble, not inside it:
+          the winner reads as the normal message, the alternatives are one
+          quiet click away. */}
+      {message.bestOf && !isError && <BestOfResponses bestOf={message.bestOf} />}
       <div className={`max-w-[88%] rounded-2xl rounded-tl-md px-4 py-2.5 shadow-sm backdrop-blur-sm ${
         isError
           ? 'bg-rose-100/70 dark:bg-rose-900/30'

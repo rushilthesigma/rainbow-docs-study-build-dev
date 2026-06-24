@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { MessageSquare, ClipboardCheck, BookOpen, X, CheckCircle2, XCircle, ArrowRight, ArrowLeft, Wand2, Share2 } from 'lucide-react';
+import { MessageSquare, ClipboardCheck, BookOpen, X, CheckCircle2, XCircle, ArrowRight, ArrowLeft, Wand2, Share2, Cpu, ChevronDown, Lock, Check } from 'lucide-react';
 import Modal from '../shared/Modal';
 import Button from '../shared/Button';
 import PillGroup from '../shared/PillGroup';
@@ -10,6 +11,10 @@ import { DIFFICULTY_OPTIONS } from '../../utils/constants';
 import { generateAssessment, gradeAssessment } from '../../api/assessments';
 import { updateNote } from '../../api/notes';
 import { apiFetch } from '../../api/client';
+import { syncData } from '../../api/auth';
+import { useAuth } from '../../context/AuthContext';
+import { planFromUser } from '../billing/modelAccess';
+import { canUseStudyModel, requiredPlanLabelFor, resolveStudyModel, studyModelLabel, visibleStudyModels } from '../study/studyModels';
 import { useWindowManagerOptional } from '../../context/WindowManagerContext';
 
 // Actions that "create from a note": a Study session seeded with
@@ -113,9 +118,28 @@ export default function NoteActions({ note, onNoteUpdated, onMakeQuiz, onAiEdit,
 // Unified AI edit component — renders as a centered modal (mobile/classic)
 // or an in-flow split column (desktop, asPanel=true).
 function AIEditNote({ onClose, note, noteText, onApplied, asPanel = false }) {
+  const { user } = useAuth();
+  const plan = planFromUser(user);
+  const email = user?.email || '';
+
+  function resolveNoteEditModel(savedKey) {
+    const k = savedKey || user?.data?.preferences?.noteEditModel;
+    return resolveStudyModel(k, plan);
+  }
+
+  const [selectedModel, setSelectedModel] = useState(() => resolveNoteEditModel());
   const [instruction, setInstruction] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+
+  async function pickModel(key) {
+    if (!canUseStudyModel(key, plan)) return;
+    setSelectedModel(key);
+    try {
+      const merged = { ...(user?.data?.preferences || {}), noteEditModel: key };
+      await syncData({ preferences: merged });
+    } catch {}
+  }
 
   function handleClose() {
     if (busy) return;
@@ -152,6 +176,7 @@ Return the revised note as JSON.`;
           system,
           messages: [{ role: 'user', content: userMessage }],
           max_tokens: 4000,
+          model: selectedModel,
         }),
       });
       const text = result.content?.[0]?.text || '';
@@ -179,6 +204,7 @@ Return the revised note as JSON.`;
 
   const body = (
     <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+      <NoteModelPicker active={selectedModel} onPick={pickModel} plan={plan} email={email} disabled={busy} />
       <textarea
         autoFocus
         value={instruction}
@@ -237,6 +263,96 @@ export function AIEditNotePanel({ note, onClose, onApplied }) {
 
 export function QuizFromNotePanel(props) {
   return <QuizFromNote {...props} asPanel />;
+}
+
+const PICKER_WIDTH = 220;
+
+function NoteModelPicker({ active, onPick, plan, email, disabled }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState(null);
+  const [mounted, setMounted] = useState(false);
+  const [shown, setShown] = useState(false);
+  const btnRef = useRef(null);
+  const popRef = useRef(null);
+
+  function toggle() {
+    if (disabled) return;
+    if (open) { setOpen(false); return; }
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) setPos({ left: Math.min(r.left, window.innerWidth - PICKER_WIDTH - 8), bottom: window.innerHeight - r.top + 4 });
+    setOpen(true);
+    setMounted(true);
+  }
+
+  useEffect(() => {
+    if (!open) { setShown(false); return; }
+    const id = requestAnimationFrame(() => setShown(true));
+    return () => cancelAnimationFrame(id);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e) { if (e.key === 'Escape') setOpen(false); }
+    function onDown(e) { if (!popRef.current?.contains(e.target) && !btnRef.current?.contains(e.target)) setOpen(false); }
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onDown);
+    return () => { document.removeEventListener('keydown', onKey); document.removeEventListener('mousedown', onDown); };
+  }, [open]);
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/35">Model</span>
+      <div className="relative">
+        <button
+          ref={btnRef}
+          type="button"
+          onClick={toggle}
+          disabled={disabled}
+          title="Choose model"
+          className="flex items-center gap-1 pl-1.5 pr-1 py-1 rounded-lg text-white/50 hover:text-white/90 hover:bg-white/[0.07] disabled:opacity-40 transition-colors"
+        >
+          <Cpu size={12} />
+          <span className="text-[11px] font-semibold max-w-[100px] truncate">{studyModelLabel(active)}</span>
+          <ChevronDown size={10} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+        </button>
+        {mounted && pos && createPortal(
+          <div
+            ref={popRef}
+            style={{ position: 'fixed', left: pos.left, bottom: pos.bottom, width: PICKER_WIDTH, zIndex: 9999, opacity: shown ? 1 : 0, transform: shown ? 'translateY(0)' : 'translateY(4px)', transition: 'opacity 0.15s ease-out, transform 0.15s ease-out' }}
+            className="rounded-xl border border-white/[0.12] bg-[#1b1b1f] shadow-2xl p-1.5"
+          >
+            {visibleStudyModels(email).map((m) => {
+              const locked = !canUseStudyModel(m.key, plan);
+              const lockLabel = locked ? requiredPlanLabelFor(m.key, plan) : null;
+              return (
+                <button
+                  key={m.key}
+                  type="button"
+                  onClick={() => { if (!locked) { onPick(m.key); setOpen(false); } }}
+                  disabled={locked}
+                  className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left transition-colors ${active === m.key ? 'bg-white/[0.09]' : locked ? 'opacity-50 cursor-not-allowed' : 'hover:bg-white/[0.06]'}`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[12px] font-bold text-white flex items-center gap-1.5 truncate">
+                      {m.label}
+                      <span className="text-[9px] font-medium text-white/40">{m.provider}</span>
+                      {locked && lockLabel && (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-300/80">
+                          <Lock size={9} /> {lockLabel}
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                  {active === m.key && <Check size={12} className="text-white/80 shrink-0" strokeWidth={3} />}
+                </button>
+              );
+            })}
+          </div>,
+          document.body
+        )}
+      </div>
+    </div>
+  );
 }
 
 function ActionButton({ icon, label, onClick, disabled }) {

@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { History, Trash2, Plus, ChevronLeft, ChevronDown, Compass, Lightbulb, Calculator, Beaker, Sparkles, Swords, BookOpen, Link2, X, Check, Paperclip, Globe, Cpu, Lock, PanelRightOpen } from 'lucide-react';
+import { History, Trash2, Plus, ChevronLeft, ChevronDown, Compass, Lightbulb, Calculator, Beaker, Swords, BookOpen, Link2, X, Check, Paperclip, Globe, Cpu, Lock, PanelRightOpen, CircleHelp } from 'lucide-react';
 import { sendStudyMessage, listStudySessions, getStudySession, deleteStudySession, listCurricula, extractSourceUrl, extractFiles } from '../../api/curriculum';
 import { syncData } from '../../api/auth';
 import ChatContainer from '../chat/ChatContainer';
@@ -8,11 +8,13 @@ import DebatePanel from './DebatePanel';
 import PdfPreviewPane from './PdfPreviewPane';
 import QuizPreviewPane from './QuizPreviewPane';
 import MathTutorPreviewPane from './MathTutorPreviewPane';
+import ViewFade from '../shared/ViewFade';
 import { errorChatMessage } from '../../utils/aiErrors';
 import { InlineProgress } from '../shared/ProgressBar';
 import { Z } from '../../styles/tokens';
 import { useToast } from '../shared/Toast';
 import { useAuth } from '../../context/AuthContext';
+import { useMathCanvas } from '../../context/MathCanvasContext';
 import { useWindowManagerOptional } from '../../context/WindowManagerContext';
 import { planFromUser } from '../billing/modelAccess';
 import { STUDY_MODELS, resolveStudyModel, canUseStudyModel, requiredPlanLabelFor, studyModelLabel, studyModelHasFreeCap, studyModelDailyCap, studyModelSupportsThinking, isGeminiOnlyEmail, visibleStudyModels, resolveGeminiOnlyModel } from './studyModels';
@@ -34,9 +36,60 @@ const QUICK_PROMPTS = [
 
 const MATH_CANVAS_WIDTH = 460;
 const MATH_CANVAS_MIN_WIDTH = 360;
+const CANVAS_ACCENT_STYLE = {
+  '--tool-accent': 'var(--canvas-accent)',
+  '--tool-accent-text': 'var(--canvas-accent-text)',
+  '--tool-accent-hover': 'var(--canvas-accent-hover)',
+  '--tool-accent-soft': 'var(--canvas-accent-soft)',
+  '--tool-accent-ring': 'var(--canvas-accent-ring)',
+  color: 'var(--canvas-accent-text)',
+};
+
+const BEST_OF_DEFAULT_ORDER = [
+  'haiku',
+  'gpt-5.4-mini',
+  'deepseek-flash',
+  'flash-lite',
+  'deepseek-pro',
+  'flash',
+  'gpt-5.4',
+  'sonnet',
+  'gemini-pro',
+];
+
+function unlockedStudyModelKeys(email, plan) {
+  return visibleStudyModels(email)
+    .filter((m) => canUseStudyModel(m.key, plan))
+    .map((m) => m.key);
+}
+
+function normalizeBestOfState(savedModels, savedJudge, email, plan) {
+  const unlocked = unlockedStudyModelKeys(email, plan);
+  const preferred = [
+    ...BEST_OF_DEFAULT_ORDER.filter((key) => unlocked.includes(key)),
+    ...unlocked.filter((key) => !BEST_OF_DEFAULT_ORDER.includes(key)),
+  ];
+  let judge = unlocked.includes(savedJudge) ? savedJudge : null;
+  const models = [];
+  for (const key of Array.isArray(savedModels) ? savedModels : []) {
+    if (!unlocked.includes(key) || key === judge || models.includes(key)) continue;
+    models.push(key);
+    if (models.length === 3) break;
+  }
+  for (const key of preferred) {
+    if (models.length === 3) break;
+    if (key === judge || models.includes(key)) continue;
+    models.push(key);
+  }
+  if (!judge) {
+    judge = preferred.find((key) => !models.includes(key)) || null;
+  }
+  return { models, judge };
+}
 
 export default function StudyModePanel({ className = '', flush = false, initialMessage, initialSources, windowId }) {
   const toast = useToast();
+  const { activeCanvas: sharedMathCanvas, getActiveCanvas } = useMathCanvas();
   // Thinking toggle: only models that support thinking show the Brain button.
   // Pro always thinks (locked on); Flash / Flash-Lite default off for snappy
   // study answers and let the user opt in. A ref mirrors the value so doSend
@@ -60,6 +113,23 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   const [studyModel, setStudyModel] = useState(() => resolveEffectiveModel(user?.data?.preferences?.studyModel));
   const studyModelRef = useRef(studyModel);
   studyModelRef.current = studyModel;
+  const [studyModelMode, setStudyModelMode] = useState(() => (
+    user?.data?.preferences?.studyModelMode === 'best-of' ? 'best-of' : 'single'
+  ));
+  const initialBestOf = normalizeBestOfState(
+    user?.data?.preferences?.studyBestOfModels,
+    user?.data?.preferences?.studyBestOfJudge,
+    userEmail,
+    plan,
+  );
+  const [bestOfModels, setBestOfModels] = useState(() => initialBestOf.models);
+  const [bestOfJudge, setBestOfJudge] = useState(() => initialBestOf.judge);
+  const studyModelModeRef = useRef(studyModelMode);
+  const bestOfModelsRef = useRef(bestOfModels);
+  const bestOfJudgeRef = useRef(bestOfJudge);
+  studyModelModeRef.current = studyModelMode;
+  bestOfModelsRef.current = bestOfModels;
+  bestOfJudgeRef.current = bestOfJudge;
   // Thinking is a hard toggle the user controls for every model: off = no
   // thinking at all, on = full thinking. Never locked.
   const thinkingLocked = false;
@@ -78,28 +148,92 @@ export default function StudyModePanel({ className = '', flush = false, initialM
     setStudyModel(resolveEffectiveModel(user?.data?.preferences?.studyModel));
   }, [user?.data?.preferences?.studyModel, plan, geminiOnly]);
 
+  useEffect(() => {
+    setStudyModelMode(user?.data?.preferences?.studyModelMode === 'best-of' ? 'best-of' : 'single');
+    const normalized = normalizeBestOfState(
+      user?.data?.preferences?.studyBestOfModels,
+      user?.data?.preferences?.studyBestOfJudge,
+      userEmail,
+      plan,
+    );
+    setBestOfModels(normalized.models);
+    setBestOfJudge(normalized.judge);
+  }, [
+    user?.data?.preferences?.studyModelMode,
+    user?.data?.preferences?.studyBestOfModels,
+    user?.data?.preferences?.studyBestOfJudge,
+    userEmail,
+    plan,
+  ]);
+
+  async function saveStudyPrefs(patch, { refresh = false } = {}) {
+    try {
+      const merged = { ...(user?.data?.preferences || {}), ...patch };
+      await syncData({ preferences: merged });
+      if (refresh) await fetchUser();
+    } catch (err) {
+      console.error('save study preferences failed:', err);
+    }
+  }
+
   async function pickStudyModel(key) {
     if (!canUseStudyModel(key, plan)) return; // locked tiers aren't selectable
     setStudyModel(key);
-    try {
-      const merged = { ...(user?.data?.preferences || {}), studyModel: key };
-      await syncData({ preferences: merged });
-      await fetchUser();
-    } catch (err) { console.error('save studyModel failed:', err); }
+    setStudyModelMode('single');
+    await saveStudyPrefs({ studyModel: key, studyModelMode: 'single' }, { refresh: true });
+  }
+
+  function pickStudyModelMode(mode) {
+    const nextMode = mode === 'best-of' ? 'best-of' : 'single';
+    setStudyModelMode(nextMode);
+    saveStudyPrefs({ studyModelMode: nextMode });
+  }
+
+  function pickBestOfModels(nextModels) {
+    const normalized = normalizeBestOfState(nextModels, bestOfJudgeRef.current, userEmail, plan);
+    setStudyModelMode('best-of');
+    setBestOfModels(normalized.models);
+    setBestOfJudge(normalized.judge);
+    saveStudyPrefs({
+      studyModelMode: 'best-of',
+      studyBestOfModels: normalized.models,
+      studyBestOfJudge: normalized.judge,
+    });
+  }
+
+  function pickBestOfJudge(nextJudge) {
+    if (!canUseStudyModel(nextJudge, plan)) return;
+    const normalized = normalizeBestOfState(bestOfModelsRef.current, nextJudge, userEmail, plan);
+    setStudyModelMode('best-of');
+    setBestOfModels(normalized.models);
+    setBestOfJudge(normalized.judge);
+    saveStudyPrefs({
+      studyModelMode: 'best-of',
+      studyBestOfModels: normalized.models,
+      studyBestOfJudge: normalized.judge,
+    });
   }
   const [messages, setMessages] = useState([]);
   const [streamingContent, setStreamingContent] = useState('');
   const [streamingThinking, setStreamingThinking] = useState('');
   const [streamingSources, setStreamingSources] = useState([]);
   const [streamingArtifacts, setStreamingArtifacts] = useState([]);
+  const [streamingBestOf, setStreamingBestOf] = useState(null);
   const [searchStatus, setSearchStatus] = useState(null);
   const [sourceMode, setSourceMode] = useState(false);
   const sourceModeRef = useRef(false);
   sourceModeRef.current = sourceMode;
+  // Humanize (essay) mode: flips this turn from tutoring to drafting or
+  // rewriting finished prose. The server swaps the whole system prompt when
+  // humanize is true. Takes precedence over source mode.
+  const [humanizeMode, setHumanizeMode] = useState(false);
+  const humanizeModeRef = useRef(false);
+  humanizeModeRef.current = humanizeMode;
   const [streaming, setStreaming] = useState(false);
   const [sessionId, setSessionId] = useState(null);
   // Debate sub-view - replaces the chat with the DebatePanel when true.
   const [debateOpen, setDebateOpen] = useState(false);
+  const [bestOfInfoOpen, setBestOfInfoOpen] = useState(false);
   // Curriculum integration + extra sources. Both flow into the
   // request `context` object on every send. Sheets toggle from the
   // header buttons. Sources are { id, title, url?, content }.
@@ -131,20 +265,25 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   const [quizSideScreenTarget, setQuizSideScreenTarget] = useState(null);
   const [mathTutorSideScreen, setMathTutorSideScreen] = useState(false);
   const mathTutorSideScreenRef = useRef(false);
-  mathTutorSideScreenRef.current = mathTutorSideScreen;
+  const setMathTutorSideScreenWithRef = useCallback((val) => {
+    mathTutorSideScreenRef.current = val;
+    setMathTutorSideScreen(val);
+  }, []);
   const [mathCanvasStrokes, setMathCanvasStrokes] = useState([]);
-  const [canvasSnapshot, setCanvasSnapshot] = useState(null);
+  const mathCanvasStrokesRef = useRef([]);
+  const canvasSnapshotRef = useRef(null);
   const mathCanvasRef = useRef(null);
   const handleMathCanvasReady = useCallback((api) => {
     mathCanvasRef.current = api;
   }, []);
   const handleMathCanvasStrokesChange = useCallback((strokes) => {
+    mathCanvasStrokesRef.current = strokes;
     setMathCanvasStrokes(strokes);
     if (strokes.length === 0) {
-      setCanvasSnapshot(null);
+      canvasSnapshotRef.current = null;
     } else {
       const snap = mathCanvasRef.current?.capture?.();
-      if (snap) setCanvasSnapshot(snap);
+      if (snap) canvasSnapshotRef.current = snap;
     }
   }, []);
   const splitRef = useRef(null);
@@ -210,7 +349,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   function openQuizSideScreen(quiz) {
     const paneIsVisible = mathTutorSideScreen || !!sideScreenQuiz || (previewDocsRef.current.length > 0 && !previewCollapsed);
     if (!paneIsVisible) extendWindowForPreview();
-    setMathTutorSideScreen(false);
+    setMathTutorSideScreenWithRef(false);
     setSideScreenQuiz(quiz);
   }
 
@@ -237,19 +376,18 @@ export default function StudyModePanel({ className = '', flush = false, initialM
     }
     setSideScreenQuiz(null);
     setQuizSideScreenTarget(null);
-    setMathTutorSideScreen(true);
+    setMathTutorSideScreenWithRef(true);
   }
 
   function collapseMathTutorSideScreen() {
-    setMathTutorSideScreen(false);
-    setCanvasSnapshot(null);
+    setMathTutorSideScreenWithRef(false);
     if (previewDocsRef.current.length === 0 || previewCollapsed) restoreWindowWidth();
   }
 
   function showPdfSideScreen() {
     const paneIsVisible = mathTutorSideScreen || !!sideScreenQuiz || (previewDocsRef.current.length > 0 && !previewCollapsed);
     if (!paneIsVisible) extendWindowForPreview();
-    setMathTutorSideScreen(false);
+    setMathTutorSideScreenWithRef(false);
     setSideScreenQuiz(null);
     setQuizSideScreenTarget(null);
     setPreviewCollapsed(false);
@@ -265,7 +403,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
     // First visible side pane: extend the window to the right rather than
     // squeezing the chat. A new PDF also becomes the active side-screen tool.
     if (!paneIsVisible) extendWindowForPreview();
-    setMathTutorSideScreen(false);
+    setMathTutorSideScreenWithRef(false);
     setSideScreenQuiz(null);
     setQuizSideScreenTarget(null);
     setPreviewCollapsed(false); // a freshly added PDF always shows
@@ -328,6 +466,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   const streamThinkingRef = useRef('');
   const streamSourcesRef = useRef([]);
   const streamArtifactsRef = useRef([]);
+  const streamBestOfRef = useRef(null);
   const initialSent = useRef(false);
   // Counts consecutive "restart" submissions so a double-restart re-runs the
   // previous real user turn. Neither "restart" message is ever sent to the server.
@@ -356,22 +495,38 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   }
   function doSend(text, opts = {}) {
     synth.cancel();
-    const wasSourced = !!(opts.sourced ?? sourceModeRef.current);
+    // Humanize wins over source mode: citation scaffolding does not fit the
+    // straight-prose output shape, so the server ignores sourced when humanize
+    // is on. Mirror that here so the UI status matches.
+    const wantsHumanize = !!(opts.humanize ?? humanizeModeRef.current);
+    // Best of 3 runs each model as itself; web search is Gemini-only and would
+    // collapse all three picks onto Gemini server-side, so grounding is off in
+    // this mode. Mirror the humanize precedent and drop sourced when comparing.
+    const bestOfActive = studyModelModeRef.current === 'best-of'
+      && bestOfModelsRef.current.length === 3 && !!bestOfJudgeRef.current;
+    const wasSourced = !wantsHumanize && !bestOfActive && !!(opts.sourced ?? sourceModeRef.current);
     const attachedImages = opts.images || [];
-    // Read the live ref instead of a render-captured value so opening the
-    // canvas immediately affects every send, including memoized send handlers.
-    const canvasApi = mathTutorSideScreenRef.current ? mathCanvasRef.current : null;
-    const canvasDataUrl = canvasApi && !canvasApi.isEmpty?.()
-      ? canvasApi.capture?.()
+    const canvasApi = mathCanvasRef.current;
+    const canvasPaneOpen = mathTutorSideScreenRef.current;
+    // Gate on the toggle AND content — pane must be open and canvas must have strokes.
+    const hasStrokes = !canvasApi?.isEmpty?.();
+    const liveCanvasDataUrl = canvasPaneOpen && hasStrokes ? canvasApi?.capture?.() : null;
+    const localCanvasDataUrl = canvasPaneOpen && hasStrokes
+      ? (liveCanvasDataUrl || canvasSnapshotRef.current)
       : null;
-    const canvasImage = canvasDataUrl
-      ? { dataUrl: canvasDataUrl, mimeType: 'image/png', name: 'Live math canvas' }
+    const detectedCanvas = localCanvasDataUrl
+      ? { dataUrl: localCanvasDataUrl, mimeType: 'image/png', name: 'Live Study math canvas' }
+      : (!canvasPaneOpen ? getActiveCanvas() : null);
+    const canvasImage = detectedCanvas?.dataUrl
+      ? {
+          dataUrl: detectedCanvas.dataUrl,
+          mimeType: detectedCanvas.mimeType || 'image/png',
+          name: detectedCanvas.name || 'Live math canvas',
+        }
       : null;
-    // Keep the live canvas invisible in the user bubble while still sending it
-    // as current-turn visual context. Preserve the API's four-image budget.
-    const images = canvasImage
-      ? [...attachedImages.slice(0, 3), canvasImage]
-      : attachedImages;
+    // Manual attachments and the canvas travel in separate request fields.
+    // This guarantees that every send reserves a slot for the detected canvas.
+    const images = attachedImages.slice(0, canvasImage ? 3 : 4);
     const userMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
     if (attachedImages.length) userMsg.images = attachedImages.map(i => ({ dataUrl: i.dataUrl, name: i.name }));
     // Used by the AI-instruct regenerate flow: hide the hidden-instruction
@@ -382,11 +537,13 @@ export default function StudyModePanel({ className = '', flush = false, initialM
     setStreamingThinking('');
     setStreamingSources([]);
     setStreamingArtifacts([]);
+    setStreamingBestOf(null);
     setSearchStatus(wasSourced ? 'searching' : null);
     streamContentRef.current = '';
     streamThinkingRef.current = '';
     streamSourcesRef.current = [];
     streamArtifactsRef.current = [];
+    streamBestOfRef.current = null;
 
     // Build the context payload - only include what the server cares
     // about. `sources` already contains extracted text from /api/files
@@ -415,6 +572,10 @@ export default function StudyModePanel({ className = '', flush = false, initialM
       },
       onMeta: (data) => {
         if (data.sessionId) setSessionId(data.sessionId);
+        if (data.bestOf) {
+          streamBestOfRef.current = data.bestOf;
+          setStreamingBestOf(data.bestOf);
+        }
         if (typeof data.studyModel?.haikuRemaining === 'number') {
           setHaikuRemaining(data.studyModel.haikuRemaining);
         }
@@ -426,8 +587,8 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         // then tell the user once rather than silently swapping models.
         if (data.studyModel?.switched && data.studyModel.key) {
           // reason 'haiku-limit' is generic across capped free models; name the
-          // one the user actually had selected (Haiku or GPT-5.4).
-          const cappedName = studyModelRef.current === 'gpt-5.4' ? 'GPT-5.4' : 'Haiku';
+          // one the user actually had selected (Haiku, DeepSeek V4 Pro, ...).
+          const cappedName = studyModelLabel(studyModelRef.current);
           setStudyModel(data.studyModel.key);
           if (data.studyModel.reason === 'haiku-limit') {
             toast.info(`Daily ${cappedName} limit reached — switched to Flash Lite until tomorrow.`);
@@ -453,6 +614,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         const think = streamThinkingRef.current;
         const sources = streamSourcesRef.current;
         const artifacts = streamArtifactsRef.current;
+        const bestOf = streamBestOfRef.current;
         if (fullContent) {
           setMessages(m => [...m, {
             role: 'assistant',
@@ -460,6 +622,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
             thinking: think || undefined,
             sources: sources.length ? sources : undefined,
             artifacts: artifacts.length ? artifacts : undefined,
+            bestOf: bestOf || undefined,
             timestamp: new Date().toISOString(),
           }]);
         }
@@ -467,11 +630,13 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         setStreamingThinking('');
         setStreamingSources([]);
         setStreamingArtifacts([]);
+        setStreamingBestOf(null);
         setSearchStatus(null);
         streamContentRef.current = '';
         streamThinkingRef.current = '';
         streamSourcesRef.current = [];
         streamArtifactsRef.current = [];
+        streamBestOfRef.current = null;
         setStreaming(false);
         if (opts.autoPlay && fullContent) {
           const speech = speakableText(fullContent);
@@ -485,14 +650,22 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         setStreamingThinking('');
         setStreamingSources([]);
         setStreamingArtifacts([]);
+        setStreamingBestOf(null);
         setSearchStatus(null);
         streamContentRef.current = '';
         streamThinkingRef.current = '';
         streamSourcesRef.current = [];
         streamArtifactsRef.current = [];
+        streamBestOfRef.current = null;
         setStreaming(false);
       },
-    }, wasSourced, !thinkingOnRef.current, studyModelRef.current);
+    }, wasSourced, !thinkingOnRef.current, studyModelRef.current, canvasImage, wantsHumanize,
+      studyModelModeRef.current === 'best-of' && bestOfModelsRef.current.length === 3 && bestOfJudgeRef.current
+        ? {
+            models: bestOfModelsRef.current,
+            judgeModel: bestOfJudgeRef.current,
+          }
+        : null);
     abortRef.current = abort;
   }
 
@@ -591,6 +764,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
     setMessages([]);
     setSessionId(null);
     setShowHistory(false);
+    setBestOfInfoOpen(false);
     setSourceMode(false);
     setSources([]);
     setLinkedCurriculumId(null);
@@ -664,11 +838,8 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         onClick={mathTutorSideScreen ? collapseMathTutorSideScreen : openMathTutorSideScreen}
         title={mathTutorSideScreen ? 'Close Math Tutor side screen' : 'Open Math Tutor in side screen'}
         aria-label={mathTutorSideScreen ? 'Close Math Tutor side screen' : 'Open Math Tutor in side screen'}
-        className={`p-1.5 rounded-lg transition-colors ${
-          mathTutorSideScreen
-            ? 'text-blue-400 bg-blue-500/20 ring-1 ring-blue-500/30'
-            : 'text-white/70 hover:text-white hover:bg-white/[0.15]'
-        }`}
+        style={CANVAS_ACCENT_STYLE}
+        className={`p-1.5 rounded-lg transition-colors tool-accent-button ${mathTutorSideScreen ? 'is-active' : ''}`}
       >
         <Calculator size={14} />
       </button>
@@ -727,6 +898,18 @@ export default function StudyModePanel({ className = '', flush = false, initialM
     );
   }
 
+  if (bestOfInfoOpen) {
+    return (
+      <div className={`flex flex-col min-h-0 ${className}`}>
+        <BestOfModeInfoView
+          bestOfModels={bestOfModels}
+          bestOfJudge={bestOfJudge}
+          onBack={() => setBestOfInfoOpen(false)}
+        />
+      </div>
+    );
+  }
+
   function handleUserEdit(idx, newContent) {
     if (streaming) return;
     if (abortRef.current) try { abortRef.current(); } catch {}
@@ -781,6 +964,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         streamingThinking={streamingThinking}
         streamingSources={streamingSources}
         streamingArtifacts={streamingArtifacts}
+        streamingBestOf={streamingBestOf}
         searchStatus={searchStatus}
         onSend={handleSend}
         disabled={streaming}
@@ -793,7 +977,11 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         onSideScreenQuiz={openQuizSideScreen}
         sourceMode={sourceMode}
         onToggleSource={setSourceMode}
-        showThinking={studyModelSupportsThinking(studyModel)}
+        sourceDisabled={studyModelMode === 'best-of' && bestOfModels.length === 3 && !!bestOfJudge}
+        sourceDisabledReason="Web search is off while comparing models in Best of 3"
+        humanizeMode={humanizeMode}
+        onToggleHumanize={setHumanizeMode}
+        showThinking={studyModelMode === 'single' && studyModelSupportsThinking(studyModel)}
         thinkingMode={thinkingOn}
         thinkingLocked={thinkingLocked}
         onToggleThinking={setThinkingPref}
@@ -813,12 +1001,19 @@ export default function StudyModePanel({ className = '', flush = false, initialM
           <div className="flex items-center gap-1.5">
             <StudyModelDropdown
               active={studyModel}
+              mode={studyModelMode}
+              bestOfModels={bestOfModels}
+              bestOfJudge={bestOfJudge}
               plan={plan}
               email={userEmail}
               onPick={pickStudyModel}
+              onModeChange={pickStudyModelMode}
+              onBestOfModels={pickBestOfModels}
+              onBestOfJudge={pickBestOfJudge}
+              onOpenBestOfInfo={() => setBestOfInfoOpen(true)}
               disabled={streaming}
             />
-            {studyModelHasFreeCap(studyModel, plan) && (
+            {studyModelMode === 'single' && studyModelHasFreeCap(studyModel, plan) && (
               <ModelCapPill
                 cap={studyModelDailyCap(studyModel, plan)}
                 remaining={studyModel === 'sonnet' ? sonnetRemaining : haikuRemaining}
@@ -832,17 +1027,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         emptyState={emptyState}
         enableDictation={speechRecognitionSupported}
         flush={flush}
-        attachmentSlot={mathTutorSideScreen && canvasSnapshot ? (
-          <div className="flex items-center gap-2 px-3 pt-2.5">
-            <div className="w-[68px] h-10 rounded overflow-hidden bg-[#0c1322] border border-blue-400/25 flex-shrink-0">
-              <img src={canvasSnapshot} alt="Canvas preview" className="w-full h-full object-contain" />
-            </div>
-            <span className="text-[11px] text-blue-400 font-medium flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse flex-shrink-0" />
-              Canvas attached
-            </span>
-          </div>
-        ) : null}
+        canvasOpen={mathTutorSideScreen}
       />
       {(mathTutorSideScreen || sideScreenQuiz || (previewDocs.length > 0 && !previewCollapsed)) && (
         <>
@@ -909,7 +1094,7 @@ function ModelCapPill({ cap, remaining, model }) {
   const known = typeof remaining === 'number';
   const low = known && remaining <= 3;
   const label = `${known ? remaining : cap}/${cap}`;
-  const modelName = { haiku: 'Haiku', 'gpt-5.4': 'GPT-5.4', sonnet: 'Sonnet' }[model] || model;
+  const modelName = { haiku: 'Haiku', 'gpt-5.4': 'GPT-5.4', sonnet: 'Sonnet', 'deepseek-pro': 'DeepSeek V4 Pro' }[model] || model;
   return (
     <span
       title={`${cap} ${modelName} messages per day on your plan`}
@@ -924,13 +1109,71 @@ function ModelCapPill({ cap, remaining, model }) {
   );
 }
 
+function BestOfModeInfoView({ bestOfModels, bestOfJudge, onBack }) {
+  const responseLabels = bestOfModels.length
+    ? bestOfModels.map((key) => studyModelLabel(key))
+    : ['Response model 1', 'Response model 2', 'Response model 3'];
+  const judgeLabel = bestOfJudge ? studyModelLabel(bestOfJudge) : 'Judge model';
+
+  return (
+    <ViewFade viewKey="best-of-mode-info" className="h-full min-h-0 overflow-y-auto bg-transparent px-5 py-5">
+      <button
+        type="button"
+        onClick={onBack}
+        className="mb-6 text-[13px] font-medium text-white/42 transition-colors hover:text-white/78"
+      >
+        Back to Study
+      </button>
+
+      <div className="mx-auto w-full max-w-2xl text-white/60">
+        <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/35">Study model mode</p>
+        <h2 className="mt-2 text-[20px] font-bold text-white/90">Best of mode</h2>
+
+        <div className="mt-5 space-y-4 text-[13px] leading-relaxed">
+          <p>
+            Best of sends your prompt to three response models, then asks a separate fourth model to judge the answers.
+          </p>
+          <p>
+            Study Mode shows the judged winner first. The other responses stay under the answer so you can compare what each model did differently.
+          </p>
+          <p>
+            It is useful for harder prompts where multiple attempts can catch nuance, but it can feel slower than Single because it creates several answers before choosing one.
+          </p>
+          <p>
+            Web search stays off in this mode. Grounding routes every model through Gemini, which would collapse your three picks onto the same engine, so each model answers as itself instead.
+          </p>
+        </div>
+
+        <div className="mt-7 space-y-2 text-[12px] leading-relaxed text-white/45">
+          <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/32">Current setup</p>
+          <p>Responses: {responseLabels.join(', ')}</p>
+          <p>Judge: {judgeLabel}</p>
+        </div>
+      </div>
+    </ViewFade>
+  );
+}
+
 // ===== Study model dropdown (composer toolbar) =====
 //
 // Compact picker that lives on the composer's top rail next to the paperclip /
 // globe / thinking buttons. Opens upward (it sits at the bottom of the panel).
 // Non-paid users see paid-only models locked with the required plan; the server
 // is the real enforcer and applies the rolling Haiku daily cap.
-function StudyModelDropdown({ active, plan, email, onPick, disabled }) {
+function StudyModelDropdown({
+  active,
+  mode = 'single',
+  bestOfModels = [],
+  bestOfJudge = null,
+  plan,
+  email,
+  onPick,
+  onModeChange,
+  onBestOfModels,
+  onBestOfJudge,
+  onOpenBestOfInfo,
+  disabled,
+}) {
   const [open, setOpen] = useState(false);
   // `mounted` keeps the portal in the DOM through the close animation; `shown`
   // drives the opacity/translate so the popover fades both in and out instead
@@ -943,8 +1186,33 @@ function StudyModelDropdown({ active, plan, email, onPick, disabled }) {
   const [pos, setPos] = useState(null);
   const btnRef = useRef(null);
   const popRef = useRef(null);
+  const [candidateSlot, setCandidateSlot] = useState(0);
 
-  const WIDTH = 256;
+  const WIDTH = mode === 'best-of' ? 318 : 256;
+  const pickerModels = visibleStudyModels(email);
+  const unlockedKeys = unlockedStudyModelKeys(email, plan);
+  const canUseBestOf = unlockedKeys.length >= 4;
+  const bestOfReady = bestOfModels.length === 3 && !!bestOfJudge;
+
+  function pickBestOfCandidate(key) {
+    if (!canUseStudyModel(key, plan) || key === bestOfJudge) return;
+    const selectedIndex = bestOfModels.indexOf(key);
+    if (selectedIndex >= 0) {
+      setCandidateSlot(selectedIndex);
+      return;
+    }
+    const next = [...bestOfModels];
+    if (next.length < 3) {
+      next.push(key);
+      setCandidateSlot(Math.min(next.length, 2));
+    } else {
+      const slot = Math.min(Math.max(candidateSlot, 0), 2);
+      next[slot] = key;
+      setCandidateSlot((slot + 1) % 3);
+    }
+    onBestOfModels?.(next);
+  }
+
   function place() {
     const b = btnRef.current?.getBoundingClientRect();
     if (!b) return;
@@ -956,6 +1224,10 @@ function StudyModelDropdown({ active, plan, email, onPick, disabled }) {
   function toggle() {
     if (!open) place();
     setOpen((o) => !o);
+  }
+  function openBestOfInfo() {
+    setOpen(false);
+    onOpenBestOfInfo?.();
   }
 
   // Drive the enter/exit fade. On open: mount, then flip `shown` on the next
@@ -990,6 +1262,14 @@ function StudyModelDropdown({ active, plan, email, onPick, disabled }) {
     };
   }, [open]);
 
+  useEffect(() => {
+    if (open) place();
+  }, [open, mode]);
+
+  useEffect(() => {
+    setCandidateSlot((slot) => Math.min(Math.max(slot, 0), Math.max(bestOfModels.length - 1, 0)));
+  }, [bestOfModels.length]);
+
   return (
     <div className="relative">
       <button
@@ -1001,7 +1281,9 @@ function StudyModelDropdown({ active, plan, email, onPick, disabled }) {
         className="flex items-center gap-1 pl-1.5 pr-1 py-1 rounded-lg text-gray-500 dark:text-blue-200/65 hover:text-gray-800 dark:hover:text-blue-50 hover:bg-white/40 dark:hover:bg-blue-500/[0.12] disabled:opacity-40 transition-colors"
       >
         <Cpu size={13} />
-        <span className="text-[11px] font-semibold max-w-[88px] truncate">{studyModelLabel(active)}</span>
+        <span className="text-[11px] font-semibold max-w-[96px] truncate">
+          {mode === 'best-of' ? (bestOfReady ? 'Best of 3' : 'Best setup') : studyModelLabel(active)}
+        </span>
         <ChevronDown size={11} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {mounted && pos && createPortal(
@@ -1019,7 +1301,43 @@ function StudyModelDropdown({ active, plan, email, onPick, disabled }) {
           }}
           className="rounded-xl border border-gray-200 dark:border-white/[0.12] bg-white dark:bg-[#1b1b1f] shadow-2xl p-1.5"
         >
-          {visibleStudyModels(email).map((m) => {
+          <div className="grid grid-cols-[1fr_1fr_1.75rem] gap-1 rounded-lg bg-gray-100 dark:bg-white/[0.05] p-1 mb-1.5">
+            <button
+              type="button"
+              onClick={() => onModeChange?.('single')}
+              className={`px-2 py-1 rounded-md text-[11px] font-semibold transition-colors ${
+                mode === 'single'
+                  ? 'bg-white dark:bg-white/[0.11] text-gray-900 dark:text-white'
+                  : 'text-gray-500 dark:text-white/45 hover:text-gray-800 dark:hover:text-white/75'
+              }`}
+            >
+              Single
+            </button>
+            <button
+              type="button"
+              onClick={() => { if (canUseBestOf) onModeChange?.('best-of'); }}
+              disabled={!canUseBestOf}
+              title={canUseBestOf ? 'Compare three models, then have a fourth judge the winner' : 'Best of needs four unlocked models'}
+              className={`px-2 py-1 rounded-md text-[11px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                mode === 'best-of'
+                  ? 'bg-white dark:bg-white/[0.11] text-gray-900 dark:text-white'
+                  : 'text-gray-500 dark:text-white/45 hover:text-gray-800 dark:hover:text-white/75'
+              }`}
+            >
+              Best of
+            </button>
+            <button
+              type="button"
+              onClick={openBestOfInfo}
+              aria-label="Explain Best of mode"
+              title="Explain Best of mode"
+              className="grid h-7 w-7 place-items-center rounded-md text-gray-400 transition-colors hover:bg-white hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.09] dark:hover:text-white/75"
+            >
+              <CircleHelp size={14} />
+            </button>
+          </div>
+
+          {mode !== 'best-of' && pickerModels.map((m) => {
             const locked = !canUseStudyModel(m.key, plan);
             const lockLabel = locked ? requiredPlanLabelFor(m.key, plan) : null;
             return (
@@ -1051,6 +1369,110 @@ function StudyModelDropdown({ active, plan, email, onPick, disabled }) {
               </button>
             );
           })}
+
+          {mode === 'best-of' && (
+            <div className="max-h-[430px] overflow-y-auto pr-0.5">
+              <div className="flex items-center justify-between px-1.5 py-1">
+                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400 dark:text-white/35">Responses</p>
+                <span className={`text-[10px] tabular-nums font-semibold ${bestOfModels.length === 3 ? 'text-emerald-500 dark:text-emerald-300/80' : 'text-amber-500 dark:text-amber-300/80'}`}>
+                  {bestOfModels.length}/3
+                </span>
+              </div>
+              {pickerModels.map((m) => {
+                const locked = !canUseStudyModel(m.key, plan);
+                const selectedIndex = bestOfModels.indexOf(m.key);
+                const selected = selectedIndex >= 0;
+                const blockedByJudge = m.key === bestOfJudge;
+                const replacing = bestOfModels.length >= 3 && !selected;
+                const disabledRow = locked || blockedByJudge;
+                const lockLabel = locked ? requiredPlanLabelFor(m.key, plan) : null;
+                return (
+                  <button
+                    key={`candidate-${m.key}`}
+                    type="button"
+                    onClick={() => { if (!disabledRow) pickBestOfCandidate(m.key); }}
+                    disabled={disabledRow}
+                    title={selected ? `Use slot ${selectedIndex + 1} for the next replacement` : replacing ? `Replace response model ${candidateSlot + 1}` : 'Add response model'}
+                    className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left transition-colors ${
+                      selected
+                        ? 'bg-blue-500/[0.12] dark:bg-blue-500/[0.16] text-blue-700 dark:text-blue-100'
+                        : disabledRow
+                          ? 'opacity-50 cursor-not-allowed'
+                          : 'hover:bg-gray-50 dark:hover:bg-white/[0.06]'
+                    }`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[12px] font-bold text-gray-900 dark:text-white flex items-center gap-1.5 truncate">
+                        {m.label}
+                        <span className="text-[9px] font-medium text-gray-400 dark:text-white/40">{m.provider}</span>
+                        {locked && lockLabel && (
+                          <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 dark:text-amber-300/80">
+                            <Lock size={9} /> {lockLabel}
+                          </span>
+                        )}
+                        {blockedByJudge && !locked && <span className="text-[9px] font-semibold text-gray-400 dark:text-white/35">Judge</span>}
+                      </p>
+                    </div>
+                    {selected && (
+                      <span className={`w-5 h-5 rounded-md bg-blue-500 text-white text-[10px] font-bold grid place-items-center shrink-0 ${
+                        selectedIndex === candidateSlot ? 'ring-2 ring-blue-300/70 ring-offset-1 ring-offset-white dark:ring-offset-[#1b1b1f]' : ''
+                      }`}>
+                        {selectedIndex + 1}
+                      </span>
+                    )}
+                    {!selected && replacing && !disabledRow && (
+                      <span className="text-[9px] font-semibold text-blue-500/80 dark:text-blue-200/70 shrink-0">
+                        Replace {candidateSlot + 1}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+
+              <div className="flex items-center justify-between px-1.5 pb-1 pt-2.5 mt-1 border-t border-gray-200 dark:border-white/[0.08]">
+                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400 dark:text-white/35">Judge AI</p>
+                <span className={`text-[10px] font-semibold ${bestOfJudge ? 'text-emerald-500 dark:text-emerald-300/80' : 'text-amber-500 dark:text-amber-300/80'}`}>
+                  Fourth model
+                </span>
+              </div>
+              {pickerModels.map((m) => {
+                const locked = !canUseStudyModel(m.key, plan);
+                const usedAsCandidate = bestOfModels.includes(m.key);
+                const selected = bestOfJudge === m.key;
+                const disabledRow = locked || usedAsCandidate;
+                const lockLabel = locked ? requiredPlanLabelFor(m.key, plan) : null;
+                return (
+                  <button
+                    key={`judge-${m.key}`}
+                    type="button"
+                    onClick={() => { if (!disabledRow) onBestOfJudge?.(m.key); }}
+                    disabled={disabledRow}
+                    className={`w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-left transition-colors ${
+                      selected
+                        ? 'bg-gray-100 dark:bg-white/[0.09]'
+                        : disabledRow
+                          ? 'opacity-50 cursor-not-allowed'
+                          : 'hover:bg-gray-50 dark:hover:bg-white/[0.06]'
+                    }`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[12px] font-bold text-gray-900 dark:text-white flex items-center gap-1.5 truncate">
+                        {m.label}
+                        <span className="text-[9px] font-medium text-gray-400 dark:text-white/40">{m.provider}</span>
+                        {locked && lockLabel && (
+                          <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 dark:text-amber-300/80">
+                            <Lock size={9} /> {lockLabel}
+                          </span>
+                        )}
+                        {usedAsCandidate && !locked && <span className="text-[9px] font-semibold text-gray-400 dark:text-white/35">Response</span>}
+                      </p>
+                    </div>
+                    {selected && <Check size={13} className="text-gray-500 dark:text-white/80 shrink-0" strokeWidth={3} />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>,
         document.body
       )}

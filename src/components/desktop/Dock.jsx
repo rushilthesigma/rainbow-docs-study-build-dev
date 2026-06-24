@@ -222,6 +222,8 @@ export default function Dock(_props) {
         title="Open another window?"
         closeOnOverlay
         size="sm"
+        appearance="quiet"
+        initialFocus="dialog"
       >
         {pendingApp && (
           <div className="font-sans">

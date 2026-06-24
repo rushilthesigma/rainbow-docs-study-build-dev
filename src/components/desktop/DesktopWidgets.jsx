@@ -200,7 +200,7 @@ function WidgetMenu({
   x, y,
   currentCols, currentRows,
   currentAccent = 'none', currentOpacity = 100, currentRadius = 'normal',
-  currentFreeMode = false,
+  currentFreeMode = true,
   onResize, onAccentChange, onOpacityChange, onRadiusChange,
   onToggleFreeMode, onStartResize, onRemove, onClose,
 }) {
@@ -462,7 +462,7 @@ function useDrag(id, position, freeMode = false) {
 }
 
 /* ── free-resize hook (used when freeMode is on) ── */
-function useFreeResize(id, freeW, freeH, position) {
+function useFreeResize(id, freeW, freeH, position, elRef) {
   const { updateWidget } = useWidgets();
 
   function onResizeMouseDown(e, dir) {
@@ -470,8 +470,12 @@ function useFreeResize(id, freeW, freeH, position) {
     e.stopPropagation();
     const startMouseX = e.clientX;
     const startMouseY = e.clientY;
-    const startW = freeW;
-    const startH = freeH;
+    // Seed from the live rendered size so the first resize of a default,
+    // content-driven no-grid widget grows from where it sits instead of
+    // jumping to the fallback dimensions.
+    const el = elRef?.current;
+    const startW = el ? el.offsetWidth : freeW;
+    const startH = el ? el.offsetHeight : freeH;
     const startPX = position.x;
     const startPY = position.y;
     const MIN_W = 120;
@@ -522,18 +526,23 @@ function Shell({
 }) {
   const { removeWidget, resizeWidget, updateWidget, widgets } = useWidgets();
   const widget = widgets.find(w => w.id === id);
-  const freeMode = widget?.freeMode ?? false;
-  const freeW = widget?.freeW ?? colsToWidth(cols);
-  const freeH = widget?.freeH ?? rowsToHeight(rows);
+  // No-grid (free) is the default. A widget only becomes "free-sized" - fixed
+  // dimensions with clipped overflow - once the user actually drags a resize
+  // handle (which sets freeW/freeH). Until then it keeps grid-style,
+  // content-driven height so the default no-grid mode never clips its contents.
+  const freeMode  = widget?.freeMode ?? true;
+  const freeSized = freeMode && widget?.freeW != null && widget?.freeH != null;
+  const freeW = widget?.freeW ?? customWidth  ?? colsToWidth(cols);
+  const freeH = widget?.freeH ?? customHeight ?? rowsToHeight(rows);
 
+  const shellRef = useRef(null);
+  const innerRef = useRef(null);
   const { onMouseDown } = useDrag(id, position, freeMode);
-  const { onResizeMouseDown } = useFreeResize(id, freeW, freeH, position);
+  const { onResizeMouseDown } = useFreeResize(id, freeW, freeH, position, innerRef);
   const { theme } = useUIPreference();
   const dark = theme !== 'light';
   const [menu, setMenu] = useState(null);
   const [isSelected, setIsSelected] = useState(false);
-  const shellRef = useRef(null);
-  const innerRef = useRef(null);
 
   // Clicking outside the widget deselects it (hides handles)
   useEffect(() => {
@@ -548,7 +557,7 @@ function Shell({
   }, [freeMode]);
 
   const width     = freeMode ? freeW : (customWidth ?? colsToWidth(cols));
-  const minHeight = freeMode ? freeH : (customHeight ?? (rows > 1 ? rowsToHeight(rows) : undefined));
+  const minHeight = freeSized ? freeH : (customHeight ?? (rows > 1 ? rowsToHeight(rows) : undefined));
 
   const accentData = ACCENT_LIST.find(a => a.key === accent) || ACCENT_LIST[0];
   const radiusData = RADIUS_STEPS.find(r => r.value === radius) || RADIUS_STEPS[1];
@@ -578,8 +587,8 @@ function Shell({
       style={{
         position: 'fixed', left: position.x, top: position.y,
         zIndex: 7, userSelect: 'none', width,
-        height: freeMode ? freeH : undefined,
-        transition: freeMode ? 'none' : 'width 0.22s cubic-bezier(0.34,1.56,0.64,1)',
+        height: freeSized ? freeH : undefined,
+        transition: freeSized ? 'none' : 'width 0.22s cubic-bezier(0.34,1.56,0.64,1)',
       }}
       onMouseDown={e => { if (freeMode) setIsSelected(true); onMouseDown(e); }}
       onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setMenu({ x: e.clientX, y: e.clientY }); }}
@@ -594,11 +603,11 @@ function Shell({
           backgroundImage: accentData.bg
             ? `linear-gradient(135deg, ${accentData.bg} 0%, transparent 65%)`
             : 'none',
-          border: `1px solid ${freeMode ? 'rgba(96,165,250,0.40)' : surfaceBorder}`,
+          border: `1px solid ${(freeMode && isSelected) ? 'rgba(96,165,250,0.40)' : surfaceBorder}`,
           borderRadius: radiusData.px,
           minHeight,
-          height: freeMode ? freeH : undefined,
-          overflow: freeMode ? 'hidden' : undefined,
+          height: freeSized ? freeH : undefined,
+          overflow: freeSized ? 'hidden' : undefined,
           backdropFilter: opacity < 100 ? 'blur(24px) saturate(160%)' : undefined,
           WebkitBackdropFilter: opacity < 100 ? 'blur(24px) saturate(160%)' : undefined,
           // Unconditionally GPU-pin the widget surface. At opacity=100 there
@@ -611,7 +620,7 @@ function Shell({
           // Pinning every shell to its own layer keeps repaints self-contained.
           willChange: 'transform',
           transform: 'translateZ(0)',
-          transition: freeMode
+          transition: freeSized
             ? 'background-color 0.2s, border-color 0.2s'
             : 'background-color 0.2s, border-color 0.2s, background-image 0.2s, border-radius 0.22s, min-height 0.22s cubic-bezier(0.34,1.56,0.64,1)',
           color: dark ? undefined : '#111',

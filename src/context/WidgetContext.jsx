@@ -83,7 +83,9 @@ export function WidgetProvider({ children }) {
     setWidgets(prev => {
       if (!type.startsWith('custom_') && prev.find(w => w.type === type)) return prev;
       const position = extra.position ?? firstFreeCell(prev);
-      const next = [...prev, { id: `w-${type}-${Date.now()}`, type, cols: 1, ...extra, position }];
+      // No-grid (free) is the default for new widgets - they drop where you
+      // leave them instead of snapping to a grid cell. Callers can override.
+      const next = [...prev, { id: `w-${type}-${Date.now()}`, type, cols: 1, freeMode: true, ...extra, position }];
       save(next);
       return next;
     });

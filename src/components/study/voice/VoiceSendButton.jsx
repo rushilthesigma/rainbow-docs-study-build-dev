@@ -2,6 +2,14 @@ import { useState, useRef, useEffect } from 'react';
 import { Mic, MicOff, AlertCircle } from 'lucide-react';
 import { useSpeechRecognition, speechRecognitionSupported } from '../../../hooks/useSpeechRecognition';
 
+const VOICE_ACCENT_STYLE = {
+  '--tool-accent': 'var(--voice-accent)',
+  '--tool-accent-text': 'var(--voice-accent-text)',
+  '--tool-accent-hover': 'var(--voice-accent-hover)',
+  '--tool-accent-soft': 'var(--voice-accent-soft)',
+  '--tool-accent-ring': 'var(--voice-accent-ring)',
+};
+
 async function requestMicPermission() {
   try {
     const stream = await navigator.mediaDevices?.getUserMedia({ audio: true });
@@ -11,7 +19,6 @@ async function requestMicPermission() {
 }
 
 // Tap to speak, auto-sends after 1.2 s of silence, AI reply plays as TTS.
-// Visually distinct from the plain dictation button: blue when active.
 export default function VoiceSendButton({ onSend, onListeningChange, disabled }) {
   const [micBlocked, setMicBlocked] = useState(false);
   const [showBlockedTip, setShowBlockedTip] = useState(false);
@@ -64,6 +71,7 @@ export default function VoiceSendButton({ onSend, onListeningChange, disabled })
         type="button"
         onClick={toggle}
         disabled={disabled}
+        style={micBlocked ? undefined : VOICE_ACCENT_STYLE}
         title={
           micBlocked
             ? 'Microphone blocked — click for help'
@@ -75,8 +83,8 @@ export default function VoiceSendButton({ onSend, onListeningChange, disabled })
           micBlocked
             ? 'text-amber-400 hover:bg-amber-500/10'
             : listening
-            ? 'text-white bg-blue-500 hover:bg-blue-600'
-            : 'text-gray-400 dark:text-blue-200/55 hover:text-gray-700 dark:hover:text-blue-100 hover:bg-white/40 dark:hover:bg-blue-500/[0.12]'
+            ? 'tool-accent-button is-fill'
+            : 'tool-accent-button text-gray-400 dark:text-blue-200/55'
         }`}
       >
         {micBlocked ? (

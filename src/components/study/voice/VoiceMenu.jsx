@@ -59,6 +59,13 @@ const SPEEDS = [
 const sectionLabel = 'text-[10px] font-semibold text-gray-400 dark:text-white/40 uppercase tracking-wide mb-1';
 const selectCls = 'w-full appearance-none px-2 py-1.5 pr-7 rounded-md text-[11px] font-medium bg-gray-100 dark:bg-white/[0.06] text-gray-800 dark:text-white/85 border border-transparent focus:border-blue-400/50 focus:outline-none';
 const divider = <div className="my-2.5 border-t border-gray-100 dark:border-white/[0.07]" />;
+const VOICE_ACCENT_STYLE = {
+  '--tool-accent': 'var(--voice-accent)',
+  '--tool-accent-text': 'var(--voice-accent-text)',
+  '--tool-accent-hover': 'var(--voice-accent-hover)',
+  '--tool-accent-soft': 'var(--voice-accent-soft)',
+  '--tool-accent-ring': 'var(--voice-accent-ring)',
+};
 
 export default function VoiceMenu({
   voices = [],
@@ -224,11 +231,11 @@ export default function VoiceMenu({
 
   const triggerTone = variant === 'surface'
     ? (open
-        ? 'text-white bg-blue-500/30 ring-1 ring-blue-400/50'
-        : 'text-gray-400 dark:text-blue-200/55 hover:text-gray-700 dark:hover:text-blue-100 hover:bg-white/40 dark:hover:bg-blue-500/[0.12]')
+        ? 'tool-accent-button is-active'
+        : 'tool-accent-button text-gray-400 dark:text-blue-200/55')
     : (open
-        ? 'text-white bg-white/20'
-        : 'text-white/70 hover:text-white hover:bg-white/[0.15]');
+        ? 'tool-accent-button is-active'
+        : 'tool-accent-button text-white/70');
 
   return (
     <div className="relative">
@@ -237,6 +244,7 @@ export default function VoiceMenu({
         type="button"
         onClick={toggle}
         title="Voice mode (beta)"
+        style={VOICE_ACCENT_STYLE}
         className={`relative p-1.5 rounded-lg transition-colors ${triggerTone}`}
       >
         <Settings2 size={14} />
@@ -270,9 +278,10 @@ export default function VoiceMenu({
                       key={s.v}
                       type="button"
                       onClick={() => onRate(s.v)}
+                      style={VOICE_ACCENT_STYLE}
                       className={`flex-1 py-1 rounded-md text-[11px] font-semibold transition-colors ${
                         Math.abs(rate - s.v) < 0.001
-                          ? 'bg-blue-500 text-white'
+                          ? 'tool-accent-button is-fill'
                           : 'bg-gray-100 dark:bg-white/[0.06] text-gray-600 dark:text-white/60 hover:bg-gray-200 dark:hover:bg-white/[0.1]'
                       }`}
                     >
@@ -313,9 +322,10 @@ export default function VoiceMenu({
                     <button
                       type="button"
                       onClick={() => (testingMic ? stopMicTest() : startMicTest())}
+                      style={VOICE_ACCENT_STYLE}
                       className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold transition-colors shrink-0 ${
                         testingMic
-                          ? 'bg-pink-500/15 text-pink-400 ring-1 ring-pink-500/30'
+                          ? 'tool-accent-button is-active'
                           : 'bg-gray-100 dark:bg-white/[0.08] text-gray-700 dark:text-white/80 hover:bg-gray-200 dark:hover:bg-white/[0.14]'
                       }`}
                     >
@@ -323,7 +333,7 @@ export default function VoiceMenu({
                       {testingMic ? 'Stop' : 'Test mic'}
                     </button>
                     <div className="flex-1 h-2.5 rounded-full bg-gray-200 dark:bg-white/10 overflow-hidden">
-                      <div ref={meterRef} className="h-full w-0 bg-pink-500 transition-[width] duration-75" />
+                      <div ref={meterRef} className="h-full w-0 tool-accent-meter transition-[width] duration-75" style={VOICE_ACCENT_STYLE} />
                     </div>
                   </div>
                   {micError && (

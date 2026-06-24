@@ -1,6 +1,7 @@
-// accent: 'neutral' (default) keeps the subtle white "on" track; 'blue' turns
-// the on-state the app accent blue. Off-state styling is shared by both.
-export default function Toggle({ label, description, checked, onChange, accent = 'neutral' }) {
+// accent: 'blue' (default) turns the on-state the app accent blue (follows the
+// user's accent hue via the remapped --color-blue-* vars); 'neutral' keeps the
+// subtle white "on" track. Off-state styling is shared by both.
+export default function Toggle({ label, description, checked, onChange, accent = 'blue' }) {
   const onTrack = accent === 'blue'
     ? 'bg-blue-500 border border-blue-400'
     : 'bg-white/25 border border-white/30';

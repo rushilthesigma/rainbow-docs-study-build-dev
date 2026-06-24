@@ -15,6 +15,8 @@ export default function Modal({
   children,
   size = 'md', // 'sm' | 'md' | 'lg' | 'xl' — only used in portal mode
   closeOnOverlay = true,
+  appearance = 'default', // 'default' | 'quiet' — only used in portal mode
+  initialFocus = 'first', // 'first' | 'dialog'
 }) {
   const insideWindow = useInsideWindowFrame();
   const overlayRef = useRef(null);
@@ -35,16 +37,20 @@ export default function Modal({
     previouslyFocused.current = document.activeElement;
     const node = dialogRef.current;
     if (node) {
-      const focusable = node.querySelector(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-      );
-      (focusable || node).focus();
+      if (initialFocus === 'dialog') {
+        node.focus();
+      } else {
+        const focusable = node.querySelector(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        (focusable || node).focus();
+      }
     }
     return () => {
       const prev = previouslyFocused.current;
       if (prev && typeof prev.focus === 'function') prev.focus();
     };
-  }, [open]);
+  }, [open, initialFocus]);
 
   useEffect(() => {
     if (!open) return;
@@ -120,10 +126,13 @@ export default function Modal({
 
   // Classic routes: light scrim + centered dialog
   const widthClass = { sm: 'max-w-sm', md: 'max-w-md', lg: 'max-w-lg', xl: 'max-w-2xl' }[size] || 'max-w-md';
+  const quiet = appearance === 'quiet';
   return createPortal(
     <div
       ref={overlayRef}
-      className="fixed inset-0 flex items-center justify-center bg-black/40 animate-fade-in"
+      className={`fixed inset-0 flex items-center justify-center animate-fade-in ${
+        quiet ? 'bg-black/[0.26]' : 'bg-black/40'
+      }`}
       style={{ zIndex: Z.modal }}
       onClick={(e) => { if (closeOnOverlay && e.target === overlayRef.current) onClose?.(); }}
     >
@@ -135,7 +144,11 @@ export default function Modal({
         aria-describedby={description ? descId : undefined}
         tabIndex={-1}
         data-modal-surface
-        className={`rounded-2xl shadow-[0_8px_48px_rgba(0,0,0,0.6)] w-full ${widthClass} mx-4 p-6 outline-none max-h-[90vh] overflow-y-auto bg-white dark:bg-[#141414] border border-gray-200 dark:border-white/[0.12] animate-modal-in`}
+        className={`rounded-2xl w-full ${widthClass} mx-4 p-6 outline-none max-h-[90vh] overflow-y-auto bg-white dark:bg-[#141414] animate-modal-in ${
+          quiet
+            ? 'shadow-[0_10px_28px_rgba(0,0,0,0.36)]'
+            : 'border border-gray-200 dark:border-white/[0.12] shadow-[0_8px_48px_rgba(0,0,0,0.6)]'
+        }`}
       >
         {(title || onClose) && (
           <div className="flex items-center justify-between mb-4">

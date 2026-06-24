@@ -1289,7 +1289,7 @@ function Pill({ active, onClick, children }) {
 function Toggle({ on, onClick }) {
   return (
     <button onClick={onClick}
-      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${on ? 'bg-indigo-500' : 'bg-white/[0.12]'}`}>
+      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${on ? 'bg-blue-500' : 'bg-white/[0.12]'}`}>
       <span className="inline-block transform rounded-full bg-white shadow transition-transform" style={{ height: 18, width: 18, transform: `translateX(${on ? 22 : 3}px)` }} />
     </button>
   );

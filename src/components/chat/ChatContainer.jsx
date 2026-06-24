@@ -4,8 +4,10 @@ import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 
 export default function ChatContainer({
-  messages, streamingContent, streamingThinking, streamingSources, streamingArtifacts, onSend, disabled, placeholder,
+  messages, streamingContent, streamingThinking, streamingSources, streamingArtifacts, streamingBestOf, onSend, disabled, placeholder,
   header, className = '', sourceMode, onToggleSource, searchStatus,
+  sourceDisabled = false, sourceDisabledReason = '',
+  humanizeMode = false, onToggleHumanize,
   showThinking = false, thinkingMode = true, thinkingLocked = false, onToggleThinking,
   composerExtras = null,
   composerPrefix = null,
@@ -23,6 +25,7 @@ export default function ChatContainer({
   // When true, renders flush (no glass-card, no rounded corners) - use for full-page panels
   flush = false,
   attachmentSlot = null,
+  canvasOpen = false,
 }) {
   const scrollRef = useRef(null);
   const chatInputRef = useRef(null);
@@ -83,9 +86,10 @@ export default function ChatContainer({
       content: streamingContent || '',
       thinking: streamingThinking || '',
       sources: streamingSources || [],
-      artifacts: streamingArtifacts || [],
-      _streaming: true,
-    });
+        artifacts: streamingArtifacts || [],
+        bestOf: streamingBestOf || undefined,
+        _streaming: true,
+      });
   }
 
   return (
@@ -153,6 +157,10 @@ export default function ChatContainer({
           placeholder={placeholder}
           sourceMode={sourceMode}
           onToggleSource={onToggleSource}
+          sourceDisabled={sourceDisabled}
+          sourceDisabledReason={sourceDisabledReason}
+          humanizeMode={humanizeMode}
+          onToggleHumanize={onToggleHumanize}
           showThinking={showThinking}
           thinkingMode={thinkingMode}
           thinkingLocked={thinkingLocked}
@@ -163,6 +171,7 @@ export default function ChatContainer({
           onPreviewFile={onPreviewFile}
           flush={flush}
           attachmentSlot={attachmentSlot}
+          canvasOpen={canvasOpen}
         />
       )}
     </div>

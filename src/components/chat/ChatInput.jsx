@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
-import { Send, Globe, Paperclip, X, FileText, Loader2, Upload, Brain } from 'lucide-react';
+import { Send, Globe, Paperclip, X, FileText, Loader2, Upload, Brain, PenLine, Calculator } from 'lucide-react';
 import { getToken } from '../../api/client';
 import { InlineProgress } from '../shared/ProgressBar';
 import DictationButton from '../study/voice/DictationButton';
@@ -26,6 +26,23 @@ function isTextFile(f) {
   return /\.(txt|md|csv|json|tex)$/i.test(f.name || '');
 }
 
+function toolAccentStyle(prefix) {
+  return {
+    '--tool-accent': `var(--${prefix}-accent)`,
+    '--tool-accent-text': `var(--${prefix}-accent-text)`,
+    '--tool-accent-hover': `var(--${prefix}-accent-hover)`,
+    '--tool-accent-soft': `var(--${prefix}-accent-soft)`,
+    '--tool-accent-ring': `var(--${prefix}-accent-ring)`,
+  };
+}
+
+const TOOL_ACCENTS = {
+  canvas: toolAccentStyle('canvas'),
+  voice: toolAccentStyle('voice'),
+  humanize: toolAccentStyle('humanize'),
+  webSearch: toolAccentStyle('web-search'),
+};
+
 // When `sourceMode` + `onToggleSource` are passed, a small "Source mode"
 // toggle appears. It tells the parent to flip the flag; the parent decides
 // whether to forward that to the server. Source mode costs 2x messages.
@@ -35,6 +52,16 @@ const ChatInput = forwardRef(function ChatInput({
   placeholder = 'Type a message...',
   sourceMode = false,
   onToggleSource,
+  // When set, the web-search toggle is shown disabled (greyed, not active) with
+  // sourceDisabledReason as its tooltip — e.g. Best of 3, where grounding would
+  // collapse the compared models onto Gemini server-side.
+  sourceDisabled = false,
+  sourceDisabledReason = '',
+  // Humanize toggle (Study Mode). When passed, a labeled "Humanize" button
+  // appears that flips the composer into essay-writer mode: the request carries
+  // humanize:true and the server swaps in a natural prose system prompt.
+  humanizeMode = false,
+  onToggleHumanize,
   // Thinking toggle (Study Mode). showThinking renders the Brain button;
   // thinkingLocked = always-on (Pro), so the button is shown active+disabled.
   showThinking = false,
@@ -55,6 +82,8 @@ const ChatInput = forwardRef(function ChatInput({
   // Optional node rendered between the doc strip and the textarea (e.g. a
   // live canvas thumbnail when the Math Canvas split-screen is open).
   attachmentSlot = null,
+  // When true, outlines the composer with the canvas accent and shows a small Canvas chip in the top rail.
+  canvasOpen = false,
 }, ref) {
   const [text, setText] = useState('');
   // images: [{ dataUrl, mimeType, name }]
@@ -80,7 +109,7 @@ const ChatInput = forwardRef(function ChatInput({
   // globally while the chat is mounted; we skip when target is a form field
   // other than our textarea so the user can still type in other inputs.
   useEffect(() => {
-    if (typeof onToggleSource !== 'function') return;
+    if (typeof onToggleSource !== 'function' || sourceDisabled) return;
     function onKey(e) {
       const mod = e.metaKey || e.ctrlKey;
       if (!mod || !e.shiftKey) return;
@@ -93,7 +122,7 @@ const ChatInput = forwardRef(function ChatInput({
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onToggleSource, sourceMode]);
+  }, [onToggleSource, sourceMode, sourceDisabled]);
 
   async function handleFiles(files) {
     const list = Array.from(files || []);
@@ -307,6 +336,24 @@ const ChatInput = forwardRef(function ChatInput({
   const stillExtracting = docs.some(d => d.status === 'extracting');
   const readyDocs = docs.filter(d => d.status === 'ready');
   const canSend = !disabled && !stillExtracting && (text.trim().length > 0 || images.length > 0 || readyDocs.length > 0);
+  const activeComposerAccent = dictationActive
+    ? TOOL_ACCENTS.voice
+    : humanizeMode
+      ? TOOL_ACCENTS.humanize
+      : sourceMode
+        ? TOOL_ACCENTS.webSearch
+        : canvasOpen
+          ? TOOL_ACCENTS.canvas
+          : undefined;
+  const sendAccent = dictationActive
+    ? TOOL_ACCENTS.voice
+    : humanizeMode
+      ? TOOL_ACCENTS.humanize
+      : sourceMode
+        ? TOOL_ACCENTS.webSearch
+        : canvasOpen
+          ? TOOL_ACCENTS.canvas
+          : undefined;
 
   // Composer redesign - DELIBERATELY not the ChatGPT rounded-pill input.
   // Layout: a card-style composer with a top "intent" rail (paperclip,
@@ -346,12 +393,17 @@ const ChatInput = forwardRef(function ChatInput({
       {/* Composer card */}
       <div
         data-tour="chat-input"
+        style={activeComposerAccent}
         className={`rounded-xl bg-white/75 dark:bg-transparent backdrop-blur-md transition-all overflow-hidden ${
           dictationActive
-            ? 'ring-2 ring-pink-500/80 dark:ring-pink-500/70'
-            : sourceMode
-              ? 'ring-2 ring-blue-400/70 bg-white/[0.06] dark:bg-blue-500/[0.05]'
-              : 'ring-1 ring-white/20 dark:ring-transparent focus-within:ring-2 focus-within:ring-blue-400/80 dark:focus-within:ring-blue-400/85'
+            ? 'ring-2 tool-accent-mode'
+            : humanizeMode
+              ? 'ring-2 tool-accent-mode'
+              : sourceMode
+                ? 'ring-2 tool-accent-mode'
+                : canvasOpen
+                  ? 'ring-2 tool-accent-mode'
+                  : 'ring-1 ring-white/20 dark:ring-transparent focus-within:ring-2 focus-within:ring-blue-400/80 dark:focus-within:ring-blue-400/85'
         }`}
       >
         {/* TOP RAIL - tools + mode toggle + char count */}
@@ -368,15 +420,29 @@ const ChatInput = forwardRef(function ChatInput({
           {typeof onToggleSource === 'function' && (
             <button
               type="button"
-              onClick={() => onToggleSource(!sourceMode)}
-              title="Search the web and cite sources (⌘⇧A)"
-              className={`p-1.5 rounded-lg transition-colors ${
-                sourceMode
-                  ? 'text-white bg-blue-500/30 ring-1 ring-blue-400/50'
-                  : 'text-gray-400 dark:text-blue-200/55 hover:text-gray-700 dark:hover:text-blue-100 hover:bg-white/40 dark:hover:bg-blue-500/[0.12]'
+              onClick={() => { if (!sourceDisabled) onToggleSource(!sourceMode); }}
+              disabled={disabled || sourceDisabled}
+              title={sourceDisabled ? (sourceDisabledReason || 'Web search is unavailable here') : 'Search the web and cite sources (⌘⇧A)'}
+              style={TOOL_ACCENTS.webSearch}
+              className={`p-1.5 rounded-lg transition-colors tool-accent-button disabled:opacity-40 ${
+                sourceMode && !sourceDisabled ? 'is-active' : 'text-gray-400 dark:text-blue-200/55'
               }`}
             >
               <Globe size={13} />
+            </button>
+          )}
+          {typeof onToggleHumanize === 'function' && (
+            <button
+              type="button"
+              onClick={() => onToggleHumanize(!humanizeMode)}
+              title="Humanize: draft or rewrite in natural, specific prose (no em dashes, no stiff filler)"
+              style={TOOL_ACCENTS.humanize}
+              className={`inline-flex items-center gap-1 pl-1.5 pr-2 py-1.5 rounded-lg transition-colors tool-accent-button ${
+                humanizeMode ? 'is-active' : 'text-gray-400 dark:text-blue-200/55'
+              }`}
+            >
+              <PenLine size={13} />
+              <span className="text-[11px] font-semibold leading-none">Humanize</span>
             </button>
           )}
           {showThinking && (
@@ -399,6 +465,15 @@ const ChatInput = forwardRef(function ChatInput({
             </button>
           )}
           {composerPrefix}
+          {canvasOpen && (
+            <div
+              style={TOOL_ACCENTS.canvas}
+              className="inline-flex items-center gap-1 pl-1.5 pr-2 py-1 rounded-md tool-accent-button is-active"
+            >
+              <Calculator size={11} />
+              <span className="text-[10px] font-semibold leading-none">Canvas</span>
+            </div>
+          )}
           {enableDictation && (
             <DictationButton
               onStart={handleDictationStart}
@@ -486,7 +561,7 @@ const ChatInput = forwardRef(function ChatInput({
             onChange={e => setText(e.target.value)}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            placeholder={sourceMode ? 'Ask anything - I\'ll search and cite…' : placeholder}
+            placeholder={humanizeMode ? 'Paste a prompt or draft and I\'ll make it read naturally…' : sourceMode ? 'Ask anything - I\'ll search and cite…' : placeholder}
             disabled={disabled}
             rows={1}
             className="flex-1 resize-none px-3 py-2.5 bg-transparent text-[14px] text-gray-900 dark:text-blue-50 placeholder-gray-400 dark:placeholder-blue-200/35 focus:outline-none max-h-40 overflow-y-auto"
@@ -498,14 +573,15 @@ const ChatInput = forwardRef(function ChatInput({
             type="submit"
             disabled={!canSend}
             title="Send (Enter)"
+            style={sendAccent}
             className={`m-1.5 px-3.5 h-9 rounded-lg inline-flex items-center gap-1.5 text-[12px] font-semibold transition-colors flex-shrink-0 ${
               canSend
-                ? (dictationActive
-                    ? 'bg-pink-500 hover:bg-pink-400 text-white'
-                    : sourceMode
-                      ? 'bg-blue-500/20 hover:bg-blue-500/30 text-blue-50'
-                      : 'bg-blue-500 hover:bg-blue-400 text-white')
-                : 'bg-gray-100 dark:bg-blue-500/[0.08] text-gray-400 dark:text-blue-200/35 cursor-not-allowed'
+                ? (sendAccent
+                    ? 'tool-accent-button is-fill'
+                    : 'bg-blue-500 hover:bg-blue-400 text-white')
+                : (sendAccent
+                    ? 'tool-accent-button is-fill opacity-40 cursor-not-allowed'
+                    : 'bg-blue-500 text-white cursor-not-allowed opacity-40')
             }`}
           >
             Send <Send size={11} />

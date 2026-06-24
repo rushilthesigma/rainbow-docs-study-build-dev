@@ -7,6 +7,8 @@
 //   haiku        : free / plus-lite (12/day cap) · lifetime / pro (unlimited)
 //   gpt-5.4      : plus / lifetime / pro (unlimited) — paid only, no free access
 //   gpt-5.4-mini : everyone (no per-model cap — only counts toward daily messages)
+//   deepseek-flash : everyone (no per-model cap — only counts toward daily messages)
+//   deepseek-pro   : free / plus-lite (12/day cap) · plus / lifetime / pro (unlimited)
 //   flash      : plus / lifetime / pro (unlimited)
 //   sonnet     : plus (24/day cap) · lifetime / pro (unlimited)
 //   gemini-pro : pro only (unlimited)
@@ -20,12 +22,15 @@ export function isGeminiOnlyEmail(email) {
 
 export const HAIKU_FREE_DAILY = 12;
 export const SONNET_PLUS_DAILY = 24;
+export const DEEPSEEK_FREE_DAILY = 12;
 
 export const STUDY_MODELS = [
   { key: 'flash-lite', label: 'Flash Lite', provider: 'Gemini', blurb: 'Fastest · everyday study',                                     plans: ['free', 'plus-lite', 'plus', 'lifetime', 'pro'] },
   { key: 'haiku',      label: 'Haiku 4.5',  provider: 'Claude', blurb: `Quick + sharp · ${HAIKU_FREE_DAILY}/day free`,                  plans: ['free', 'plus-lite', 'lifetime', 'pro'] },
   { key: 'gpt-5.4',    label: 'GPT-5.4',    provider: 'OpenAI', blurb: 'Versatile + capable · paid',                                    plans: ['plus', 'lifetime', 'pro'] },
   { key: 'gpt-5.4-mini', label: 'GPT-5.4 mini', provider: 'OpenAI', blurb: 'Fast + free · counts toward daily messages',                plans: ['free', 'plus-lite', 'plus', 'lifetime', 'pro'] },
+  { key: 'deepseek-flash', label: 'DeepSeek V4', provider: 'DeepSeek', blurb: 'Fast + free · counts toward daily messages',           plans: ['free', 'plus-lite', 'plus', 'lifetime', 'pro'] },
+  { key: 'deepseek-pro',   label: 'DeepSeek V4 Pro',   provider: 'DeepSeek', blurb: `Step-by-step reasoning · ${DEEPSEEK_FREE_DAILY}/day free`, plans: ['free', 'plus-lite', 'plus', 'lifetime', 'pro'] },
   { key: 'flash',      label: 'Flash',      provider: 'Gemini', blurb: 'Balanced reasoning',                                            plans: ['plus', 'lifetime', 'pro'] },
   { key: 'sonnet',     label: 'Sonnet 4.6', provider: 'Claude', blurb: `Deepest writing + explanation · ${SONNET_PLUS_DAILY}/day`,      plans: ['plus', 'lifetime', 'pro'] },
   { key: 'gemini-pro', label: 'Gemini Pro', provider: 'Gemini', blurb: 'Hardest math + code',                                           plans: ['pro'] },
@@ -88,12 +93,17 @@ export function studyModelBlurb(key, plan) {
     if (['lifetime', 'pro'].includes(plan)) return 'Deepest writing + explanation · Unlimited';
     return m.blurb; // "Deepest writing + explanation · 24/day" for plus
   }
+  if (key === 'deepseek-pro') {
+    if (['plus', 'lifetime', 'pro'].includes(plan)) return 'Step-by-step reasoning · Unlimited';
+    return m.blurb; // "Step-by-step reasoning · 12/day free" for free / plus-lite
+  }
   return m.blurb;
 }
 
 // Whether the given model has a per-day cap for this plan (drives the cap pill).
 export function studyModelHasFreeCap(key, plan) {
   if (key === 'haiku') return ['free', 'plus-lite'].includes(plan);
+  if (key === 'deepseek-pro') return ['free', 'plus-lite'].includes(plan);
   if (key === 'sonnet') return plan === 'plus';
   return false;
 }
@@ -101,12 +111,13 @@ export function studyModelHasFreeCap(key, plan) {
 // The daily message cap for a capped model/plan combination, or null.
 export function studyModelDailyCap(key, plan) {
   if (key === 'haiku' && ['free', 'plus-lite'].includes(plan)) return HAIKU_FREE_DAILY;
+  if (key === 'deepseek-pro' && ['free', 'plus-lite'].includes(plan)) return DEEPSEEK_FREE_DAILY;
   if (key === 'sonnet' && plan === 'plus') return SONNET_PLUS_DAILY;
   return null;
 }
 
 export function studyModelSupportsThinking(key) {
-  return ['haiku', 'sonnet', 'gemini-pro'].includes(key);
+  return ['haiku', 'sonnet', 'gemini-pro', 'deepseek-pro'].includes(key);
 }
 
 // Returns the subset of STUDY_MODELS visible to a given user. For

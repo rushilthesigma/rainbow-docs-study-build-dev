@@ -16,6 +16,12 @@ const STATUS_LABEL = {
   error:     'Something went wrong',
 };
 
+const VOICE_BADGE_STYLE = {
+  color: 'var(--voice-accent-text)',
+  backgroundColor: 'var(--voice-accent-soft)',
+  boxShadow: '0 0 0 1px var(--voice-accent-ring)',
+};
+
 export default function VoiceConversation({ onSendVoice, onClose, modelLabel = '' }) {
   const [status, setStatus] = useState('listening');
   const [youText, setYouText] = useState('');
@@ -134,7 +140,7 @@ export default function VoiceConversation({ onSendVoice, onClose, modelLabel = '
       {/* Header */}
       <div className="w-full flex items-center justify-between mb-0.5">
         <div className="flex items-center gap-1.5">
-          <span className="px-1.5 py-0.5 rounded text-[8px] font-bold tracking-wide bg-blue-500/25 text-blue-200 ring-1 ring-blue-400/30">BETA</span>
+          <span className="px-1.5 py-0.5 rounded text-[8px] font-bold tracking-wide" style={VOICE_BADGE_STYLE}>BETA</span>
           <span className="text-[11px] text-white/45">Voice{modelLabel ? ` · ${modelLabel}` : ''}</span>
         </div>
         <button

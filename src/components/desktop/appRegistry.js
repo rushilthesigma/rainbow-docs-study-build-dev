@@ -12,9 +12,11 @@ import { BookOpen, MessageSquare, FileText, Settings, Shield, Zap, Lightbulb, Ca
 // /api/slideshows client file still exist on disk but nothing imports
 // them anymore, so they are dead code.
 const APP_REGISTRY = [
-  { id: 'curricula', label: 'Curricula', icon: BookOpen, color: '#3b82f6', gradient: 'from-blue-500 to-blue-700' },
+  // Literal-hex blue stops (not `blue-*` tokens) so the user's accent-hue
+  // picker, which rotates the global blue scale, never recolors this icon.
+  { id: 'curricula', label: 'Curricula', icon: BookOpen, color: '#3b82f6', gradient: 'from-[#3b82f6] to-[#1d4ed8]' },
   { id: 'lessons', label: 'Lessons', icon: Lightbulb, color: '#eab308', gradient: 'from-yellow-400 to-amber-600' },
-  { id: 'study', label: 'Study Mode', icon: MessageSquare, color: '#3b82f6', gradient: 'from-sky-400 to-blue-600' },
+  { id: 'study', label: 'Study Mode', icon: MessageSquare, color: '#3b82f6', gradient: 'from-sky-400 to-[#2563eb]' },
   // Note Map is now a view inside Notes (sidebar Maps section). The
   // standalone `notemap` dock entry was removed; users open Notes and
   // pick a map there.

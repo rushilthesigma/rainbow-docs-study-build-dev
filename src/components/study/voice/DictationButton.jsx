@@ -17,6 +17,14 @@ const ERR_LABELS = {
 // Errors that mean mic access is permanently blocked — show persistent indicator.
 const BLOCKED_ERRORS = new Set(['not-allowed', 'service-not-allowed']);
 
+const VOICE_ACCENT_STYLE = {
+  '--tool-accent': 'var(--voice-accent)',
+  '--tool-accent-text': 'var(--voice-accent-text)',
+  '--tool-accent-hover': 'var(--voice-accent-hover)',
+  '--tool-accent-soft': 'var(--voice-accent-soft)',
+  '--tool-accent-ring': 'var(--voice-accent-ring)',
+};
+
 async function requestMicPermission() {
   try {
     const stream = await navigator.mediaDevices?.getUserMedia({ audio: true });
@@ -152,6 +160,7 @@ export default function DictationButton({ onStart, onLiveText, onTranscript, onL
         type="button"
         onClick={toggle}
         disabled={disabled}
+        style={micBlocked ? undefined : VOICE_ACCENT_STYLE}
         title={
           micBlocked
             ? 'Microphone blocked — click for help'
@@ -163,8 +172,8 @@ export default function DictationButton({ onStart, onLiveText, onTranscript, onL
           micBlocked
             ? 'text-amber-400 hover:bg-amber-500/10'
             : listening
-            ? 'text-white bg-pink-500 hover:bg-pink-600 focus:ring-2 focus:ring-pink-500'
-            : 'text-gray-400 dark:text-blue-200/55 hover:text-gray-700 dark:hover:text-blue-100 hover:bg-white/40 dark:hover:bg-blue-500/[0.12]'
+            ? 'tool-accent-button is-fill'
+            : 'tool-accent-button text-gray-400 dark:text-blue-200/55'
         }`}
       >
         {micBlocked ? (

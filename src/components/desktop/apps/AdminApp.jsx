@@ -5,7 +5,7 @@ import {
   RefreshCw, ChevronRight, Zap, ClipboardList, BarChart3, X, Check,
   Swords, Activity, ChevronDown, Sparkles, TrendingDown, Clock,
   Lock, Unlock, GraduationCap, Globe, AlertTriangle, Wand2, Edit3,
-  Gift, Users,
+  Gift, Users, Network,
 } from 'lucide-react';
 import {
   checkAdmin, getMetrics, listUsers, getUser, toggleBan, deleteUser,
@@ -439,7 +439,7 @@ function UserList({ users, total, metrics, query, setQuery, planFilter, setPlanF
                   {u.isDemo && <span className="px-1.5 py-0.5 rounded bg-amber-900/20 text-amber-400 text-[10px] font-bold uppercase tracking-wider">Demo</span>}
                 </div>
                 <p className="text-[10px] text-white/35 truncate">
-                  {u.handle ? `@${u.handle} · ` : ''}{u.email} · L{u.level} · {u.visitCount || 0} visits · {sumMsgs(u)} msgs · {u.curriculaCount} curr · {u.studySessionCount} study · {u.lessonCount} lessons
+                  {u.handle ? `@${u.handle} · ` : ''}{u.email} · L{u.level} · {u.visitCount || 0} visits · {sumMsgs(u)} msgs · {u.curriculaCount} curr · {u.studySessionCount} study · {u.lessonCount} lessons · {u.noteMapsCount ?? 0} maps
                 </p>
               </div>
               {/* Compact last-seen timestamp + chevron */}
@@ -643,6 +643,7 @@ function AnalyticsPanel({ users, total, landing, onClose, standalone }) {
     // Churn - users active in the prior 30d window but NOT in the
     // current 7d. Rough but useful directional signal.
     let activePrior30 = 0, activeNow7 = 0;
+    let totalNoteMaps = 0;
     const usersWithActivity = users.filter(u => lastActiveMs(u) > 0);
     for (const u of users) {
       const la = lastActiveMs(u);
@@ -658,6 +659,7 @@ function AnalyticsPanel({ users, total, landing, onClose, standalone }) {
       if (u.plan === 'pro') pro++;
       if (u.banned) banned++;
       totalVisits += u.visitCount || 0;
+      totalNoteMaps += u.noteMapsCount || 0;
       const m = u.chatMessages || {};
       totalMsgs += (m.study || 0) + (m.lessons || 0) + (m.curriculum || 0);
       if (ageActive >= 7 * DAY && ageActive < 30 * DAY) activePrior30++;
@@ -679,7 +681,7 @@ function AnalyticsPanel({ users, total, landing, onClose, standalone }) {
       .sort((a, b) => b.msgs - a.msgs)
       .slice(0, 5);
 
-    return { dau, wau, mau, newToday, new7d, new30d, pro, banned, avgVisits, stickiness, churn, totalMsgs, totalVisits, powerUsers };
+    return { dau, wau, mau, newToday, new7d, new30d, pro, banned, avgVisits, stickiness, churn, totalMsgs, totalVisits, totalNoteMaps, powerUsers };
   }, [users]);
 
   return (
@@ -721,6 +723,7 @@ function AnalyticsPanel({ users, total, landing, onClose, standalone }) {
             <StatRow label="Churn (prior-30 not in last-7)" value={`${stats.churn.toFixed(1)}%`} />
             <StatRow label="Avg visits / active user" value={stats.avgVisits.toFixed(1)} />
             <StatRow label="Total chat messages" value={stats.totalMsgs.toLocaleString()} />
+            <StatRow label="Total note maps" value={stats.totalNoteMaps.toLocaleString()} />
             <StatRow label="Total visits (signed-in)" value={stats.totalVisits.toLocaleString()} />
             <StatRow label="Landing page visits" value={(landing?.landingVisits ?? 0).toLocaleString()} />
             <StatRow label="Landing visits · today" value={(landing?.landingVisitsToday ?? 0).toLocaleString()} />
@@ -892,6 +895,7 @@ function OverviewTab({ u }) {
       <Stat label="Curriculum chats" value={u.curriculumChats?.length || 0} />
       <Stat label="Curricula" value={u.curricula?.length || 0} />
       <Stat label="Notes" value={u.notes?.length || 0} />
+      <Stat label="Note maps" value={u.noteMaps?.length || 0} />
       <Stat label="Flashcard decks" value={u.flashcardDecks?.length || 0} />
       <Stat label="Goals" value={u.goals?.length || 0} />
       <Stat label="Assessments" value={u.assessmentHistory?.length || 0} />
@@ -1604,6 +1608,7 @@ function OtherTab({ u }) {
     <div className="space-y-4">
       <ListBlock title="Curricula"          items={u.curricula}          render={c => `${c.title} · ${c.completedLessons}/${c.lessonCount} lessons`} icon={<BookOpen size={10} />} />
       <ListBlock title="Notes"              items={u.notes}              render={n => `${n.title} · ${n.type}`}                                       icon={<FileText size={10} />} />
+      <ListBlock title="Note maps"          items={u.noteMaps}           render={m => `${m.name || 'Untitled'}${m.isDefault ? ' · default' : ''} · ${m.nodeCount} node${m.nodeCount === 1 ? '' : 's'} · ${m.edgeCount} edge${m.edgeCount === 1 ? '' : 's'}`} icon={<Network size={10} />} />
       <ListBlock title="Goals"              items={u.goals}              render={g => `${g.title} · ${g.status}`}                                     icon={<Target size={10} />} />
       <ListBlock title="Flashcards"         items={u.flashcardDecks}     render={d => `${d.title} · ${d.cardCount} cards`}                            icon={<Layers size={10} />} />
       <ListBlock title="Assessment history" items={u.assessmentHistory}  render={a => `${a.title} · ${a.score}/${a.total} (${a.percentage}%)`}        icon={<Trophy size={10} />} />

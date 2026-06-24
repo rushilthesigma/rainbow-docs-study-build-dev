@@ -4,6 +4,99 @@ import { syncData } from '../api/auth';
 
 const UIPreferenceContext = createContext(null);
 
+// ─── Accent color ─────────────────────────────────────────────────────────────
+//
+// The whole UI is themed off Tailwind's `blue-*` palette. Rather than rewrite
+// ~90 files, we let the user pick any hue on the spectrum and rotate the blue
+// scale to it at runtime. Tailwind v4 resolves every `*-blue-*` utility to
+// `var(--color-blue-N)`, so overriding those custom properties on <html>
+// recolors the entire interface in one shot. Inline styles on :root win over
+// the @theme defaults, so this is non-destructive and reverts cleanly.
+
+// Tailwind blue-500's OKLCH hue - the out-of-the-box accent.
+export const DEFAULT_ACCENT_HUE = 259.815;
+
+// Canonical Tailwind v4 blue ramp: [shade, L, C, hue-offset-from-500].
+// We keep each step's lightness + chroma and only rotate the hue, which gives
+// a perceptually even recolor across the full 50→950 scale for ANY accent
+// (the browser gamut-clamps chroma per hue, so it degrades gracefully).
+const BLUE_RAMP = [
+  ['50',  0.970, 0.014, -5.211],
+  ['100', 0.932, 0.032, -4.230],
+  ['200', 0.882, 0.059, -5.687],
+  ['300', 0.809, 0.105, -8.002],
+  ['400', 0.707, 0.165, -5.191],
+  ['500', 0.623, 0.214,  0.000],
+  ['600', 0.546, 0.245,  3.066],
+  ['700', 0.488, 0.243,  4.561],
+  ['800', 0.424, 0.199,  5.823],
+  ['900', 0.379, 0.146,  5.707],
+  ['950', 0.282, 0.091,  8.120],
+];
+
+const norm360 = (n) => ((n % 360) + 360) % 360;
+const resolveHue = (hue) => {
+  const n = Number(hue);
+  return norm360(Number.isFinite(n) ? n : DEFAULT_ACCENT_HUE);
+};
+
+const rampByShade = Object.fromEntries(BLUE_RAMP.map(([shade, l, c, dh]) => [shade, { l, c, dh }]));
+
+export function accentColorForHue(hue, shade = '500', alpha = null) {
+  const step = rampByShade[shade] || rampByShade['500'];
+  const base = resolveHue(hue);
+  const color = `oklch(${step.l} ${step.c} ${norm360(base + step.dh).toFixed(3)}`;
+  return alpha == null ? `${color})` : `${color} / ${alpha})`;
+}
+
+// Write the rotated blue palette (plus the brand/accent aliases) onto <html>.
+// Called both from the provider effect (on load / persisted change) and live
+// while the user drags the spectrum, so it must be cheap and side-effect-only.
+export function applyAccent(hue) {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement;
+  const base = resolveHue(hue);
+  for (const [shade, l, c, dh] of BLUE_RAMP) {
+    const color = `oklch(${l} ${c} ${norm360(base + dh).toFixed(3)})`;
+    root.style.setProperty(`--color-blue-${shade}`, color);
+    // `brand` is the @theme alias of the same scale (no 950 step).
+    if (shade !== '950') root.style.setProperty(`--color-brand-${shade}`, color);
+  }
+  const accent = `oklch(0.623 0.214 ${base.toFixed(3)})`;
+  root.style.setProperty('--color-accent-dark', accent);
+  root.style.setProperty('--color-accent-glow-dark', `oklch(0.623 0.214 ${base.toFixed(3)} / 0.18)`);
+  // Global default for the `.acc-*` helpers; per-app/mobile scopes still win.
+  root.style.setProperty('--app-accent', accent);
+}
+
+export const TOOL_ACCENT_DEFAULTS = {
+  canvasAccentHue: 70,
+  voiceAccentHue: 330,
+  humanizeAccentHue: 300,
+  webSearchAccentHue: DEFAULT_ACCENT_HUE,
+};
+
+const TOOL_ACCENT_PREFIXES = {
+  canvasAccentHue: 'canvas',
+  voiceAccentHue: 'voice',
+  humanizeAccentHue: 'humanize',
+  webSearchAccentHue: 'web-search',
+};
+
+export function applyToolAccent(prefKey, hue) {
+  if (typeof document === 'undefined') return;
+  const prefix = TOOL_ACCENT_PREFIXES[prefKey] || prefKey;
+  const root = document.documentElement;
+  root.style.setProperty(`--${prefix}-accent`, accentColorForHue(hue, '500'));
+  root.style.setProperty(`--${prefix}-accent-text`, accentColorForHue(hue, '300'));
+  root.style.setProperty(`--${prefix}-accent-light`, accentColorForHue(hue, '300'));
+  root.style.setProperty(`--${prefix}-accent-dark`, accentColorForHue(hue, '900'));
+  root.style.setProperty(`--${prefix}-accent-soft`, accentColorForHue(hue, '500', 0.20));
+  root.style.setProperty(`--${prefix}-accent-hover`, accentColorForHue(hue, '500', 0.12));
+  root.style.setProperty(`--${prefix}-accent-ring`, accentColorForHue(hue, '400', 0.50));
+  root.style.setProperty(`--${prefix}-accent-glow`, accentColorForHue(hue, '500', 0.36));
+}
+
 // Wallpapers that were removed from WALLPAPERS. If a user still has
 // one of these in their stored preference, fall back to the default
 // so they don't see a broken background.
@@ -19,6 +112,8 @@ const RETIRED_WALLPAPERS = new Set(['desert', 'cherry']);
 // who want frosted-glass chrome can still dial it down in Settings.
 const DEFAULTS = {
   theme: 'dark',
+  accentHue: DEFAULT_ACCENT_HUE,
+  ...TOOL_ACCENT_DEFAULTS,
   wallpaper: 'milkyway',
   dockSize: 'medium',
   iconStyle: 'gradient',
@@ -69,6 +164,11 @@ export function UIPreferenceProvider({ children }) {
   const wallpaper = RETIRED_WALLPAPERS.has(rawWallpaper) ? DEFAULTS.wallpaper : rawWallpaper;
   // Theme is locked to dark - light mode is not supported.
   const theme = 'dark';
+  const accentHue    = prefs.accentHue   ?? DEFAULTS.accentHue;
+  const canvasAccentHue = prefs.canvasAccentHue ?? DEFAULTS.canvasAccentHue;
+  const voiceAccentHue = prefs.voiceAccentHue ?? DEFAULTS.voiceAccentHue;
+  const humanizeAccentHue = prefs.humanizeAccentHue ?? DEFAULTS.humanizeAccentHue;
+  const webSearchAccentHue = prefs.webSearchAccentHue ?? DEFAULTS.webSearchAccentHue;
   const dockSize     = prefs.dockSize    || DEFAULTS.dockSize;
   const iconStyle    = prefs.iconStyle   || DEFAULTS.iconStyle;
   const dockPosition    = prefs.dockPosition    || DEFAULTS.dockPosition;
@@ -81,6 +181,19 @@ export function UIPreferenceProvider({ children }) {
   useEffect(() => {
     document.documentElement.classList.add('dark');
   }, []);
+
+  // Rotate the blue palette to the chosen accent hue. Runs on mount and
+  // whenever the persisted hue changes (incl. a sync from another session).
+  useEffect(() => {
+    applyAccent(accentHue);
+  }, [accentHue]);
+
+  useEffect(() => {
+    applyToolAccent('canvasAccentHue', canvasAccentHue);
+    applyToolAccent('voiceAccentHue', voiceAccentHue);
+    applyToolAccent('humanizeAccentHue', humanizeAccentHue);
+    applyToolAccent('webSearchAccentHue', webSearchAccentHue);
+  }, [canvasAccentHue, voiceAccentHue, humanizeAccentHue, webSearchAccentHue]);
 
   // ----- Mutator -----
   //
@@ -125,6 +238,15 @@ export function UIPreferenceProvider({ children }) {
   // setTheme is a no-op - dark mode is permanent.
   // eslint-disable-next-line no-unused-vars
   const setTheme = useCallback((_v) => {}, []);
+  const setAccentHue    = useCallback((v) => setPref('accentHue', v),    [setPref]);
+  const setCanvasAccentHue = useCallback((v) => setPref('canvasAccentHue', v), [setPref]);
+  const setVoiceAccentHue = useCallback((v) => setPref('voiceAccentHue', v), [setPref]);
+  const setHumanizeAccentHue = useCallback((v) => setPref('humanizeAccentHue', v), [setPref]);
+  const setWebSearchAccentHue = useCallback((v) => setPref('webSearchAccentHue', v), [setPref]);
+  const previewCanvasAccent = useCallback((v) => applyToolAccent('canvasAccentHue', v), []);
+  const previewVoiceAccent = useCallback((v) => applyToolAccent('voiceAccentHue', v), []);
+  const previewHumanizeAccent = useCallback((v) => applyToolAccent('humanizeAccentHue', v), []);
+  const previewWebSearchAccent = useCallback((v) => applyToolAccent('webSearchAccentHue', v), []);
   const setWallpaper    = useCallback((v) => setPref('wallpaper', v),    [setPref]);
   const setDockSize     = useCallback((v) => setPref('dockSize', v),     [setPref]);
   const setIconStyle    = useCallback((v) => setPref('iconStyle', v),    [setPref]);
@@ -154,6 +276,11 @@ export function UIPreferenceProvider({ children }) {
   const value = useMemo(() => ({
     uiMode: effectiveMode, rawUiMode: uiMode, setUiMode,
     wallpaper, setWallpaper,
+    accentHue, setAccentHue, previewAccent: applyAccent,
+    canvasAccentHue, setCanvasAccentHue, previewCanvasAccent,
+    voiceAccentHue, setVoiceAccentHue, previewVoiceAccent,
+    humanizeAccentHue, setHumanizeAccentHue, previewHumanizeAccent,
+    webSearchAccentHue, setWebSearchAccentHue, previewWebSearchAccent,
     dockSize, setDockSize,
     iconStyle, setIconStyle,
     dockPosition, setDockPosition,
@@ -162,9 +289,14 @@ export function UIPreferenceProvider({ children }) {
     titlebarOpacity, setTitlebarOpacity,
     bottomBarTransparent, setBottomBarTransparent,
   }), [
-    effectiveMode, uiMode, wallpaper, dockSize, iconStyle, dockPosition,
+    effectiveMode, uiMode, wallpaper, accentHue,
+    canvasAccentHue, voiceAccentHue, humanizeAccentHue, webSearchAccentHue,
+    dockSize, iconStyle, dockPosition,
     theme, windowOpacity, titlebarOpacity, bottomBarTransparent,
-    setUiMode, setWallpaper, setDockSize, setIconStyle, setDockPosition,
+    setUiMode, setWallpaper, setAccentHue,
+    setCanvasAccentHue, setVoiceAccentHue, setHumanizeAccentHue, setWebSearchAccentHue,
+    previewCanvasAccent, previewVoiceAccent, previewHumanizeAccent, previewWebSearchAccent,
+    setDockSize, setIconStyle, setDockPosition,
     setTheme, setWindowOpacity, setTitlebarOpacity, setBottomBarTransparent,
   ]);
 

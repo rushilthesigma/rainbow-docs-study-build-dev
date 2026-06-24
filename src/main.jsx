@@ -6,6 +6,7 @@ import { AuthProvider } from './context/AuthContext';
 import { SharingProvider } from './context/SharingContext';
 import { PanelProvider } from './context/PanelContext';
 import { SplitViewProvider } from './context/SplitViewContext';
+import { MathCanvasProvider } from './context/MathCanvasContext';
 import ErrorBoundary from './components/shared/ErrorBoundary';
 import { ToastProvider } from './components/shared/Toast';
 import './index.css';
@@ -19,7 +20,9 @@ createRoot(document.getElementById('root')).render(
             <SharingProvider>
               <PanelProvider>
                 <SplitViewProvider>
-                  <App />
+                  <MathCanvasProvider>
+                    <App />
+                  </MathCanvasProvider>
                 </SplitViewProvider>
               </PanelProvider>
             </SharingProvider>
