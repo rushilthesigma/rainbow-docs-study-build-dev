@@ -403,7 +403,7 @@ function FeaturesSection({ isMobile }) {
             );
           })}
         </div>
-        <p className="text-[12px] text-white/45 mt-6">Runs on Gemini and Claude models.</p>
+        <p className="text-[12px] text-white/45 mt-6">Runs on Gemini, GPT, Grok, and DeepSeek models.</p>
       </FadeUp>
     </section>
   );

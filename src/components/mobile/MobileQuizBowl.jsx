@@ -3,6 +3,9 @@ import { Zap, Play, Check, X, BookOpen, Sparkles, ArrowRight } from 'lucide-reac
 import { apiFetch } from '../../api/client';
 import { fetchQBReaderTossups } from '../../api/quizMatch';
 import { InlineProgress } from '../shared/ProgressBar';
+import QbModelPicker from '../shared/QbModelPicker';
+import { useQbModel } from '../../hooks/useQbModel';
+import { studyModelLabel } from '../study/studyModels';
 
 const DIFFICULTIES = ['Easy', 'Medium', 'Hard', 'Tournament'];
 const CATEGORIES = ['Science', 'History', 'Literature', 'Geography', 'Math', 'Art', 'Music', 'Philosophy', 'Pop Culture', 'Mixed'];
@@ -55,6 +58,8 @@ export default function MobileQuizBowl() {
   const [difficulty, setDifficulty] = useState('Medium');
   const [questionSource, setQuestionSource] = useState('qbreader');
   const [revealSpeedMs, setRevealSpeedMs] = useState(140);
+  // Which AI writes the AI-generated tossups (persisted, plan-gated).
+  const { model: qbModel, pick: pickQbModel, available: qbModels } = useQbModel();
 
   const [buzzed, setBuzzed] = useState(false);
   const [answer, setAnswer] = useState('');
@@ -85,6 +90,7 @@ export default function MobileQuizBowl() {
           system: SYSTEM_PROMPT,
           messages: [{ role: 'user', content: generatePrompt(category, difficulty, 5) }],
           max_tokens: 4096,
+          model: qbModel,
         }),
       });
       const text = result.content?.[0]?.text || '';
@@ -254,8 +260,15 @@ export default function MobileQuizBowl() {
       {/* Source */}
       <div className="grid grid-cols-2 gap-2 mb-4">
         <MobileTile active={questionSource === 'qbreader'} icon={<BookOpen size={14} />} label="Past QB" sub="qbreader.org" onClick={() => setQuestionSource('qbreader')} />
-        <MobileTile active={questionSource === 'ai'} icon={<Sparkles size={14} />} label="AI" sub="Synthetic" onClick={() => setQuestionSource('ai')} />
+        <MobileTile active={questionSource === 'ai'} icon={<Sparkles size={14} />} label="AI" sub={studyModelLabel(qbModel)} onClick={() => setQuestionSource('ai')} />
       </div>
+
+      {/* AI model (AI only) */}
+      {questionSource === 'ai' && (
+        <div className="mb-4">
+          <QbModelPicker value={qbModel} onPick={pickQbModel} models={qbModels} />
+        </div>
+      )}
 
       {/* Category */}
       <div className="mb-4">

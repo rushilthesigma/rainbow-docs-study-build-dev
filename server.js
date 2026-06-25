@@ -82,6 +82,48 @@ const OPENAI_GPT_MINI = 'gpt-5.4-mini';
 const DEEPSEEK_FLASH = 'deepseek-v4-flash';
 const DEEPSEEK_PRO   = 'deepseek-v4-pro';
 
+// xAI Grok id. Grok speaks the OpenAI Chat Completions protocol, so it's served
+// through the `openai` SDK pointed at https://api.x.ai/v1 (no new dependency).
+// Pinned to grok-4.3 (the current flagship). Grok 4.3 is a reasoning model: it
+// streams a chain-of-thought on delta.reasoning_content (forwarded as `thinking`
+// events), like DeepSeek V4 Pro. Offered as a permanently-free Study Mode pick
+// for everyone, with NO per-model cap — it only draws down the shared daily
+// message quota, like DeepSeek V4 Flash. Any Grok call degrades to the
+// equivalent-tier Gemini model on failure, so a bad/absent key never breaks the app.
+const GROK = 'grok-4.3';
+
+// Best-effort knowledge cutoffs used only to decide whether a user's prompt
+// needs live search. Keep these conservative: searching is safer than letting a
+// stale model answer from memory. Deployments can override with JSON:
+// MODEL_KNOWLEDGE_CUTOFFS_JSON='{"gpt-5.4":"2026-05-31"}'
+function envModelCutoffOverrides() {
+  const raw = process.env.MODEL_KNOWLEDGE_CUTOFFS_JSON;
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter(([, value]) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))),
+    );
+  } catch (err) {
+    console.warn('Invalid MODEL_KNOWLEDGE_CUTOFFS_JSON:', err?.message || err);
+    return {};
+  }
+}
+const MODEL_KNOWLEDGE_CUTOFFS = {
+  [GEMINI_FLASH_LITE]: '2026-04-30',
+  [GEMINI_FLASH]: '2026-04-30',
+  [GEMINI_PRO]: '2026-04-30',
+  [CLAUDE_HAIKU]: '2025-07-31',
+  [CLAUDE_SONNET]: '2026-01-31',
+  [OPENAI_GPT]: '2026-04-30',
+  [OPENAI_GPT_MINI]: '2026-04-30',
+  [DEEPSEEK_FLASH]: '2026-02-28',
+  [DEEPSEEK_PRO]: '2026-02-28',
+  [GROK]: '2025-11-30',
+  ...envModelCutoffOverrides(),
+};
+
 // Tier → { gemini, claude } pairs. speed = flash-lite/haiku, balanced =
 // flash/sonnet, pro = pro/sonnet. providerForUser() picks which half runs.
 const TIER_MODELS = {
@@ -93,11 +135,15 @@ const CLAUDE_MODELS = new Set([CLAUDE_HAIKU, CLAUDE_SONNET]);
 const isClaudeModel = (id) => CLAUDE_MODELS.has(id) || /^claude/i.test(String(id || ''));
 const isOpenAIModel = (id) => /^gpt-/i.test(String(id || ''));
 const isDeepSeekModel = (id) => /^deepseek/i.test(String(id || ''));
+const isXaiModel = (id) => /^grok/i.test(String(id || ''));
 
-// Topics where DeepSeek's training may produce censored / politically-slanted
-// output. Matched against the trailing messages so the reroute fires on the
-// turn that introduces the topic, not retroactively on unrelated turns.
-const GEOPOLITICS_RE = /\b(china|chinese|prc|ccp|cpc|taiwan(?:ese)?|roc|hong\s*kong|tibet(?:an)?|xinjiang|uyghur|tiananmen|south\s+china\s+sea|one[\s-]china|cross[\s-]strait|taiwan\s+strait|sino[\s-]|beijing\s+(policy|govern|leader|regime)|geopolit|sovereignty\s+(dispute|claim)|territorial\s+(claim|dispute|integrit)|taiwan\s+independen|reunif|separati[st]|sanctions|trade\s+war|military\s+tension|nuclear\s+threat)\b/i;
+// Topics where DeepSeek may give politically-slanted answers. The direct check
+// only catches explicit China/Taiwan turns; contextual follow-ups use one tiny
+// Flash-Lite classifier so "what about the economy?" after a Taiwan question can
+// reroute, but unrelated turns after that conversation do not.
+const CHINA_TAIWAN_TOPIC_RE = /\b(china|chinese|prc|ccp|cpc|taiwan(?:ese)?|republic\s+of\s+china|hong\s*kong|tibet(?:an)?|xinjiang|uyghur|tiananmen|south\s+china\s+sea|one[\s-]china|cross[\s-]strait|taiwan\s+strait|sino[\s-]|beijing\s+(policy|govern|leader|regime)|taiwan\s+independen|reunif|separati[st])\b/i;
+const DEEPSEEK_REROUTE_CONTEXT_RE = /\b(china|chinese|prc|ccp|cpc|taiwan(?:ese)?|republic\s+of\s+china|hong\s*kong|tibet(?:an)?|xinjiang|uyghur|tiananmen|south\s+china\s+sea|one[\s-]china|cross[\s-]strait|taiwan\s+strait|sino[\s-]|geopolitic(?:s|al)?|foreign\s+policy|international\s+relations|sovereignty\s+(dispute|claim)|territorial\s+(claim|dispute|integrit)|sanctions|trade\s+war|military\s+tension|nuclear\s+threat)\b/i;
+const DEEPSEEK_REROUTE_DECISION_CACHE = new WeakMap();
 
 function messageText(content) {
   if (typeof content === 'string') return content;
@@ -112,11 +158,83 @@ function messageText(content) {
   return String(content || '');
 }
 
-// Check the last three user messages for geopolitically-sensitive content.
-function isGeopoliticsTopic(messages) {
-  if (!Array.isArray(messages)) return false;
-  const recent = messages.filter(m => m.role === 'user').slice(-3);
-  return recent.some(m => GEOPOLITICS_RE.test(messageText(m.content)));
+function lastUserMessageText(messages) {
+  if (!Array.isArray(messages)) return '';
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === 'user') return messageText(messages[i].content);
+  }
+  return '';
+}
+
+function recentDeepSeekRerouteContext(messages) {
+  if (!Array.isArray(messages)) return [];
+  return messages
+    .slice(-5)
+    .filter(m => DEEPSEEK_REROUTE_CONTEXT_RE.test(messageText(m.content)));
+}
+
+async function classifyDeepSeekRerouteFollowup(messages, currentText) {
+  if (!genAI || !currentText.trim()) return null;
+  const recent = (messages || []).slice(-5).map((m) => {
+    const speaker = m.role === 'assistant' ? 'Assistant' : 'Student';
+    return `${speaker}: ${messageText(m.content).replace(/\s+/g, ' ').trim().slice(0, 900)}`;
+  }).join('\n');
+  const routerSystem = `You are a tiny routing classifier for DeepSeek fallback.
+
+Return ONLY JSON: {"related":true} or {"related":false}.
+
+Return true only when the CURRENT student message asks about, follows up on, or depends on China, Taiwan, cross-strait relations, PRC/ROC/CCP issues, or a geopolitical/international-relations topic visible in the recent conversation.
+
+Return false for unrelated schoolwork, coding, math, writing, generic words, or a new topic that does not depend on that recent China/Taiwan/geopolitics context.`;
+  const routerUser = [
+    'Recent conversation:',
+    recent || '(none)',
+    '',
+    'Current student message:',
+    currentText.slice(0, 2000),
+  ].join('\n');
+  try {
+    const result = await callGemini(routerSystem, [{ role: 'user', content: routerUser }], GEMINI_FLASH_LITE, 64, {
+      enableWebSearch: false,
+      deepseekReroute: false,
+      disableThinking: true,
+      includeThoughts: false,
+      jsonMode: true,
+      temperature: 0,
+    });
+    if (!result?.success) return null;
+    const text = (result.data?.content || []).map(part => part?.text || '').join('');
+    const parsed = parseAIJson(text);
+    if (typeof parsed?.related === 'boolean') return parsed.related;
+    if (typeof parsed?.isRelated === 'boolean') return parsed.isRelated;
+    if (typeof parsed?.reroute === 'boolean') return parsed.reroute;
+    return /^\s*true\b/i.test(text);
+  } catch (err) {
+    console.warn('DeepSeek reroute classifier failed:', err?.message || err);
+    return null;
+  }
+}
+
+async function isDeepSeekRerouteTopic(messages, opts = {}) {
+  if (opts.deepseekReroute === false) return false;
+  if (typeof opts.deepseekRerouteDecision === 'boolean') return opts.deepseekRerouteDecision;
+  if (opts && typeof opts === 'object') {
+    const cached = DEEPSEEK_REROUTE_DECISION_CACHE.get(opts);
+    if (cached) return cached;
+    const decision = computeDeepSeekRerouteTopic(messages);
+    DEEPSEEK_REROUTE_DECISION_CACHE.set(opts, decision);
+    return decision;
+  }
+  return computeDeepSeekRerouteTopic(messages);
+}
+
+async function computeDeepSeekRerouteTopic(messages) {
+  const current = lastUserMessageText(messages);
+  if (!current.trim()) return false;
+  if (CHINA_TAIWAN_TOPIC_RE.test(current)) return true;
+  if (!recentDeepSeekRerouteContext(messages).length) return false;
+  const classified = await classifyDeepSeekRerouteFollowup(messages, current);
+  return classified === true;
 }
 
 const DEFAULT_MODEL = GEMINI_FLASH;
@@ -128,9 +246,14 @@ const FALLBACK_MODEL = GEMINI_FLASH_LITE;
 const geminiSiblingOf = (id) => {
   if (isOpenAIModel(id)) return /mini/i.test(String(id)) ? GEMINI_FLASH_LITE : GEMINI_FLASH; // GPT-5.4 → Flash, mini → Flash Lite
   if (isDeepSeekModel(id)) return /pro/i.test(String(id)) ? GEMINI_FLASH : GEMINI_FLASH_LITE; // V4 Pro → Flash, V4 Flash → Flash Lite
+  if (isXaiModel(id)) return GEMINI_FLASH; // Grok 4.3 (pro-tier reasoning) → Flash
   if (!isClaudeModel(id)) return id || DEFAULT_MODEL;
   if (id === CLAUDE_HAIKU) return GEMINI_FLASH_LITE;
   return GEMINI_FLASH; // Sonnet → Flash (balanced); Pro tier streams on Flash too
+};
+const modelKnowledgeCutoff = (id) => {
+  const modelId = id || DEFAULT_MODEL;
+  return MODEL_KNOWLEDGE_CUTOFFS[modelId] || MODEL_KNOWLEDGE_CUTOFFS[geminiSiblingOf(modelId)] || null;
 };
 
 // How many blocks the AI generates per lesson, before the final quiz
@@ -156,8 +279,12 @@ const fallbackFor = (name) => {
 };
 const genAI = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
 if (!GEMINI_API_KEY) console.warn('GEMINI_API_KEY is not set - AI calls will fail');
-const anthropic = ANTHROPIC_API_KEY ? new Anthropic({ apiKey: ANTHROPIC_API_KEY }) : null;
-if (!ANTHROPIC_API_KEY) console.warn('ANTHROPIC_API_KEY is not set - Claude calls will fall back to Gemini');
+// Claude models are removed from the product. The Anthropic client is force-
+// disabled so no request can route to Claude: every `anthropic ?` check below
+// falls through to Gemini, callClaude() short-circuits to callGemini(), and
+// providerForUser() can never return 'anthropic'. The SDK import and callClaude()
+// remain in place but are now dead/unreachable (re-enable by restoring this line).
+const anthropic = null; // was: ANTHROPIC_API_KEY ? new Anthropic({ apiKey: ANTHROPIC_API_KEY }) : null;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const openai = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
 if (!OPENAI_API_KEY) console.warn('OPENAI_API_KEY is not set - GPT calls will fail');
@@ -166,6 +293,11 @@ const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
 // DeepSeek base URL rather than adding a new dependency.
 const deepseek = DEEPSEEK_API_KEY ? new OpenAI({ apiKey: DEEPSEEK_API_KEY, baseURL: 'https://api.deepseek.com' }) : null;
 if (!DEEPSEEK_API_KEY) console.warn('DEEPSEEK_API_KEY is not set - DeepSeek calls will fall back to Gemini');
+const XAI_API_KEY = process.env.XAI_API_KEY || '';
+// xAI Grok is OpenAI-compatible, so we reuse the OpenAI SDK pointed at the xAI
+// base URL rather than adding a new dependency.
+const xai = XAI_API_KEY ? new OpenAI({ apiKey: XAI_API_KEY, baseURL: 'https://api.x.ai/v1' }) : null;
+if (!XAI_API_KEY) console.warn('XAI_API_KEY is not set - Grok calls will fall back to Gemini');
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 
 // Data storage - try multiple locations until one works
@@ -284,11 +416,14 @@ function isOwner(email) {
   return OWNER_EMAILS.includes(email?.toLowerCase());
 }
 
-// Accounts restricted to Gemini-only models in Study Mode.
+// Accounts restricted away from Claude/OpenAI models in Study Mode.
 // Mirrors GEMINI_ONLY_EMAILS in src/components/study/studyModels.js.
 const GEMINI_ONLY_EMAILS = new Set(['kelapure@gmail.com']);
 function isGeminiOnly(email) {
   return GEMINI_ONLY_EMAILS.has((email || '').toLowerCase());
+}
+function isBlockedForGeminiOnly(provider) {
+  return provider === 'claude' || provider === 'openai';
 }
 
 // Viewer admins can access the admin panel (read + plan changes) but cannot ban users.
@@ -311,39 +446,70 @@ function canSeeBeta(email) {
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
 const STRIPE_PRICE_ID = process.env.STRIPE_PRICE_ID || '';
-// Per-tier prices created on Stripe (set in .env). Each tier maps to a
-// price id + a checkout mode (subscription for recurring, payment for
-// the one-time lifetime purchase). Unset => that tier disabled at checkout.
+// Single paid plan ($4/mo). Keeps the existing Plus-monthly Stripe price id;
+// the legacy pro ($10/mo) and lifetime ($20 one-time) tiers are retired and
+// folded into 'paid'. Unset price => paid disabled at checkout. Do NOT fall
+// back to STRIPE_PRICE_ID here (that is the old $10 pro price).
 const TIER_PRICES = {
-  plus:     { priceId: process.env.STRIPE_PRICE_PLUS_MONTHLY || '', mode: 'subscription', amountUsd: 4,  interval: 'month' },
-  pro:      { priceId: process.env.STRIPE_PRICE_PRO_MONTHLY  || STRIPE_PRICE_ID || '', mode: 'subscription', amountUsd: 10, interval: 'month' },
-  lifetime: { priceId: process.env.STRIPE_PRICE_LIFETIME     || '', mode: 'payment',      amountUsd: 20, interval: null },
+  paid: { priceId: process.env.STRIPE_PRICE_PLUS_MONTHLY || '', mode: 'subscription', amountUsd: 4, interval: 'month' },
 };
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 
 // ===== Plan / limits =====
-// Five tiers, ladder Free → Plus-Lite (free, referral unlock) → Plus → Lifetime → Pro:
-//   free       = baseline gating, what un-paid un-referred accounts get
-//   plus-lite  = free, unlocks when the user has referred 2 friends
-//                (≈ $2/month of value - roughly half of Plus)
-//   plus       = $4/mo, 5x the free limits for casual learners
-//   lifetime   = $20 one-time, sits between plus and pro on limits
-//                (permanent access, generous but not unlimited)
-//   pro        = $10/mo, unlimited everything
-// "Paid" via isPro() = anything above plus-lite (so the referral bonus
-// gates the same way free does - better limits but still rate-capped).
+// Two plans: free and paid ($4/mo). Each plan gets a daily CREDIT pool drawn
+// on a rolling 24h window (the same usage.msgWindow that used to count
+// messages). Every AI action spends credits: chat/debate/notes spend the
+// chosen MODEL's credit cost (MODEL_CREDIT_COST), curriculum generation a
+// flat CURRICULUM_CREDIT_COST, an AI Quiz Bowl tossup set a flat
+// QB_TOSSUP_CREDIT_COST. Note maps stay a simple count cap.
+//   free = 100 credits/day
+//   paid = 9,500 credits/day  ($4/mo)
+// Owners/advisors are unlimited (see dailyCreditAllowance) so demo accounts
+// never run dry.
 const LIMITS = {
-  free:        { dailyMessages: 45,       dailyQB: 2,        weeklyCurricula: 2,        weeklyDebates: 4,        noteMaps: 2 },
-  'plus-lite': { dailyMessages: 115,      dailyQB: 5,        weeklyCurricula: 3,        weeklyDebates: 6,        noteMaps: 3 },
-  plus:        { dailyMessages: 225,      dailyQB: 9,        weeklyCurricula: 5,        weeklyDebates: 12,       noteMaps: 9 },
-  lifetime:    { dailyMessages: 525,      dailyQB: 23,       weeklyCurricula: 12,       weeklyDebates: 30,       noteMaps: 23 },
-  pro:         { dailyMessages: Infinity, dailyQB: Infinity, weeklyCurricula: Infinity, weeklyDebates: Infinity, noteMaps: Infinity },
+  free: { dailyCredits: 100,  noteMaps: 3 },
+  paid: { dailyCredits: 9500, noteMaps: Infinity },
 };
-const PAID_TIERS = new Set(['plus', 'lifetime', 'pro']);
+const PAID_TIERS = new Set(['paid']);
 
-function deepSeekRerouteTarget(messages, opts = {}) {
-  if (opts.deepseekReroute === false || !isGeopoliticsTopic(messages)) return null;
-  return PAID_TIERS.has(opts.userPlan) ? OPENAI_GPT : GEMINI_FLASH_LITE;
+// Per-message credit cost by Study-Mode model key, priced off real API cost:
+// Gemini models scaled lower, Claude/OpenAI scaled toward true cost. Unknown
+// keys fall back to DEFAULT_MODEL_CREDIT_COST.
+const MODEL_CREDIT_COST = {
+  'flash-lite':     1,   // Gemini Flash Lite — baseline
+  'deepseek-flash': 1,   // DeepSeek V4 (free model, floor)
+  'grok':           1,   // Grok 4.3 (positioned free; minimal draw)
+  'flash':          2,   // Gemini Flash — 2× Flash Lite
+  'gpt-5.4-mini':   5,   // GPT-5.4 mini
+  'deepseek-pro':   7,   // DeepSeek V4 Pro (reasoning)
+  'haiku':          10,  // Claude Haiku 4.5
+  'gemini-pro':     20,  // Gemini Pro (scaled lower than raw cost ratio)
+  'sonnet':         35,  // Claude Sonnet 4.6
+  'gpt-5.4':        40,  // GPT-5.4
+};
+const DEFAULT_MODEL_CREDIT_COST = 1;
+// Flat per-feature credit costs.
+const CURRICULUM_CREDIT_COST = 50;   // one AI curriculum generation
+const QB_TOSSUP_CREDIT_COST  = 8;    // one AI-generated Quiz Bowl tossup set
+const SOURCED_CREDIT_SURCHARGE = 2;  // extra credits when a web-search answer is served
+// Referrals no longer unlock a plan tier; instead 2+ referrals grant a
+// permanent daily bonus to a free user's credit pool.
+const REFERRAL_BONUS_CREDITS = 100;
+
+// Credit cost for a Study-Mode model key, defaulting to the floor cost.
+function studyModelCreditCost(key) {
+  return MODEL_CREDIT_COST[key] ?? DEFAULT_MODEL_CREDIT_COST;
+}
+// Credit cost for a raw model id (used by tier-model routes that don't carry
+// a study-model key). Maps id → study key → cost.
+function creditCostForModelId(id) {
+  const key = studyModelKeyForId(id);
+  return key ? studyModelCreditCost(key) : DEFAULT_MODEL_CREDIT_COST;
+}
+
+async function deepSeekRerouteTarget(messages, opts = {}, sourceModel = DEEPSEEK_FLASH) {
+  if (!(await isDeepSeekRerouteTopic(messages, opts))) return null;
+  return geminiSiblingOf(sourceModel);
 }
 
 // Referrals: each user owns one 8-char alphanumeric code. When two
@@ -382,12 +548,9 @@ function allocateReferralCode(users) {
   // Fall back to a timestamp suffix - guaranteed unique even on collision.
   return generateReferralCode().slice(0, 4) + Date.now().toString(36).toUpperCase().slice(-4);
 }
-// Legacy aliases - kept so older code that read these constants doesn't
-// break. New code should go through LIMITS[plan] instead.
-const FREE_DAILY_MESSAGE_LIMIT = LIMITS.free.dailyMessages;
-const FREE_DAILY_QUIZBOWL_GAMES = LIMITS.free.dailyQB;
-const FREE_WEEKLY_CURRICULA = LIMITS.free.weeklyCurricula;
-const FREE_WEEKLY_DEBATES = LIMITS.free.weeklyDebates;
+// Credit-pool aliases. New code should go through dailyCreditAllowance().
+const FREE_DAILY_CREDITS = LIMITS.free.dailyCredits;
+const PAID_DAILY_CREDITS = LIMITS.paid.dailyCredits;
 const MODEL_FREE       = GEMINI_FLASH_LITE;
 const MODEL_FLASH_LITE = GEMINI_FLASH_LITE;
 
@@ -402,34 +565,35 @@ function weekKey(d = new Date()) {
   return `${date.getUTCFullYear()}-W${String(weekNum).padStart(2, '0')}`;
 }
 
-// Resolve the user's effective plan tier. Lifetime trumps everything (it's
-// a permanent grant). Recurring Plus/Pro require a future-dated proUntil
-// (Stripe sets it at the billing-period end). Plus-Lite is a free bonus
-// granted once `referralsUsed >= REFERRAL_THRESHOLD` (currently 2).
-// Owners and advisors always see lifetime so demo accounts can use the
-// product without paying.
+// Resolve the user's effective plan: 'free' | 'paid'. Any active paid
+// subscription (proUntil in the future or untimed), a new 'paid' stamp, or a
+// legacy paid plan (plus/pro/lifetime, incl. lifetimePurchasedAt) all resolve
+// to paid — this grandfathers every previously-paying user. Legacy 'plus-lite'
+// was a FREE referral tier and resolves to free. Owners/advisors resolve to
+// paid so demo accounts work without paying (and are unlimited via
+// dailyCreditAllowance). Referrals no longer grant a tier; they add bonus
+// daily credits instead.
 function getPlan(user, email) {
   const d = user?.data || {};
-  // The stored plan ALWAYS wins. Owners + advisors used to auto-resolve
-  // to lifetime here, but that blocked admin from testing downgrades
-  // on their own account. They can self-grant lifetime from the admin
-  // PlanPicker; otherwise we only fall back to lifetime for owners
-  // when they've never had a plan stamped at all.
-  if (d.plan === 'lifetime' || d.lifetimePurchasedAt) return 'lifetime';
+  if (d.lifetimePurchasedAt) return 'paid';                 // grandfather old lifetime buyers
   const stillActive = !d.proUntil || new Date(d.proUntil) > new Date();
-  if (d.plan === 'pro' && stillActive) return 'pro';
-  if (d.plan === 'plus' && stillActive) return 'plus';
-  if (d.plan === 'plus-lite' && stillActive) return 'plus-lite';
-  if (d.plan === 'free') return 'free';
-  // Untouched (null/undefined): owners + advisors get lifetime as a
-  // convenience, the referral unlock kicks in for everyone else, and
-  // the final fallback is free.
-  if (isOwner(email) || isAdvisor(email)) return 'lifetime';
-  if ((d.referralsUsed || 0) >= REFERRAL_THRESHOLD) return 'plus-lite';
+  if (['paid', 'plus', 'pro', 'lifetime'].includes(d.plan) && stillActive) return 'paid';
+  if (d.plan === 'free' || d.plan === 'plus-lite') return 'free';
+  if (isOwner(email) || isAdvisor(email)) return 'paid';   // untouched demo accounts
   return 'free';
 }
-// "Pro" in the legacy sense = any paid tier. New code that needs to
-// distinguish Plus vs Lifetime vs Pro should call getPlan() directly.
+// Daily credit pool for a user: free/paid base + a referral bonus for free
+// users, and unlimited for owner/advisor demo accounts.
+function dailyCreditAllowance(user, email) {
+  if (isOwner(email) || isAdvisor(email)) return Infinity;
+  const plan = getPlan(user, email);
+  let cap = LIMITS[plan]?.dailyCredits ?? LIMITS.free.dailyCredits;
+  if (plan === 'free' && (user?.data?.referralsUsed || 0) >= REFERRAL_THRESHOLD) {
+    cap += REFERRAL_BONUS_CREDITS;
+  }
+  return cap;
+}
+// Whether the account is on the paid plan.
 function isPro(user, email) { return PAID_TIERS.has(getPlan(user, email)); }
 // Three tiers selectable via preferences.modelTier, each spanning two models:
 //   'speed'    → flash-lite / Claude Haiku   (fastest + cheapest, the floor)
@@ -448,7 +612,7 @@ function normalizeTier(tier) {
 //   speed     → everyone
 function canUseTier(tier, plan) {
   const t = normalizeTier(tier);
-  if (t === 'pro') return plan === 'pro';
+  if (t === 'pro') return plan === 'paid';
   if (t === 'balanced') return PAID_TIERS.has(plan);
   if (t === 'speed') return true;
   return false; // unknown tier → unusable, falls through to bestTierForPlan
@@ -516,39 +680,39 @@ const DEEPSEEK_FREE_DAILY = 12;
 // V4 Pro is the free-but-capped reasoning option: 12/day for non-paid (own
 // window), unlimited for every paid tier, exactly like Haiku.
 const STUDY_MODELS = {
-  'flash-lite':   { id: GEMINI_FLASH_LITE, label: 'Flash Lite',   provider: 'gemini', paidOnly: false },
-  'haiku':        { id: CLAUDE_HAIKU,      label: 'Haiku 4.5',    provider: 'claude', paidOnly: false, freeDailyLimit: HAIKU_FREE_DAILY, usageKey: 'haikuWindow', lockKey: 'haikuLockedUntil' },
-  'gpt-5.4':      { id: OPENAI_GPT,        label: 'GPT-5.4',      provider: 'openai', paidOnly: true },
-  'gpt-5.4-mini': { id: OPENAI_GPT_MINI,   label: 'GPT-5.4 mini', provider: 'openai', paidOnly: false },
+  'flash-lite':   { id: GEMINI_FLASH_LITE, label: 'Flash Lite',   provider: 'gemini', paidOnly: false, knowledgeCutoff: modelKnowledgeCutoff(GEMINI_FLASH_LITE) },
+  'gpt-5.4':      { id: OPENAI_GPT,        label: 'GPT-5.4',      provider: 'openai', paidOnly: true, knowledgeCutoff: modelKnowledgeCutoff(OPENAI_GPT) },
+  'gpt-5.4-mini': { id: OPENAI_GPT_MINI,   label: 'GPT-5.4 mini', provider: 'openai', paidOnly: false, knowledgeCutoff: modelKnowledgeCutoff(OPENAI_GPT_MINI) },
   // DeepSeek V4 Flash: free for everyone, no per-model cap (only draws the shared daily quota).
-  'deepseek-flash': { id: DEEPSEEK_FLASH, label: 'DeepSeek V4', provider: 'deepseek', paidOnly: false },
+  'deepseek-flash': { id: DEEPSEEK_FLASH, label: 'DeepSeek V4', provider: 'deepseek', paidOnly: false, knowledgeCutoff: modelKnowledgeCutoff(DEEPSEEK_FLASH) },
   // DeepSeek V4 Pro: free for everyone but capped at 12/day for non-paid (own window), unlimited for paid.
-  'deepseek-pro':   { id: DEEPSEEK_PRO,   label: 'DeepSeek V4 Pro',   provider: 'deepseek', paidOnly: false, freeDailyLimit: DEEPSEEK_FREE_DAILY, usageKey: 'deepseekWindow', lockKey: 'deepseekLockedUntil' },
-  'flash':      { id: GEMINI_FLASH,      label: 'Flash',      provider: 'gemini', paidOnly: true },
-  'sonnet':     { id: CLAUDE_SONNET,     label: 'Sonnet 4.6', provider: 'claude', paidOnly: true },
-  'gemini-pro': { id: GEMINI_PRO,        label: 'Gemini Pro', provider: 'gemini', paidOnly: true },
+  'deepseek-pro':   { id: DEEPSEEK_PRO,   label: 'DeepSeek V4 Pro',   provider: 'deepseek', paidOnly: false, freeDailyLimit: DEEPSEEK_FREE_DAILY, usageKey: 'deepseekWindow', lockKey: 'deepseekLockedUntil', knowledgeCutoff: modelKnowledgeCutoff(DEEPSEEK_PRO) },
+  // Grok 4.3: permanently free for everyone, no per-model cap (only draws the shared daily quota).
+  'grok':           { id: GROK,            label: 'Grok 4.3',          provider: 'xai',      paidOnly: false, knowledgeCutoff: modelKnowledgeCutoff(GROK) },
+  'flash':      { id: GEMINI_FLASH,      label: 'Flash',      provider: 'gemini', paidOnly: true, knowledgeCutoff: modelKnowledgeCutoff(GEMINI_FLASH) },
+  'gemini-pro': { id: GEMINI_PRO,        label: 'Gemini Pro', provider: 'gemini', paidOnly: true, knowledgeCutoff: modelKnowledgeCutoff(GEMINI_PRO) },
 };
-// Haiku is the default pick for everyone. When a non-paid user exhausts the
-// rolling Haiku cap, the model locks until UTC midnight and auto-switches to
-// HAIKU_LIMIT_FALLBACK (Sonnet) for the rest of the day. Plan-locked picks
-// (non-paid user requests Flash/Sonnet/Pro) still drop to the uncapped floor
-// model (Flash Lite) so they keep chatting for free.
-const DEFAULT_STUDY_MODEL = 'haiku';
+// Flash Lite is the default pick for everyone (Claude/Haiku removed). Unknown or
+// plan-locked picks drop to the uncapped floor model (Flash Lite) so users keep
+// chatting for free. The HAIKU_* cap names below are retained only because
+// freeCapConfig() returns null (caps retired); they no longer gate anything.
+const DEFAULT_STUDY_MODEL = 'flash-lite';
 const DEFAULT_MATH_TUTOR_MODEL = 'flash-lite';
 const FALLBACK_STUDY_MODEL = 'flash-lite';
 const HAIKU_LIMIT_FALLBACK = 'flash-lite'; // model served when daily Haiku cap is hit
 
 function studyModelAllowed(key, plan) {
-  const m = STUDY_MODELS[key];
-  if (!m) return false;
-  return m.paidOnly ? PAID_TIERS.has(plan) : true;
+  // Credit model: every known model is selectable by everyone. The per-message
+  // credit cost (MODEL_CREDIT_COST) is the only gate, charged at send time.
+  return !!STUDY_MODELS[key];
 }
 
-// Cap config for a capped free model ({ freeDailyLimit, usageKey, lockKey }), or
-// null for uncapped/unknown keys.
+// Per-model daily caps are retired under the credit model — every model is
+// drawn from the single credit pool instead. Returning null here makes the
+// remaining cap/lock/billing machinery (resolveStudyModel cap block,
+// recordFreeCapUse, reroute skip, comparisonBillKeys) inert.
 function freeCapConfig(key) {
-  const m = STUDY_MODELS[key];
-  return (m && m.freeDailyLimit && m.usageKey && m.lockKey) ? m : null;
+  return null;
 }
 
 // Count a capped model's study messages logged in the rolling 24h window
@@ -583,9 +747,9 @@ function resolveStudyModel(requested, user, email) {
   // default itself (Haiku) carries a cap for non-paid users.
   if (!studyModelAllowed(key, plan)) { key = FALLBACK_STUDY_MODEL; switched = true; reason = 'plan'; }
 
-  // Gemini-only accounts may never use a non-Gemini model (Claude OR OpenAI),
-  // regardless of plan.
-  if (isGeminiOnly(email) && STUDY_MODELS[key]?.provider !== 'gemini') {
+  // Gemini-only accounts may not use Claude/OpenAI, regardless of plan.
+  // DeepSeek remains selectable and is served through its own provider path.
+  if (isGeminiOnly(email) && isBlockedForGeminiOnly(STUDY_MODELS[key]?.provider)) {
     // Best available Gemini model for the plan: pro → flash → flash-lite
     const geminiModels = ['gemini-pro', 'flash', 'flash-lite'];
     key = geminiModels.find(k => studyModelAllowed(k, plan)) || FALLBACK_STUDY_MODEL;
@@ -622,6 +786,30 @@ function resolveStudyModel(requested, user, email) {
   return { key, id: m.id, provider: m.provider, switched, reason, haikuRemaining };
 }
 
+// Source/auto-search mode is charged through the normal 2x sourced-message
+// quota and may be served by Gemini grounding even when the picker says Claude,
+// OpenAI, or DeepSeek. Keep plan + restricted-provider gating, but do not spend or
+// enforce per-model free caps because that provider is not the answering engine.
+function resolveStudyModelForSearch(requested, user, email) {
+  const plan = getPlan(user, email);
+  let key = STUDY_MODELS[requested]
+    ? requested
+    : (user?.data?.preferences?.studyModel || DEFAULT_STUDY_MODEL);
+  if (!STUDY_MODELS[key]) key = DEFAULT_STUDY_MODEL;
+
+  let switched = false, reason = null;
+  if (!studyModelAllowed(key, plan)) { key = FALLBACK_STUDY_MODEL; switched = true; reason = 'plan'; }
+
+  if (isGeminiOnly(email) && isBlockedForGeminiOnly(STUDY_MODELS[key]?.provider)) {
+    const geminiModels = ['gemini-pro', 'flash', 'flash-lite'];
+    key = geminiModels.find(k => studyModelAllowed(k, plan)) || FALLBACK_STUDY_MODEL;
+    switched = true; reason = 'gemini-only';
+  }
+
+  const m = STUDY_MODELS[key];
+  return { key, id: m.id, provider: m.provider, switched, reason, haikuRemaining: null };
+}
+
 // Log a capped-model study message into its rolling window (drives the non-paid
 // cap). `key` selects the model (haiku → haikuWindow, gpt-5.4 → gptWindow).
 function recordFreeCapUse(user, key) {
@@ -640,8 +828,38 @@ function studyModelPublicMeta(key) {
     claude: 'Claude',
     openai: 'OpenAI',
     deepseek: 'DeepSeek',
+    xai: 'xAI',
   })[m.provider] || m.provider || 'AI';
   return { key, label: m.label, provider };
+}
+
+function studyModelKeyForId(id) {
+  return Object.keys(STUDY_MODELS).find(key => STUDY_MODELS[key]?.id === id) || null;
+}
+
+function providerLabelForModelId(id) {
+  if (isDeepSeekModel(id)) return 'DeepSeek';
+  if (isXaiModel(id)) return 'xAI';
+  if (isOpenAIModel(id)) return 'OpenAI';
+  if (isClaudeModel(id)) return 'Claude';
+  return 'Gemini';
+}
+
+function candidateWithActualModel(candidate, actualModel) {
+  if (!actualModel || actualModel === candidate.id) return candidate;
+  const servedKey = studyModelKeyForId(actualModel);
+  const servedMeta = servedKey
+    ? studyModelPublicMeta(servedKey)
+    : { key: actualModel, label: actualModel, provider: providerLabelForModelId(actualModel) };
+  return {
+    ...candidate,
+    ...servedMeta,
+    id: actualModel,
+    requestedKey: candidate.requestedKey || candidate.key,
+    requestedLabel: candidate.requestedLabel || candidate.label,
+    switched: true,
+    reason: candidate.reason || (isDeepSeekModel(candidate.id) && !isDeepSeekModel(actualModel) ? 'deepseek-reroute' : 'fallback'),
+  };
 }
 
 function resolveBestOfStudyModels(bestOf, user, email) {
@@ -677,29 +895,68 @@ function resolveBestOfStudyModels(bestOf, user, email) {
   return { candidates, judge };
 }
 
+// "Regular reroute" candidate set: EVERY model the account can actually run as
+// itself right now, in strongest-first order. Unlike Best of 3 (which auto-
+// downgrades plan-locked picks onto Flash Lite and so can show the same model
+// twice), reroute only includes models that run as themselves — so each answer
+// is a distinct model. Plan-locked picks are skipped; capped free models (Haiku,
+// DeepSeek V4 Pro) are skipped once their non-paid daily window is spent or
+// locked, so a reroute never serves a duplicate Flash-Lite stand-in.
+const REROUTE_MODEL_ORDER = [
+  'gpt-5.4', 'gemini-pro', 'flash', 'deepseek-pro', 'grok',
+  'gpt-5.4-mini', 'deepseek-flash', 'flash-lite',
+];
+function resolveRerouteStudyModels(user, email) {
+  const plan = getPlan(user, email);
+  const paid = PAID_TIERS.has(plan);
+  const candidates = [];
+  for (const key of REROUTE_MODEL_ORDER) {
+    const m = STUDY_MODELS[key];
+    if (!m) continue;
+    // Only models this plan + account may run as themselves.
+    if (!studyModelAllowed(key, plan)) continue;
+    if (isGeminiOnly(email) && isBlockedForGeminiOnly(m.provider)) continue;
+    // Capped free models: drop once the non-paid daily window is exhausted/locked
+    // so we never substitute the Flash-Lite fallback (which is already its own row).
+    const cap = freeCapConfig(key);
+    if (cap && !paid) {
+      const lockedUntil = user?.data?.usage?.[cap.lockKey] || 0;
+      const used = rollingCapUsage(user, cap.usageKey);
+      if (lockedUntil > Date.now() || used >= cap.freeDailyLimit) continue;
+    }
+    candidates.push({
+      ...studyModelPublicMeta(key),
+      requestedKey: key,
+      requestedLabel: studyModelPublicMeta(key).label,
+      id: m.id,
+      provider: m.provider,
+    });
+  }
+  return candidates;
+}
+
 // ===== Debate opponent model picker =====
 // Debate has its OWN per-message model toggle (separate from Study Mode), with
 // STRICTER free gating: free accounts may pick ONLY Flash Lite and GPT-5.4 mini
 // (no free Haiku, unlike study). Every other tier matches the study allow-list.
 // Mirrors canUseDebateModel() in src/components/study/DebatePanel.jsx.
 function debateModelAllowed(key, plan) {
-  const m = STUDY_MODELS[key];
-  if (!m) return false;
-  if (plan === 'free') return key === 'flash-lite' || key === 'gpt-5.4-mini';
-  return studyModelAllowed(key, plan);
+  // Credit model: free users may pick any debate opponent model too; the
+  // per-message credit cost is the gate.
+  return !!STUDY_MODELS[key];
 }
 
 // Resolve the opponent model a debate request actually gets. Same shape and
 // fallback discipline as resolveStudyModel() but using the debate allow-list:
-// an unaffordable pick drops to Flash Lite, Gemini-only accounts are forced onto
-// Gemini, and the shared capped-model windows (Haiku) still apply for non-paid.
+// an unaffordable pick drops to Flash Lite, Gemini-only accounts are blocked
+// from Claude/OpenAI, and capped-model windows still apply for non-paid.
 function resolveDebateModel(requested, user, email) {
   const plan = getPlan(user, email);
   let key = STUDY_MODELS[requested] ? requested : FALLBACK_STUDY_MODEL;
   let switched = false, reason = null;
   if (!debateModelAllowed(key, plan)) { key = FALLBACK_STUDY_MODEL; switched = true; reason = 'plan'; }
 
-  if (isGeminiOnly(email) && STUDY_MODELS[key]?.provider !== 'gemini') {
+  if (isGeminiOnly(email) && isBlockedForGeminiOnly(STUDY_MODELS[key]?.provider)) {
     const geminiModels = ['gemini-pro', 'flash', 'flash-lite'];
     key = geminiModels.find(k => debateModelAllowed(k, plan)) || FALLBACK_STUDY_MODEL;
     switched = true; reason = 'gemini-only';
@@ -725,6 +982,139 @@ function resolveDebateModel(requested, user, email) {
 
   const m = STUDY_MODELS[key];
   return { key, id: m.id, provider: m.provider, switched, reason, haikuRemaining };
+}
+
+function resolveDebateModelForSearch(requested, user, email) {
+  const plan = getPlan(user, email);
+  let key = STUDY_MODELS[requested] ? requested : FALLBACK_STUDY_MODEL;
+  let switched = false, reason = null;
+  if (!debateModelAllowed(key, plan)) { key = FALLBACK_STUDY_MODEL; switched = true; reason = 'plan'; }
+
+  if (isGeminiOnly(email) && isBlockedForGeminiOnly(STUDY_MODELS[key]?.provider)) {
+    const geminiModels = ['gemini-pro', 'flash', 'flash-lite'];
+    key = geminiModels.find(k => debateModelAllowed(k, plan)) || FALLBACK_STUDY_MODEL;
+    switched = true; reason = 'gemini-only';
+  }
+
+  const m = STUDY_MODELS[key];
+  return { key, id: m.id, provider: m.provider, switched, reason, haikuRemaining: null };
+}
+
+const MONTH_INDEX = {
+  jan: 1, january: 1,
+  feb: 2, february: 2,
+  mar: 3, march: 3,
+  apr: 4, april: 4,
+  may: 5,
+  jun: 6, june: 6,
+  jul: 7, july: 7,
+  aug: 8, august: 8,
+  sep: 9, sept: 9, september: 9,
+  oct: 10, october: 10,
+  nov: 11, november: 11,
+  dec: 12, december: 12,
+};
+const RECENT_OR_LIVE_TOPIC_RE = /\b(latest|newest|currently|recent(?:ly)?|today|tonight|yesterday|tomorrow|now|live|ongoing|breaking|news|headline|headlines|update|updates|updated|announced|released|launched|as\s+of|current\s+(events?|news|version|versions|status|state|price|prices|score|scores|standings|president|leader|release)|this\s+(week|month|year|season|semester)|last\s+(week|month|year|night)|next\s+(week|month|year)|score|scores|standings|forecast|weather|stock|stocks|crypto|price|prices|election|poll|polls|version|versions)\b/i;
+
+function utcDateMs(year, month = 12, day = 31) {
+  return Date.UTC(Number(year), Number(month) - 1, Number(day), 23, 59, 59, 999);
+}
+
+function cutoffMs(cutoff) {
+  if (!cutoff) return null;
+  const ms = Date.parse(`${cutoff}T23:59:59.999Z`);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function markSpan(spans, start, end) {
+  spans.push([start, end]);
+}
+
+function inMarkedSpan(spans, index) {
+  return spans.some(([start, end]) => index >= start && index < end);
+}
+
+function promptDateMentionAfterCutoff(text, cutoff) {
+  const cut = cutoffMs(cutoff);
+  if (!text || !Number.isFinite(cut)) return false;
+  const spans = [];
+  const lower = String(text).toLowerCase();
+
+  const record = (ms, start, end) => {
+    if (start != null && end != null) markSpan(spans, start, end);
+    return Number.isFinite(ms) && ms > cut;
+  };
+
+  for (const match of lower.matchAll(/\b(20\d{2}|19\d{2})[-/.](0?[1-9]|1[0-2])[-/.](0?[1-9]|[12]\d|3[01])\b/g)) {
+    if (record(utcDateMs(match[1], match[2], match[3]), match.index, match.index + match[0].length)) return true;
+  }
+  for (const match of lower.matchAll(/\b(0?[1-9]|1[0-2])\/(0?[1-9]|[12]\d|3[01])\/(20\d{2}|19\d{2})\b/g)) {
+    if (record(utcDateMs(match[3], match[1], match[2]), match.index, match.index + match[0].length)) return true;
+  }
+  for (const match of lower.matchAll(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t)?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+([0-3]?\d)(?:st|nd|rd|th)?,?\s+(20\d{2}|19\d{2})\b/g)) {
+    const month = MONTH_INDEX[match[1].replace(/\.$/, '')];
+    if (record(utcDateMs(match[3], month, match[2]), match.index, match.index + match[0].length)) return true;
+  }
+  for (const match of lower.matchAll(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t)?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(20\d{2}|19\d{2})\b/g)) {
+    const month = MONTH_INDEX[match[1].replace(/\.$/, '')];
+    if (record(utcDateMs(match[2], month + 1, 0), match.index, match.index + match[0].length)) return true;
+  }
+
+  for (const match of lower.matchAll(/\b(20\d{2}|19\d{2})\b/g)) {
+    if (inMarkedSpan(spans, match.index)) continue;
+    if (record(utcDateMs(match[1]), match.index, match.index + match[0].length)) return true;
+  }
+
+  const now = new Date();
+  const currentYear = now.getUTCFullYear();
+  if (/\blast\s+year\b/i.test(text) && utcDateMs(currentYear - 1) > cut) return true;
+  if (/\b(this|next)\s+year\b/i.test(text) && utcDateMs(currentYear) > cut) return true;
+  if (RECENT_OR_LIVE_TOPIC_RE.test(text) && Date.now() > cut) return true;
+  return false;
+}
+
+function requestTextForAutoSearch(body = {}) {
+  const chunks = [];
+  if (typeof body.message === 'string') chunks.push(body.message);
+  if (typeof body.topic === 'string') chunks.push(body.topic);
+  if (typeof body.customInstructions === 'string') chunks.push(body.customInstructions);
+  if (Array.isArray(body.messages)) {
+    const recentUsers = body.messages.filter(m => m?.role === 'user').slice(-3);
+    for (const msg of recentUsers) chunks.push(messageText(msg.content));
+  }
+  return chunks.filter(Boolean).join('\n\n');
+}
+
+function requestHasAttachedSources(body = {}) {
+  return Array.isArray(body?.context?.sources) && body.context.sources.length > 0;
+}
+
+function requestForbidsExternalSearch(body = {}) {
+  const text = [requestTextForAutoSearch(body), typeof body.system === 'string' ? body.system : ''].filter(Boolean).join('\n\n');
+  return /\b(?:do\s+not\s+search\s+the\s+web|no\s+web|no\s+outside\s+knowledge|do\s+not\s+use\s+outside|use\s+no\s+outside|only\s+permitted\s+fact\s+base|sourced\s+entirely\s+from|source\s+notes[\s\S]{0,120}\bonly|attached\s+sources[\s\S]{0,120}\bonly)\b/i.test(text);
+}
+
+function defaultModelIdForAutoSearch(user, email, opts = {}) {
+  if (opts.debate) return resolveDebateModelForSearch(opts.requestedModel, user, email).id;
+  if (STUDY_MODELS[opts.requestedModel]) return resolveStudyModelForSearch(opts.requestedModel, user, email).id;
+  if (opts.stream) return modelForUser(user, email, { stream: true });
+  return modelForUser(user, email);
+}
+
+function autoSearchDecisionForRequest(body, user, email, opts = {}) {
+  if (requestHasAttachedSources(body) || requestForbidsExternalSearch(body)) {
+    return { sourced: false, auto: false, modelId: null, cutoff: null };
+  }
+  const explicit = !!body?.sourced;
+  if (explicit) return { sourced: true, auto: false, modelId: null, cutoff: null };
+  if (body?.humanize || body?.reroute === true || body?.bruteForce === true || body?.bestOf) {
+    return { sourced: false, auto: false, modelId: null, cutoff: null };
+  }
+  const modelId = opts.modelId || defaultModelIdForAutoSearch(user, email, opts);
+  const cutoff = modelKnowledgeCutoff(modelId);
+  const text = requestTextForAutoSearch(body);
+  const auto = promptDateMentionAfterCutoff(text, cutoff);
+  return { sourced: auto, auto, modelId, cutoff };
 }
 
 // Daily limits are a ROLLING 24h window. Instead of a midnight reset,
@@ -764,62 +1154,42 @@ function rollingMsgUsage(user) {
   return (user.data.usage.msgWindow || []).reduce((n, e) => n + (e?.cost || 1), 0);
 }
 
-// Returns { allowed, remaining, limit, plan }. Mutates usage on allowed=true.
-// `cost` is how many message-units the request counts as (2 for sourced).
-function consumeMessage(users, email, cost = 1) {
+// Core credit charge. Draws `amount` credits from the user's rolling-24h
+// pool. Returns { allowed, remaining, limit, plan, cost }. Mutates usage on
+// allowed=true. Owner/advisor accounts are unlimited (allowance = Infinity).
+function consumeCredits(users, email, amount = 1) {
   const u = users[email];
-  if (!u) return { allowed: false, remaining: 0, limit: 0, plan: 'free' };
+  if (!u) return { allowed: false, remaining: 0, limit: 0, plan: 'free', cost: amount };
   const plan = getPlan(u, email);
-  const cap = LIMITS[plan]?.dailyMessages ?? LIMITS.free.dailyMessages;
-  if (cap === Infinity) return { allowed: true, remaining: Infinity, limit: Infinity, plan };
+  const cap = dailyCreditAllowance(u, email);
+  if (cap === Infinity) return { allowed: true, remaining: Infinity, limit: Infinity, plan, cost: amount };
   ensureUsageBucket(u);
   const used = rollingMsgUsage(u);
-  if (used + cost > cap) {
-    return { allowed: false, remaining: Math.max(0, cap - used), limit: cap, plan };
+  if (used + amount > cap) {
+    return { allowed: false, remaining: Math.max(0, cap - used), limit: cap, plan, cost: amount };
   }
-  u.data.usage.msgWindow.push({ ts: Date.now(), cost });
-  return { allowed: true, remaining: Math.max(0, cap - (used + cost)), limit: cap, plan, cost };
+  u.data.usage.msgWindow.push({ ts: Date.now(), cost: amount });
+  return { allowed: true, remaining: Math.max(0, cap - (used + amount)), limit: cap, plan, cost: amount };
 }
-function consumeQuizBowlGame(users, email) {
-  const u = users[email];
-  if (!u) return { allowed: false };
-  const plan = getPlan(u, email);
-  const cap = LIMITS[plan]?.dailyQB ?? LIMITS.free.dailyQB;
-  if (cap === Infinity) return { allowed: true, remaining: Infinity, limit: Infinity, plan };
-  ensureUsageBucket(u);
-  const used = u.data.usage.qbWindow.length;
-  if (used >= cap) {
-    return { allowed: false, remaining: 0, limit: cap, plan };
-  }
-  u.data.usage.qbWindow.push(Date.now());
-  return { allowed: true, remaining: Math.max(0, cap - (used + 1)), limit: cap, plan };
-}
-// Weekly buckets - curricula / debates
+// Back-compat wrapper: chat call sites pass the model's credit cost as `cost`.
+function consumeMessage(users, email, cost = 1) { return consumeCredits(users, email, cost); }
+// Curriculum generation = a flat credit charge.
 function consumeCurriculumGeneration(users, email) {
-  const u = users[email];
-  if (!u) return { allowed: false };
-  const plan = getPlan(u, email);
-  const cap = LIMITS[plan]?.weeklyCurricula ?? LIMITS.free.weeklyCurricula;
-  if (cap === Infinity) return { allowed: true, remaining: Infinity, limit: Infinity, plan };
-  ensureUsageBucket(u);
-  if ((u.data.usage.curricula || 0) >= cap) {
-    return { allowed: false, remaining: 0, limit: cap, plan };
-  }
-  u.data.usage.curricula = (u.data.usage.curricula || 0) + 1;
-  return { allowed: true, remaining: Math.max(0, cap - u.data.usage.curricula), limit: cap, plan };
+  if (!users[email]) return { allowed: false };
+  return consumeCredits(users, email, CURRICULUM_CREDIT_COST);
 }
+// An AI Quiz Bowl tossup set = a flat credit charge.
+function consumeQuizBowlGame(users, email) {
+  if (!users[email]) return { allowed: false };
+  return consumeCredits(users, email, QB_TOSSUP_CREDIT_COST);
+}
+// Starting a debate is free; debate is charged per opponent message in
+// /api/debate/chat (per the chosen model's credit cost). Kept as a no-op so
+// the existing /api/debate/start call site stays valid.
 function consumeDebate(users, email) {
   const u = users[email];
   if (!u) return { allowed: false };
-  const plan = getPlan(u, email);
-  const cap = LIMITS[plan]?.weeklyDebates ?? LIMITS.free.weeklyDebates;
-  if (cap === Infinity) return { allowed: true, remaining: Infinity, limit: Infinity, plan };
-  ensureUsageBucket(u);
-  if ((u.data.usage.debates || 0) >= cap) {
-    return { allowed: false, remaining: 0, limit: cap, plan };
-  }
-  u.data.usage.debates = (u.data.usage.debates || 0) + 1;
-  return { allowed: true, remaining: Math.max(0, cap - u.data.usage.debates), limit: cap, plan };
+  return { allowed: true, remaining: Infinity, limit: Infinity, plan: getPlan(u, email) };
 }
 
 // ===== MIDDLEWARE =====
@@ -994,9 +1364,9 @@ function createDefaultData() {
       // ON = terse, high-signal phrases (the shipped style). OFF = normal,
       // conversational AI prose. Read in prompts.js buildToneRules().
       succinctMode: true,
-      // When true (default), DeepSeek requests on geopolitically-sensitive
-      // topics are silently rerouted to Gemini Flash Lite (free) or GPT-5.4
-      // (paid) so the user gets an unfiltered answer.
+      // When true (default), DeepSeek requests about China/Taiwan, or relevant
+      // follow-ups after recent China/Taiwan/geopolitics context, reroute to
+      // the same-tier Gemini model.
       deepseekReroute: true,
       customInstructions: '',
       // ----- UI prefs (moved off localStorage) -----
@@ -1072,7 +1442,7 @@ function createDefaultData() {
 
 
     // ----- Billing / plan state -----
-    plan: 'free',                 // 'free' | 'plus-lite' | 'plus' | 'pro' | 'lifetime'
+    plan: 'free',                 // 'free' | 'paid'
     proUntil: null,               // ISO string or null - when a recurring sub expires; null = untimed
     proGrantedBy: null,           // 'owner' | 'stripe' | null
     lifetimePurchasedAt: null,    // ISO when the one-time Lifetime charge cleared; sticky forever
@@ -1188,6 +1558,16 @@ function migrateUserData(data) {
       // Don't block login on a bad rebuild - just leave the empty default.
       console.error('secretProfile rebuild failed:', e);
     }
+  }
+  // Collapse legacy multi-tier plans to the new free|paid model. Any
+  // previously-paid plan (plus/pro/lifetime, or a lifetime stamp) becomes
+  // 'paid'; the old free referral tier 'plus-lite' and any unknown value
+  // become 'free'. getPlan() still re-checks proUntil so an expired paid
+  // subscription correctly resolves back to free.
+  if (['plus', 'pro', 'lifetime'].includes(data.plan) || data.lifetimePurchasedAt) {
+    data.plan = 'paid';
+  } else if (data.plan !== 'paid' && data.plan !== 'free') {
+    data.plan = 'free';
   }
   // Backfill the user's shareable referral code if they don't have one
   // yet. We can't check for global collisions from inside this function
@@ -2643,9 +3023,8 @@ async function callOpenAI(systemPrompt, messages, model, maxOutputTokens = 4096,
 // the Gemini sibling on any failure, keeping the app resilient if the key is
 // absent/bad or DeepSeek is down.
 async function callDeepSeek(systemPrompt, messages, model, maxOutputTokens = 4096, opts = {}) {
-  const rerouteModel = deepSeekRerouteTarget(messages, opts);
+  const rerouteModel = await deepSeekRerouteTarget(messages, opts, model);
   if (rerouteModel) {
-    if (isOpenAIModel(rerouteModel)) return callOpenAI(systemPrompt, messages, rerouteModel, maxOutputTokens, opts);
     return callGemini(systemPrompt, messages, rerouteModel, maxOutputTokens, opts);
   }
   if (!deepseek) return callGemini(systemPrompt, messages, geminiSiblingOf(model), maxOutputTokens, opts);
@@ -2666,6 +3045,34 @@ async function callDeepSeek(systemPrompt, messages, model, maxOutputTokens = 409
     return { success: true, data: { content: [{ type: 'text', text }], sources: [] }, model: resolved };
   } catch (err) {
     console.warn(`DeepSeek call (${resolved}) failed: ${err?.message || err}. Falling back to Gemini.`);
+    return callGemini(systemPrompt, messages, geminiSiblingOf(resolved), maxOutputTokens, opts);
+  }
+}
+
+// Non-streaming Grok call. Same envelope as callGemini/callClaude/callOpenAI/
+// callDeepSeek. Grok is OpenAI-compatible (classic Chat Completions), so it uses
+// max_tokens. Grok 4 is a reasoning model — it spends tokens thinking before it
+// answers — so the budget is generous to leave room for both reasoning and the
+// reply. Degrades to the Gemini sibling on any failure, keeping the app resilient
+// if the key is absent/bad or xAI is down.
+async function callGrok(systemPrompt, messages, model, maxOutputTokens = 4096, opts = {}) {
+  if (!xai) return callGemini(systemPrompt, messages, geminiSiblingOf(model), maxOutputTokens, opts);
+  const resolved = isXaiModel(model) ? model : GROK;
+  const system = opts.jsonMode
+    ? `${systemPrompt || ''}\n\nRespond with ONLY valid JSON — no markdown, no code fences, no prose before or after.`.trim()
+    : (systemPrompt || '');
+  try {
+    const resp = await xai.chat.completions.create({
+      model: resolved,
+      max_tokens: Math.min(Math.max(Number(maxOutputTokens) || 4096, 1024), 16000),
+      temperature: Number.isFinite(opts.temperature) ? opts.temperature : 0.7,
+      ...(opts.jsonMode ? { response_format: { type: 'json_object' } } : {}),
+      messages: messagesToOpenAI(system, messages),
+    });
+    const text = resp?.choices?.[0]?.message?.content || '';
+    return { success: true, data: { content: [{ type: 'text', text }], sources: [] }, model: resolved };
+  } catch (err) {
+    console.warn(`Grok call (${resolved}) failed: ${err?.message || err}. Falling back to Gemini.`);
     return callGemini(systemPrompt, messages, geminiSiblingOf(resolved), maxOutputTokens, opts);
   }
 }
@@ -2708,21 +3115,32 @@ async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096,
     currentModel = geminiSiblingOf(currentModel);
   }
 
-  // DeepSeek (V3 / R1) is served by callDeepSeek. Web search is Gemini-only, so a
-  // DeepSeek id that requests grounding is coerced to its Gemini sibling instead.
+  // DeepSeek is served by callDeepSeek. Web search is Gemini-only, so a DeepSeek
+  // id that requests grounding is already coerced to its Gemini sibling; the
+  // targeted China/Taiwan/geopolitics reroute applies only to non-sourced turns.
   if (isDeepSeekModel(currentModel)) {
-    const rerouteModel = deepSeekRerouteTarget(messages, opts);
-    if (rerouteModel) {
-      if (isOpenAIModel(rerouteModel)) {
-        return callOpenAI(systemPrompt, messages, rerouteModel, maxOutputTokens, opts);
-      }
-      currentModel = rerouteModel;
-    } else {
-      if (!opts.enableWebSearch && deepseek) {
-        return callDeepSeek(systemPrompt, messages, currentModel, maxOutputTokens, opts);
-      }
+    if (opts.enableWebSearch) {
       currentModel = geminiSiblingOf(currentModel);
+    } else {
+      const rerouteModel = await deepSeekRerouteTarget(messages, opts, currentModel);
+      if (rerouteModel) {
+        currentModel = rerouteModel;
+      } else {
+        if (deepseek) {
+          return callDeepSeek(systemPrompt, messages, currentModel, maxOutputTokens, opts);
+        }
+        currentModel = geminiSiblingOf(currentModel);
+      }
     }
+  }
+
+  // Grok is served by callGrok. Web search is Gemini-only, so a Grok id that
+  // requests grounding is coerced to its Gemini sibling instead.
+  if (isXaiModel(currentModel)) {
+    if (!opts.enableWebSearch && xai) {
+      return callGrok(systemPrompt, messages, currentModel, maxOutputTokens, opts);
+    }
+    currentModel = geminiSiblingOf(currentModel);
   }
 
   if (!genAI) return { success: false, error: 'GEMINI_API_KEY not configured', status: 500 };
@@ -2964,17 +3382,24 @@ app.post('/api/chat', authMiddleware, async (req, res) => {
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
     users[email].data = migrateUserData(users[email].data);
-    const cost = sourced ? 2 : 1;
-    const quota = consumeMessage(users, email, cost);
+    const autoSearch = autoSearchDecisionForRequest(req.body, users[email], email, { requestedModel });
+    const suppressSourceMode = requestHasAttachedSources(req.body) || requestForbidsExternalSearch(req.body) || !!req.body?.humanize;
+    const effectiveSourced = suppressSourceMode ? false : !!(sourced || autoSearch.auto);
+    if (suppressSourceMode) req.body.sourced = false;
+    if (autoSearch.auto) req.body.sourced = true;
+    const baseCost = (requestedModel && STUDY_MODELS[requestedModel])
+      ? studyModelCreditCost(requestedModel)
+      : creditCostForModelId(modelForUser(users[email], email));
+    const cost = baseCost + (effectiveSourced ? SOURCED_CREDIT_SURCHARGE : 0);
+    const quota = consumeCredits(users, email, cost);
     if (!quota.allowed) {
-      const upgradeKind = quota.plan === 'free' ? 'refer' : 'upgrade';
-      const upgradeHint = upgradeKind === 'refer'
-        ? 'Refer 2 friends to unlock Plus-Lite (free) for higher limits.'
-        : 'Upgrade to the next plan for more daily messages.';
+      const upgradeHint = quota.plan === 'free'
+        ? 'Upgrade to Paid for 9,500 credits/day.'
+        : 'Your credits reset on a rolling 24h window.';
       return res.status(402).json({
         error: 'message_limit_reached',
-        message: `You've hit today's message limit (${quota.limit}). ${upgradeHint}`,
-        limit: quota.limit, remaining: quota.remaining, plan: quota.plan, upgradeKind,
+        message: `This answer costs ${cost} credit${cost === 1 ? '' : 's'} and you only have ${quota.remaining} left today. ${upgradeHint}`,
+        limit: quota.limit, remaining: quota.remaining, plan: quota.plan, cost, upgradeKind: 'upgrade',
       });
     }
     // Resolve model: if the caller supplied a study-model key, honour it with
@@ -2983,15 +3408,19 @@ app.post('/api/chat', authMiddleware, async (req, res) => {
     let modelId = modelForUser(users[email], email);
     let resolvedModel = null;
     if (requestedModel && STUDY_MODELS[requestedModel]) {
-      resolvedModel = resolveStudyModel(requestedModel, users[email], email);
+      resolvedModel = effectiveSourced
+        ? resolveStudyModelForSearch(requestedModel, users[email], email)
+        : resolveStudyModel(requestedModel, users[email], email);
       modelId = resolvedModel.id;
-      recordFreeCapUse(users[email], resolvedModel.key);
+      if (!effectiveSourced) recordFreeCapUse(users[email], resolvedModel.key);
     }
     saveUsers(users);
     const systemPrompt = system || 'You are a helpful AI assistant.';
+    const structuredOutput = !!jsonMode || /\b(?:output|respond with)\s+only\s+valid\s+json\b/i.test(systemPrompt);
     const result = await callGemini(systemPrompt, messages, modelId, max_tokens || 4096, {
-      enableWebSearch: !!sourced,
+      enableWebSearch: effectiveSourced,
       jsonMode: !!jsonMode,
+      skipCitationMarkers: effectiveSourced && structuredOutput,
       disableThinking: !!disableThinking,
       userPlan: quota.plan,
       deepseekReroute: users[email].data.preferences?.deepseekReroute !== false,
@@ -3028,9 +3457,9 @@ app.post('/api/debate/start', authMiddleware, (req, res) => {
 
 // Debate opponent chat. Like /api/chat (non-streaming, consumes the daily
 // message bucket) but honors a chosen opponent `model` with debate plan-gating.
-// `sourced` (web search) is Gemini-only, so in source mode we run the user's
-// Gemini tier and skip the picker — exactly how Study Mode behaves. callGemini
-// auto-routes the resolved id to Claude/OpenAI when web search is off.
+// `sourced` (web search) is Gemini-grounded. We still honor the selected
+// opponent model for plan/cutoff semantics, and callGemini coerces
+// non-Gemini providers onto the equivalent Gemini search path.
 app.post('/api/debate/chat', authMiddleware, async (req, res) => {
   try {
     const { messages, system, max_tokens, sourced, model } = req.body;
@@ -3038,24 +3467,35 @@ app.post('/api/debate/chat', authMiddleware, async (req, res) => {
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
     users[email].data = migrateUserData(users[email].data);
-    const cost = sourced ? 2 : 1;
-    const quota = consumeMessage(users, email, cost);
+    const autoSearch = autoSearchDecisionForRequest(req.body, users[email], email, {
+      requestedModel: model,
+      debate: true,
+    });
+    const suppressSourceMode = requestHasAttachedSources(req.body) || requestForbidsExternalSearch(req.body);
+    const effectiveSourced = suppressSourceMode ? false : !!(sourced || autoSearch.auto);
+    if (suppressSourceMode) req.body.sourced = false;
+    if (autoSearch.auto) req.body.sourced = true;
+    const baseCost = (model && STUDY_MODELS[model])
+      ? studyModelCreditCost(model)
+      : creditCostForModelId(modelForUser(users[email], email));
+    const cost = baseCost + (effectiveSourced ? SOURCED_CREDIT_SURCHARGE : 0);
+    const quota = consumeCredits(users, email, cost);
     if (!quota.allowed) {
-      const upgradeKind = quota.plan === 'free' ? 'refer' : 'upgrade';
-      const upgradeHint = upgradeKind === 'refer'
-        ? 'Refer 2 friends to unlock Plus-Lite (free) for higher limits.'
-        : 'Upgrade to the next plan for more daily messages.';
+      const upgradeHint = quota.plan === 'free'
+        ? 'Upgrade to Paid for 9,500 credits/day.'
+        : 'Your credits reset on a rolling 24h window.';
       return res.status(402).json({
         error: 'message_limit_reached',
-        message: `You've hit today's message limit (${quota.limit}). ${upgradeHint}`,
-        limit: quota.limit, remaining: quota.remaining, plan: quota.plan, upgradeKind,
+        message: `This reply costs ${cost} credit${cost === 1 ? '' : 's'} and you only have ${quota.remaining} left today. ${upgradeHint}`,
+        limit: quota.limit, remaining: quota.remaining, plan: quota.plan, cost, upgradeKind: 'upgrade',
       });
     }
     const systemPrompt = system || 'You are a sharp debate opponent.';
     let modelId, studyMeta = null, billKey = null;
-    if (sourced) {
-      // Web search forces the Gemini tier; the picker is a no-op this turn.
-      modelId = modelForUser(users[email], email, { stream: true });
+    if (effectiveSourced) {
+      const r = resolveDebateModelForSearch(model, users[email], email);
+      modelId = r.id;
+      studyMeta = { key: r.key, switched: r.switched, reason: r.reason, haikuRemaining: r.haikuRemaining };
     } else {
       const r = resolveDebateModel(model, users[email], email);
       modelId = r.id;
@@ -3065,7 +3505,7 @@ app.post('/api/debate/chat', authMiddleware, async (req, res) => {
     }
     saveUsers(users);
     const result = await callGemini(systemPrompt, messages, modelId, max_tokens || 4096, {
-      enableWebSearch: !!sourced, userPlan: getPlan(users[email], email), deepseekReroute: users[email].data.preferences?.deepseekReroute !== false,
+      enableWebSearch: effectiveSourced, userPlan: getPlan(users[email], email), deepseekReroute: users[email].data.preferences?.deepseekReroute !== false,
     });
     if (!result.success) return res.status(result.status || 500).json({ error: result.error });
     // Bill the capped free model only on a completed turn, then report the
@@ -3386,13 +3826,16 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
         });
       }
     } else {
-      // Free plan: 1 curriculum generation per week. Pro: unlimited.
+      // Generating a curriculum costs CURRICULUM_CREDIT_COST credits.
       const quota = consumeCurriculumGeneration(usersC, emailC);
       if (!quota.allowed) {
+        const upgradeHint = quota.plan === 'free'
+          ? 'Upgrade to Paid for 9,500 credits/day.'
+          : 'Your credits reset on a rolling 24h window.';
         return res.status(402).json({
           error: 'curriculum_limit_reached',
-          message: `You've already generated ${quota.limit} curriculum this week on the free plan. Upgrade to Pro for unlimited.`,
-          limit: quota.limit, remaining: 0,
+          message: `Generating a curriculum costs ${CURRICULUM_CREDIT_COST} credits and you only have ${quota.remaining} left today. ${upgradeHint}`,
+          limit: quota.limit, remaining: quota.remaining, plan: quota.plan, cost: CURRICULUM_CREDIT_COST,
         });
       }
     }
@@ -4435,6 +4878,54 @@ async function streamDeepSeekResponse(res, sse, systemPrompt, messages, onComple
   }
 }
 
+// Native Grok streaming path (same SSE schema as Gemini/Claude/OpenAI/DeepSeek).
+// Grok is OpenAI-compatible, so this reuses the OpenAI SDK pointed at the xAI base
+// URL. Grok 4 is a reasoning model: it streams its chain-of-thought on
+// `delta.reasoning_content`, which we forward as `thinking` events, then the answer
+// on `delta.content`. On any early failure it falls back to the Gemini stream.
+async function streamGrokResponse(res, sse, systemPrompt, messages, onComplete, model, opts = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 300000);
+  const heartbeat = setInterval(() => {
+    try { res.write(`: keepalive ${Date.now()}\n\n`); res.flush?.(); } catch {}
+  }, 15000);
+
+  let buffered = '';
+  try {
+    const stream = await xai.chat.completions.create({
+      model,
+      max_tokens: 16384,
+      temperature: 0.7,
+      stream: true,
+      messages: messagesToOpenAI(systemPrompt, messages),
+    }, { signal: controller.signal });
+
+    for await (const event of stream) {
+      const delta = event?.choices?.[0]?.delta || {};
+      if (!opts.disableThinking && delta.reasoning_content) sse({ thinking: delta.reasoning_content });
+      if (delta.content) { buffered += delta.content; sse({ content: delta.content }); }
+    }
+
+    clearTimeout(timeout);
+    clearInterval(heartbeat);
+    if (onComplete) {
+      try { await onComplete(buffered, []); }
+      catch (bookkeepErr) { console.error('streamGrokResponse onComplete threw:', bookkeepErr); }
+    }
+    sse({ done: true, sources: [] });
+    res.end();
+  } catch (e) {
+    clearTimeout(timeout);
+    clearInterval(heartbeat);
+    console.error('Grok stream error:', e);
+    // Nothing emitted yet → fall back to the Gemini sibling on the same socket.
+    if (!buffered && !res.writableEnded) {
+      return streamAIResponse(res, systemPrompt, messages, onComplete, geminiSiblingOf(model), opts);
+    }
+    if (!res.writableEnded) { sse({ error: e?.message || String(e) }); res.end(); }
+  }
+}
+
 // Helper: stream AI response as SSE, backed by Google Gemini.
 //
 // SSE event schema (unchanged from the old Anthropic impl - frontend consumers
@@ -4451,9 +4942,25 @@ async function streamDeepSeekResponse(res, sse, systemPrompt, messages, onComple
 //     returns groundingMetadata at stream end, inject [n] markers at the
 //     correct segment indices and flush the rewritten text as a single content
 //     event followed by per-source events + the done event.
+// Humanize hard-bans em dashes, en dashes, and double hyphens. The prompt tells
+// the model to recast instead, but a generative model complies ~95%, not 100%,
+// so this is the deterministic backstop: any dash-like separator that slips
+// through becomes a comma. ONLY applied to Humanize output (opts.stripDashes),
+// never to normal chat, so single hyphens in IDs and double hyphens in any
+// code/CSS elsewhere are left untouched.
+function stripDashChars(s) {
+  if (!s || (!s.includes('—') && !s.includes('–') && !s.includes('--'))) return s;
+  return s
+    .replace(/\s*[—–]\s*/g, ', ')   // em/en dash (with any surrounding space) -> comma
+    .replace(/(\S)\s*--\s*(\S)/g, '$1, $2')   // double hyphen between words -> comma
+    .replace(/[ \t]+,/g, ',')                 // tidy " ,"
+    .replace(/,\s*,/g, ',')                   // collapse ", ,"
+    .replace(/,(\s*)([.!?;:])/g, '$2');       // ", ." -> "."
+}
+
 async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOverride, opts = {}) {
   const enableWebSearch = !!opts.enableWebSearch;
-  const rerouteModel = isDeepSeekModel(modelOverride) ? deepSeekRerouteTarget(messages, opts) : null;
+  const rerouteModel = !enableWebSearch && isDeepSeekModel(modelOverride) ? await deepSeekRerouteTarget(messages, opts, modelOverride) : null;
   const effectiveModelOverride = rerouteModel || modelOverride;
   // Claude models stream natively for non-sourced requests. Source mode is
   // backed by Google Search grounding (Gemini only), so a Claude id in source
@@ -4461,7 +4968,8 @@ async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOv
   const wantClaude = !!anthropic && isClaudeModel(effectiveModelOverride) && !enableWebSearch;
   const wantOpenAI = !!openai && isOpenAIModel(effectiveModelOverride) && (!enableWebSearch || !!rerouteModel);
   const wantDeepSeek = !!deepseek && isDeepSeekModel(effectiveModelOverride) && !enableWebSearch;
-  const requestedModel = (wantClaude || wantOpenAI || wantDeepSeek) ? effectiveModelOverride : geminiSiblingOf(effectiveModelOverride || DEFAULT_MODEL);
+  const wantGrok = !!xai && isXaiModel(effectiveModelOverride) && !enableWebSearch;
+  const requestedModel = (wantClaude || wantOpenAI || wantDeepSeek || wantGrok) ? effectiveModelOverride : geminiSiblingOf(effectiveModelOverride || DEFAULT_MODEL);
   if (!res.headersSent) {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -4472,8 +4980,13 @@ async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOv
     res.flushHeaders();
   }
   // Helper: write SSE event AND flush so Node's internal buffer doesn't hold it.
+  // In Humanize mode (opts.stripDashes) every streamed content delta is scrubbed
+  // of dash-like separators here, so the user never even sees one flash mid-stream.
   const sse = (obj) => {
     try {
+      if (opts.stripDashes && typeof obj.content === 'string') {
+        obj = { ...obj, content: stripDashChars(obj.content) };
+      }
       res.write(`data: ${JSON.stringify(obj)}\n\n`);
       res.flush?.();
     } catch {}
@@ -4484,16 +4997,14 @@ async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOv
   if (wantClaude) {
     return streamClaudeResponse(res, sse, systemPrompt, messages, onComplete, requestedModel, opts);
   }
-  if (rerouteModel && isOpenAIModel(rerouteModel) && !openai) {
-    sse({ error: 'OPENAI_API_KEY is not configured' });
-    res.end();
-    return;
-  }
   if (wantOpenAI) {
     return streamOpenAIResponse(res, sse, systemPrompt, messages, onComplete, requestedModel, opts);
   }
   if (wantDeepSeek) {
     return streamDeepSeekResponse(res, sse, systemPrompt, messages, onComplete, requestedModel, opts);
+  }
+  if (wantGrok) {
+    return streamGrokResponse(res, sse, systemPrompt, messages, onComplete, requestedModel, opts);
   }
 
   if (!genAI) {
@@ -4714,17 +5225,18 @@ async function runBestOfStudyResponse({ sse, systemPrompt, messages, bestOf, opt
   // Best of 3 compares THREE DISTINCT models. Web search is Gemini-only, so
   // callGemini() coerces every Claude/OpenAI/DeepSeek id to its Gemini sibling
   // when grounding is on — which silently collapses all three picks onto the
-  // same underlying model and defeats the comparison. Force grounding off here
-  // so each candidate runs as the exact model the student chose. (The judge
-  // already runs with enableWebSearch:false below.)
+  // same underlying model and defeats the comparison. Force grounding off here.
+  // DeepSeek's China/Taiwan/geopolitics reroute remains enabled and is surfaced
+  // in the requested-vs-served metadata when it fires.
   const candidateOpts = { ...opts, enableWebSearch: false };
   const candidateResults = await Promise.all(bestOf.candidates.map(async (candidate, index) => {
     try {
       const result = await callGemini(systemPrompt, messages, candidate.id, 8192, candidateOpts);
+      const servedCandidate = candidateWithActualModel(candidate, result?.model || candidate.id);
       if (!result?.success) {
         return {
           index,
-          candidate,
+          candidate: servedCandidate,
           content: '',
           sources: [],
           error: result?.error || 'Model failed to answer.',
@@ -4732,7 +5244,7 @@ async function runBestOfStudyResponse({ sse, systemPrompt, messages, bestOf, opt
       }
       return {
         index,
-        candidate,
+        candidate: servedCandidate,
         content: bestOfText(result),
         sources: result?.data?.sources || [],
         actualModel: result.model || candidate.id,
@@ -4775,6 +5287,7 @@ Judge for accuracy, directness, teaching value, and whether the answer follows t
       jsonMode: true,
       temperature: 0.2,
     });
+    bestOf.judge = candidateWithActualModel(bestOf.judge, judgeResult?.model || bestOf.judge.id);
     const parsed = parseAIJson(bestOfText(judgeResult));
     const candidateNumber = Number(parsed?.winner ?? parsed?.winnerIndex ?? parsed?.choice);
     const chosen = successful.find((r) => r.index === candidateNumber - 1);
@@ -4824,11 +5337,503 @@ Judge for accuracy, directness, teaching value, and whether the answer follows t
   };
 }
 
+// Heuristic "did the model refuse?" check for the regular-reroute feature. We
+// only look at the HEAD of the answer (the first ~400 chars) so a long, genuine
+// answer that happens to say "I can't stress this enough" mid-paragraph is not
+// flagged — refusals lead with the decline.
+const REFUSAL_PATTERNS = [
+  /\bi\s*(?:'|’)?\s*(?:m\b.{0,12})?(?:can(?:'|’)?t|cannot|can\s*not|won(?:'|’)?t|am\s+not\s+able\s+to|am\s+unable\s+to|(?:'|’)?m\s+(?:not\s+able|unable)\s+to)\b[^.?!\n]{0,70}\b(?:help|assist|do\s+that|do\s+this|provide|comply|continue|create|generate|produce|write|answer|fulfill|that\s+request|with\s+that|with\s+this)\b/i,
+  /\b(?:i(?:'|’)?m\s+sorry|i\s+am\s+sorry|unfortunately|i\s+apologi[sz]e)\b[^.?!\n]{0,40}\b(?:can(?:'|’)?t|cannot|can\s*not|won(?:'|’)?t|unable|not\s+able)\b/i,
+  /\bi(?:'|’)?m\s+not\s+(?:able|going)\s+to\s+(?:help|assist|do|provide|answer|continue)\b/i,
+  /\bas\s+an?\s+ai\b[^.?!\n]{0,40}\b(?:can(?:'|’)?t|cannot|unable|not\s+able)\b/i,
+];
+function looksLikeRefusal(text) {
+  if (!text) return false;
+  const head = String(text).trim().slice(0, 400);
+  return REFUSAL_PATTERNS.some((rx) => rx.test(head));
+}
+
+function rerouteStats(results, candidates) {
+  return {
+    modelCount: candidates.length,
+    answeredCount: results.filter((r) => r.content && !r.refused).length,
+    refusedCount: results.filter((r) => r.refused).length,
+    failedCount: results.filter((r) => !r.content && !r.refused).length,
+  };
+}
+
+function comparisonBillKeys(bestOfMeta, plan) {
+  if (PAID_TIERS.has(plan)) return [];
+  const keys = [];
+  if (bestOfMeta?.mode === 'best-of' && freeCapConfig(bestOfMeta?.judge?.key)) {
+    keys.push(bestOfMeta.judge.key);
+  }
+  for (const response of (bestOfMeta?.responses || [])) {
+    if (freeCapConfig(response?.key)) keys.push(response.key);
+  }
+  return keys;
+}
+
+// Total credit cost of every model that actually ran in a multi-model turn
+// (best-of / reroute / brute force): sum of each response model + the judge.
+function comparisonCreditCost(bestOfMeta) {
+  let total = 0;
+  for (const r of (bestOfMeta?.responses || [])) total += studyModelCreditCost(r?.key);
+  if (bestOfMeta?.mode === 'best-of' && bestOfMeta?.judge?.key) total += studyModelCreditCost(bestOfMeta.judge.key);
+  return total;
+}
+
+// Best-of/reroute/brute-force fan out to many models, but requireMessageQuota
+// only charged the single primary model up front. Top up the credit pool with
+// the difference so a multi-model run costs the sum of every model it ran.
+// Recorded unconditionally (the work is already done); owners are unlimited.
+function chargeMultiModelCredits(req, users, email, bestOfMeta) {
+  const u = users[email];
+  if (!u) return;
+  if (dailyCreditAllowance(u, email) === Infinity) return;
+  const total = comparisonCreditCost(bestOfMeta);
+  const surcharge = req.sourced ? SOURCED_CREDIT_SURCHARGE : 0;
+  const alreadyCharged = Math.max(0, (req.quota?.cost || 0) - surcharge);
+  const extra = total - alreadyCharged;
+  if (extra <= 0) return;
+  ensureUsageBucket(u);
+  u.data.usage.msgWindow.push({ ts: Date.now(), cost: extra });
+}
+
+function pickReroutePrimary(results) {
+  return results.find((r) => r.content && !r.refused)
+    || results.find((r) => r.content)
+    || results[0];
+}
+
+// Brute force's goal is a prompt that ACTUALLY answers — so on top of refusals it
+// also has to notice a soft "non-answer": the model didn't refuse, it just
+// dodged with a clarifying question or "give me more context". Head-only match so
+// a real answer that merely opens by restating the question isn't flagged.
+const DEFLECTION_PATTERNS = [
+  /\bcould you (?:please )?(?:clarify|provide|share|specify|give me|tell me|elaborate|explain what)/i,
+  /\bcan you (?:please )?(?:clarify|provide|tell me more|be more specific|elaborate|give me more)/i,
+  /\b(?:please )?(?:provide|share|give) (?:me )?(?:some )?(?:more )?(?:context|detail|details|specifics|information)\b/i,
+  /\bto (?:better )?(?:help|assist)(?: you)?,?\s*(?:could|can|please|i(?:'|’)?d need|i would need)/i,
+  /\bwhat (?:specifically|exactly) (?:do|are|did|would) you\b/i,
+  /\bi(?:'|’)?m not sure (?:what|which|exactly what) you\b/i,
+  /\bcould you be more specific\b/i,
+];
+function looksLikeNonAnswer(text) {
+  if (!text || !String(text).trim()) return false;
+  const head = String(text).trim().slice(0, 240);
+  return DEFLECTION_PATTERNS.some((rx) => rx.test(head));
+}
+// Accepted = a model actually answered the question: real content, no refusal,
+// no soft deflection. That is the whole point of brute force.
+function isBruteForceAnswer(r) {
+  return !!(r && r.content && !r.refused && !looksLikeNonAnswer(r.content));
+}
+function pickBruteForcePrimary(results) {
+  return (results || []).find(isBruteForceAnswer)
+    || (results || []).find((r) => r.content && !r.refused)
+    || (results || []).find((r) => r.content)
+    || (results || [])[0];
+}
+
+function rerouteResponses(results, primary) {
+  return results.map((r) => ({
+    key: r.candidate.key,
+    requestedKey: r.candidate.requestedKey,
+    label: r.candidate.requestedLabel || r.candidate.label,
+    servedLabel: r.candidate.label,
+    provider: r.candidate.provider,
+    selected: r.index === primary?.index,
+    refused: !!r.refused,
+    switched: !!r.candidate.switched,
+    reason: r.candidate.reason || null,
+    content: r.content,
+    sources: r.sources || [],
+    error: r.error || null,
+  }));
+}
+
+function lastUserContent(messages) {
+  for (let i = (messages || []).length - 1; i >= 0; i--) {
+    if (messages[i]?.role === 'user') return messageText(messages[i].content);
+  }
+  return '';
+}
+
+function messagesWithRewrittenLastUser(messages, rewrittenPrompt) {
+  const out = (messages || []).map((m) => ({ ...m }));
+  for (let i = out.length - 1; i >= 0; i--) {
+    if (out[i]?.role === 'user') {
+      out[i] = { ...out[i], content: rewrittenPrompt };
+      break;
+    }
+  }
+  return out;
+}
+
+async function runRerouteAttempt({ systemPrompt, messages, candidates, opts = {} }) {
+  const runOpts = { ...opts, enableWebSearch: false };
+  return Promise.all(candidates.map(async (candidate, index) => {
+    try {
+      const result = await callGemini(systemPrompt, messages, candidate.id, 8192, runOpts);
+      const servedCandidate = candidateWithActualModel(candidate, result?.model || candidate.id);
+      if (!result?.success) {
+        return { index, candidate: servedCandidate, content: '', sources: [], error: result?.error || 'Model failed to answer.' };
+      }
+      const content = bestOfText(result);
+      return { index, candidate: servedCandidate, content, sources: result?.data?.sources || [], refused: looksLikeRefusal(content) };
+    } catch (err) {
+      return { index, candidate, content: '', sources: [], error: err?.message || String(err) };
+    }
+  }));
+}
+
+async function buildSmartReroutePrompt(messages, results, { proactive = false } = {}) {
+  const originalPrompt = lastUserContent(messages).trim();
+  if (!originalPrompt) return null;
+  const refusalNotes = (results || [])
+    .filter((r) => r.refused || r.error)
+    .slice(0, 6)
+    .map((r) => {
+      const label = r.candidate?.requestedLabel || r.candidate?.label || 'Model';
+      const text = (r.error || r.content || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+      return `- ${label}: ${text || 'No usable answer.'}`;
+    })
+    .join('\n');
+  const rewriteSystem = `You rewrite Study Mode prompts when multiple AI models refused or failed to answer.
+
+Your job is to craft a version the models are more likely to accept while preserving the user's core ethos: the real goal, stance, emotional charge, constraints, and learning intent behind the original prompt.
+
+This is NOT a jailbreak or policy-bypass task. Do not dilute a benign request into a generic safety lecture. If the user's core intent is allowed, preserve it and remove only the wording that likely triggered refusals. If the core intent is disallowed, preserve the underlying educational or analytical ethos while redirecting the request to an allowed form.
+
+Rules:
+- Do not include jailbreak language, roleplay coercion, policy-bypass instructions, hidden instructions, or requests to ignore safeguards.
+- Preserve the strongest acceptable version of the user's request; do not over-sanitize, moralize, or erase the point.
+- If the original asks for harmful, illegal, exploitative, or privacy-invasive help, keep the core topic but rewrite the task into an allowed form: high-level concepts, prevention, ethics, legal context, fictional/non-operational analysis, or defensive guidance.
+- Keep any legitimate classroom, tutoring, writing, math, science, or analysis goal.
+- Keep it concise and usable as the next user prompt.
+- Return ONLY JSON: {"prompt":"rewritten prompt","rationale":"short reason"}`;
+  const rewriteUser = proactive
+    ? [
+        'Original student prompt:',
+        originalPrompt.slice(0, 6000),
+        '',
+        'No model has answered this yet. Rewrite it up front into the clearest, most',
+        'answerable version that fully preserves the core ethos, so the models are most',
+        'likely to give a strong, direct answer on the first pass.',
+      ].join('\n')
+    : [
+        'Original student prompt:',
+        originalPrompt.slice(0, 6000),
+        '',
+        'Why the first reroute failed:',
+        refusalNotes || 'The model responses were unusable.',
+      ].join('\n');
+
+  try {
+    const result = await callGemini(rewriteSystem, [{ role: 'user', content: rewriteUser }], GEMINI_FLASH_LITE, 2048, {
+      enableWebSearch: false,
+      deepseekReroute: false,
+      disableThinking: true,
+      jsonMode: true,
+      temperature: 0.2,
+    });
+    if (!result?.success) return null;
+    const parsed = parseAIJson(bestOfText(result));
+    const prompt = String(parsed?.prompt || '').trim();
+    if (!prompt || prompt.length < 8) return null;
+    if (prompt.toLowerCase() === originalPrompt.toLowerCase()) return null;
+    return {
+      prompt: prompt.slice(0, 6000),
+      rationale: String(parsed?.rationale || 'Reframed the request into a more acceptable prompt while preserving its core ethos.').trim().slice(0, 300),
+    };
+  } catch (err) {
+    console.warn('Smart reroute prompt rewrite failed:', err?.message || err);
+    return null;
+  }
+}
+
+// Regular reroute: run the SAME prompt through every model the account can use
+// and return a Best-of-shaped meta (mode:'reroute') carrying every response, so
+// the existing "other responses" UI can render them. There is NO judge — the
+// "primary" shown in the bubble is simply the first model (in strongest-first
+// order) that answered without refusing.
+async function runRerouteStudyResponse({ sse, systemPrompt, messages, candidates, opts = {}, smart = false }) {
+  // Smart reroute: reframe the prompt UP FRONT (ethos-preserving) before any
+  // model sees it, instead of waiting for every model to refuse. Plain reroute
+  // only rewrites as the last-resort fallback below.
+  let runMessages = messages;
+  let smartRewrite = null;
+  if (smart) {
+    sse({ status: 'Smart reroute: sharpening your prompt while keeping its intent…' });
+    const rewrite = await buildSmartReroutePrompt(messages, [], { proactive: true });
+    if (rewrite?.prompt) {
+      smartRewrite = { used: true, proactive: true, ...rewrite };
+      runMessages = messagesWithRewrittenLastUser(messages, rewrite.prompt);
+    }
+  }
+
+  sse({ status: `Rerouting through ${candidates.length} model${candidates.length === 1 ? '' : 's'}…` });
+  // Each non-DeepSeek model must run AS ITSELF. Web search would coerce
+  // non-Gemini ids to their Gemini sibling and hide the refusals this feature
+  // exists to surface, so grounding stays off. DeepSeek's targeted Gemini
+  // reroute remains enabled and is visible in the requested-vs-served metadata.
+  let results = await runRerouteAttempt({ systemPrompt, messages: runMessages, candidates, opts });
+
+  if (!results.some((r) => r.content && !r.refused) && results.some((r) => r.refused)) {
+    const initialStats = rerouteStats(results, candidates);
+    sse({ status: 'No model accepted it; preserving the core ethos in a new prompt…' });
+    const rewrite = await buildSmartReroutePrompt(runMessages, results);
+    if (rewrite?.prompt) {
+      // In smart mode this is a second-stage escalation on top of the proactive
+      // rewrite; flag both so the UI can explain what happened.
+      smartRewrite = { used: true, ...(smart ? { proactive: true, escalated: true } : {}), ...rewrite, initialStats };
+      sse({ status: 'Retrying reroute with the ethos-preserving prompt…' });
+      const retryMessages = messagesWithRewrittenLastUser(runMessages, rewrite.prompt);
+      const retryResults = await runRerouteAttempt({ systemPrompt, messages: retryMessages, candidates, opts });
+      if (retryResults.some((r) => r.content)) {
+        results = retryResults;
+      } else {
+        smartRewrite.retryFailed = true;
+      }
+    }
+  }
+
+  // Primary = first model that gave a real (non-refusal) answer; then any model
+  // that produced content; then whatever came first.
+  const primary = pickReroutePrimary(results);
+  if (!primary?.content) throw new Error('None of the models returned a response.');
+  const stats = rerouteStats(results, candidates);
+
+  return {
+    content: primary.content,
+    sources: primary.sources || [],
+    bestOfMeta: {
+      mode: 'reroute',
+      primaryKey: primary.candidate.key,
+      primaryLabel: primary.candidate.requestedLabel || primary.candidate.label,
+      ...stats,
+      smartRewrite,
+      responses: rerouteResponses(results, primary),
+    },
+  };
+}
+
+// ===== Brute force =====
+// Brute force is a LOOPING version of smart reroute, run by a dedicated rewriting
+// AI ("the Brute Forcer"). Round after round it crafts/edits the prompt — learning
+// from every prior attempt, using zero trigger words — and fans it out to the
+// models, and it keeps trying until one of them actually ANSWERS the question (not
+// just "doesn't refuse") or the round budget runs out. The Brute Forcer never
+// answers anything itself; its only job is to find a prompt that gets answered.
+const BRUTE_FORCE_MODELS = 5;       // how many models each round fans out to
+const BRUTE_FORCE_MAX_ROUNDS = 10;  // hard cap so a stuck request can't spin forever
+// The Brute Forcer is its OWN model, separate from the per-model fan-out. Crafting
+// a prompt that reliably passes is the harder job, so it runs on Grok 4 (xAI's
+// reasoning model) rather than the Gemini-tier fan-out. callGrok auto-falls back to
+// the Gemini tier if xAI errors or the key is missing.
+const BRUTE_FORCE_MODEL = GROK;
+
+// Compact the running attempt log into a brief the Brute Forcer learns from:
+// every prompt it already tried this turn and how each model reacted.
+function bruteForceAttemptBrief(attemptLog) {
+  if (!attemptLog?.length) return 'No attempts yet — this is the first prompt you craft.';
+  return attemptLog.map((a) => {
+    const outcomes = (a.outcomes || [])
+      .map((o) => `    - ${o.label}: ${o.status}${o.snippet ? ` ("${o.snippet}")` : ''}`)
+      .join('\n');
+    return `Round ${a.round} prompt:\n  ${String(a.prompt || '').replace(/\s+/g, ' ').trim().slice(0, 600)}\n  Outcomes:\n${outcomes || '    - (no outcomes)'}`;
+  }).join('\n\n');
+}
+
+// Rewrite the prompt so models will answer it WITHOUT using trigger words. A
+// "trigger word" here is any term that trips a content filter into refusing an
+// otherwise-allowed academic request (loaded, alarming, or charged vocabulary,
+// named methods, slurs, etc.). Each round is told the previous rewrite + why
+// models still refused, so it strips more loaded wording and rephrases further.
+// Same non-jailbreak discipline as buildSmartReroutePrompt: this only removes
+// wording that causes false-positive refusals; a genuinely disallowed request
+// is redirected to an allowed form, never bypassed.
+// The Brute Forcer: a dedicated rewriting AI whose ONE job is to get the student's
+// request to actually be answered. It never answers the request itself — every
+// round it crafts (round 1) or edits (later rounds) the prompt to try next, learns
+// from the full attempt log, and changes tactics to pass more. Same non-jailbreak
+// discipline as the smart-reroute rewriter; it only neutralizes false-positive
+// wording and sharpens vague asks, and redirects truly-disallowed topics to an
+// allowed form.
+async function buildBruteForcePrompt(messages, { round = 1, focus = '', attemptLog = [] } = {}) {
+  const originalPrompt = lastUserContent(messages).trim();
+  if (!originalPrompt) return null;
+  const cleanFocus = String(focus || '').trim().slice(0, 600);
+  const system = `You are the Brute Forcer: a specialist whose ONLY job is to reword a student's Study Mode request so that an AI tutor will actually ANSWER it — not refuse it, not deflect, not ask a clarifying question back. You never answer the request yourself; you only craft the prompt that gets answered.
+
+You are an expert in why models refuse or dodge: loaded or alarming wording, named real-world methods, charged or sensitive framing, ambiguity, or phrasing that pattern-matches a policy even when the intent is benign and educational. You know exactly how to neutralize all of that while keeping the student's real intent, scope, and learning goal fully intact.
+
+This is NOT a jailbreak or policy-bypass task. You only remove wording that causes false-positive refusals on an ALLOWED request, and you sharpen vague requests so they get a real answer. If the underlying request is genuinely disallowed (real harm, operational illegal help, exploitation, privacy invasion), keep the topic but redirect it to an allowed form: high-level concepts, prevention, ethics, legal/historical context, or defensive/analytical framing. Never add jailbreak language, roleplay coercion, hidden instructions, or requests to ignore safeguards.
+
+Your strategy every round:
+- Use ZERO trigger words: replace any loaded, alarming, violent, sexual, illicit, or politically charged vocabulary (and slurs or named methods) with neutral, clinical, academic phrasing.
+- Read the attempt log. See what already failed and WHY, and CHANGE TACTICS — escalate: abstract further, reframe academically, split into safe sub-questions, add neutral framing, or restate as analysis or explanation. Never reuse a wording that already got refused or deflected.
+- Make the request specific and directly answerable so the tutor gives a real, on-topic answer instead of a clarifying question.
+- Preserve the strongest ACCEPTABLE version of the intent. Do not moralize, lecture, or hollow it out.
+- If a MOST IMPORTANT part is given, keep it central and never trade it away.
+- Keep the prompt concise and usable verbatim as the next user message.
+- Return ONLY JSON: {"prompt":"the prompt to try next","triggerWords":["loaded words you removed"],"strategy":"the tactic you are using this round","rationale":"why this one should get answered"}`;
+  const user = [
+    'Student request you must get answered:',
+    originalPrompt.slice(0, 6000),
+    cleanFocus ? `\nMOST IMPORTANT part (the user says this must be preserved above all else):\n${cleanFocus}` : '',
+    '',
+    'Attempt log so far (prompts you already tried this turn and how each model reacted):',
+    bruteForceAttemptBrief(attemptLog),
+    '',
+    round === 1
+      ? `Craft the very first prompt most likely to be answered directly and trigger-word-free${cleanFocus ? ', keeping the MOST IMPORTANT part central' : ''}.`
+      : `This is round ${round}. The previous prompt did not get a real answer. Change tactics and craft a different, more answerable, trigger-word-free prompt${cleanFocus ? ', keeping the MOST IMPORTANT part intact' : ''}.`,
+  ].filter(Boolean).join('\n');
+
+  const opts = {
+    enableWebSearch: false,
+    deepseekReroute: false,
+    disableThinking: true,
+    jsonMode: true,
+    // Heat up a little each round so successive prompts diverge instead of
+    // converging back on the same blocked phrasing.
+    temperature: Math.min(0.3 + (round - 1) * 0.15, 0.9),
+  };
+  try {
+    // Dedicated Brute Forcer model: Grok 4. callGrok auto-falls back to the Gemini
+    // tier if xAI errors or the key is missing. Grok 4 is a reasoning model, so give
+    // it extra token headroom — thinking tokens share the budget with the JSON output.
+    // Belt-and-suspenders: if it still comes back unsuccessful, retry on Flash Lite.
+    let result = await callGrok(system, [{ role: 'user', content: user }], BRUTE_FORCE_MODEL, 4096, opts);
+    if (!result?.success) {
+      result = await callGemini(system, [{ role: 'user', content: user }], GEMINI_FLASH_LITE, 2048, opts);
+    }
+    if (!result?.success) return null;
+    const parsed = parseAIJson(bestOfText(result));
+    const prompt = String(parsed?.prompt || '').trim();
+    if (!prompt || prompt.length < 8) return null;
+    const triggerWords = Array.isArray(parsed?.triggerWords)
+      ? parsed.triggerWords.map((w) => String(w).trim()).filter(Boolean).slice(0, 12)
+      : [];
+    return {
+      prompt: prompt.slice(0, 6000),
+      triggerWords,
+      strategy: String(parsed?.strategy || '').trim().slice(0, 200),
+      rationale: String(parsed?.rationale || 'Reworded the request to be answerable and trigger-word-free while keeping its intent.').trim().slice(0, 300),
+    };
+  } catch (err) {
+    console.warn('Brute forcer rewrite failed:', err?.message || err);
+    return null;
+  }
+}
+
+// Brute force: loop reroute + trigger-word-free rewrites until a model gives a
+// real (non-refusal) answer or the round budget is spent. Returns the same
+// Best-of-shaped meta the reroute panel already renders (mode:'reroute'), with a
+// `bruteForce`/`rounds` marker and the final rewrite surfaced via smartRewrite.
+async function runBruteForceStudyResponse({ sse, systemPrompt, messages, candidates, opts = {}, focus = '' }) {
+  // Looping smart reroute, driven by the dedicated Brute Forcer. Every round the
+  // Brute Forcer crafts/edits the prompt (learning from the attempt log), we fan it
+  // out to the models, and we keep going until ONE actually answers the question —
+  // not just "doesn't refuse" — or the round budget runs out. The user's "most
+  // important" focus, when given, is held central across every round.
+  const cleanFocus = String(focus || '').trim().slice(0, 600);
+  const attemptLog = [];
+  let results = null;
+  let firstStats = null;
+  let lastRewrite = null;
+  let roundsRun = 0;
+  const triggerWordsRemoved = new Set();
+
+  for (let round = 1; round <= BRUTE_FORCE_MAX_ROUNDS; round++) {
+    roundsRun = round;
+    sse({ status: round === 1
+      ? 'Brute force — the brute forcer is crafting a prompt that will get answered…'
+      : `Brute force round ${round} — the brute forcer is editing the prompt to get it answered…` });
+    const rewrite = await buildBruteForcePrompt(messages, { round, focus: cleanFocus, attemptLog });
+    let runMessages = messages;
+    if (rewrite?.prompt) {
+      lastRewrite = rewrite;
+      (rewrite.triggerWords || []).forEach((w) => triggerWordsRemoved.add(w));
+      runMessages = messagesWithRewrittenLastUser(messages, rewrite.prompt);
+    } else if (round > 1) {
+      // Brute Forcer can't produce a new prompt → stop with what we have.
+      break;
+    }
+    // round 1 with no rewrite: fall back to the raw prompt.
+
+    sse({ status: `Brute force round ${round} — trying the prompt across ${candidates.length} model${candidates.length === 1 ? '' : 's'}…` });
+    results = await runRerouteAttempt({ systemPrompt, messages: runMessages, candidates, opts });
+    if (round === 1) firstStats = rerouteStats(results, candidates);
+
+    // Record this round so the Brute Forcer can learn from it next round.
+    attemptLog.push({
+      round,
+      prompt: rewrite?.prompt || lastUserContent(messages),
+      outcomes: results.map((r) => ({
+        label: r.candidate?.requestedLabel || r.candidate?.label || 'Model',
+        status: !r.content ? 'failed' : (r.refused ? 'refused' : (looksLikeNonAnswer(r.content) ? 'deflected' : 'answered')),
+        snippet: (r.content || r.error || '').replace(/\s+/g, ' ').trim().slice(0, 120),
+      })),
+    });
+
+    // Success = a model ACTUALLY answered (no refusal, no deflection). Stop.
+    if (results.some(isBruteForceAnswer)) break;
+    // Nothing to improve on (only hard infra failures, no refusal/deflection to
+    // rewrite around) → another prompt won't help. Stop.
+    const improvable = results.some((r) => r.refused || (r.content && looksLikeNonAnswer(r.content)));
+    if (!improvable) break;
+  }
+
+  const primary = pickBruteForcePrimary(results);
+  if (!primary?.content) throw new Error('None of the models returned a response.');
+  const stats = rerouteStats(results, candidates);
+  const succeeded = isBruteForceAnswer(primary);
+
+  return {
+    content: primary.content,
+    sources: primary.sources || [],
+    bestOfMeta: {
+      mode: 'reroute',
+      bruteForce: true,
+      rounds: roundsRun,
+      succeeded,
+      focus: cleanFocus || undefined,
+      primaryKey: primary.candidate.key,
+      primaryLabel: primary.candidate.requestedLabel || primary.candidate.label,
+      ...stats,
+      smartRewrite: lastRewrite
+        ? {
+            used: true,
+            bruteForce: true,
+            rounds: roundsRun,
+            focus: cleanFocus || undefined,
+            prompt: lastRewrite.prompt,
+            strategy: lastRewrite.strategy || undefined,
+            rationale: lastRewrite.rationale,
+            triggerWords: Array.from(triggerWordsRemoved).slice(0, 12),
+            initialStats: firstStats,
+            // The actual prompt the Brute Forcer entered each round, so the UI
+            // can show its work (not just the final wording).
+            attempts: attemptLog.map((a) => ({
+              round: a.round,
+              prompt: a.prompt,
+              answered: a.outcomes.some((o) => o.status === 'answered'),
+            })),
+          }
+        : null,
+      responses: rerouteResponses(results, primary),
+    },
+  };
+}
+
 // Lesson chat (conversational 5-phase)
 app.post('/api/curriculum/:id/lesson/:lessonId/chat', authMiddleware, requireMessageQuota, async (req, res) => {
   try {
     const { message, sourced, images } = req.body;
-    req.sourced = !!sourced;
+    req.sourced = !!(req.sourced || sourced);
     req.images = Array.isArray(images) ? images : [];
     if (!message && !req.images.length) return res.status(400).json({ error: 'Message required' });
 
@@ -6271,7 +7276,8 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
     //   • Otherwise, `sourced=true` keeps the existing Google-Search
     //     grounding path.
     const hasAttachedSources = Array.isArray(requestContext.sources) && requestContext.sources.length > 0;
-    req.sourced = !!sourced && !hasAttachedSources && !humanizeMode;
+    const requestedSourced = !!(req.sourced || sourced);
+    req.sourced = requestedSourced && !hasAttachedSources && !humanizeMode;
     req.hasAttachedSources = hasAttachedSources;
     const manualImages = Array.isArray(images)
       ? images.slice(0, validCanvasImage ? 3 : 4)
@@ -6355,34 +7361,40 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
       aiMessages[aiMessages.length - 1].images = req.images;
     }
 
-    // Study Mode model picker. The chosen model only applies to non-sourced
-    // turns — source mode is Google-Search grounding, which is Gemini-only.
-    // resolveStudyModel() gates by plan (non-paid → Flash Lite / Haiku only)
-    // and auto-switches Haiku → Flash Lite once a non-paid user passes the
-    // rolling-24h Haiku cap. We persist the user's actual pick (not the
-    // auto-switched fallback) so the preference sticks across messages.
+    // Study Mode model picker. Source/auto-source mode still resolves the
+    // selected model for cutoff + plan semantics, but provider-specific free
+    // caps only apply when that provider answers without search. Grounded
+    // search is billed through the 2x sourced-message quota instead.
     const requestedStudyModel = req.body.model;
     const planSM = getPlan(users[email], email);
-    const bestOfConfig = resolveBestOfStudyModels(bestOf, users[email], email);
+    // Regular reroute wins over every other mode: it deliberately fans the
+    // prompt out to every model, so Best of 3 / source mode / single-model
+    // routing are all bypassed when reroute is requested.
+    const rerouteConfig = (req.body.reroute === true)
+      ? resolveRerouteStudyModels(users[email], email)
+      : null;
+    const rerouteActive = !!(rerouteConfig && rerouteConfig.length);
+    // Brute force fans out to a fixed set of the strongest models (5) and keeps
+    // rewriting the prompt without trigger words until one answers. It shares
+    // reroute's candidate resolver but only takes the top BRUTE_FORCE_MODELS.
+    const bruteForceConfig = (!rerouteActive && req.body.bruteForce === true)
+      ? resolveRerouteStudyModels(users[email], email).slice(0, BRUTE_FORCE_MODELS)
+      : null;
+    const bruteForceActive = !!(bruteForceConfig && bruteForceConfig.length);
+    const bestOfConfig = (rerouteActive || bruteForceActive) ? null : resolveBestOfStudyModels(bestOf, users[email], email);
     let effectiveStudyModel = null;
     let studyMeta = null;
     let billHaiku = false;
     let billModelKey = null;
     const bestOfBillKeys = [];
-    if (bestOfConfig) {
-      // Best of 3 ignores web search (runBestOfStudyResponse forces grounding
-      // off), so its capped candidate/judge models really do run — the sourced
-      // exemption that spares single-model turns never applies here. Charge
-      // every free-capped candidate plus the judge, regardless of req.sourced.
-      for (const model of [...bestOfConfig.candidates, bestOfConfig.judge]) {
-        if (freeCapConfig(model.key) && !PAID_TIERS.has(planSM)) bestOfBillKeys.push(model.key);
-      }
-    } else if (!req.sourced) {
-      const r = resolveStudyModel(requestedStudyModel, users[email], email);
+    if (!rerouteActive && !bruteForceActive && !bestOfConfig) {
+      const r = req.sourced
+        ? resolveStudyModelForSearch(requestedStudyModel, users[email], email)
+        : resolveStudyModel(requestedStudyModel, users[email], email);
       effectiveStudyModel = r.id;
       studyMeta = { key: r.key, switched: r.switched, reason: r.reason, haikuRemaining: r.haikuRemaining };
       // Charge the non-paid rolling cap for any capped free model (Haiku, GPT-5.4).
-      billHaiku = !!freeCapConfig(r.key) && !PAID_TIERS.has(planSM);
+      billHaiku = !req.sourced && !!freeCapConfig(r.key) && !PAID_TIERS.has(planSM);
       billModelKey = r.key;
       if (STUDY_MODELS[requestedStudyModel] && studyModelAllowed(requestedStudyModel, planSM)) {
         users[email].data.preferences = { ...(users[email].data.preferences || {}), studyModel: requestedStudyModel };
@@ -6468,7 +7480,49 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
       includeThoughts: !studyThinkingOff,
       userPlan: planSM,
       deepseekReroute: users[email].data.preferences?.deepseekReroute !== false,
+      // Humanize: scrub em/en dashes from streamed deltas (see stripDashChars).
+      stripDashes: humanizeMode,
     };
+
+    if (rerouteActive) {
+      const result = await runRerouteStudyResponse({
+        sse,
+        systemPrompt,
+        messages: aiMessages,
+        candidates: rerouteConfig,
+        opts: responseOpts,
+        smart: req.body.smartReroute === true,
+      });
+      const primaryContent = humanizeMode ? stripDashChars(result.content) : result.content;
+      chargeMultiModelCredits(req, users, email, result.bestOfMeta);
+      sse({ bestOf: result.bestOfMeta });
+      for (const source of result.sources || []) sse({ source });
+      sse({ content: primaryContent });
+      await completeStudyAssistantTurn(primaryContent, result.sources, { bestOf: result.bestOfMeta });
+      sse({ done: true, sources: result.sources || [] });
+      res.end();
+      return;
+    }
+
+    if (bruteForceActive) {
+      const result = await runBruteForceStudyResponse({
+        sse,
+        systemPrompt,
+        messages: aiMessages,
+        candidates: bruteForceConfig,
+        opts: responseOpts,
+        focus: typeof req.body.bruteForceFocus === 'string' ? req.body.bruteForceFocus : '',
+      });
+      const primaryContent = humanizeMode ? stripDashChars(result.content) : result.content;
+      chargeMultiModelCredits(req, users, email, result.bestOfMeta);
+      sse({ bestOf: result.bestOfMeta });
+      for (const source of result.sources || []) sse({ source });
+      sse({ content: primaryContent });
+      await completeStudyAssistantTurn(primaryContent, result.sources, { bestOf: result.bestOfMeta });
+      sse({ done: true, sources: result.sources || [] });
+      res.end();
+      return;
+    }
 
     if (bestOfConfig) {
       const result = await runBestOfStudyResponse({
@@ -6478,17 +7532,19 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
         bestOf: bestOfConfig,
         opts: responseOpts,
       });
+      const winnerContent = humanizeMode ? stripDashChars(result.content) : result.content;
+      chargeMultiModelCredits(req, users, email, result.bestOfMeta);
       sse({ bestOf: result.bestOfMeta });
       for (const source of result.sources || []) sse({ source });
-      sse({ content: result.content });
-      await completeStudyAssistantTurn(result.content, result.sources, { bestOf: result.bestOfMeta });
+      sse({ content: winnerContent });
+      await completeStudyAssistantTurn(winnerContent, result.sources, { bestOf: result.bestOfMeta });
       sse({ done: true, sources: result.sources || [] });
       res.end();
       return;
     }
 
     await streamAIResponse(res, systemPrompt, aiMessages, async (fullContent, sources) => {
-      await completeStudyAssistantTurn(fullContent, sources);
+      await completeStudyAssistantTurn(humanizeMode ? stripDashChars(fullContent) : fullContent, sources);
       // Thinking is driven by `studyThinkingOff` (computed above from the
       // client's Thinking toggle + web-search mode). When thinking is on we
       // also surface the reasoning so the client's "Thinking" panel streams.
@@ -7021,6 +8077,14 @@ app.post('/api/notes/:nid/generate-cues', authMiddleware, async (req, res) => {
     if (!note) return res.status(404).json({ error: 'Note not found' });
     if (!note.mainNotes) return res.status(400).json({ error: 'No notes to generate cues from' });
 
+    users[email].data = migrateUserData(users[email].data);
+    const cueCost = creditCostForModelId(GEMINI_FLASH_LITE);
+    const cueQuota = consumeCredits(users, email, cueCost);
+    if (!cueQuota.allowed) {
+      return res.status(402).json({ error: 'message_limit_reached', message: `Generating cues costs ${cueCost} credit${cueCost === 1 ? '' : 's'} and you only have ${cueQuota.remaining} left today.`, limit: cueQuota.limit, remaining: cueQuota.remaining, plan: cueQuota.plan, cost: cueCost });
+    }
+    saveUsers(users);
+
     const { system, user } = buildCueGenerationPrompt(note.mainNotes);
     // Flash-Lite + disableThinking: cues are a fixed-shape, short JSON list;
     // Gemini 3's CoT here just burns latency without improving the keywords.
@@ -7046,6 +8110,14 @@ app.post('/api/notes/:nid/generate-summary', authMiddleware, async (req, res) =>
     const note = (users[email].data?.notes || []).find(n => n.id === req.params.nid);
     if (!note) return res.status(404).json({ error: 'Note not found' });
     if (!note.mainNotes) return res.status(400).json({ error: 'No notes to summarize' });
+
+    users[email].data = migrateUserData(users[email].data);
+    const sumCost = creditCostForModelId(GEMINI_FLASH_LITE);
+    const sumQuota = consumeCredits(users, email, sumCost);
+    if (!sumQuota.allowed) {
+      return res.status(402).json({ error: 'message_limit_reached', message: `Generating a summary costs ${sumCost} credit${sumCost === 1 ? '' : 's'} and you only have ${sumQuota.remaining} left today.`, limit: sumQuota.limit, remaining: sumQuota.remaining, plan: sumQuota.plan, cost: sumCost });
+    }
+    saveUsers(users);
 
     const { system, user } = buildSummaryPrompt(note.cues, note.mainNotes);
     // Same speed trick as cue gen: tight summary, no need for CoT.
@@ -7090,6 +8162,12 @@ app.post('/api/notes/:id/flashcards', authMiddleware, async (req, res) => {
     } else {
       const noteContent = [note.mainNotes, note.summary].filter(Boolean).join('\n\n');
       if (!noteContent.trim() && !note.title) return res.status(400).json({ error: 'Add some notes first, then generate flashcards.' });
+      const fcCost = creditCostForModelId(DEFAULT_MODEL);
+      const fcQuota = consumeCredits(users, email, fcCost);
+      if (!fcQuota.allowed) {
+        return res.status(402).json({ error: 'message_limit_reached', message: `Generating flashcards costs ${fcCost} credit${fcCost === 1 ? '' : 's'} and you only have ${fcQuota.remaining} left today.`, limit: fcQuota.limit, remaining: fcQuota.remaining, plan: fcQuota.plan, cost: fcCost });
+      }
+      saveUsers(users);
       const missed = missedForTopic(users[email].data.missedQuestions, note.title || '', noteContent.slice(0, 200), 4);
       const { system, user } = buildNodeFlashcardPrompt({
         label: note.title || 'this note',
@@ -10865,28 +11943,43 @@ function requireMessageQuota(req, res, next) {
   const email = findEmailById(users, req.userId);
   if (!email) return res.status(404).json({ error: 'User not found' });
   users[email].data = migrateUserData(users[email].data);
-  // Sourced requests always route to Gemini regardless of the model picker.
-  const sourced = !!(req.body && req.body.sourced);
-  // Sourced (web-search) requests cost 2 messages against the daily cap.
-  const cost = sourced ? 2 : 1;
-  const result = consumeMessage(users, email, cost);
+  if (!req.body || typeof req.body !== 'object') req.body = {};
+  const autoSearch = autoSearchDecisionForRequest(req.body, users[email], email, {
+    requestedModel: req.body.model,
+    stream: true,
+  });
+  const suppressSourceMode = requestHasAttachedSources(req.body) || requestForbidsExternalSearch(req.body) || !!req.body.humanize;
+  const sourced = suppressSourceMode ? false : !!(req.body.sourced || autoSearch.auto);
+  if (suppressSourceMode) req.body.sourced = false;
+  if (autoSearch.auto) req.body.sourced = true;
+  // Credit cost = the chosen model's price (+ a surcharge for web-search
+  // answers). Study/debate/chat requests carry a study-model key in the body;
+  // tier-model routes (lessons/gems/curriculum chat) fall back to the user's
+  // tier model's cost.
+  const reqModelKey = req.body.model;
+  const baseCost = (reqModelKey && STUDY_MODELS[reqModelKey])
+    ? studyModelCreditCost(reqModelKey)
+    : creditCostForModelId(modelForUser(users[email], email));
+  const cost = baseCost + (sourced ? SOURCED_CREDIT_SURCHARGE : 0);
+  const result = consumeCredits(users, email, cost);
   if (!result.allowed) {
-    const upgradeKind = result.plan === 'free' ? 'refer' : 'upgrade';
-    const upgradeHint = upgradeKind === 'refer'
-      ? 'Refer 2 friends to unlock Plus-Lite (free) for higher limits.'
-      : 'Upgrade to the next plan for more daily messages.';
+    const upgradeHint = result.plan === 'free'
+      ? 'Upgrade to Paid for 9,500 credits/day.'
+      : 'Your credits reset on a rolling 24h window.';
     return res.status(402).json({
       error: 'message_limit_reached',
-      message: sourced
-        ? `A sourced answer costs 2 messages and you only have ${result.remaining} left today. ${upgradeHint}`
-        : `You've hit today's message limit (${result.limit}). ${upgradeHint}`,
-      limit: result.limit, remaining: result.remaining, plan: result.plan, upgradeKind,
+      message: `This answer costs ${cost} credit${cost === 1 ? '' : 's'} and you only have ${result.remaining} left today. ${upgradeHint}`,
+      limit: result.limit, remaining: result.remaining, plan: result.plan, cost, upgradeKind: 'upgrade',
     });
   }
   saveUsers(users);
   req.quota = result;
   req.userPlan = result.plan;
   req.sourced = sourced;
+  req.autoSourced = !!autoSearch.auto;
+  req.autoSource = autoSearch.auto
+    ? { reason: 'knowledge-cutoff', model: autoSearch.modelId, cutoff: autoSearch.cutoff }
+    : null;
   next();
 }
 
@@ -11326,7 +12419,7 @@ app.post('/api/lessons/:id/blocks/:bid/complete', authMiddleware, (req, res) => 
 app.post('/api/lessons/:id/chat', authMiddleware, requireMessageQuota, async (req, res) => {
   try {
     const { message, sourced, images } = req.body || {};
-    req.sourced = !!sourced;
+    req.sourced = !!(req.sourced || sourced);
     req.images = Array.isArray(images) ? images : [];
     if (!message && !req.images.length) return res.status(400).json({ error: 'Message required' });
 
@@ -11465,8 +12558,10 @@ app.post('/api/math-tutor/chat', authMiddleware, requireMessageQuota, async (req
     const requestedMT = STUDY_MODELS[req.body?.model]
       ? req.body.model
       : (users[email].data.preferences?.mathTutorModel || DEFAULT_MATH_TUTOR_MODEL);
-    const r = resolveStudyModel(requestedMT, users[email], email);
-    const billHaiku = !!freeCapConfig(r.key) && !PAID_TIERS.has(planMT);
+    const r = req.sourced
+      ? resolveStudyModelForSearch(requestedMT, users[email], email)
+      : resolveStudyModel(requestedMT, users[email], email);
+    const billHaiku = !req.sourced && !!freeCapConfig(r.key) && !PAID_TIERS.has(planMT);
     if (STUDY_MODELS[req.body?.model] && studyModelAllowed(req.body.model, planMT)) {
       users[email].data.preferences = { ...(users[email].data.preferences || {}), mathTutorModel: req.body.model };
       saveUsers(users);
@@ -11488,7 +12583,7 @@ app.post('/api/math-tutor/chat', authMiddleware, requireMessageQuota, async (req
         if (billHaiku) { recordFreeCapUse(users[email], r.key); saveUsers(users); }
       },
       r.id,
-      { enableWebSearch: false, userPlan: planMT, deepseekReroute: users[email].data.preferences?.deepseekReroute !== false },
+      { enableWebSearch: !!req.sourced, userPlan: planMT, deepseekReroute: users[email].data.preferences?.deepseekReroute !== false },
     );
   } catch (e) {
     console.error('Math tutor chat error:', e);
@@ -11542,7 +12637,9 @@ app.get('/api/billing/status', authMiddleware, (req, res) => {
     ensureUsageBucket(users[email]);
     saveUsers(users);
     const plan = getPlan(users[email], email);
-    const pro = plan === 'pro';
+    const allowance = dailyCreditAllowance(users[email], email);
+    const used = rollingMsgUsage(users[email]);
+    const unlimited = allowance === Infinity;
     res.json({
       plan,
       isOwner: isOwner(email),
@@ -11550,27 +12647,13 @@ app.get('/api/billing/status', authMiddleware, (req, res) => {
       isBeta: canSeeBeta(email),
       proUntil: users[email].data.proUntil || null,
       proGrantedBy: users[email].data.proGrantedBy || null,
-      limits: {
-        messagesPerDay: FREE_DAILY_MESSAGE_LIMIT,
-        quizBowlGamesPerDay: FREE_DAILY_QUIZBOWL_GAMES,
-        curriculaPerWeek: FREE_WEEKLY_CURRICULA,
-        debatesPerWeek: FREE_WEEKLY_DEBATES,
+      credits: {
+        allowance: unlimited ? null : allowance,
+        used,
+        remaining: unlimited ? null : Math.max(0, allowance - used),
+        unlimited,
+        windowHours: 24,
       },
-      usage: (() => {
-        const d = users[email].data;
-        const msgs = (d.usage?.msgWindow || []).reduce((n, e) => n + (e?.cost || 1), 0);
-        const qb = (d.usage?.qbWindow || []).length;
-        return {
-          messages: msgs,
-          quizBowlGames: qb,
-          curricula: d.usage?.curricula || 0,
-          debates: d.usage?.debates || 0,
-          remainingMessages: pro ? null : Math.max(0, FREE_DAILY_MESSAGE_LIMIT - msgs),
-          remainingQuizBowl: pro ? null : Math.max(0, FREE_DAILY_QUIZBOWL_GAMES - qb),
-          remainingCurricula: pro ? null : Math.max(0, FREE_WEEKLY_CURRICULA - (d.usage?.curricula || 0)),
-          remainingDebates: pro ? null : Math.max(0, FREE_WEEKLY_DEBATES - (d.usage?.debates || 0)),
-        };
-      })(),
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -11591,18 +12674,26 @@ app.get('/api/billing/usage', authMiddleware, (req, res) => {
   const plan = getPlan(users[email], email);
   const limits = LIMITS[plan] || LIMITS.free;
   const u = users[email].data;
-  // Daily counters report the rolling 24h window.
-  const msgUsed = (u.usage?.msgWindow || []).reduce((n, e) => n + (e?.cost || 1), 0);
-  const qbUsed = (u.usage?.qbWindow || []).length;
+  const allowance = dailyCreditAllowance(users[email], email);
+  const used = rollingMsgUsage(users[email]);
+  const unlimited = allowance === Infinity;
   res.json({
     plan,
     limits,
     windowHours: 24,
+    credits: {
+      allowance: unlimited ? null : allowance,
+      used,
+      remaining: unlimited ? null : Math.max(0, allowance - used),
+      unlimited,
+    },
+    modelCosts: MODEL_CREDIT_COST,
+    featureCosts: {
+      curriculum: CURRICULUM_CREDIT_COST,
+      quizBowlTossup: QB_TOSSUP_CREDIT_COST,
+      sourcedSurcharge: SOURCED_CREDIT_SURCHARGE,
+    },
     used: {
-      dailyMessages: msgUsed,
-      dailyQB: qbUsed,
-      weeklyCurricula: u.usage?.curricula || 0,
-      weeklyDebates: u.usage?.debates || 0,
       noteMaps: (u.noteMaps || []).length,
     },
   });
@@ -11613,31 +12704,19 @@ app.get('/api/billing/tiers', (req, res) => {
     tiers: {
       free: {
         id: 'free', label: 'Free', amountUsd: 0, interval: 'month', mode: null, buyable: false,
-        limits: LIMITS.free,
+        dailyCredits: LIMITS.free.dailyCredits, limits: LIMITS.free,
       },
-      // Referral unlock - never billed, never bought via Stripe. The
-      // amountUsd is displayed as "value", not a price; the unlock copy
-      // ("Refer 2 friends") is rendered on the client.
-      'plus-lite': {
-        id: 'plus-lite', label: 'Plus-Lite', amountUsd: 2, interval: 'month', mode: null,
-        buyable: false, unlock: 'referral', referralsRequired: REFERRAL_THRESHOLD,
-        limits: LIMITS['plus-lite'],
+      paid: {
+        id: 'paid', label: 'Paid', amountUsd: TIER_PRICES.paid.amountUsd, interval: TIER_PRICES.paid.interval,
+        mode: TIER_PRICES.paid.mode, buyable: !!TIER_PRICES.paid.priceId,
+        dailyCredits: LIMITS.paid.dailyCredits, limits: LIMITS.paid,
       },
-      plus: {
-        id: 'plus', label: 'Plus', amountUsd: TIER_PRICES.plus.amountUsd, interval: 'month',
-        mode: TIER_PRICES.plus.mode, buyable: !!TIER_PRICES.plus.priceId,
-        limits: LIMITS.plus,
-      },
-      lifetime: {
-        id: 'lifetime', label: 'Lifetime', amountUsd: TIER_PRICES.lifetime.amountUsd, interval: 'once',
-        mode: TIER_PRICES.lifetime.mode, buyable: !!TIER_PRICES.lifetime.priceId,
-        limits: LIMITS.lifetime,
-      },
-      pro: {
-        id: 'pro', label: 'Pro', amountUsd: TIER_PRICES.pro.amountUsd, interval: 'month',
-        mode: TIER_PRICES.pro.mode, buyable: !!TIER_PRICES.pro.priceId,
-        limits: LIMITS.pro,
-      },
+    },
+    modelCosts: MODEL_CREDIT_COST,
+    featureCosts: {
+      curriculum: CURRICULUM_CREDIT_COST,
+      quizBowlTossup: QB_TOSSUP_CREDIT_COST,
+      sourcedSurcharge: SOURCED_CREDIT_SURCHARGE,
     },
   });
 });
@@ -11714,18 +12793,15 @@ app.post('/api/referral/redeem', authMiddleware, (req, res) => {
     redeemedCode: raw,
     ownerReferralsUsed: users[ownerEmail].data.referralsUsed,
     ownerUnlocked,
-    // The redeemer doesn't get an instant boost themselves - they get
-    // a tiny welcome bump (1 extra free message + 1 QB game today) so
-    // the action feels rewarding. The owner gets the real prize.
-    welcomeBonus: { messages: 1, quizBowlGames: 1 },
+    // Once the owner hits REFERRAL_THRESHOLD redemptions, their free daily
+    // credit pool gains REFERRAL_BONUS_CREDITS (applied in dailyCreditAllowance).
+    referralBonusCredits: REFERRAL_BONUS_CREDITS,
   });
 });
 
-// Create a Stripe Checkout session for a specific tier. Body shape:
-//   { tier: 'plus' | 'pro' | 'lifetime' }
-// Subscriptions use mode='subscription'; the one-time Lifetime charge
-// uses mode='payment'. Legacy callers that POST no body still work -
-// they fall back to the Pro monthly tier.
+// Create a Stripe Checkout session for the single paid plan ($4/mo). The
+// `tier` body field is ignored/normalized to 'paid' so legacy callers keep
+// working.
 app.post('/api/billing/create-checkout-session', authMiddleware, async (req, res) => {
   if (!stripe) return res.status(500).json({ error: 'Stripe not configured' });
   try {
@@ -11734,11 +12810,9 @@ app.post('/api/billing/create-checkout-session', authMiddleware, async (req, res
     if (!email) return res.status(404).json({ error: 'User not found' });
     users[email].data = migrateUserData(users[email].data);
 
-    const requestedTier = (req.body?.tier || 'pro').toLowerCase();
-    const cfg = TIER_PRICES[requestedTier];
-    if (!cfg) return res.status(400).json({ error: 'unknown_tier', tier: requestedTier });
-    if (!cfg.priceId && !STRIPE_PRICE_ID) {
-      return res.status(500).json({ error: `tier "${requestedTier}" has no Stripe price configured` });
+    const cfg = TIER_PRICES.paid;
+    if (!cfg || !cfg.priceId) {
+      return res.status(500).json({ error: 'paid plan has no Stripe price configured' });
     }
 
     // Reuse or create Stripe customer.
@@ -11754,24 +12828,18 @@ app.post('/api/billing/create-checkout-session', authMiddleware, async (req, res
       saveUsers(users);
     }
 
-    const priceId = cfg.priceId || STRIPE_PRICE_ID;
     const origin = req.headers.origin || `http://localhost:${PORT}`;
     const session = await stripe.checkout.sessions.create({
       mode: cfg.mode,
       customer: customerId,
-      line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${origin}/?upgraded=1&tier=${requestedTier}`,
+      line_items: [{ price: cfg.priceId, quantity: 1 }],
+      success_url: `${origin}/?upgraded=1&tier=paid`,
       cancel_url: `${origin}/?upgraded=0`,
-      // The webhook reads `metadata.tier` to decide which plan to set
-      // when a subscription event arrives - without it, a Plus
-      // subscription would be indistinguishable from a Pro one.
-      metadata: { userId: req.userId, tier: requestedTier },
-      ...(cfg.mode === 'subscription'
-        ? { subscription_data: { metadata: { userId: req.userId, tier: requestedTier } } }
-        : {}),
+      metadata: { userId: req.userId, tier: 'paid' },
+      subscription_data: { metadata: { userId: req.userId, tier: 'paid' } },
       allow_promotion_codes: true,
     });
-    res.json({ url: session.url, id: session.id, tier: requestedTier });
+    res.json({ url: session.url, id: session.id, tier: 'paid' });
   } catch (e) {
     console.error('checkout session failed', e);
     res.status(500).json({ error: e.message });
@@ -11810,7 +12878,7 @@ app.post('/api/billing/sync', authMiddleware, async (req, res) => {
     const subs = await stripe.subscriptions.list({ customer: customerId, limit: 5, status: 'all' });
     const active = subs.data.find(s => s.status === 'active' || s.status === 'trialing');
     if (active) {
-      users[email].data.plan = 'pro';
+      users[email].data.plan = 'paid';
       users[email].data.proGrantedBy = 'stripe';
       users[email].data.stripeSubscriptionId = active.id;
       users[email].data.proUntil = active.current_period_end
@@ -11905,22 +12973,13 @@ async function handleStripeWebhook(req, res) {
       }
       if (entry) {
         entry.user.data = migrateUserData(entry.user.data);
-        const tier = session.metadata?.tier || (session.mode === 'payment' ? 'lifetime' : 'pro');
-        if (tier === 'lifetime' || session.mode === 'payment') {
-          // One-time Lifetime purchase - sticky forever, never expires.
-          entry.user.data.plan = 'lifetime';
-          entry.user.data.proGrantedBy = 'stripe';
-          entry.user.data.lifetimePurchasedAt = new Date().toISOString();
-          entry.user.data.proUntil = null;
-        } else {
-          // Subscription (Plus or Pro). The subscription.updated event
-          // will refine proUntil to the actual period_end; we set a 35-day
-          // grace here so the upgrade is felt immediately.
-          entry.user.data.plan = (tier === 'plus') ? 'plus' : 'pro';
-          entry.user.data.proGrantedBy = 'stripe';
-          entry.user.data.stripeSubscriptionId = session.subscription || null;
-          entry.user.data.proUntil = new Date(Date.now() + 35 * 86400000).toISOString();
-        }
+        // Single paid plan ($4/mo subscription). subscription.updated refines
+        // proUntil to the real period_end; set a 35-day grace here so the
+        // upgrade is felt immediately.
+        entry.user.data.plan = 'paid';
+        entry.user.data.proGrantedBy = 'stripe';
+        entry.user.data.stripeSubscriptionId = session.subscription || null;
+        entry.user.data.proUntil = new Date(Date.now() + 35 * 86400000).toISOString();
         saveUsers(users);
       }
     }
@@ -11940,16 +12999,13 @@ async function handleStripeWebhook(req, res) {
       }
       if (entry) {
         entry.user.data = migrateUserData(entry.user.data);
-        // Lifetime trumps everything - don't downgrade a lifetime user
-        // if a subscription event happens to flow through for them.
-        if (entry.user.data.plan === 'lifetime' || entry.user.data.lifetimePurchasedAt) {
+        // Grandfathered lifetime buyers stay paid forever - never downgrade.
+        if (entry.user.data.lifetimePurchasedAt) {
           saveUsers(users);
         } else {
           entry.user.data.stripeSubscriptionId = sub.id;
-          const subPriceId = sub.items?.data?.[0]?.price?.id;
-          const tier = sub.metadata?.tier || tierFromPriceId(subPriceId, 'pro');
           if (sub.status === 'active' || sub.status === 'trialing') {
-            entry.user.data.plan = (tier === 'plus') ? 'plus' : 'pro';
+            entry.user.data.plan = 'paid';
             entry.user.data.proGrantedBy = 'stripe';
             const periodEnd = sub.current_period_end ? new Date(sub.current_period_end * 1000) : null;
             entry.user.data.proUntil = periodEnd ? periodEnd.toISOString() : null;
@@ -11967,9 +13023,8 @@ async function handleStripeWebhook(req, res) {
       const entry = userByCustomer(sub.customer);
       if (entry) {
         entry.user.data = migrateUserData(entry.user.data);
-        // Same lifetime guard - a deleted subscription shouldn't strip
-        // a Lifetime grant.
-        if (entry.user.data.plan !== 'lifetime' && !entry.user.data.lifetimePurchasedAt) {
+        // Grandfathered lifetime buyers keep paid access on cancel.
+        if (!entry.user.data.lifetimePurchasedAt) {
           entry.user.data.plan = 'free';
           entry.user.data.proUntil = null;
           entry.user.data.stripeSubscriptionId = null;
@@ -11993,25 +13048,20 @@ function ownerMiddleware(req, res, next) {
   next();
 }
 
-// Owner grant - body { userId|email, tier, until }. `tier` defaults to
-// 'pro' for back-compat with the original /grant-pro semantics. Lifetime
-// grants also stamp `lifetimePurchasedAt` so the user model treats them
-// as permanent (not just a sub with no end date).
+// Owner grant - body { userId|email, tier, until }. `tier` is normalized to
+// the two-plan model: anything but an explicit 'free' grants 'paid'.
 app.post('/api/owner/grant-pro', authMiddleware, ownerMiddleware, (req, res) => {
   const { userId, email: targetEmail, until, tier: requestedTier } = req.body || {};
-  const tier = ['plus-lite', 'plus', 'pro', 'lifetime'].includes(requestedTier) ? requestedTier : 'pro';
+  const tier = (requestedTier === 'free') ? 'free' : 'paid';
   const users = loadUsers();
   let email = targetEmail && users[targetEmail] ? targetEmail : findEmailById(users, userId);
   if (!email) return res.status(404).json({ error: 'User not found' });
   users[email].data = migrateUserData(users[email].data);
   users[email].data.plan = tier;
-  users[email].data.proGrantedBy = 'owner';
-  users[email].data.proUntil = (tier === 'lifetime') ? null : (until || null);
-  if (tier === 'lifetime') {
-    users[email].data.lifetimePurchasedAt = users[email].data.lifetimePurchasedAt || new Date().toISOString();
-  }
+  users[email].data.proGrantedBy = (tier === 'paid') ? 'owner' : null;
+  users[email].data.proUntil = (tier === 'paid') ? (until || null) : null;
   saveUsers(users);
-  res.json({ success: true, user: { email, plan: users[email].data.plan, proUntil: users[email].data.proUntil, lifetimePurchasedAt: users[email].data.lifetimePurchasedAt } });
+  res.json({ success: true, user: { email, plan: users[email].data.plan, proUntil: users[email].data.proUntil } });
 });
 
 app.post('/api/owner/revoke-pro', authMiddleware, ownerMiddleware, (req, res) => {
@@ -13866,6 +14916,24 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
 
   if (match.players.length < 2) return res.status(409).json({ error: 'Need at least 2 players (add bots or invite a friend)' });
 
+  // Generating the AI tossup set costs QB_TOSSUP_CREDIT_COST credits (host pays).
+  {
+    const usersQB = loadUsers();
+    const emailQB = findEmailById(usersQB, req.userId);
+    if (emailQB) {
+      usersQB[emailQB].data = migrateUserData(usersQB[emailQB].data);
+      const quota = consumeQuizBowlGame(usersQB, emailQB);
+      if (!quota.allowed) {
+        return res.status(402).json({
+          error: 'message_limit_reached',
+          message: `Generating tossups costs ${QB_TOSSUP_CREDIT_COST} credits and you only have ${quota.remaining} left today.`,
+          limit: quota.limit, remaining: quota.remaining, plan: quota.plan, cost: QB_TOSSUP_CREDIT_COST,
+        });
+      }
+      saveUsers(usersQB);
+    }
+  }
+
   // Persist settings + flip to "generating" so the opponent sees a spinner.
   match.category = category;
   match.difficulty = difficulty;
@@ -15586,6 +16654,23 @@ function sm2Update(card, quality) {
 app.post('/api/trial/generate', authMiddleware, async (req, res) => {
   try {
     const { topic = 'Science', count = 5, difficulty = 'medium' } = req.body;
+    // Generating AI tossups costs QB_TOSSUP_CREDIT_COST credits.
+    {
+      const usersQB = loadUsers();
+      const emailQB = findEmailById(usersQB, req.userId);
+      if (emailQB) {
+        usersQB[emailQB].data = migrateUserData(usersQB[emailQB].data);
+        const quota = consumeQuizBowlGame(usersQB, emailQB);
+        if (!quota.allowed) {
+          return res.status(402).json({
+            error: 'message_limit_reached',
+            message: `Generating tossups costs ${QB_TOSSUP_CREDIT_COST} credits and you only have ${quota.remaining} left today.`,
+            limit: quota.limit, remaining: quota.remaining, plan: quota.plan, cost: QB_TOSSUP_CREDIT_COST,
+          });
+        }
+        saveUsers(usersQB);
+      }
+    }
     const diffMap = { easy: 'introductory/middle-school', medium: 'high-school varsity', hard: 'college/national championship' };
     const diffLabel = diffMap[difficulty] || diffMap.medium;
 

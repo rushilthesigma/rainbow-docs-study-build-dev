@@ -58,7 +58,7 @@ export default function ReferralChip() {
     try {
       const r = await redeemReferralCode(code);
       setSuccess(r.ownerUnlocked
-        ? 'Code redeemed - they just unlocked Plus-Lite.'
+        ? 'Code redeemed - they just earned +100 daily credits.'
         : `Code redeemed. Thanks!`);
       setInput('');
       await refresh();
@@ -131,8 +131,8 @@ export default function ReferralChip() {
             </div>
             <p className={`text-[11px] mt-2 ${unlocked ? 'text-emerald-500 dark:text-emerald-300' : 'text-gray-500 dark:text-white/55'}`}>
               {unlocked
-                ? `Plus-Lite unlocked · ${info.referralsUsed} friends joined`
-                : `${info ? info.referralsUsed : 0} / ${info?.referralsRequired ?? 2} friends joined - unlock Plus-Lite at ${info?.referralsRequired ?? 2}.`}
+                ? `+100 daily credits unlocked · ${info.referralsUsed} friends joined`
+                : `${info ? info.referralsUsed : 0} / ${info?.referralsRequired ?? 2} friends joined - earn +100 daily credits at ${info?.referralsRequired ?? 2}.`}
             </p>
           </div>
 

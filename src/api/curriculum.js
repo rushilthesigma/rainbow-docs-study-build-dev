@@ -371,6 +371,10 @@ export function sendStudyMessage(
   canvasImage,
   humanize,
   bestOf,
+  reroute,
+  smartReroute,
+  bruteForce,
+  bruteForceFocus,
 ) {
   let images = [], handlers, sourced = false;
   if (Array.isArray(handlersOrImages)) {
@@ -394,6 +398,10 @@ export function sendStudyMessage(
       model,
       humanize,
       bestOf,
+      reroute,
+      smartReroute,
+      bruteForce,
+      bruteForceFocus,
     }),
     handlers,
   );

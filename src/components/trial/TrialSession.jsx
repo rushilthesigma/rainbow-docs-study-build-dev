@@ -309,8 +309,13 @@ export default function TrialSession({
             return u;
           });
 
-          // Claim buzzedBy in the same batch - effect sees both updates at once
-          setBuzzedBy(prev => prev ?? bot.id);
+          // Reflect the latest valid claimer (claimedRef above already
+          // guarantees only one bot reaches here per claim). Must NOT be
+          // `prev ?? bot.id`: when a second bot negged inside the first
+          // bot's 1200ms wrong-notice window, buzzedBy stayed on bot #1,
+          // so the resolution effect never ran for bot #2 and claimedRef
+          // was left stuck on it — the user's buzz then silently no-op'd.
+          setBuzzedBy(bot.id);
         }, bot.thinkMs);
 
         botTimers.current.push(tt);
@@ -324,19 +329,22 @@ export default function TrialSession({
   useEffect(() => {
     if (!buzzedBy || buzzedBy === 'user') return;
     const botState = botStates.find(s => s.id === buzzedBy);
-    if (!botState?.correct) {
-      // Release the claim lock immediately so the user can buzz again
-      // while the "wrong" notification is still visible. The visual
-      // (buzzedBy) clears after 1200ms; protect against clobbering a
-      // user buzz that fires during that window.
+    if (botState?.correct == null) return; // buzz not resolved yet
+    let timer;
+    if (!botState.correct) {
+      // Wrong buzz. Release the claim lock immediately so the user (or a
+      // later bot) can buzz again while the "wrong" notice is still up.
+      // buzzedBy clears after 1200ms unless someone else buzzes first —
+      // that re-runs this effect, and the cleanup below cancels this
+      // pending clear so the claim is never left dangling.
       claimedRef.current = null;
-      setTimeout(() => {
+      timer = setTimeout(() => {
         setBuzzedBy(prev => prev !== 'user' ? null : prev);
-        if (revealedCount < words.current.length) startReveal();
+        if (phaseRef.current === 'reading' && revealedCntRef.current < words.current.length) startReveal();
       }, 1200);
     } else {
       const cumScore = botState.score || 0;
-      setTimeout(() => {
+      timer = setTimeout(() => {
         if (matchMode && cumScore >= MATCH_TARGET) {
           logQuestion();
           setMatchWinner(buzzedBy);
@@ -345,6 +353,7 @@ export default function TrialSession({
         } else advanceQuestion();
       }, 2000);
     }
+    return () => clearTimeout(timer);
   }, [buzzedBy]); // eslint-disable-line
 
   // ── End-of-question dead-ball: fully revealed, nobody answered ────────

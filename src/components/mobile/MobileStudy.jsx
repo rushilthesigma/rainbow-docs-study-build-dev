@@ -7,7 +7,7 @@ import { Z } from '../../styles/tokens';
 import useKeyboardInset from '../../hooks/useKeyboardInset';
 import { useAuth } from '../../context/AuthContext';
 import { planFromUser } from '../billing/modelAccess';
-import { STUDY_MODELS, HAIKU_FREE_DAILY, resolveStudyModel, canUseStudyModel, requiredPlanLabelFor, studyModelLabel, studyModelHasFreeCap } from '../study/studyModels';
+import { HAIKU_FREE_DAILY, resolveStudyModel, canUseStudyModel, requiredPlanLabelFor, studyModelLabel, studyModelHasFreeCap, visibleStudyModels, isGeminiOnlyEmail, isBlockedForGeminiOnly, resolveGeminiOnlyModel, STUDY_MODELS } from '../study/studyModels';
 
 // Mobile-native Study Mode: full-bleed chat, slim title, no Debate
 // button (head-to-head needs a wider canvas), no sidebar. The empty
@@ -23,6 +23,7 @@ const QUICK_PROMPTS = [
 export default function MobileStudy() {
   const { user, fetchUser } = useAuth();
   const plan = planFromUser(user);
+  const userEmail = user?.email || '';
   const [messages, setMessages] = useState([]);
   const [streamingContent, setStreamingContent] = useState('');
   const [streamingThinking, setStreamingThinking] = useState('');
@@ -34,7 +35,15 @@ export default function MobileStudy() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   // Per-message model pick, mirrors the desktop Study toggle. The saved choice
   // lives in preferences.studyModel; a plan-locked pick resolves to the floor.
-  const [studyModel, setStudyModel] = useState(() => resolveStudyModel(user?.data?.preferences?.studyModel, plan));
+  function resolveEffectiveModel(savedKey) {
+    const resolved = resolveStudyModel(savedKey, plan);
+    if (isGeminiOnlyEmail(userEmail)) {
+      const m = STUDY_MODELS.find(x => x.key === resolved);
+      if (!m || isBlockedForGeminiOnly(m.provider)) return resolveGeminiOnlyModel(plan);
+    }
+    return resolved;
+  }
+  const [studyModel, setStudyModel] = useState(() => resolveEffectiveModel(user?.data?.preferences?.studyModel));
   const studyModelRef = useRef(studyModel);
   studyModelRef.current = studyModel;
   const [modelSheetOpen, setModelSheetOpen] = useState(false);
@@ -49,8 +58,8 @@ export default function MobileStudy() {
 
   // Keep the picker in sync if the cached user (plan / saved pick) changes.
   useEffect(() => {
-    setStudyModel(resolveStudyModel(user?.data?.preferences?.studyModel, plan));
-  }, [user?.data?.preferences?.studyModel, plan]);
+    setStudyModel(resolveEffectiveModel(user?.data?.preferences?.studyModel));
+  }, [user?.data?.preferences?.studyModel, plan, userEmail]);
 
   async function pickStudyModel(key) {
     if (!canUseStudyModel(key, plan)) return; // locked tiers aren't selectable
@@ -249,6 +258,7 @@ export default function MobileStudy() {
         <ModelSheet
           active={studyModel}
           plan={plan}
+          email={userEmail}
           onClose={() => setModelSheetOpen(false)}
           onPick={pickStudyModel}
         />
@@ -282,7 +292,7 @@ function HaikuLimitPill({ remaining }) {
 // Bottom sheet mirroring the desktop dropdown: lists every study model with
 // provider + blurb. Non-paid users see paid-only models locked with the
 // required plan. The server is the real enforcer (plan gate + Haiku cap).
-function ModelSheet({ active, plan, onClose, onPick }) {
+function ModelSheet({ active, plan, email, onClose, onPick }) {
   return (
     <div className="fixed inset-0" style={{ zIndex: Z.sheet }}>
       <button onClick={onClose} aria-label="Close" className="absolute inset-0 bg-black/50 backdrop-blur-[2px] animate-fade-in" />
@@ -299,9 +309,9 @@ function ModelSheet({ active, plan, onClose, onPick }) {
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-3">
           <div className="space-y-1.5">
-            {STUDY_MODELS.map((m) => {
+            {visibleStudyModels(email).map((m) => {
               const locked = !canUseStudyModel(m.key, plan);
-              const lockLabel = locked ? requiredPlanLabelFor(m.key) : null;
+              const lockLabel = locked ? requiredPlanLabelFor(m.key, plan) : null;
               return (
                 <button
                   key={m.key}

@@ -305,9 +305,6 @@ function Tour({ onSkip, onTour, dark }) {
 function QBReady({ onGo, dark }) {
   return (
     <div className="text-center">
-      <div className="mb-5 inline-grid place-items-center w-16 h-16 rounded-xl bg-amber-500/15 ring-1 ring-amber-500/30">
-        <Zap size={28} strokeWidth={2.4} className="text-amber-400" />
-      </div>
       <Header
         title="Ready to play?"
         sub="We'll open Quiz Bowl and walk you through your first game against AI bots — pick a category, enter the lobby, and buzz."
@@ -316,7 +313,7 @@ function QBReady({ onGo, dark }) {
       <div className="mt-8 flex justify-center">
         <button
           onClick={onGo}
-          className="inline-flex items-center gap-2 px-7 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-[0.98] text-white text-[14px] font-semibold transition-all shadow-lg shadow-amber-500/20"
+          className="inline-flex items-center gap-2 px-7 py-3 rounded-xl bg-blue-500 hover:bg-blue-400 active:scale-[0.98] text-white text-[14px] font-semibold transition-all shadow-lg shadow-blue-500/20"
         >
           Let&apos;s go <ArrowRight size={14} />
         </button>

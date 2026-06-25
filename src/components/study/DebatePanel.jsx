@@ -16,16 +16,15 @@ import VoiceMenu from './voice/VoiceMenu';
 import { useSpeechSynthesis, speechSynthesisSupported } from '../../hooks/useSpeechSynthesis';
 import { speechRecognitionSupported } from '../../hooks/useSpeechRecognition';
 
-// Debate's opponent-model gating: free accounts get ONLY Flash Lite + GPT-5.4
-// mini (stricter than Study Mode, which also gives free Haiku); every other
-// tier matches study. Mirrors debateModelAllowed() in server.js.
+// Debate's opponent-model gating: under the credit model every account can
+// pick any model (charged per message). Mirrors debateModelAllowed() in
+// server.js.
 function canUseDebateModel(key, plan) {
-  if (plan === 'free') return key === 'flash-lite' || key === 'gpt-5.4-mini';
   return canUseStudyModel(key, plan);
 }
 // Models offered in the debate picker for this account — only the ones the
-// user can actually pick (no locked rows), filtered to Gemini for
-// gemini-only accounts via visibleStudyModels().
+// user can actually pick (no locked rows), with restricted providers filtered
+// through visibleStudyModels().
 function debateModelsFor(email, plan) {
   return visibleStudyModels(email).filter(m => canUseDebateModel(m.key, plan));
 }

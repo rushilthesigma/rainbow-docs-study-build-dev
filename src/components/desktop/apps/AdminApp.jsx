@@ -294,7 +294,7 @@ function UserList({ users, total, metrics, query, setQuery, planFilter, setPlanF
   const dau = users.filter(u => { const t = lastSeen(u); return t && (now - t) < DAY; }).length;
   const wau = users.filter(u => { const t = lastSeen(u); return t && (now - t) < 7 * DAY; }).length;
   const activeNow = users.filter(u => { const t = lastSeen(u); return t && (now - t) < HOUR; }).length;
-  const proCount = users.filter(u => u.plan === 'pro').length;
+  const proCount = users.filter(u => ['paid', 'pro', 'plus', 'lifetime'].includes(u.plan)).length;
   const bannedCount = users.filter(u => u.banned).length;
   const demoCount = users.filter(u => u.isDemo).length;
   const totalMsgs = users.reduce((s, u) => s + sumMsgs(u), 0);
@@ -529,11 +529,8 @@ function PlanPicker({ plan, onSetPlan }) {
     return () => document.removeEventListener('pointerdown', onClick);
   }, [open]);
   const TIERS = [
-    { id: 'free',      label: 'Free' },
-    { id: 'plus-lite', label: 'Plus-Lite' },
-    { id: 'plus',      label: 'Plus' },
-    { id: 'lifetime',  label: 'Lifetime' },
-    { id: 'pro',       label: 'Pro' },
+    { id: 'free', label: 'Free' },
+    { id: 'paid', label: 'Paid' },
   ];
   async function pick(tier) {
     if (busy || tier === plan) { setOpen(false); return; }
@@ -576,28 +573,13 @@ function PlanPicker({ plan, onSetPlan }) {
   );
 }
 
-// Generic plan badge - picks color + label for any tier. Surfaces
-// Plus-Lite / Plus / Lifetime alongside the existing Pro pill.
+// Plan badge - 'paid' shows a single PAID pill (legacy tier strings still map
+// to it via getPlan on the server, but the client now only sees free|paid).
 function PlanPill({ plan }) {
-  if (plan === 'pro') return <ProPill />;
-  if (plan === 'lifetime') {
-    return (
-      <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500 text-white">
-        <Sparkles size={8} /> LIFETIME
-      </span>
-    );
-  }
-  if (plan === 'plus') {
+  if (plan === 'paid' || plan === 'pro' || plan === 'plus' || plan === 'lifetime') {
     return (
       <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-violet-500 text-white">
-        <Zap size={8} /> PLUS
-      </span>
-    );
-  }
-  if (plan === 'plus-lite') {
-    return (
-      <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500 text-white">
-        <Zap size={8} /> PLUS-LITE
+        <Zap size={8} /> PAID
       </span>
     );
   }
@@ -656,7 +638,7 @@ function AnalyticsPanel({ users, total, landing, onClose, standalone }) {
       if (ageCreated < 1 * DAY) newToday++;
       if (ageCreated < 7 * DAY) new7d++;
       if (ageCreated < 30 * DAY) new30d++;
-      if (u.plan === 'pro') pro++;
+      if (['paid', 'pro', 'plus', 'lifetime'].includes(u.plan)) pro++;
       if (u.banned) banned++;
       totalVisits += u.visitCount || 0;
       totalNoteMaps += u.noteMapsCount || 0;

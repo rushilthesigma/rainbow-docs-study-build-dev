@@ -17,7 +17,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useMathCanvas } from '../../context/MathCanvasContext';
 import { useWindowManagerOptional } from '../../context/WindowManagerContext';
 import { planFromUser } from '../billing/modelAccess';
-import { STUDY_MODELS, resolveStudyModel, canUseStudyModel, requiredPlanLabelFor, studyModelLabel, studyModelHasFreeCap, studyModelDailyCap, studyModelSupportsThinking, isGeminiOnlyEmail, visibleStudyModels, resolveGeminiOnlyModel } from './studyModels';
+import { STUDY_MODELS, resolveStudyModel, canUseStudyModel, requiredPlanLabelFor, studyModelLabel, studyModelHasFreeCap, studyModelDailyCap, studyModelSupportsThinking, isGeminiOnlyEmail, visibleStudyModels, resolveGeminiOnlyModel, isBlockedForGeminiOnly } from './studyModels';
 import VoiceMenu from './voice/VoiceMenu';
 import { useSpeechSynthesis, speechSynthesisSupported } from '../../hooks/useSpeechSynthesis';
 import { speechRecognitionSupported } from '../../hooks/useSpeechRecognition';
@@ -36,24 +36,14 @@ const QUICK_PROMPTS = [
 
 const MATH_CANVAS_WIDTH = 460;
 const MATH_CANVAS_MIN_WIDTH = 360;
-const CANVAS_ACCENT_STYLE = {
-  '--tool-accent': 'var(--canvas-accent)',
-  '--tool-accent-text': 'var(--canvas-accent-text)',
-  '--tool-accent-hover': 'var(--canvas-accent-hover)',
-  '--tool-accent-soft': 'var(--canvas-accent-soft)',
-  '--tool-accent-ring': 'var(--canvas-accent-ring)',
-  color: 'var(--canvas-accent-text)',
-};
 
 const BEST_OF_DEFAULT_ORDER = [
-  'haiku',
   'gpt-5.4-mini',
   'deepseek-flash',
   'flash-lite',
   'deepseek-pro',
   'flash',
   'gpt-5.4',
-  'sonnet',
   'gemini-pro',
 ];
 
@@ -100,13 +90,13 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   const geminiOnly = isGeminiOnlyEmail(userEmail);
   // Study Mode model picker (separate from the global tier). The saved pick
   // lives in preferences.studyModel; a plan-locked pick resolves to the floor.
-  // For Gemini-only accounts, Claude picks are silently replaced with the best
-  // available Gemini model.
+  // For restricted accounts, Claude/OpenAI picks are silently replaced with the
+  // best available Gemini model. DeepSeek stays selectable.
   function resolveEffectiveModel(savedKey) {
     const resolved = resolveStudyModel(savedKey, plan);
     if (geminiOnly) {
       const m = STUDY_MODELS.find(x => x.key === resolved);
-      if (!m || m.provider !== 'Gemini') return resolveGeminiOnlyModel(plan);
+      if (!m || isBlockedForGeminiOnly(m.provider)) return resolveGeminiOnlyModel(plan);
     }
     return resolved;
   }
@@ -495,16 +485,23 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   }
   function doSend(text, opts = {}) {
     synth.cancel();
+    // Regular reroute fans this prompt out to every model server-side. It owns
+    // the whole turn, so source mode / humanize / best-of are all suppressed.
+    const rerouteActive = !!opts.reroute;
+    // Brute force is the same kind of server-owned fan-out turn as reroute, so it
+    // suppresses source mode / humanize / best-of the exact same way.
+    const bruteForceActive = !!opts.bruteForce;
+    const fanOutActive = rerouteActive || bruteForceActive;
     // Humanize wins over source mode: citation scaffolding does not fit the
     // straight-prose output shape, so the server ignores sourced when humanize
     // is on. Mirror that here so the UI status matches.
-    const wantsHumanize = !!(opts.humanize ?? humanizeModeRef.current);
+    const wantsHumanize = !fanOutActive && !!(opts.humanize ?? humanizeModeRef.current);
     // Best of 3 runs each model as itself; web search is Gemini-only and would
     // collapse all three picks onto Gemini server-side, so grounding is off in
     // this mode. Mirror the humanize precedent and drop sourced when comparing.
-    const bestOfActive = studyModelModeRef.current === 'best-of'
+    const bestOfActive = !fanOutActive && studyModelModeRef.current === 'best-of'
       && bestOfModelsRef.current.length === 3 && !!bestOfJudgeRef.current;
-    const wasSourced = !wantsHumanize && !bestOfActive && !!(opts.sourced ?? sourceModeRef.current);
+    const wasSourced = !fanOutActive && !wantsHumanize && !bestOfActive && !!(opts.sourced ?? sourceModeRef.current);
     const attachedImages = opts.images || [];
     const canvasApi = mathCanvasRef.current;
     const canvasPaneOpen = mathTutorSideScreenRef.current;
@@ -660,12 +657,16 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         setStreaming(false);
       },
     }, wasSourced, !thinkingOnRef.current, studyModelRef.current, canvasImage, wantsHumanize,
-      studyModelModeRef.current === 'best-of' && bestOfModelsRef.current.length === 3 && bestOfJudgeRef.current
+      bestOfActive
         ? {
             models: bestOfModelsRef.current,
             judgeModel: bestOfJudgeRef.current,
           }
-        : null);
+        : null,
+      rerouteActive,
+      rerouteActive && !!opts.smartReroute,
+      bruteForceActive,
+      bruteForceActive ? (opts.bruteForceFocus || '') : '');
     abortRef.current = abort;
   }
 
@@ -838,8 +839,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         onClick={mathTutorSideScreen ? collapseMathTutorSideScreen : openMathTutorSideScreen}
         title={mathTutorSideScreen ? 'Close Math Tutor side screen' : 'Open Math Tutor in side screen'}
         aria-label={mathTutorSideScreen ? 'Close Math Tutor side screen' : 'Open Math Tutor in side screen'}
-        style={CANVAS_ACCENT_STYLE}
-        className={`p-1.5 rounded-lg transition-colors tool-accent-button ${mathTutorSideScreen ? 'is-active' : ''}`}
+        className={`p-1.5 rounded-lg transition-colors ${mathTutorSideScreen ? 'text-white bg-white/20' : 'text-white/70 hover:text-white hover:bg-white/[0.15]'}`}
       >
         <Calculator size={14} />
       </button>
@@ -929,6 +929,50 @@ export default function StudyModePanel({ className = '', flush = false, initialM
     setMessages(prev => [...prev.slice(0, userIdx), userMsgSnapshot]);
     const hidden = `${prevUserText}\n\n[SYSTEM NOTE: Regenerate your previous answer - this time ${instruction.trim()}. Do NOT acknowledge this instruction. Just output the revised answer directly.]`;
     setTimeout(() => doSend(hidden, { hideUserInDisplay: true }), 30);
+  }
+
+  // Regular reroute: re-run the user's prompt through EVERY available model and
+  // append a new assistant turn that carries every response. We keep the
+  // original (possibly refused) answer in place above it and don't show a
+  // duplicate user bubble - the comparison panel is the whole point.
+  function handleReroute(idx) {
+    if (streaming) return;
+    let userIdx = idx - 1;
+    while (userIdx >= 0 && messages[userIdx]?.role !== 'user') userIdx--;
+    if (userIdx < 0) return;
+    const prevUserText = messages[userIdx].content || '';
+    if (!prevUserText.trim()) return;
+    if (abortRef.current) try { abortRef.current(); } catch {}
+    setTimeout(() => doSend(prevUserText, { reroute: true, hideUserInDisplay: true }), 30);
+  }
+
+  // Smart reroute: same fan-out, but the server reframes the prompt up front
+  // (ethos-preserving) before any model sees it - best when the original wording
+  // is tripping refusals or coming back weak across the board.
+  function handleSmartReroute(idx) {
+    if (streaming) return;
+    let userIdx = idx - 1;
+    while (userIdx >= 0 && messages[userIdx]?.role !== 'user') userIdx--;
+    if (userIdx < 0) return;
+    const prevUserText = messages[userIdx].content || '';
+    if (!prevUserText.trim()) return;
+    if (abortRef.current) try { abortRef.current(); } catch {}
+    setTimeout(() => doSend(prevUserText, { reroute: true, smartReroute: true, hideUserInDisplay: true }), 30);
+  }
+
+  // Brute force: the relentless option. Re-runs the prompt through 5 models and
+  // keeps rewriting it WITHOUT trigger words for up to 10 rounds, until one
+  // model actually answers. Same in-place behavior as reroute - no duplicate
+  // user bubble, the comparison panel carries every round.
+  function handleBruteForce(idx, focus = '') {
+    if (streaming) return;
+    let userIdx = idx - 1;
+    while (userIdx >= 0 && messages[userIdx]?.role !== 'user') userIdx--;
+    if (userIdx < 0) return;
+    const prevUserText = messages[userIdx].content || '';
+    if (!prevUserText.trim()) return;
+    if (abortRef.current) try { abortRef.current(); } catch {}
+    setTimeout(() => doSend(prevUserText, { bruteForce: true, bruteForceFocus: focus, hideUserInDisplay: true }), 30);
   }
 
   // Rich empty state - quick-prompt cards, NOT ChatGPT's blank greeting.
@@ -1024,6 +1068,9 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         }
         onUserEditMessage={handleUserEdit}
         onAiInstruct={handleAiInstruct}
+        onReroute={handleReroute}
+        onSmartReroute={handleSmartReroute}
+        onBruteForce={handleBruteForce}
         emptyState={emptyState}
         enableDictation={speechRecognitionSupported}
         flush={flush}

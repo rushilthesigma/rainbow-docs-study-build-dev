@@ -1,139 +1,108 @@
-// Client mirror of STUDY_MODELS in server.js. The server is the real
-// enforcer (plan gating + rolling caps); this drives the Study Mode
-// picker UI and pre-empts obviously-locked selections. Keep in sync.
+// Client mirror of STUDY_MODELS + MODEL_CREDIT_COST in server.js. The server
+// is the real enforcer (it charges credits per request); this drives the
+// Study Mode picker UI. Keep credit costs in sync with server.js.
 //
-// Plan access matrix:
-//   flash-lite   : everyone
-//   haiku        : free / plus-lite (12/day cap) · lifetime / pro (unlimited)
-//   gpt-5.4      : plus / lifetime / pro (unlimited) — paid only, no free access
-//   gpt-5.4-mini : everyone (no per-model cap — only counts toward daily messages)
-//   deepseek-flash : everyone (no per-model cap — only counts toward daily messages)
-//   deepseek-pro   : free / plus-lite (12/day cap) · plus / lifetime / pro (unlimited)
-//   flash      : plus / lifetime / pro (unlimited)
-//   sonnet     : plus (24/day cap) · lifetime / pro (unlimited)
-//   gemini-pro : pro only (unlimited)
+// Credit model: every model is selectable by everyone. Each message spends
+// the model's credit cost from the user's daily pool (free 100/day, paid
+// 9,500/day). There are no per-model day caps and no plan locks.
 
-// Accounts that may only use Gemini models. Claude + OpenAI options are hidden
-// from the picker and rejected server-side for these emails.
+// Accounts that should not see Claude/OpenAI options. DeepSeek remains
+// selectable and is rejected or fallen back only by its own server-side checks.
 export const GEMINI_ONLY_EMAILS = new Set(['kelapure@gmail.com']);
 export function isGeminiOnlyEmail(email) {
   return GEMINI_ONLY_EMAILS.has((email || '').toLowerCase());
 }
+export function isBlockedForGeminiOnly(provider) {
+  return provider === 'Claude' || provider === 'OpenAI';
+}
 
+// Legacy constants kept for back-compat with older imports. No longer used to
+// gate anything (per-model caps are retired under the credit model).
 export const HAIKU_FREE_DAILY = 12;
 export const SONNET_PLUS_DAILY = 24;
 export const DEEPSEEK_FREE_DAILY = 12;
 
+// Per-message credit cost by model key. MUST match MODEL_CREDIT_COST in
+// server.js. Gemini scaled lower, Claude/OpenAI scaled toward true cost.
+export const STUDY_MODEL_CREDITS = {
+  'flash-lite': 1,
+  'deepseek-flash': 1,
+  'grok': 1,
+  'flash': 2,
+  'gpt-5.4-mini': 5,
+  'deepseek-pro': 7,
+  'haiku': 10,
+  'gemini-pro': 20,
+  'sonnet': 35,
+  'gpt-5.4': 40,
+};
+export function studyModelCredits(key) {
+  return STUDY_MODEL_CREDITS[key] ?? 1;
+}
+
 export const STUDY_MODELS = [
-  { key: 'flash-lite', label: 'Flash Lite', provider: 'Gemini', blurb: 'Fastest · everyday study',                                     plans: ['free', 'plus-lite', 'plus', 'lifetime', 'pro'] },
-  { key: 'haiku',      label: 'Haiku 4.5',  provider: 'Claude', blurb: `Quick + sharp · ${HAIKU_FREE_DAILY}/day free`,                  plans: ['free', 'plus-lite', 'lifetime', 'pro'] },
-  { key: 'gpt-5.4',    label: 'GPT-5.4',    provider: 'OpenAI', blurb: 'Versatile + capable · paid',                                    plans: ['plus', 'lifetime', 'pro'] },
-  { key: 'gpt-5.4-mini', label: 'GPT-5.4 mini', provider: 'OpenAI', blurb: 'Fast + free · counts toward daily messages',                plans: ['free', 'plus-lite', 'plus', 'lifetime', 'pro'] },
-  { key: 'deepseek-flash', label: 'DeepSeek V4', provider: 'DeepSeek', blurb: 'Fast + free · counts toward daily messages',           plans: ['free', 'plus-lite', 'plus', 'lifetime', 'pro'] },
-  { key: 'deepseek-pro',   label: 'DeepSeek V4 Pro',   provider: 'DeepSeek', blurb: `Step-by-step reasoning · ${DEEPSEEK_FREE_DAILY}/day free`, plans: ['free', 'plus-lite', 'plus', 'lifetime', 'pro'] },
-  { key: 'flash',      label: 'Flash',      provider: 'Gemini', blurb: 'Balanced reasoning',                                            plans: ['plus', 'lifetime', 'pro'] },
-  { key: 'sonnet',     label: 'Sonnet 4.6', provider: 'Claude', blurb: `Deepest writing + explanation · ${SONNET_PLUS_DAILY}/day`,      plans: ['plus', 'lifetime', 'pro'] },
-  { key: 'gemini-pro', label: 'Gemini Pro', provider: 'Gemini', blurb: 'Hardest math + code',                                           plans: ['pro'] },
+  { key: 'flash-lite',     label: 'Flash Lite',      provider: 'Gemini',   blurb: 'Fastest · everyday study' },
+  { key: 'gpt-5.4',        label: 'GPT-5.4',         provider: 'OpenAI',   blurb: 'Versatile + capable' },
+  { key: 'gpt-5.4-mini',   label: 'GPT-5.4 mini',    provider: 'OpenAI',   blurb: 'Fast + capable' },
+  { key: 'deepseek-flash', label: 'DeepSeek V4',     provider: 'DeepSeek', blurb: 'Fast + free' },
+  { key: 'deepseek-pro',   label: 'DeepSeek V4 Pro', provider: 'DeepSeek', blurb: 'Step-by-step reasoning' },
+  { key: 'grok',           label: 'Grok 4.3',        provider: 'xAI',      blurb: 'Frontier reasoning' },
+  { key: 'flash',          label: 'Flash',           provider: 'Gemini',   blurb: 'Balanced reasoning' },
+  { key: 'gemini-pro',     label: 'Gemini Pro',      provider: 'Gemini',   blurb: 'Hardest math + code' },
 ];
 
-export const DEFAULT_STUDY_MODEL = 'haiku';
+export const DEFAULT_STUDY_MODEL = 'flash-lite';
 export const FALLBACK_STUDY_MODEL = 'flash-lite';
 export const HAIKU_LIMIT_FALLBACK = 'flash-lite';
 
 const BY_KEY = Object.fromEntries(STUDY_MODELS.map((m) => [m.key, m]));
 
-export function isPaidPlan(plan) { return ['plus', 'lifetime', 'pro'].includes(plan); }
+export function isPaidPlan(plan) { return plan === 'paid'; }
 
-export function canUseStudyModel(key, plan) {
-  const m = BY_KEY[key];
-  if (!m) return false;
-  return m.plans.includes(plan);
+// Every known model is usable; credits are the gate (server-enforced).
+export function canUseStudyModel(key, _plan) {
+  return !!BY_KEY[key];
 }
 
-const PLAN_ORDER = ['free', 'plus-lite', 'plus', 'lifetime', 'pro'];
-const PLAN_DISPLAY = { 'plus-lite': 'Plus-Lite', plus: 'Plus', lifetime: 'Lifetime', pro: 'Pro' };
-
-// Returns the label of the lowest plan that unlocks the model for a user on
-// currentPlan (e.g. a free user sees "Plus" for Flash, a plus user sees
-// "Lifetime" for Haiku). Returns null if already accessible.
-export function requiredPlanLabelFor(key, currentPlan = 'free') {
-  const m = BY_KEY[key];
-  if (!m || m.plans.includes(currentPlan)) return null;
-  const currentIdx = PLAN_ORDER.indexOf(currentPlan);
-  for (const p of PLAN_ORDER) {
-    if (PLAN_ORDER.indexOf(p) > currentIdx && m.plans.includes(p)) {
-      return PLAN_DISPLAY[p] || p;
-    }
-  }
-  return 'Pro';
+// No model is plan-locked anymore — credit cost is the gate.
+export function requiredPlanLabelFor(_key, _currentPlan = 'free') {
+  return null;
 }
 
-// The model the user can actually use — falls back when saved pick is unknown
-// or plan-locked, preferring the best accessible model over always using haiku.
-export function resolveStudyModel(savedKey, plan) {
-  if (savedKey && canUseStudyModel(savedKey, plan)) return savedKey;
-  if (canUseStudyModel('haiku', plan)) return 'haiku';
-  if (canUseStudyModel('flash', plan)) return 'flash';
-  return FALLBACK_STUDY_MODEL;
+// The model the user will use — honors the saved pick, else the default.
+export function resolveStudyModel(savedKey, _plan) {
+  if (savedKey && BY_KEY[savedKey]) return savedKey;
+  return DEFAULT_STUDY_MODEL;
 }
 
 export function studyModelLabel(key) { return BY_KEY[key]?.label || 'Flash Lite'; }
 
-export function studyModelBlurb(key, plan) {
+// Blurb now ends with the model's credit cost so every picker surfaces it.
+export function studyModelBlurb(key, _plan) {
   const m = BY_KEY[key];
   if (!m) return '';
-  if (key === 'haiku') {
-    if (['lifetime', 'pro'].includes(plan)) return 'Quick + sharp · Unlimited';
-    return m.blurb; // "Quick + sharp · 12/day free"
-  }
-  if (key === 'gpt-5.4') {
-    return 'Versatile + capable · Unlimited'; // paid only (plus/lifetime/pro), no cap
-  }
-  if (key === 'sonnet') {
-    if (['lifetime', 'pro'].includes(plan)) return 'Deepest writing + explanation · Unlimited';
-    return m.blurb; // "Deepest writing + explanation · 24/day" for plus
-  }
-  if (key === 'deepseek-pro') {
-    if (['plus', 'lifetime', 'pro'].includes(plan)) return 'Step-by-step reasoning · Unlimited';
-    return m.blurb; // "Step-by-step reasoning · 12/day free" for free / plus-lite
-  }
-  return m.blurb;
+  const c = studyModelCredits(key);
+  return `${m.blurb} · ${c} credit${c === 1 ? '' : 's'}`;
 }
 
-// Whether the given model has a per-day cap for this plan (drives the cap pill).
-export function studyModelHasFreeCap(key, plan) {
-  if (key === 'haiku') return ['free', 'plus-lite'].includes(plan);
-  if (key === 'deepseek-pro') return ['free', 'plus-lite'].includes(plan);
-  if (key === 'sonnet') return plan === 'plus';
-  return false;
-}
-
-// The daily message cap for a capped model/plan combination, or null.
-export function studyModelDailyCap(key, plan) {
-  if (key === 'haiku' && ['free', 'plus-lite'].includes(plan)) return HAIKU_FREE_DAILY;
-  if (key === 'deepseek-pro' && ['free', 'plus-lite'].includes(plan)) return DEEPSEEK_FREE_DAILY;
-  if (key === 'sonnet' && plan === 'plus') return SONNET_PLUS_DAILY;
-  return null;
-}
+// Per-model day caps are retired under the credit model.
+export function studyModelHasFreeCap(_key, _plan) { return false; }
+export function studyModelDailyCap(_key, _plan) { return null; }
 
 export function studyModelSupportsThinking(key) {
-  return ['haiku', 'sonnet', 'gemini-pro', 'deepseek-pro'].includes(key);
+  return ['gemini-pro', 'deepseek-pro', 'grok'].includes(key);
 }
 
-// Returns the subset of STUDY_MODELS visible to a given user. For
-// Gemini-only accounts the Claude entries are filtered out entirely.
+// Returns the subset of STUDY_MODELS visible to a given user. For restricted
+// accounts the Claude/OpenAI entries are filtered out entirely.
 export function visibleStudyModels(email) {
   if (isGeminiOnlyEmail(email)) {
-    return STUDY_MODELS.filter(m => m.provider === 'Gemini');
+    return STUDY_MODELS.filter(m => !isBlockedForGeminiOnly(m.provider));
   }
   return STUDY_MODELS;
 }
 
-// Resolve the best accessible Gemini model for an account that is
-// restricted to Gemini-only (falls back from flash to flash-lite for
-// lower-tier plans).
-export function resolveGeminiOnlyModel(plan) {
-  if (canUseStudyModel('gemini-pro', plan)) return 'gemini-pro';
-  if (canUseStudyModel('flash', plan)) return 'flash';
-  return 'flash-lite';
+// Resolve the best accessible Gemini fallback for a Gemini-only account.
+export function resolveGeminiOnlyModel(_plan) {
+  return 'gemini-pro';
 }

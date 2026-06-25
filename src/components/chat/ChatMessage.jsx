@@ -5,9 +5,23 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import { Check, X, Copy, Pencil, FileText, ExternalLink, FileText as NoteIcon, Zap, Swords, Brain, ChevronRight, ChevronDown, Volume2, Square, PanelRightOpen } from 'lucide-react';
+import { Check, X, Copy, Pencil, FileText, ExternalLink, FileText as NoteIcon, Zap, Swords, Brain, ChevronRight, ChevronDown, Volume2, Square, PanelRightOpen, Shuffle, Hammer } from 'lucide-react';
 import MathText from '../shared/MathText';
 import { useWindowManager } from '../../context/WindowManagerContext';
+
+// Lightweight client-side "did the model decline?" check, mirroring the server's
+// refusal detector. Used to tailor the Reroute tooltip when an answer leads with
+// an "I can't do that" — the reroute itself works on any turn.
+const CLIENT_REFUSAL_PATTERNS = [
+  /\bi\s*(?:'|’)?\s*(?:m\b.{0,12})?(?:can(?:'|’)?t|cannot|can\s*not|won(?:'|’)?t|am\s+not\s+able\s+to|am\s+unable\s+to|(?:'|’)?m\s+(?:not\s+able|unable)\s+to)\b[^.?!\n]{0,70}\b(?:help|assist|do\s+that|do\s+this|provide|comply|continue|create|generate|produce|write|answer|fulfill|that\s+request|with\s+that|with\s+this)\b/i,
+  /\b(?:i(?:'|’)?m\s+sorry|i\s+am\s+sorry|unfortunately|i\s+apologi[sz]e)\b[^.?!\n]{0,40}\b(?:can(?:'|’)?t|cannot|can\s*not|won(?:'|’)?t|unable|not\s+able)\b/i,
+  /\bi(?:'|’)?m\s+not\s+(?:able|going)\s+to\s+(?:help|assist|do|provide|answer|continue)\b/i,
+];
+function messageLooksLikeRefusal(text) {
+  if (!text) return false;
+  const head = String(text).trim().slice(0, 400);
+  return CLIENT_REFUSAL_PATTERNS.some((rx) => rx.test(head));
+}
 
 // Collapsible "Thinking" panel — shows the model's reasoning summary.
 // Auto-expanded while thoughts stream in, collapsible afterward.
@@ -40,14 +54,16 @@ function ThinkingPanel({ text, streaming }) {
   );
 }
 
-// Best of 3 result. The WINNER is rendered as the normal message body below;
-// this is the quiet "see what the other models said" control that sits ABOVE
-// the answer — collapsed by default so the thread stays clean, and expandable
-// to compare every candidate side by side.
+// Best of 3 / regular-reroute result. The WINNER (best-of) or first non-refusal
+// answer (reroute) is rendered as the normal message body below; this is the
+// control that sits ABOVE it and expands to compare every model side by side.
+// Best of 3 collapses by default (quiet thread); reroute opens by default
+// because seeing every response IS the point.
 function BestOfResponses({ bestOf }) {
   const responses = Array.isArray(bestOf?.responses) ? bestOf.responses : [];
+  const isReroute = bestOf?.mode === 'reroute';
   const firstOther = Math.max(0, responses.findIndex((r) => !r.selected));
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(isReroute);
   const [activeIndex, setActiveIndex] = useState(firstOther);
 
   useEffect(() => {
@@ -59,6 +75,17 @@ function BestOfResponses({ bestOf }) {
   const active = responses[activeIndex] || responses[0];
   const winner = responses.find((r) => r.selected) || responses[0];
   const otherCount = Math.max(0, responses.length - 1);
+  const modelCount = bestOf?.modelCount ?? responses.length;
+  const answeredCount = bestOf?.answeredCount ?? responses.filter((r) => r.content && !r.refused).length;
+  const refusedCount = bestOf?.refusedCount ?? responses.filter((r) => r.refused).length;
+  const smartRewrite = isReroute && bestOf?.smartRewrite?.used ? bestOf.smartRewrite : null;
+  const initialRefusedCount = smartRewrite?.initialStats?.refusedCount ?? 0;
+  const initialModelCount = smartRewrite?.initialStats?.modelCount ?? modelCount;
+  // Brute force reuses the reroute panel but loops N rounds. Besides the
+  // collapsed summary line, it gets its own box that shows the actual prompt(s)
+  // the Brute Forcer AI entered each round (see the smartRewrite.attempts box).
+  const bruteForce = isReroute && !!bestOf?.bruteForce;
+  const bruteRounds = bestOf?.rounds ?? smartRewrite?.rounds ?? 0;
 
   return (
     <div className="mb-1 max-w-[88%] pl-1">
@@ -72,29 +99,122 @@ function BestOfResponses({ bestOf }) {
             : 'text-white/40 hover:text-white/70 hover:bg-white/[0.04]'
         }`}
       >
+        {isReroute && <Shuffle size={11} className="shrink-0 text-blue-300/70" />}
         <span className="text-[11.5px] font-semibold">
-          {open ? 'Other responses' : 'See other responses'}
+          {isReroute
+            ? (open ? 'All model answers' : 'See all model answers')
+            : (open ? 'Other responses' : 'See other responses')}
         </span>
         <span className="text-[10.5px] font-medium text-white/35 truncate">
-          · {otherCount} other model{otherCount === 1 ? '' : 's'}
-          {winner?.label && <span className="text-white/30"> · {winner.label} won</span>}
+          {isReroute ? (
+            <>· {modelCount} model{modelCount === 1 ? '' : 's'}
+              {bruteForce
+                ? <span className="text-blue-300/80"> · brute force{bruteRounds ? ` · ${bruteRounds} round${bruteRounds === 1 ? '' : 's'}` : ''}</span>
+                : smartRewrite && <span className="text-violet-300/70"> · {smartRewrite.proactive ? 'smart reroute' : 'smart retry'}</span>}
+              {refusedCount > 0 && <span className="text-rose-300/60"> · {refusedCount} refused</span>}
+            </>
+          ) : (
+            <>· {otherCount} other model{otherCount === 1 ? '' : 's'}
+              {winner?.label && <span className="text-white/30"> · {winner.label} won</span>}
+            </>
+          )}
         </span>
         <ChevronDown size={12} className={`shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
         <div className="mt-1.5 rounded-xl border border-white/[0.10] bg-white/[0.03] px-2.5 py-2.5 space-y-2">
-          {bestOf?.judge?.label && (
-            <p className="px-1 text-[10px] font-semibold uppercase tracking-[0.13em] text-white/35">
-              Judged by {bestOf.judge.label}
-            </p>
-          )}
-          {bestOf?.rationale && (
-            <p className="px-1 text-[11px] leading-snug text-white/45">{bestOf.rationale}</p>
+          {isReroute ? (
+            <>
+              <p className="px-1 text-[10px] font-semibold uppercase tracking-[0.13em] text-white/35">
+                Rerouted through {modelCount} model{modelCount === 1 ? '' : 's'} · {answeredCount} answered{refusedCount > 0 ? ` · ${refusedCount} refused` : ''}
+              </p>
+              {smartRewrite && !bruteForce && (
+                <div className="rounded-lg border px-2.5 py-2 border-violet-300/15 bg-violet-300/[0.05]">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.13em] text-violet-200/75">
+                    {smartRewrite.proactive
+                      ? (smartRewrite.escalated
+                          ? `Smart reroute · escalated after ${initialRefusedCount || initialModelCount} refusal${(initialRefusedCount || initialModelCount) === 1 ? '' : 's'}`
+                          : 'Smart reroute · prompt reframed up front')
+                      : `Smart retry after ${initialRefusedCount || initialModelCount} refusal${(initialRefusedCount || initialModelCount) === 1 ? '' : 's'}`}
+                  </p>
+                  <p className="mt-1 text-[11px] leading-snug text-white/45">
+                    {smartRewrite.rationale || 'The prompt was reframed to preserve the core ethos in a form models are more likely to accept.'}
+                  </p>
+                  {smartRewrite.prompt && (
+                    <p className="mt-1.5 line-clamp-2 text-[11px] leading-snug text-white/35" title={smartRewrite.prompt}>
+                      {smartRewrite.prompt}
+                    </p>
+                  )}
+                </div>
+              )}
+              {smartRewrite && bruteForce && (() => {
+                // Show what the Brute Forcer AI actually entered. It edits the
+                // prompt every round, so surface each round's prompt (falling
+                // back to the single final prompt for older payloads).
+                const attempts = Array.isArray(smartRewrite.attempts) && smartRewrite.attempts.length
+                  ? smartRewrite.attempts
+                  : (smartRewrite.prompt ? [{ round: 1, prompt: smartRewrite.prompt, answered: bestOf?.succeeded }] : []);
+                return (
+                  <div className="rounded-lg border px-2.5 py-2 border-blue-300/20 bg-blue-300/[0.06] space-y-1.5">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.13em] text-blue-200/80">
+                      Brute forced · {bruteRounds || smartRewrite.rounds || attempts.length} round{(bruteRounds || smartRewrite.rounds || attempts.length) === 1 ? '' : 's'} · no trigger words
+                    </p>
+                    {smartRewrite.focus && (
+                      <p className="text-[11px] leading-snug text-white/50">
+                        <span className="text-white/35">Most important:</span> {smartRewrite.focus}
+                      </p>
+                    )}
+                    {smartRewrite.strategy && (
+                      <p className="text-[11px] leading-snug text-white/50">
+                        <span className="text-white/35">Tactic:</span> {smartRewrite.strategy}
+                      </p>
+                    )}
+                    {attempts.length > 0 && (
+                      <div className="space-y-1.5 pt-0.5">
+                        {attempts.map((a) => (
+                          <div key={a.round} className="rounded-md border border-white/[0.08] bg-black/20 px-2 py-1.5">
+                            <p className="mb-0.5 text-[9.5px] font-semibold uppercase tracking-[0.1em] text-white/35">
+                              {attempts.length > 1 ? `Round ${a.round} — prompt entered` : 'Prompt the AI entered'}
+                              {a.answered && <span className="ml-1 text-blue-200/90">· answered</span>}
+                            </p>
+                            <p className="max-h-32 overflow-y-auto whitespace-pre-wrap text-[11px] leading-snug text-white/65">
+                              {a.prompt}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {Array.isArray(smartRewrite.triggerWords) && smartRewrite.triggerWords.length > 0 && (
+                      <div className="flex flex-wrap gap-1 pt-0.5">
+                        <span className="text-[10px] text-white/30">Dropped:</span>
+                        {smartRewrite.triggerWords.map((w, i) => (
+                          <span key={i} className="rounded bg-white/[0.05] px-1.5 py-0.5 text-[10px] text-white/35 line-through">{w}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </>
+          ) : (
+            <>
+              {bestOf?.judge?.label && (
+                <p className="px-1 text-[10px] font-semibold uppercase tracking-[0.13em] text-white/35">
+                  Judged by {bestOf.judge.label}
+                </p>
+              )}
+              {bestOf?.rationale && (
+                <p className="px-1 text-[11px] leading-snug text-white/45">{bestOf.rationale}</p>
+              )}
+            </>
           )}
           <div className="grid gap-1">
             {responses.map((r, index) => {
               const selected = index === activeIndex;
               const isWinner = !!r.selected;
+              const status = isReroute
+                ? (r.refused ? 'Refused' : (r.error ? 'Failed' : (isWinner ? 'Shown above' : 'Answered')))
+                : (isWinner ? 'Winner' : (r.error ? 'Failed' : 'Alternative'));
               return (
                 <button
                   key={`${r.key || r.label}-${index}`}
@@ -113,8 +233,8 @@ function BestOfResponses({ bestOf }) {
                         <span className="font-normal text-white/35"> to {r.servedLabel}</span>
                       )}
                     </span>
-                    <span className="block text-[10px] text-white/35 truncate">
-                      {isWinner ? 'Winner' : (r.error ? 'Failed' : 'Alternative')} · {r.provider || 'AI'}
+                    <span className={`block text-[10px] truncate ${r.refused ? 'text-rose-300/70' : 'text-white/35'}`}>
+                      {status} · {r.provider || 'AI'}
                     </span>
                   </span>
                   {isWinner && <Check size={12} className="text-blue-200/90 shrink-0" strokeWidth={3} />}
@@ -249,9 +369,9 @@ function InlineQuiz({ quizJson, answers, submitted, onAnswer, onSubmit, unboxed 
                     key={opt}
                     disabled={submitted}
                     onClick={() => onAnswer(q.question, letter)}
-                    className={`w-full text-left px-3 py-1.5 rounded text-xs transition-colors ${
+                    className={`w-full text-left px-3 py-1.5 rounded text-xs transition-colors shadow-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-400/45 ${
                       submitted ? (correctOpt ? 'bg-emerald-100 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 font-medium' : selected && !correctOpt ? 'bg-rose-100 dark:bg-rose-900/20 text-rose-600' : 'text-gray-500') :
-                      selected ? 'bg-blue-500 text-white font-medium' : 'hover:bg-gray-50 dark:hover:bg-white/[0.05] text-gray-700 dark:text-gray-300'
+                      selected ? 'bg-blue-500/[0.14] text-blue-700 dark:text-blue-100 ring-1 ring-inset ring-blue-400/35 dark:ring-blue-300/25 font-medium' : 'hover:bg-gray-50 dark:hover:bg-white/[0.05] text-gray-700 dark:text-gray-300'
                     }`}
                   >
                     <MathText>{opt}</MathText>
@@ -303,6 +423,9 @@ export default function ChatMessage({
   onEdit,
   onUserEdit,
   onAiInstruct,
+  onReroute,
+  onSmartReroute,
+  onBruteForce,
 }) {
   const isUser = message.role === 'user';
   const raw = message.content || '';
@@ -310,12 +433,46 @@ export default function ChatMessage({
   const [editText, setEditText] = useState(raw);
   const [instructText, setInstructText] = useState('');
   const [copied, setCopied] = useState(false);
+  const [rerouteMenuOpen, setRerouteMenuOpen] = useState(false);
+  const [reroutePos, setReroutePos] = useState(null);
+  const rerouteBtnRef = useRef(null);
+  const [bruteOpen, setBruteOpen] = useState(false);
+  const [bruteFocus, setBruteFocus] = useState('');
   const [speaking, setSpeaking] = useState(false);
   const [quizAnswers, setQuizAnswers] = useState({});
   const [quizSubmitted, setQuizSubmitted] = useState(false);
   const utterRef = useRef(null);
 
   useEffect(() => () => { window.speechSynthesis?.cancel(); }, []);
+
+  // The reroute menu is portaled to <body> so it escapes the message bubble's
+  // stacking context — otherwise the NEXT chat message paints on top of it and
+  // steals the hover/click (you'd hover "Smart Reroute" and the next message
+  // would light up instead). Position it from the trigger button's rect.
+  function placeRerouteMenu() {
+    const b = rerouteBtnRef.current?.getBoundingClientRect();
+    if (!b) return;
+    const MENU_W = 130;
+    const MENU_H = 64;
+    const left = Math.max(8, Math.min(b.left, window.innerWidth - MENU_W - 8));
+    let top = b.bottom + 4;
+    if (top + MENU_H > window.innerHeight - 8) top = b.top - MENU_H - 4; // flip above near the edge
+    setReroutePos({ left, top, width: MENU_W });
+  }
+
+  useEffect(() => {
+    if (!rerouteMenuOpen) return;
+    const reflow = () => placeRerouteMenu();
+    const onKey = (e) => { if (e.key === 'Escape') setRerouteMenuOpen(false); };
+    window.addEventListener('scroll', reflow, true);
+    window.addEventListener('resize', reflow);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('scroll', reflow, true);
+      window.removeEventListener('resize', reflow);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [rerouteMenuOpen]);
 
   function pickFemaleVoice() {
     const voices = window.speechSynthesis.getVoices();
@@ -393,6 +550,17 @@ export default function ChatMessage({
     onAiInstruct(instructText.trim());
     setInstructText('');
     setEditing(false);
+  }
+
+  // Brute force with an optional clarification: the user types what matters
+  // most about the request, which the server keeps intact while it rewrites the
+  // prompt without trigger words. Empty focus is fine - it just runs the loop.
+  function submitBruteForce() {
+    if (typeof onBruteForce !== 'function') return;
+    const focus = bruteFocus.trim();
+    setBruteOpen(false);
+    setBruteFocus('');
+    onBruteForce(focus);
   }
 
   // Extract quiz blocks - only render the inline quiz UI when the full block has arrived
@@ -541,7 +709,7 @@ export default function ChatMessage({
               <p className="text-[10px] text-white/60 mt-1.5">Saving will restart the conversation from here.</p>
               <div className="flex gap-1.5 mt-2 justify-end">
                 <button onClick={() => { setEditing(false); setEditText(raw); }} className="px-3 py-1 rounded-md text-[11px] text-white/70 hover:bg-white/10">Cancel</button>
-                <button onClick={saveUserEdit} className="px-3 py-1 rounded-md text-[11px] bg-white text-gray-900 font-semibold hover:bg-white/90">Save &amp; Restart</button>
+                <button onClick={saveUserEdit} className="px-3 py-1 rounded-md text-[11px] bg-blue-500 text-white font-semibold hover:bg-blue-400 transition-colors">Save &amp; Restart</button>
               </div>
             </div>
           </div>
@@ -552,7 +720,7 @@ export default function ChatMessage({
       <div className="group flex justify-end mb-3 animate-fade-in">
         <div className="max-w-[78%]">
           {/* User bubble - dark/white neutral, no color */}
-          <div className="rounded-2xl rounded-tr-md bg-gray-900/70 dark:bg-white/[0.11] px-4 py-2.5 shadow-sm backdrop-blur-sm">
+          <div className="rounded-2xl rounded-tr-md bg-gray-900/70 dark:bg-white/[0.11] px-4 py-2.5 shadow-sm">
             {Array.isArray(message.images) && message.images.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mb-2">
                 {message.images.map((img, i) => (
@@ -620,7 +788,7 @@ export default function ChatMessage({
           the winner reads as the normal message, the alternatives are one
           quiet click away. */}
       {message.bestOf && !isError && <BestOfResponses bestOf={message.bestOf} />}
-      <div className={`max-w-[88%] rounded-2xl rounded-tl-md px-4 py-2.5 shadow-sm backdrop-blur-sm ${
+      <div className={`max-w-[88%] rounded-2xl rounded-tl-md px-4 py-2.5 shadow-sm ${
         isError
           ? 'bg-rose-100/70 dark:bg-rose-900/30'
           : 'bg-white/50 dark:bg-white/[0.08]'
@@ -713,7 +881,38 @@ export default function ChatMessage({
             </div>
           </div>
         )}
-        {!isStreaming && !isError && displayContent && !editing && (
+        {!isStreaming && !isError && displayContent && !editing && bruteOpen && typeof onBruteForce === 'function' && (
+          <div className="mt-3 pt-3 border-t border-gray-200 dark:border-[#2A2A40]">
+            <label className="text-[10px] font-semibold text-blue-600 dark:text-blue-200/80 uppercase tracking-wider block mb-1.5">
+              What's the most important part to keep?
+            </label>
+            <div className="flex gap-1.5 items-start">
+              <input
+                autoFocus
+                value={bruteFocus}
+                onChange={e => setBruteFocus(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') submitBruteForce();
+                  else if (e.key === 'Escape') { setBruteOpen(false); setBruteFocus(''); }
+                }}
+                placeholder="Optional. e.g. keep the step-by-step math, or the core argument"
+                className="flex-1 px-2.5 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-white/[0.10] bg-white dark:bg-white/[0.05] text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-blue-400/30"
+              />
+              <button
+                onClick={() => { setBruteOpen(false); setBruteFocus(''); }}
+                className="px-2 py-1 rounded text-[10px] text-gray-500 hover:bg-gray-100 dark:hover:bg-white/[0.07]"
+              >Cancel</button>
+              <button
+                onClick={submitBruteForce}
+                className="inline-flex items-center gap-1 px-3 py-1 rounded-lg text-[10px] font-medium text-white bg-blue-600 hover:bg-blue-500 dark:bg-blue-500/80 dark:hover:bg-blue-500 transition-colors"
+              ><Hammer size={10} /> Brute force</button>
+            </div>
+            <p className="mt-1.5 text-[10px] leading-snug text-gray-400 dark:text-white/35">
+              5 models keep rewording your prompt for up to 10 rounds, preserving this above all.
+            </p>
+          </div>
+        )}
+        {!isStreaming && !isError && displayContent && !editing && !bruteOpen && (
           <div className="mt-2 flex items-center gap-1 opacity-40 hover:opacity-100 transition-opacity">
             <button
               onClick={handleCopy}
@@ -742,6 +941,71 @@ export default function ChatMessage({
                 className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/[0.07]"
               >
                 <Pencil size={10} /> Edit
+              </button>
+            )}
+            {typeof onReroute === 'function' && (
+              typeof onSmartReroute === 'function' ? (
+                // Reroute split into a small menu: plain reroute vs smart reroute.
+                // Menu is portaled to <body> (see placeRerouteMenu) so the next
+                // chat message can't paint over it and swallow the click/hover.
+                <div className="relative">
+                  <button
+                    ref={rerouteBtnRef}
+                    onClick={() => setRerouteMenuOpen((o) => { if (!o) placeRerouteMenu(); return !o; })}
+                    aria-expanded={rerouteMenuOpen}
+                    title={messageLooksLikeRefusal(displayContent)
+                      ? "This looks like a refusal — reroute through every model to find one that answers"
+                      : "Reroute this prompt through every model"}
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-blue-600 dark:text-blue-300/90 hover:text-blue-700 dark:hover:text-blue-200 hover:bg-blue-500/[0.10] dark:hover:bg-blue-500/[0.12] transition-colors"
+                  >
+                    <Shuffle size={10} /> Reroute
+                    <ChevronDown size={10} className={`transition-transform ${rerouteMenuOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {rerouteMenuOpen && reroutePos && createPortal(
+                    <>
+                      <div className="fixed inset-0 z-[9998]" onClick={() => setRerouteMenuOpen(false)} />
+                      <div
+                        style={{ position: 'fixed', left: reroutePos.left, top: reroutePos.top, minWidth: reroutePos.width, zIndex: 9999 }}
+                        className="rounded-lg border border-gray-200 dark:border-white/[0.10] bg-white dark:bg-[#1b1d24] shadow-xl py-0.5"
+                      >
+                        <button
+                          onClick={() => { setRerouteMenuOpen(false); onReroute(); }}
+                          className="w-full px-2.5 py-1 text-left text-[11px] text-gray-800 dark:text-white/85 whitespace-nowrap hover:bg-gray-100 dark:hover:bg-white/[0.07] transition-colors"
+                        >
+                          Reroute
+                        </button>
+                        <button
+                          onClick={() => { setRerouteMenuOpen(false); onSmartReroute(); }}
+                          className="w-full px-2.5 py-1 text-left text-[11px] text-gray-800 dark:text-white/85 whitespace-nowrap hover:bg-gray-100 dark:hover:bg-white/[0.07] transition-colors"
+                        >
+                          Smart Reroute
+                        </button>
+                      </div>
+                    </>,
+                    document.body
+                  )}
+                </div>
+              ) : (
+                <button
+                  onClick={onReroute}
+                  title={messageLooksLikeRefusal(displayContent)
+                    ? "This looks like a refusal — reroute through every model to find one that answers"
+                    : "Reroute: run this prompt through every model and see each response"}
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-blue-600 dark:text-blue-300/90 hover:text-blue-700 dark:hover:text-blue-200 hover:bg-blue-500/[0.10] dark:hover:bg-blue-500/[0.12] transition-colors"
+                >
+                  <Shuffle size={10} /> Reroute
+                </button>
+              )
+            )}
+            {typeof onBruteForce === 'function' && (
+              <button
+                onClick={() => { setBruteOpen((o) => !o); setEditing(false); }}
+                aria-expanded={bruteOpen}
+                title="Brute force: run 5 models for up to 10 rounds, rewriting the prompt without trigger words until one answers. Click to first say what matters most."
+                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-blue-700 dark:text-blue-100 ring-1 ring-inset ring-blue-500/25 dark:ring-blue-400/30 transition-colors ${bruteOpen ? 'bg-blue-500/25 dark:bg-blue-400/30' : 'bg-blue-500/15 hover:bg-blue-500/25 dark:bg-blue-400/[0.18] dark:hover:bg-blue-400/30'}`}
+              >
+                <Hammer size={10} /> Brute force
+                <ChevronDown size={10} className={`transition-transform ${bruteOpen ? 'rotate-180' : ''}`} />
               </button>
             )}
           </div>

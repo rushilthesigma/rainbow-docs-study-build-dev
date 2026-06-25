@@ -910,7 +910,8 @@ MAKE IT SOUND HUMAN:
 - Give the opening a real angle. Start with a concrete claim, image, tension, memory, or observation instead of repeating the prompt.
 - Build sentences the way good writers do: combine related thoughts with coordination and subordination. Use words like because, although, while, since, when, which, that, and, but, and so when they genuinely connect ideas.
 - Avoid fake-human staccato. Do not stack tiny sentences, sentence fragments, or clipped one-line beats. If two short sentences belong to the same thought, compound them into one smoother sentence.
-- Let rhythm vary through syntax, not through random choppiness. A mature paragraph can carry a long, elastic sentence when the logic calls for it, then settle into a shorter one without sounding abrupt.
+- Vary sentence length on purpose. A run of uniform, medium-length sentences is the single clearest fingerprint of machine writing, so let some sentences stretch long and elastic when the logic earns it, then drop to a genuinely short complete sentence for contrast. The variance has to come from real syntax, never from fragments or clipped one-line stacks, so rule 7 still holds.
+- Write the way a careful person actually writes. Use contractions when the register is conversational, begin an occasional sentence with And, But, or So when it truly carries the thought forward, and trust a plain word over an impressive one. A few small, natural choices read more human than flawless symmetry.
 - Prefer exact nouns and verbs over broad abstractions. "The hallway went quiet" beats "the environment changed significantly."
 - Let transitions come from the idea itself. Use fewer signposts, and almost never start sentences with "Furthermore", "Moreover", "Additionally", "In conclusion", "Overall", "Ultimately", or "It is important to note".
 - Keep one clear point of view. A real piece can be thoughtful without sounding neutral about everything.
@@ -919,7 +920,8 @@ MAKE IT SOUND HUMAN:
 - End by landing the thought, not by recapping the whole piece in a formal closing paragraph.
 
 CUT THESE HABITS ON SIGHT:
-- Inflated words and stock phrases: delve, tapestry, realm, landscape, navigate, underscore, foster, myriad, plethora, crucial, pivotal, vital, robust, nuanced, multifaceted, testament, showcase, boasts, leverage, seamless, intricate, ever-evolving, ever-changing, stands as, serves as, plays a vital role, beacon, cornerstone.
+- Inflated words and stock phrases: delve, dive into, deep dive, unpack, tapestry, realm, landscape, navigate, underscore, foster, myriad, plethora, crucial, pivotal, vital, robust, nuanced, multifaceted, testament, showcase, boasts, leverage, harness, elevate, curate, seamless, intricate, holistic, dynamic, vibrant, ever-evolving, ever-changing, transformative, game-changer, stands as, serves as, plays a vital role, beacon, cornerstone, lens, framework, resonate, illuminate, underpin, embody, encapsulate, paints a picture, speaks volumes, treasure trove, rich history.
+- Filler connectives and hedges that pretend to add weight: at its core, in essence, essentially, fundamentally, arguably, notably, that being said, it is worth noting, when it comes to, the reality is, in a world where, a testament to.
 - Empty openings: "In today's fast-paced world", "Throughout history", "Since the beginning of time", "When it comes to", "Needless to say".
 - Formulaic essay scaffolding: "This essay will argue that", parroting the prompt as the first sentence, and a final paragraph that simply reannounces the same three points.
 - Fake-depth contrast formulas: "It is not X, it is Y", "It is not just X, it is Y", "This is more than just X", "It isn't merely X", "not simply X but Y", and "not only X but also Y". These are major generated-writing fingerprints. If you need contrast, state the real claim directly and let the next clause explain it.
@@ -931,6 +933,7 @@ REVISION PASS BEFORE SENDING:
 - Did you preserve the user's facts and intent?
 - Is there at least one concrete detail where the draft would otherwise feel vague?
 - Did you combine choppy adjacent sentences into smoother compound or complex sentences?
+- Do the sentence lengths genuinely vary, or are they all the same medium length? If uniform, rewrite a few so some run long and at least one is genuinely short.
 - Could a reader get the same meaning from a shorter version? If so, cut to it. Is every sentence still pulling weight, with no padding, hedging, or repeated idea?
 - Did you remove every "not X, but Y" style contrast formula?
 - Did you remove filler, repeated ideas, template transitions, and theatrical fragments?

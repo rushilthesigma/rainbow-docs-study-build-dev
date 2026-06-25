@@ -1006,10 +1006,8 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
                 <button
                   onClick={() => handleSend(input)}
                   disabled={!input.trim()}
-                  className={`px-3 h-8 rounded-lg inline-flex items-center gap-1.5 text-[13px] font-medium transition-colors ${
-                    input.trim()
-                      ? 'text-white/35 hover:text-white'
-                      : 'tool-accent-button is-disabled cursor-not-allowed'
+                  className={`px-3 h-8 rounded-lg inline-flex items-center gap-1.5 text-[13px] font-medium transition-colors text-white/35 hover:text-white ${
+                    input.trim() ? '' : 'cursor-not-allowed'
                   }`}
                 >
                   Send <Send size={11} />

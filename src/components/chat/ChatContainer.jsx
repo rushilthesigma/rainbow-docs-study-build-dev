@@ -21,6 +21,9 @@ export default function ChatContainer({
   onEditMessage = null,
   onUserEditMessage = null,
   onAiInstruct = null,
+  onReroute = null,
+  onSmartReroute = null,
+  onBruteForce = null,
   emptyState = null,
   // When true, renders flush (no glass-card, no rounded corners) - use for full-page panels
   flush = false,
@@ -130,6 +133,9 @@ export default function ChatContainer({
               onEdit={typeof onEditMessage === 'function' ? (newContent) => onEditMessage(i, newContent) : undefined}
               onUserEdit={typeof onUserEditMessage === 'function' ? (newContent) => onUserEditMessage(i, newContent) : undefined}
               onAiInstruct={typeof onAiInstruct === 'function' ? (instruction) => onAiInstruct(i, instruction) : undefined}
+              onReroute={typeof onReroute === 'function' && msg.role === 'assistant' && !msg._streaming ? () => onReroute(i) : undefined}
+              onSmartReroute={typeof onSmartReroute === 'function' && msg.role === 'assistant' && !msg._streaming ? () => onSmartReroute(i) : undefined}
+              onBruteForce={typeof onBruteForce === 'function' && msg.role === 'assistant' && !msg._streaming ? (clarify) => onBruteForce(i, clarify) : undefined}
             />
           );
         })}

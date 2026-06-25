@@ -12,6 +12,9 @@ import useBrowserBack from '../../../hooks/useBrowserBack';
 import { useAuth } from '../../../context/AuthContext';
 import QuizBowlMatch, { PlayerCard } from './QuizBowlMatch';
 import ProgressBar, { InlineProgress } from '../../shared/ProgressBar';
+import QbModelPicker from '../../shared/QbModelPicker';
+import { useQbModel } from '../../../hooks/useQbModel';
+import { studyModelLabel } from '../../study/studyModels';
 
 const DIFFICULTIES = ['Easy', 'Medium', 'Hard', 'Tournament'];
 const CATEGORIES = ['Science', 'History', 'Literature', 'Geography', 'Math', 'Art', 'Music', 'Philosophy', 'Pop Culture', 'Mixed'];
@@ -156,6 +159,8 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   const [matchReplayRec, setMatchReplayRec] = useState(null);
   useBrowserBack(view !== 'hub', () => { setView('hub'); setReplaySet(null); setMatchReplayRec(null); });
   const { user } = useAuth();
+  // Which AI writes the AI-generated tossups (persisted, plan-gated).
+  const { model: qbModel, pick: pickQbModel, available: qbModels } = useQbModel();
   const [questions, setQuestions] = useState(() =>
     hasPreloaded ? initialQuestions.map(q => ({ ...q, ...parseTossupText(q.text || '') })) : []
   );
@@ -317,6 +322,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
             system: SYSTEM_PROMPT,
             messages: [{ role: 'user', content: generatePrompt(cat, diff, 10, customInstr, notes) }],
             max_tokens: 8192,
+            model: qbModel,
           }),
         });
         const text = result.content?.[0]?.text || '';
@@ -365,6 +371,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
           system: SYSTEM_PROMPT,
           messages: [{ role: 'user', content: generatePrompt(category, difficulty, questionCount, customInstructions, sourceNotes) }],
           max_tokens: 8192,
+          model: qbModel,
         }),
       });
       const text = result.content?.[0]?.text || '';
@@ -805,7 +812,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
           {/* Source */}
           <div className="grid grid-cols-2 gap-2">
             <GlassTile active={questionSource === 'qbreader'} icon={<BookOpen size={14} />} label="Past QB" sub="qbreader.org" onClick={() => setQuestionSource('qbreader')} />
-            <GlassTile active={questionSource === 'ai'} icon={<Sparkles size={14} />} label="AI" sub="Gemini" onClick={() => setQuestionSource('ai')} />
+            <GlassTile active={questionSource === 'ai'} icon={<Sparkles size={14} />} label="AI" sub={studyModelLabel(qbModel)} onClick={() => setQuestionSource('ai')} />
           </div>
 
           {/* Category */}
@@ -817,6 +824,11 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
           <div className="grid grid-cols-4 gap-1.5" data-tour="qb-difficulty-picker">
             {DIFFICULTIES.map(d => <GlassPill key={d} active={difficulty === d} onClick={() => setDifficulty(d)}>{d}</GlassPill>)}
           </div>
+
+          {/* AI model (AI only) */}
+          {questionSource === 'ai' && (
+            <QbModelPicker value={qbModel} onPick={pickQbModel} models={qbModels} />
+          )}
 
           {/* Count (AI only) */}
           {questionSource === 'ai' && (

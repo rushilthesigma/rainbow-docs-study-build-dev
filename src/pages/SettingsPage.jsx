@@ -327,7 +327,7 @@ function AITab({ prefs, update, flushAutosave, saving, saved, saveError }) {
       <Block label="Response style" hint="On: short, high-signal phrases (default). Off: normal, conversational AI prose.">
         <Toggle accent="blue" checked={prefs.succinctMode ?? true} onChange={v => update('succinctMode', v)} />
       </Block>
-      <Block label="DeepSeek routing" hint="When on, messages about geopolitics or China/Taiwan are automatically answered by a different model for a less filtered response.">
+      <Block label="DeepSeek routing" hint="When on, DeepSeek uses Gemini for China/Taiwan topics and relevant geopolitical follow-ups.">
         <Toggle accent="blue" checked={prefs.deepseekReroute ?? true} onChange={v => update('deepseekReroute', v)} />
       </Block>
       <Block label="Rigor">
@@ -391,18 +391,16 @@ function CurriculumTab({ prefs, update, saving, saved, saveError }) {
 // ─── Account tab ──────────────────────────────────────────────────────────────
 
 const PLAN_LABELS = {
-  free:     'Free',
-  plus:     'Plus',
-  pro:      'Pro',
-  lifetime: 'Lifetime',
+  free: 'Free',
+  paid: 'Paid',
 };
 
 function AccountTab({ user, onRestart }) {
   const toast = useToast();
   const [portalBusy, setPortalBusy] = useState(false);
   const plan = planFromUser(user);
-  const isLifetime = plan === 'lifetime' || !!user?.data?.lifetimePurchasedAt;
-  const isPaid = ['plus', 'pro'].includes(plan) || isLifetime;
+  const isLifetime = !!user?.data?.lifetimePurchasedAt;
+  const isPaid = plan === 'paid';
   const proUntil = user?.data?.proUntil;
 
   async function handleManage() {

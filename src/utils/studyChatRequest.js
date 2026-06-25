@@ -9,6 +9,10 @@ export function buildStudyChatBody({
   model = null,
   humanize = false,
   bestOf = null,
+  reroute = false,
+  smartReroute = false,
+  bruteForce = false,
+  bruteForceFocus = '',
 }) {
   const normalizedCanvas = canvasImage?.dataUrl
     ? {
@@ -28,6 +32,14 @@ export function buildStudyChatBody({
     disableThinking: !!disableThinking,
     humanize: !!humanize,
     model: model || undefined,
+    // Regular reroute: fan this prompt out to every available model.
+    reroute: reroute ? true : undefined,
+    // Smart reroute: reframe the prompt up front (ethos-preserving) before the fan-out.
+    smartReroute: smartReroute ? true : undefined,
+    // Brute force: loop 5 models + up to 10 trigger-word-free rewrites until one answers.
+    bruteForce: bruteForce ? true : undefined,
+    // Optional clarification of the most important part to preserve in rewrites.
+    bruteForceFocus: bruteForce && bruteForceFocus ? String(bruteForceFocus).slice(0, 600) : undefined,
     bestOf: bestOf && Array.isArray(bestOf.models) && bestOf.judgeModel
       ? {
           models: bestOf.models.slice(0, 3),
