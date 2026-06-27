@@ -11,6 +11,7 @@ export default function ChatContainer({
   showThinking = false, thinkingMode = true, thinkingLocked = false, onToggleThinking,
   composerExtras = null,
   composerPrefix = null,
+  composerNotice = null,
   enableDictation = false,
   onPreviewFile = null,
   sideScreenQuizId = null,
@@ -24,6 +25,10 @@ export default function ChatContainer({
   onReroute = null,
   onSmartReroute = null,
   onBruteForce = null,
+  // Smart Reroute and Brute Force are Paid-only. When `paid` is false the
+  // controls render locked and clicking them calls `onUpgrade` instead.
+  paid = true,
+  onUpgrade = null,
   emptyState = null,
   // When true, renders flush (no glass-card, no rounded corners) - use for full-page panels
   flush = false,
@@ -136,6 +141,8 @@ export default function ChatContainer({
               onReroute={typeof onReroute === 'function' && msg.role === 'assistant' && !msg._streaming ? () => onReroute(i) : undefined}
               onSmartReroute={typeof onSmartReroute === 'function' && msg.role === 'assistant' && !msg._streaming ? () => onSmartReroute(i) : undefined}
               onBruteForce={typeof onBruteForce === 'function' && msg.role === 'assistant' && !msg._streaming ? (clarify) => onBruteForce(i, clarify) : undefined}
+              paid={paid}
+              onUpgrade={onUpgrade}
             />
           );
         })}
@@ -155,6 +162,7 @@ export default function ChatContainer({
           <ArrowDown size={12} /> New
         </button>
       )}
+      {!hideInput && composerNotice}
       {!hideInput && (
         <ChatInput
           ref={chatInputRef}

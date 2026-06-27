@@ -3,8 +3,8 @@
 // Study Mode picker UI. Keep credit costs in sync with server.js.
 //
 // Credit model: every model is selectable by everyone. Each message spends
-// the model's credit cost from the user's daily pool (free 100/day, paid
-// 9,500/day). There are no per-model day caps and no plan locks.
+// the model's credit cost from the user's weekly pool (free 995/week, paid
+// 9,500/week). There are no per-model caps and no plan locks.
 
 // Accounts that should not see Claude/OpenAI options. DeepSeek remains
 // selectable and is rejected or fallen back only by its own server-side checks.
@@ -38,6 +38,32 @@ export const STUDY_MODEL_CREDITS = {
 };
 export function studyModelCredits(key) {
   return STUDY_MODEL_CREDITS[key] ?? 1;
+}
+
+// Models costing strictly more than this drain a free user's weekly pool
+// fast enough to warrant a heads-up right above the chat box.
+export const CREDIT_HEAVY_THRESHOLD = 5;
+export function studyModelEatsCreditsFast(key) {
+  return studyModelCredits(key) > CREDIT_HEAVY_THRESHOLD;
+}
+
+// When a heavy model is picked we point the user at a cheap-but-capable
+// alternative (4 credits or fewer). Ordered by capability so we suggest the
+// strongest light model first. Respects per-account visibility and never
+// suggests the model they're already on.
+export const CREDIT_LIGHT_CEILING = 4;
+const CHEAP_MODEL_PREFERENCE = ['grok', 'flash', 'flash-lite', 'deepseek-flash'];
+export function recommendedCheapModel(email, excludeKey) {
+  const cheap = visibleStudyModels(email).filter(
+    (m) => studyModelCredits(m.key) <= CREDIT_LIGHT_CEILING && m.key !== excludeKey
+  );
+  if (!cheap.length) return null;
+  cheap.sort((a, b) => {
+    const pa = CHEAP_MODEL_PREFERENCE.indexOf(a.key);
+    const pb = CHEAP_MODEL_PREFERENCE.indexOf(b.key);
+    return (pa === -1 ? 99 : pa) - (pb === -1 ? 99 : pb);
+  });
+  return cheap[0].key;
 }
 
 export const STUDY_MODELS = [

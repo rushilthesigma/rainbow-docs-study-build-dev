@@ -88,8 +88,8 @@ const DEEPSEEK_PRO   = 'deepseek-v4-pro';
 // streams a chain-of-thought on delta.reasoning_content (forwarded as `thinking`
 // events), like DeepSeek V4 Pro. Offered as a permanently-free Study Mode pick
 // for everyone, with NO per-model cap — it only draws down the shared daily
-// message quota, like DeepSeek V4 Flash. Any Grok call degrades to the
-// equivalent-tier Gemini model on failure, so a bad/absent key never breaks the app.
+// message quota, like DeepSeek V4 Flash. Grok calls never fall back to Gemini:
+// missing/bad xAI keys should surface as xAI errors.
 const GROK = 'grok-4.3';
 
 // Best-effort knowledge cutoffs used only to decide whether a user's prompt
@@ -297,7 +297,7 @@ const XAI_API_KEY = process.env.XAI_API_KEY || '';
 // xAI Grok is OpenAI-compatible, so we reuse the OpenAI SDK pointed at the xAI
 // base URL rather than adding a new dependency.
 const xai = XAI_API_KEY ? new OpenAI({ apiKey: XAI_API_KEY, baseURL: 'https://api.x.ai/v1' }) : null;
-if (!XAI_API_KEY) console.warn('XAI_API_KEY is not set - Grok calls will fall back to Gemini');
+if (!XAI_API_KEY) console.warn('XAI_API_KEY is not set - Grok calls will fail');
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 
 // Data storage - try multiple locations until one works
@@ -456,18 +456,21 @@ const TIER_PRICES = {
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 
 // ===== Plan / limits =====
-// Two plans: free and paid ($4/mo). Each plan gets a daily CREDIT pool drawn
-// on a rolling 24h window (the same usage.msgWindow that used to count
-// messages). Every AI action spends credits: chat/debate/notes spend the
-// chosen MODEL's credit cost (MODEL_CREDIT_COST), curriculum generation a
-// flat CURRICULUM_CREDIT_COST, an AI Quiz Bowl tossup set a flat
-// QB_TOSSUP_CREDIT_COST. Note maps stay a simple count cap.
-//   free = 100 credits/day
-//   paid = 9,500 credits/day  ($4/mo)
-// Owners/advisors are unlimited (see dailyCreditAllowance) so demo accounts
-// never run dry.
+// Two plans: free and paid ($4/mo). Each plan gets a WEEKLY CREDIT pool drawn
+// on a rolling 7-day window (the usage.msgWindow that used to count messages).
+// Every AI action spends credits: chat/debate/notes spend the chosen MODEL's
+// credit cost (MODEL_CREDIT_COST), curriculum generation a flat
+// CURRICULUM_CREDIT_COST, an AI Quiz Bowl tossup set a flat
+// QB_TOSSUP_CREDIT_COST, and multi-model runs (reroute / best-of / brute force)
+// a DISCOUNTED bundle price (see comparisonCreditCost). Note maps stay a count cap.
+//   free = 995 credits/week
+//   paid = 9,500 credits/week  ($4/mo)
+// NOTE: the `dailyCredits` field name is legacy — the pool is now weekly. Kept
+// as-is to avoid churning every reader; treat it as the per-week allowance.
+// Owners/advisors get no exemption — they draw from their plan's pool like
+// everyone else (they resolve to 'paid', so 9,500/week) and adhere to limits.
 const LIMITS = {
-  free: { dailyCredits: 100,  noteMaps: 3 },
+  free: { dailyCredits: 995,  noteMaps: 3 },
   paid: { dailyCredits: 9500, noteMaps: Infinity },
 };
 const PAID_TIERS = new Set(['paid']);
@@ -492,6 +495,11 @@ const DEFAULT_MODEL_CREDIT_COST = 1;
 const CURRICULUM_CREDIT_COST = 50;   // one AI curriculum generation
 const QB_TOSSUP_CREDIT_COST  = 8;    // one AI-generated Quiz Bowl tossup set
 const SOURCED_CREDIT_SURCHARGE = 2;  // extra credits when a web-search answer is served
+// Reroute / best-of / brute force fan out to several models, but instead of
+// billing the full SUM of every model + judge they get a discount: you pay this
+// fraction of the combined cost (floored at the priciest single model that ran),
+// so trying many models is cheaper than running each one separately.
+const MULTI_MODEL_DISCOUNT_RATE = 0.5;  // 50% off the combined model cost
 // Referrals no longer unlock a plan tier; instead 2+ referrals grant a
 // permanent daily bonus to a free user's credit pool.
 const REFERRAL_BONUS_CREDITS = 100;
@@ -572,7 +580,7 @@ function weekKey(d = new Date()) {
 // was a FREE referral tier and resolves to free. Owners/advisors resolve to
 // paid so demo accounts work without paying (and are unlimited via
 // dailyCreditAllowance). Referrals no longer grant a tier; they add bonus
-// daily credits instead.
+// weekly credits instead.
 function getPlan(user, email) {
   const d = user?.data || {};
   if (d.lifetimePurchasedAt) return 'paid';                 // grandfather old lifetime buyers
@@ -582,10 +590,12 @@ function getPlan(user, email) {
   if (isOwner(email) || isAdvisor(email)) return 'paid';   // untouched demo accounts
   return 'free';
 }
-// Daily credit pool for a user: free/paid base + a referral bonus for free
-// users, and unlimited for owner/advisor demo accounts.
+// Weekly credit pool for a user: free/paid base + a referral bonus for free
+// users. Owners/advisors are NOT exempt — they draw from their resolved plan's
+// pool (they resolve to 'paid' via getPlan, so 9,500/week) like any other
+// account, so admins still adhere to plan limits. (Name kept for back-compat;
+// the pool is now weekly, see LIMITS / CREDIT_WINDOW_MS.)
 function dailyCreditAllowance(user, email) {
-  if (isOwner(email) || isAdvisor(email)) return Infinity;
   const plan = getPlan(user, email);
   let cap = LIMITS[plan]?.dailyCredits ?? LIMITS.free.dailyCredits;
   if (plan === 'free' && (user?.data?.referralsUsed || 0) >= REFERRAL_THRESHOLD) {
@@ -1123,7 +1133,11 @@ function autoSearchDecisionForRequest(body, user, email, opts = {}) {
 // on ISO week change. `usage.day` is kept around for backward compat
 // with anything that still reads it; the bucketed daily counters are
 // no longer authoritative.
-const ROLLING_WINDOW_MS = 24 * 60 * 60 * 1000;  // 24h
+const ROLLING_WINDOW_MS = 24 * 60 * 60 * 1000;  // 24h (legacy per-model windows)
+// The CREDIT pool is now weekly: msgWindow entries count toward the allowance
+// for a trailing 7 days, then age out. (Per-model caps below still use the 24h
+// window, but they're retired/inert under the credit model.)
+const CREDIT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;  // 7 days
 function ensureUsageBucket(user) {
   const week = weekKey();
   if (!user.data.usage) user.data.usage = { day: null, messages: 0, quizBowlGames: 0, week: null, curricula: 0, debates: 0 };
@@ -1137,7 +1151,10 @@ function ensureUsageBucket(user) {
   if (!Array.isArray(user.data.usage.gptWindow)) user.data.usage.gptWindow = [];
   if (!Array.isArray(user.data.usage.deepseekWindow)) user.data.usage.deepseekWindow = [];
   const cutoff = Date.now() - ROLLING_WINDOW_MS;
-  user.data.usage.msgWindow = user.data.usage.msgWindow.filter(e => (e?.ts || 0) > cutoff);
+  // The credit pool (msgWindow) ages out over a 7-day window; the legacy
+  // per-model windows keep their 24h cutoff.
+  const creditCutoff = Date.now() - CREDIT_WINDOW_MS;
+  user.data.usage.msgWindow = user.data.usage.msgWindow.filter(e => (e?.ts || 0) > creditCutoff);
   user.data.usage.qbWindow = user.data.usage.qbWindow.filter(ts => ts > cutoff);
   user.data.usage.haikuWindow = user.data.usage.haikuWindow.filter(ts => ts > cutoff);
   user.data.usage.gptWindow = user.data.usage.gptWindow.filter(ts => ts > cutoff);
@@ -1149,14 +1166,15 @@ function ensureUsageBucket(user) {
   }
 }
 
-// Sum the costs of every message logged inside the rolling window.
+// Sum the costs of every message logged inside the rolling 7-day window.
 function rollingMsgUsage(user) {
   return (user.data.usage.msgWindow || []).reduce((n, e) => n + (e?.cost || 1), 0);
 }
 
-// Core credit charge. Draws `amount` credits from the user's rolling-24h
+// Core credit charge. Draws `amount` credits from the user's rolling 7-day
 // pool. Returns { allowed, remaining, limit, plan, cost }. Mutates usage on
-// allowed=true. Owner/advisor accounts are unlimited (allowance = Infinity).
+// allowed=true. (The Infinity branch below is now only reachable if some plan
+// were ever given an unlimited pool — owners/advisors are no longer exempt.)
 function consumeCredits(users, email, amount = 1) {
   const u = users[email];
   if (!u) return { allowed: false, remaining: 0, limit: 0, plan: 'free', cost: amount };
@@ -2930,6 +2948,16 @@ function messagesToAnthropic(messages) {
   });
 }
 
+function messagesHaveImages(messages) {
+  return (messages || []).some(m => (
+    Array.isArray(m.images) &&
+    m.images.some(img => {
+      const url = img?.dataUrl || img?.url;
+      return typeof url === 'string' && url.trim() !== '';
+    })
+  ));
+}
+
 // Convert the same Claude-style messages into the OpenAI Chat Completions shape.
 // systemPrompt becomes a leading system message; images become image_url parts.
 function messagesToOpenAI(systemPrompt, messages) {
@@ -3027,6 +3055,9 @@ async function callDeepSeek(systemPrompt, messages, model, maxOutputTokens = 409
   if (rerouteModel) {
     return callGemini(systemPrompt, messages, rerouteModel, maxOutputTokens, opts);
   }
+  if (messagesHaveImages(messages)) {
+    return callGemini(systemPrompt, messages, geminiSiblingOf(model), maxOutputTokens, opts);
+  }
   if (!deepseek) return callGemini(systemPrompt, messages, geminiSiblingOf(model), maxOutputTokens, opts);
   const resolved = isDeepSeekModel(model) ? model : DEEPSEEK_FLASH;
   const system = opts.jsonMode
@@ -3053,11 +3084,11 @@ async function callDeepSeek(systemPrompt, messages, model, maxOutputTokens = 409
 // callDeepSeek. Grok is OpenAI-compatible (classic Chat Completions), so it uses
 // max_tokens. Grok 4 is a reasoning model — it spends tokens thinking before it
 // answers — so the budget is generous to leave room for both reasoning and the
-// reply. Degrades to the Gemini sibling on any failure, keeping the app resilient
-// if the key is absent/bad or xAI is down.
+// reply. Grok never falls back to Gemini: missing keys and provider errors are
+// returned as xAI failures so callers do not silently get a different model.
 async function callGrok(systemPrompt, messages, model, maxOutputTokens = 4096, opts = {}) {
-  if (!xai) return callGemini(systemPrompt, messages, geminiSiblingOf(model), maxOutputTokens, opts);
   const resolved = isXaiModel(model) ? model : GROK;
+  if (!xai) return { success: false, error: 'XAI_API_KEY not configured', status: 500, model: resolved };
   const system = opts.jsonMode
     ? `${systemPrompt || ''}\n\nRespond with ONLY valid JSON — no markdown, no code fences, no prose before or after.`.trim()
     : (systemPrompt || '');
@@ -3072,8 +3103,8 @@ async function callGrok(systemPrompt, messages, model, maxOutputTokens = 4096, o
     const text = resp?.choices?.[0]?.message?.content || '';
     return { success: true, data: { content: [{ type: 'text', text }], sources: [] }, model: resolved };
   } catch (err) {
-    console.warn(`Grok call (${resolved}) failed: ${err?.message || err}. Falling back to Gemini.`);
-    return callGemini(systemPrompt, messages, geminiSiblingOf(resolved), maxOutputTokens, opts);
+    console.warn(`Grok call (${resolved}) failed: ${err?.message || err}.`);
+    return { success: false, error: err?.message || 'xAI provider failed', status: err?.status || err?.code || 500, model: resolved };
   }
 }
 
@@ -3134,13 +3165,13 @@ async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096,
     }
   }
 
-  // Grok is served by callGrok. Web search is Gemini-only, so a Grok id that
-  // requests grounding is coerced to its Gemini sibling instead.
+  // Grok is served by callGrok. Web search is Gemini-only, but Grok requests
+  // must not silently become Gemini; source-mode Grok returns a clear error.
   if (isXaiModel(currentModel)) {
-    if (!opts.enableWebSearch && xai) {
-      return callGrok(systemPrompt, messages, currentModel, maxOutputTokens, opts);
+    if (opts.enableWebSearch) {
+      return { success: false, error: 'xAI source mode is not supported', status: 400, model: currentModel };
     }
-    currentModel = geminiSiblingOf(currentModel);
+    return callGrok(systemPrompt, messages, currentModel, maxOutputTokens, opts);
   }
 
   if (!genAI) return { success: false, error: 'GEMINI_API_KEY not configured', status: 500 };
@@ -3394,11 +3425,11 @@ app.post('/api/chat', authMiddleware, async (req, res) => {
     const quota = consumeCredits(users, email, cost);
     if (!quota.allowed) {
       const upgradeHint = quota.plan === 'free'
-        ? 'Upgrade to Paid for 9,500 credits/day.'
-        : 'Your credits reset on a rolling 24h window.';
+        ? 'Upgrade to Paid for 9,500 credits/week.'
+        : 'Your credits reset on a rolling 7-day window.';
       return res.status(402).json({
         error: 'message_limit_reached',
-        message: `This answer costs ${cost} credit${cost === 1 ? '' : 's'} and you only have ${quota.remaining} left today. ${upgradeHint}`,
+        message: `This answer costs ${cost} credit${cost === 1 ? '' : 's'} and you only have ${quota.remaining} left this week. ${upgradeHint}`,
         limit: quota.limit, remaining: quota.remaining, plan: quota.plan, cost, upgradeKind: 'upgrade',
       });
     }
@@ -3482,11 +3513,11 @@ app.post('/api/debate/chat', authMiddleware, async (req, res) => {
     const quota = consumeCredits(users, email, cost);
     if (!quota.allowed) {
       const upgradeHint = quota.plan === 'free'
-        ? 'Upgrade to Paid for 9,500 credits/day.'
-        : 'Your credits reset on a rolling 24h window.';
+        ? 'Upgrade to Paid for 9,500 credits/week.'
+        : 'Your credits reset on a rolling 7-day window.';
       return res.status(402).json({
         error: 'message_limit_reached',
-        message: `This reply costs ${cost} credit${cost === 1 ? '' : 's'} and you only have ${quota.remaining} left today. ${upgradeHint}`,
+        message: `This reply costs ${cost} credit${cost === 1 ? '' : 's'} and you only have ${quota.remaining} left this week. ${upgradeHint}`,
         limit: quota.limit, remaining: quota.remaining, plan: quota.plan, cost, upgradeKind: 'upgrade',
       });
     }
@@ -3830,11 +3861,11 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
       const quota = consumeCurriculumGeneration(usersC, emailC);
       if (!quota.allowed) {
         const upgradeHint = quota.plan === 'free'
-          ? 'Upgrade to Paid for 9,500 credits/day.'
-          : 'Your credits reset on a rolling 24h window.';
+          ? 'Upgrade to Paid for 9,500 credits/week.'
+          : 'Your credits reset on a rolling 7-day window.';
         return res.status(402).json({
           error: 'curriculum_limit_reached',
-          message: `Generating a curriculum costs ${CURRICULUM_CREDIT_COST} credits and you only have ${quota.remaining} left today. ${upgradeHint}`,
+          message: `Generating a curriculum costs ${CURRICULUM_CREDIT_COST} credits and you only have ${quota.remaining} left this week. ${upgradeHint}`,
           limit: quota.limit, remaining: quota.remaining, plan: quota.plan, cost: CURRICULUM_CREDIT_COST,
         });
       }
@@ -4831,6 +4862,10 @@ async function streamOpenAIResponse(res, sse, systemPrompt, messages, onComplete
 // `delta.reasoning_content`, which we forward as `thinking` events. V4 Flash runs
 // non-thinking. On any early failure it falls back to the Gemini stream.
 async function streamDeepSeekResponse(res, sse, systemPrompt, messages, onComplete, model, opts = {}) {
+  if (messagesHaveImages(messages)) {
+    return streamAIResponse(res, systemPrompt, messages, onComplete, geminiSiblingOf(model), opts);
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 300000);
   const heartbeat = setInterval(() => {
@@ -4882,8 +4917,13 @@ async function streamDeepSeekResponse(res, sse, systemPrompt, messages, onComple
 // Grok is OpenAI-compatible, so this reuses the OpenAI SDK pointed at the xAI base
 // URL. Grok 4 is a reasoning model: it streams its chain-of-thought on
 // `delta.reasoning_content`, which we forward as `thinking` events, then the answer
-// on `delta.content`. On any early failure it falls back to the Gemini stream.
+// on `delta.content`. Grok errors are surfaced directly; no Gemini fallback.
 async function streamGrokResponse(res, sse, systemPrompt, messages, onComplete, model, opts = {}) {
+  if (!xai) {
+    sse({ error: 'XAI_API_KEY not configured' });
+    res.end();
+    return;
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 300000);
   const heartbeat = setInterval(() => {
@@ -4918,10 +4958,6 @@ async function streamGrokResponse(res, sse, systemPrompt, messages, onComplete, 
     clearTimeout(timeout);
     clearInterval(heartbeat);
     console.error('Grok stream error:', e);
-    // Nothing emitted yet → fall back to the Gemini sibling on the same socket.
-    if (!buffered && !res.writableEnded) {
-      return streamAIResponse(res, systemPrompt, messages, onComplete, geminiSiblingOf(model), opts);
-    }
     if (!res.writableEnded) { sse({ error: e?.message || String(e) }); res.end(); }
   }
 }
@@ -4962,14 +4998,18 @@ async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOv
   const enableWebSearch = !!opts.enableWebSearch;
   const rerouteModel = !enableWebSearch && isDeepSeekModel(modelOverride) ? await deepSeekRerouteTarget(messages, opts, modelOverride) : null;
   const effectiveModelOverride = rerouteModel || modelOverride;
+  const hasImages = messagesHaveImages(messages);
   // Claude models stream natively for non-sourced requests. Source mode is
   // backed by Google Search grounding (Gemini only), so a Claude id in source
   // mode is coerced to its Gemini sibling instead of routing to Anthropic.
   const wantClaude = !!anthropic && isClaudeModel(effectiveModelOverride) && !enableWebSearch;
   const wantOpenAI = !!openai && isOpenAIModel(effectiveModelOverride) && (!enableWebSearch || !!rerouteModel);
-  const wantDeepSeek = !!deepseek && isDeepSeekModel(effectiveModelOverride) && !enableWebSearch;
-  const wantGrok = !!xai && isXaiModel(effectiveModelOverride) && !enableWebSearch;
-  const requestedModel = (wantClaude || wantOpenAI || wantDeepSeek || wantGrok) ? effectiveModelOverride : geminiSiblingOf(effectiveModelOverride || DEFAULT_MODEL);
+  const wantDeepSeek = !!deepseek && isDeepSeekModel(effectiveModelOverride) && !enableWebSearch && !hasImages;
+  const isGrokRequest = isXaiModel(effectiveModelOverride);
+  const wantGrok = !!xai && isGrokRequest && !enableWebSearch;
+  const requestedModel = (wantClaude || wantOpenAI || wantDeepSeek || wantGrok || isGrokRequest)
+    ? effectiveModelOverride
+    : geminiSiblingOf(effectiveModelOverride || DEFAULT_MODEL);
   if (!res.headersSent) {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -5005,6 +5045,11 @@ async function streamAIResponse(res, systemPrompt, messages, onComplete, modelOv
   }
   if (wantGrok) {
     return streamGrokResponse(res, sse, systemPrompt, messages, onComplete, requestedModel, opts);
+  }
+  if (isGrokRequest) {
+    sse({ error: xai ? 'xAI source mode is not supported' : 'XAI_API_KEY not configured' });
+    res.end();
+    return;
   }
 
   if (!genAI) {
@@ -5374,18 +5419,36 @@ function comparisonBillKeys(bestOfMeta, plan) {
   return keys;
 }
 
-// Total credit cost of every model that actually ran in a multi-model turn
-// (best-of / reroute / brute force): sum of each response model + the judge.
-function comparisonCreditCost(bestOfMeta) {
+// Discounted credit cost of a multi-model turn (best-of / reroute / brute
+// force). The raw cost is the sum of every response model + the judge, but we
+// only charge MULTI_MODEL_DISCOUNT_RATE of that sum — floored at the priciest
+// single model that ran, so a fan-out never costs less than one model run but
+// is much cheaper than paying full price for each. Returns an integer.
+function comparisonRawCreditCost(bestOfMeta) {
   let total = 0;
-  for (const r of (bestOfMeta?.responses || [])) total += studyModelCreditCost(r?.key);
-  if (bestOfMeta?.mode === 'best-of' && bestOfMeta?.judge?.key) total += studyModelCreditCost(bestOfMeta.judge.key);
-  return total;
+  let priciest = 0;
+  for (const r of (bestOfMeta?.responses || [])) {
+    const c = studyModelCreditCost(r?.key);
+    total += c;
+    if (c > priciest) priciest = c;
+  }
+  if (bestOfMeta?.mode === 'best-of' && bestOfMeta?.judge?.key) {
+    const j = studyModelCreditCost(bestOfMeta.judge.key);
+    total += j;
+    if (j > priciest) priciest = j;
+  }
+  return { total, priciest };
+}
+function comparisonCreditCost(bestOfMeta) {
+  const { total, priciest } = comparisonRawCreditCost(bestOfMeta);
+  if (total <= 0) return 0;
+  return Math.max(priciest, Math.ceil(total * MULTI_MODEL_DISCOUNT_RATE));
 }
 
 // Best-of/reroute/brute-force fan out to many models, but requireMessageQuota
 // only charged the single primary model up front. Top up the credit pool with
-// the difference so a multi-model run costs the sum of every model it ran.
+// the difference so a multi-model run costs the DISCOUNTED bundle price above
+// (comparisonCreditCost), not the full sum of every model it ran.
 // Recorded unconditionally (the work is already done); owners are unlimited.
 function chargeMultiModelCredits(req, users, email, bestOfMeta) {
   const u = users[email];
@@ -5630,8 +5693,7 @@ const BRUTE_FORCE_MODELS = 5;       // how many models each round fans out to
 const BRUTE_FORCE_MAX_ROUNDS = 10;  // hard cap so a stuck request can't spin forever
 // The Brute Forcer is its OWN model, separate from the per-model fan-out. Crafting
 // a prompt that reliably passes is the harder job, so it runs on Grok 4 (xAI's
-// reasoning model) rather than the Gemini-tier fan-out. callGrok auto-falls back to
-// the Gemini tier if xAI errors or the key is missing.
+// reasoning model) rather than the Gemini-tier fan-out.
 const BRUTE_FORCE_MODEL = GROK;
 
 // Compact the running attempt log into a brief the Brute Forcer learns from:
@@ -5702,14 +5764,9 @@ Your strategy every round:
     temperature: Math.min(0.3 + (round - 1) * 0.15, 0.9),
   };
   try {
-    // Dedicated Brute Forcer model: Grok 4. callGrok auto-falls back to the Gemini
-    // tier if xAI errors or the key is missing. Grok 4 is a reasoning model, so give
-    // it extra token headroom — thinking tokens share the budget with the JSON output.
-    // Belt-and-suspenders: if it still comes back unsuccessful, retry on Flash Lite.
-    let result = await callGrok(system, [{ role: 'user', content: user }], BRUTE_FORCE_MODEL, 4096, opts);
-    if (!result?.success) {
-      result = await callGemini(system, [{ role: 'user', content: user }], GEMINI_FLASH_LITE, 2048, opts);
-    }
+    // Dedicated Brute Forcer model: Grok 4. Grok 4 is a reasoning model, so give
+    // it extra token headroom; thinking tokens share the budget with the JSON output.
+    const result = await callGrok(system, [{ role: 'user', content: user }], BRUTE_FORCE_MODEL, 4096, opts);
     if (!result?.success) return null;
     const parsed = parseAIJson(bestOfText(result));
     const prompt = String(parsed?.prompt || '').trim();
@@ -8081,7 +8138,7 @@ app.post('/api/notes/:nid/generate-cues', authMiddleware, async (req, res) => {
     const cueCost = creditCostForModelId(GEMINI_FLASH_LITE);
     const cueQuota = consumeCredits(users, email, cueCost);
     if (!cueQuota.allowed) {
-      return res.status(402).json({ error: 'message_limit_reached', message: `Generating cues costs ${cueCost} credit${cueCost === 1 ? '' : 's'} and you only have ${cueQuota.remaining} left today.`, limit: cueQuota.limit, remaining: cueQuota.remaining, plan: cueQuota.plan, cost: cueCost });
+      return res.status(402).json({ error: 'message_limit_reached', message: `Generating cues costs ${cueCost} credit${cueCost === 1 ? '' : 's'} and you only have ${cueQuota.remaining} left this week.`, limit: cueQuota.limit, remaining: cueQuota.remaining, plan: cueQuota.plan, cost: cueCost });
     }
     saveUsers(users);
 
@@ -8115,7 +8172,7 @@ app.post('/api/notes/:nid/generate-summary', authMiddleware, async (req, res) =>
     const sumCost = creditCostForModelId(GEMINI_FLASH_LITE);
     const sumQuota = consumeCredits(users, email, sumCost);
     if (!sumQuota.allowed) {
-      return res.status(402).json({ error: 'message_limit_reached', message: `Generating a summary costs ${sumCost} credit${sumCost === 1 ? '' : 's'} and you only have ${sumQuota.remaining} left today.`, limit: sumQuota.limit, remaining: sumQuota.remaining, plan: sumQuota.plan, cost: sumCost });
+      return res.status(402).json({ error: 'message_limit_reached', message: `Generating a summary costs ${sumCost} credit${sumCost === 1 ? '' : 's'} and you only have ${sumQuota.remaining} left this week.`, limit: sumQuota.limit, remaining: sumQuota.remaining, plan: sumQuota.plan, cost: sumCost });
     }
     saveUsers(users);
 
@@ -8165,7 +8222,7 @@ app.post('/api/notes/:id/flashcards', authMiddleware, async (req, res) => {
       const fcCost = creditCostForModelId(DEFAULT_MODEL);
       const fcQuota = consumeCredits(users, email, fcCost);
       if (!fcQuota.allowed) {
-        return res.status(402).json({ error: 'message_limit_reached', message: `Generating flashcards costs ${fcCost} credit${fcCost === 1 ? '' : 's'} and you only have ${fcQuota.remaining} left today.`, limit: fcQuota.limit, remaining: fcQuota.remaining, plan: fcQuota.plan, cost: fcCost });
+        return res.status(402).json({ error: 'message_limit_reached', message: `Generating flashcards costs ${fcCost} credit${fcCost === 1 ? '' : 's'} and you only have ${fcQuota.remaining} left this week.`, limit: fcQuota.limit, remaining: fcQuota.remaining, plan: fcQuota.plan, cost: fcCost });
       }
       saveUsers(users);
       const missed = missedForTopic(users[email].data.missedQuestions, note.title || '', noteContent.slice(0, 200), 4);
@@ -11944,6 +12001,21 @@ function requireMessageQuota(req, res, next) {
   if (!email) return res.status(404).json({ error: 'User not found' });
   users[email].data = migrateUserData(users[email].data);
   if (!req.body || typeof req.body !== 'object') req.body = {};
+  // Smart Reroute and Brute Force are Paid-only Study Mode features. Reject
+  // here — before any credits are consumed — so free users see an upgrade
+  // prompt instead of being charged for a refusal. (Plain Reroute stays free.)
+  const wantsSmartReroute = req.body.reroute === true && req.body.smartReroute === true;
+  const wantsBruteForce = req.body.bruteForce === true;
+  if ((wantsSmartReroute || wantsBruteForce) && !isPro(users[email], email)) {
+    const feature = wantsBruteForce ? 'Brute force' : 'Smart reroute';
+    return res.status(402).json({
+      error: 'feature_requires_paid_plan',
+      feature: wantsBruteForce ? 'bruteForce' : 'smartReroute',
+      message: `${feature} is a Paid feature. Upgrade to Paid to keep rewriting your prompt across every model until one answers.`,
+      plan: getPlan(users[email], email),
+      upgradeKind: 'upgrade',
+    });
+  }
   const autoSearch = autoSearchDecisionForRequest(req.body, users[email], email, {
     requestedModel: req.body.model,
     stream: true,
@@ -11964,11 +12036,11 @@ function requireMessageQuota(req, res, next) {
   const result = consumeCredits(users, email, cost);
   if (!result.allowed) {
     const upgradeHint = result.plan === 'free'
-      ? 'Upgrade to Paid for 9,500 credits/day.'
-      : 'Your credits reset on a rolling 24h window.';
+      ? 'Upgrade to Paid for 9,500 credits/week.'
+      : 'Your credits reset on a rolling 7-day window.';
     return res.status(402).json({
       error: 'message_limit_reached',
-      message: `This answer costs ${cost} credit${cost === 1 ? '' : 's'} and you only have ${result.remaining} left today. ${upgradeHint}`,
+      message: `This answer costs ${cost} credit${cost === 1 ? '' : 's'} and you only have ${result.remaining} left this week. ${upgradeHint}`,
       limit: result.limit, remaining: result.remaining, plan: result.plan, cost, upgradeKind: 'upgrade',
     });
   }
@@ -12652,7 +12724,8 @@ app.get('/api/billing/status', authMiddleware, (req, res) => {
         used,
         remaining: unlimited ? null : Math.max(0, allowance - used),
         unlimited,
-        windowHours: 24,
+        windowHours: 168,
+        windowDays: 7,
       },
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -12680,7 +12753,8 @@ app.get('/api/billing/usage', authMiddleware, (req, res) => {
   res.json({
     plan,
     limits,
-    windowHours: 24,
+    windowHours: 168,
+    windowDays: 7,
     credits: {
       allowance: unlimited ? null : allowance,
       used,
@@ -12691,8 +12765,15 @@ app.get('/api/billing/usage', authMiddleware, (req, res) => {
     featureCosts: {
       curriculum: CURRICULUM_CREDIT_COST,
       quizBowlTossup: QB_TOSSUP_CREDIT_COST,
+      // Note AI actions charge the underlying model's per-message rate.
+      noteSummary: creditCostForModelId(GEMINI_FLASH_LITE),
+      noteFlashcards: creditCostForModelId(DEFAULT_MODEL),
       sourcedSurcharge: SOURCED_CREDIT_SURCHARGE,
     },
+    // Reroute / best-of / brute force aren't a flat fee — they charge a
+    // discounted share of the combined model cost (floored at the priciest
+    // model). Surface the rate so the UI can explain the discount.
+    multiModelDiscount: MULTI_MODEL_DISCOUNT_RATE,
     used: {
       noteMaps: (u.noteMaps || []).length,
     },
@@ -12716,8 +12797,12 @@ app.get('/api/billing/tiers', (req, res) => {
     featureCosts: {
       curriculum: CURRICULUM_CREDIT_COST,
       quizBowlTossup: QB_TOSSUP_CREDIT_COST,
+      // Note AI actions charge the underlying model's per-message rate.
+      noteSummary: creditCostForModelId(GEMINI_FLASH_LITE),
+      noteFlashcards: creditCostForModelId(DEFAULT_MODEL),
       sourcedSurcharge: SOURCED_CREDIT_SURCHARGE,
     },
+    multiModelDiscount: MULTI_MODEL_DISCOUNT_RATE,
   });
 });
 
@@ -14926,7 +15011,7 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
       if (!quota.allowed) {
         return res.status(402).json({
           error: 'message_limit_reached',
-          message: `Generating tossups costs ${QB_TOSSUP_CREDIT_COST} credits and you only have ${quota.remaining} left today.`,
+          message: `Generating tossups costs ${QB_TOSSUP_CREDIT_COST} credits and you only have ${quota.remaining} left this week.`,
           limit: quota.limit, remaining: quota.remaining, plan: quota.plan, cost: QB_TOSSUP_CREDIT_COST,
         });
       }
@@ -16664,7 +16749,7 @@ app.post('/api/trial/generate', authMiddleware, async (req, res) => {
         if (!quota.allowed) {
           return res.status(402).json({
             error: 'message_limit_reached',
-            message: `Generating tossups costs ${QB_TOSSUP_CREDIT_COST} credits and you only have ${quota.remaining} left today.`,
+            message: `Generating tossups costs ${QB_TOSSUP_CREDIT_COST} credits and you only have ${quota.remaining} left this week.`,
             limit: quota.limit, remaining: quota.remaining, plan: quota.plan, cost: QB_TOSSUP_CREDIT_COST,
           });
         }

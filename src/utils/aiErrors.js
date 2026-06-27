@@ -20,6 +20,17 @@ export function friendlyAIError(raw) {
     };
   }
 
+  // Smart Reroute / Brute Force are Paid-only Study Mode features.
+  if (code === 'feature_requires_paid_plan' || msg.includes('paid feature')) {
+    const feat = raw?.feature === 'bruteForce'
+      ? 'Brute force'
+      : raw?.feature === 'smartReroute' ? 'Smart reroute' : 'That feature';
+    return {
+      title: `${feat} is a Paid feature`,
+      body: serverMsg || `Upgrade to Paid to use ${feat.toLowerCase()} — it keeps rewriting your prompt across every model until one answers.`,
+    };
+  }
+
   const isLimit = code === 'message_limit_reached'
     || msg.includes('message_limit_reached')
     || msg.includes("today's message limit")
@@ -28,16 +39,16 @@ export function friendlyAIError(raw) {
   if (isLimit) {
     const plan = raw?.plan;
     const kind = raw?.upgradeKind || (plan === 'free' ? 'refer' : 'upgrade');
-    const limitTxt = raw?.limit ? ` (${raw.limit}/day)` : '';
+    const limitTxt = raw?.limit ? ` (${raw.limit} credits/week)` : '';
     if (kind === 'refer') {
       return {
-        title: 'Daily message limit reached',
-        body: `You've used today's free messages${limitTxt}. Refer 2 friends to unlock Plus-Lite (free) for higher limits, or upgrade any time.`,
+        title: 'Out of credits for this week',
+        body: `You've used all of this week's credits${limitTxt}. Each message costs credits depending on the model. Refer 2 friends to unlock Plus-Lite (free) for a bigger weekly allowance, or upgrade any time.`,
       };
     }
     return {
-      title: 'Daily message limit reached',
-      body: `You've used today's messages${limitTxt}. Upgrade to the next plan for more.`,
+      title: 'Out of credits for this week',
+      body: `You've used all of this week's credits${limitTxt}. Each message costs credits depending on the model — upgrade to the next plan for a much bigger weekly allowance.`,
     };
   }
 

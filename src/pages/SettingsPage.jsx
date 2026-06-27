@@ -12,8 +12,9 @@ import Button from '../components/shared/Button';
 import { GraduationCap, ChevronDown, Check, RotateCcw } from 'lucide-react';
 import { DEFAULT_ACCENT_HUE, TOOL_ACCENT_DEFAULTS, useUIPreference } from '../context/UIPreferenceContext';
 import { WALLPAPER_LIST } from '../components/desktop/DesktopBackground';
-import { openBillingPortal } from '../api/billing';
+import { openBillingPortal, createCheckoutSession, getTiers, getMyUsage } from '../api/billing';
 import { planFromUser } from '../components/billing/modelAccess';
+import FALLBACK_TIERS, { FALLBACK_MODEL_COSTS, FALLBACK_FEATURE_COSTS, FALLBACK_MULTI_MODEL_DISCOUNT, mergeTiers, fmtCap, fmtCredits } from '../components/billing/tiersCatalog';
 import { useToast } from '../components/shared/Toast';
 
 // ─── Shared primitives ────────────────────────────────────────────────────────
@@ -255,7 +256,149 @@ const TABS = [
   { id: 'ai',         label: 'AI Tutor' },
   { id: 'curriculum', label: 'Curriculum' },
   { id: 'account',    label: 'Account' },
+  { id: 'plans',      label: 'Plans' },
 ];
+
+// ─── Plans tab ────────────────────────────────────────────────────────────────
+// Daily credit balance, plan comparison, and per-model credit costs — rendered
+// as flat Settings sections (no boxed card).
+const MODEL_LABELS = {
+  'flash-lite': 'Flash Lite', 'deepseek-flash': 'DeepSeek V4', 'grok': 'Grok 4.3', 'flash': 'Flash',
+  'gpt-5.4-mini': 'GPT-5.4 mini', 'deepseek-pro': 'DeepSeek Pro', 'haiku': 'Haiku 4.5',
+  'gemini-pro': 'Gemini Pro', 'sonnet': 'Sonnet 4.6', 'gpt-5.4': 'GPT-5.4',
+};
+
+// Flat per-feature credit costs surfaced in the Plans tab, in display order.
+const FEATURE_LABELS = {
+  curriculum: 'Curriculum generation',
+  quizBowlTossup: 'Quiz Bowl tossups (AI)',
+  noteSummary: 'Note summary & cue cards',
+  noteFlashcards: 'Note flashcards',
+};
+const FEATURE_ORDER = ['curriculum', 'quizBowlTossup', 'noteSummary', 'noteFlashcards'];
+
+function PlansTab({ user }) {
+  const toast = useToast();
+  const cachedPlan = user?.data?.plan || 'free';
+  const [tiers, setTiers] = useState(FALLBACK_TIERS);
+  const [usage, setUsage] = useState(null);
+  const [buyBusy, setBuyBusy] = useState(false);
+
+  useEffect(() => {
+    getTiers().then(d => setTiers(mergeTiers(FALLBACK_TIERS, d.tiers))).catch(() => {});
+    getMyUsage().then(setUsage).catch(() => {});
+  }, []);
+
+  const plan = usage?.plan || (['paid', 'plus', 'pro', 'lifetime'].includes(cachedPlan) ? 'paid' : 'free');
+  const credits = usage?.credits || null;
+  const modelCosts = usage?.modelCosts || FALLBACK_MODEL_COSTS;
+
+  async function buy() {
+    if (buyBusy) return;
+    setBuyBusy(true);
+    try {
+      const { url } = await createCheckoutSession('paid');
+      if (url) window.open(url, '_blank', 'noopener');
+    } catch (e) {
+      toast.error(e?.message || 'Checkout failed.');
+    }
+    setBuyBusy(false);
+  }
+
+  // Weekly credit gauge.
+  const unlimited = !credits || credits.unlimited || credits.allowance == null;
+  const allowance = credits?.allowance ?? (tiers?.[plan]?.dailyCredits ?? tiers?.[plan]?.limits?.dailyCredits ?? 995);
+  const multiModelDiscount = usage?.multiModelDiscount ?? FALLBACK_MULTI_MODEL_DISCOUNT;
+  const used = credits?.used ?? 0;
+  const remaining = unlimited ? null : (credits?.remaining ?? Math.max(0, allowance - used));
+  const pct = unlimited ? 10 : Math.min(100, Math.round((used / Math.max(1, allowance)) * 100));
+  const tone = unlimited ? 'bg-white/20' : pct >= 100 ? 'bg-rose-400' : pct >= 85 ? 'bg-amber-400' : 'bg-blue-400';
+
+  const costEntries = Object.entries(modelCosts || {}).sort((a, b) => a[1] - b[1]);
+  // Server featureCosts merged over the fallback so note costs show even on an
+  // older server build that doesn't return them yet.
+  const featureCosts = { ...FALLBACK_FEATURE_COSTS, ...(usage?.featureCosts || {}) };
+  const featureEntries = FEATURE_ORDER
+    .filter((k) => typeof featureCosts[k] === 'number')
+    .map((k) => [k, featureCosts[k]]);
+
+  return (
+    <div>
+      <Block label="Credits this week" hint="Resets on a rolling 7-day window">
+        <div className="text-[15px] font-semibold text-white tabular-nums leading-none">
+          {unlimited
+            ? 'Unlimited'
+            : <>{fmtCredits(remaining)}<span className="text-white/25 text-[11px]"> / {fmtCredits(allowance)} left</span></>}
+        </div>
+        <div className="mt-2 h-1 rounded-full bg-white/[0.07]">
+          <div className={`h-full rounded-full ${tone}`} style={{ width: `${unlimited ? 100 : Math.max(2, 100 - pct)}%` }} />
+        </div>
+      </Block>
+
+      <Block label="Plans">
+        <ul className="divide-y divide-white/[0.05]">
+          {['free', 'paid'].map(id => {
+            const t = tiers[id];
+            if (!t) return null;
+            const isCurrent = plan === id;
+            const daily = t.dailyCredits ?? t.limits?.dailyCredits;
+            const price = id === 'free' ? 'Free' : `$${t.amountUsd}/${t.interval || 'month'}`;
+            return (
+              <li key={id} className="flex items-center justify-between gap-3 py-2.5">
+                <div className="min-w-0">
+                  <div className="text-[13px] font-semibold text-white leading-tight">
+                    {t.label}
+                    <span className="text-[11px] font-normal text-white/40 ml-2 tabular-nums">{price}</span>
+                  </div>
+                  <div className="text-[11px] text-white/45 tabular-nums mt-0.5">
+                    {fmtCredits(daily)} credits/week · {fmtCap(t.limits?.noteMaps)} note maps
+                  </div>
+                </div>
+                {isCurrent ? (
+                  <span className="shrink-0 text-[10px] text-emerald-400 font-semibold flex items-center gap-0.5">
+                    <Check size={9} /> Current
+                  </span>
+                ) : id === 'paid' ? (
+                  <Button size="sm" onClick={buy} loading={buyBusy} disabled={!t.buyable}>Upgrade</Button>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      </Block>
+
+      <Block label="Cost per message" hint="What each model spends per message">
+        <ul className="text-[12px] leading-relaxed">
+          {costEntries.map(([key, cost]) => (
+            <li key={key} className="text-white/60">
+              {MODEL_LABELS[key] || key}
+              <span className="text-white/35"> — </span>
+              <span className="tabular-nums text-white/80">{cost} cr</span>
+            </li>
+          ))}
+        </ul>
+      </Block>
+
+      <Block label="Cost per generation" hint="Flat credit cost for one-shot AI generations">
+        <ul className="text-[12px] leading-relaxed">
+          {featureEntries.map(([key, cost]) => (
+            <li key={key} className="text-white/60">
+              {FEATURE_LABELS[key] || key}
+              <span className="text-white/35"> — </span>
+              <span className="tabular-nums text-white/80">{cost} cr</span>
+            </li>
+          ))}
+          <li className="text-white/60">
+            Reroute &amp; Best of
+            <span className="text-white/35"> — </span>
+            <span className="tabular-nums text-white/80">{Math.round(multiModelDiscount * 100)}% off</span>
+            <span className="text-white/35"> the combined model cost</span>
+          </li>
+        </ul>
+      </Block>
+    </div>
+  );
+}
 
 // ─── Appearance tab ───────────────────────────────────────────────────────────
 
@@ -398,6 +541,7 @@ const PLAN_LABELS = {
 function AccountTab({ user, onRestart }) {
   const toast = useToast();
   const [portalBusy, setPortalBusy] = useState(false);
+  const [buyBusy, setBuyBusy] = useState(false);
   const plan = planFromUser(user);
   const isLifetime = !!user?.data?.lifetimePurchasedAt;
   const isPaid = plan === 'paid';
@@ -413,6 +557,18 @@ function AccountTab({ user, onRestart }) {
       toast.error(e?.message || 'Could not open billing portal.');
     }
     setPortalBusy(false);
+  }
+
+  async function handleUpgrade() {
+    if (buyBusy) return;
+    setBuyBusy(true);
+    try {
+      const { url } = await createCheckoutSession('paid');
+      if (url) window.open(url, '_blank', 'noopener');
+    } catch (e) {
+      toast.error(e?.message || 'Checkout failed.');
+    }
+    setBuyBusy(false);
   }
 
   return (
@@ -435,7 +591,9 @@ function AccountTab({ user, onRestart }) {
           {isPaid && !isLifetime && (
             <Button size="sm" variant="ghost" onClick={handleManage} loading={portalBusy}>Manage</Button>
           )}
-          {!isPaid && <span className="text-[12px] text-white/30">Upgrade from the top bar</span>}
+          {!isPaid && (
+            <Button size="sm" onClick={handleUpgrade} loading={buyBusy}>Upgrade</Button>
+          )}
         </div>
       </Block>
 
@@ -465,11 +623,13 @@ function isDemoEmail(email) {
   return e.startsWith('demo-landing-') || e.endsWith('@covalent.test');
 }
 
-export default function SettingsPage() {
+export default function SettingsPage({ initialTab } = {}) {
   const { user, fetchUser } = useAuth();
   const toast = useToast();
   const isDemo = isDemoEmail(user?.email);
-  const [tab, setTab] = useState('appearance');
+  const [tab, setTab] = useState(() => (
+    TABS.some((t) => t.id === initialTab) ? initialTab : 'appearance'
+  ));
 
   useEffect(() => {
     if (isDemo) { try { localStorage.removeItem(PREFS_LS_KEY); } catch {} }
@@ -640,6 +800,7 @@ export default function SettingsPage() {
         {tab === 'ai'         && <AITab prefs={prefs} update={update} flushAutosave={flushAutosaveNow} saving={saving} saved={saved} saveError={saveError} />}
         {tab === 'curriculum' && <CurriculumTab prefs={prefs} update={update} saving={saving} saved={saved} saveError={saveError} />}
         {tab === 'account'    && <AccountTab user={user} onRestart={handleRestart} />}
+        {tab === 'plans'      && <PlansTab user={user} />}
       </div>
     </div>
   );

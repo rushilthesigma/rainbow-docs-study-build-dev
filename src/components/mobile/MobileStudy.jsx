@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Sparkles, History, Send, Calculator, Beaker, Lightbulb, Compass, Plus, X, Brain, ChevronRight, Cpu, Check, Lock } from 'lucide-react';
+import { Sparkles, History, Send, Calculator, Beaker, Lightbulb, Compass, Plus, X, Brain, ChevronRight, Cpu, Check, Lock, Zap, ArrowRight } from 'lucide-react';
 import { sendStudyMessage, listStudySessions, getStudySession, deleteStudySession } from '../../api/curriculum';
 import { syncData } from '../../api/auth';
 import { errorChatMessage } from '../../utils/aiErrors';
@@ -7,7 +7,7 @@ import { Z } from '../../styles/tokens';
 import useKeyboardInset from '../../hooks/useKeyboardInset';
 import { useAuth } from '../../context/AuthContext';
 import { planFromUser } from '../billing/modelAccess';
-import { HAIKU_FREE_DAILY, resolveStudyModel, canUseStudyModel, requiredPlanLabelFor, studyModelLabel, studyModelHasFreeCap, visibleStudyModels, isGeminiOnlyEmail, isBlockedForGeminiOnly, resolveGeminiOnlyModel, STUDY_MODELS } from '../study/studyModels';
+import { HAIKU_FREE_DAILY, resolveStudyModel, canUseStudyModel, requiredPlanLabelFor, studyModelLabel, studyModelHasFreeCap, visibleStudyModels, isGeminiOnlyEmail, isBlockedForGeminiOnly, resolveGeminiOnlyModel, STUDY_MODELS, studyModelEatsCreditsFast, recommendedCheapModel } from '../study/studyModels';
 
 // Mobile-native Study Mode: full-bleed chat, slim title, no Debate
 // button (head-to-head needs a wider canvas), no sidebar. The empty
@@ -20,7 +20,7 @@ const QUICK_PROMPTS = [
   { icon: Compass,    label: "What's a good thing to study right now?", prompt: 'What should I work on right now?' },
 ];
 
-export default function MobileStudy() {
+export default function MobileStudy({ onNavigate }) {
   const { user, fetchUser } = useAuth();
   const plan = planFromUser(user);
   const userEmail = user?.email || '';
@@ -47,6 +47,9 @@ export default function MobileStudy() {
   const studyModelRef = useRef(studyModel);
   studyModelRef.current = studyModel;
   const [modelSheetOpen, setModelSheetOpen] = useState(false);
+  // Credit-burn notice dismissal — session-only, keyed by the model it was
+  // dismissed for so a different costly pick surfaces it again.
+  const [creditNoticeDismissed, setCreditNoticeDismissed] = useState(null);
   // Free Haiku messages left in the rolling 24h window (non-paid only). Null
   // until the server reports it on the first send.
   const [haikuRemaining, setHaikuRemaining] = useState(null);
@@ -221,6 +224,33 @@ export default function MobileStudy() {
             <HaikuLimitPill remaining={haikuRemaining} />
           )}
         </div>
+        {plan === 'free' && studyModelEatsCreditsFast(studyModel) && creditNoticeDismissed !== studyModel && (
+          <div className="flex items-center gap-2 mb-2 text-[11px] font-medium text-blue-600 dark:text-blue-300/90">
+            <Zap size={12} className="shrink-0 fill-current" />
+            <span className="min-w-0">
+              {studyModelLabel(studyModel)} takes up credits fast
+              {(() => { const r = recommendedCheapModel(userEmail, studyModel); return r ? <> · try <span className="font-semibold">{studyModelLabel(r)}</span></> : null; })()}
+            </span>
+            {onNavigate && (
+              <button
+                type="button"
+                onClick={() => onNavigate('settings')}
+                className="inline-flex items-center gap-0.5 font-semibold text-blue-600 dark:text-blue-300 whitespace-nowrap active:opacity-70"
+              >
+                See how it works
+                <ArrowRight size={11} className="shrink-0" />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setCreditNoticeDismissed(studyModel)}
+              aria-label="Dismiss"
+              className="ml-auto shrink-0 p-0.5 rounded text-blue-500/70 active:bg-blue-500/10"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        )}
         <div className="flex items-end gap-2">
           <textarea
             value={input}

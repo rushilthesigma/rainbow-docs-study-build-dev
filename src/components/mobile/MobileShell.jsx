@@ -136,7 +136,7 @@ const MobileShell = forwardRef(function MobileShell(_props, ref) {
           // child's h-full collapsed to its content size and the form
           // floated wherever the messages list ended.
           <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-            <PageComponent />
+            <PageComponent onNavigate={navigateFromHome} />
           </div>
         ) : (
           <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">

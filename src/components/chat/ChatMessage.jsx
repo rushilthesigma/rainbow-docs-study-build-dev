@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import { Check, X, Copy, Pencil, FileText, ExternalLink, FileText as NoteIcon, Zap, Swords, Brain, ChevronRight, ChevronDown, Volume2, Square, PanelRightOpen, Shuffle, Hammer } from 'lucide-react';
+import { Check, X, Copy, Pencil, FileText, ExternalLink, FileText as NoteIcon, Zap, Swords, Brain, ChevronRight, ChevronDown, Volume2, Square, PanelRightOpen, Shuffle, Hammer, Lock } from 'lucide-react';
 import MathText from '../shared/MathText';
 import { useWindowManager } from '../../context/WindowManagerContext';
 
@@ -426,6 +426,10 @@ export default function ChatMessage({
   onReroute,
   onSmartReroute,
   onBruteForce,
+  // Smart Reroute and Brute Force are Paid-only. When false, those two controls
+  // render locked and route the click to the upgrade flow instead of firing.
+  paid = true,
+  onUpgrade = null,
 }) {
   const isUser = message.role === 'user';
   const raw = message.content || '';
@@ -557,6 +561,7 @@ export default function ChatMessage({
   // prompt without trigger words. Empty focus is fine - it just runs the loop.
   function submitBruteForce() {
     if (typeof onBruteForce !== 'function') return;
+    if (!paid) { setBruteOpen(false); onUpgrade?.(); return; }
     const focus = bruteFocus.trim();
     setBruteOpen(false);
     setBruteFocus('');
@@ -975,10 +980,16 @@ export default function ChatMessage({
                           Reroute
                         </button>
                         <button
-                          onClick={() => { setRerouteMenuOpen(false); onSmartReroute(); }}
-                          className="w-full px-2.5 py-1 text-left text-[11px] text-gray-800 dark:text-white/85 whitespace-nowrap hover:bg-gray-100 dark:hover:bg-white/[0.07] transition-colors"
+                          onClick={() => { setRerouteMenuOpen(false); if (paid) onSmartReroute(); else onUpgrade?.(); }}
+                          title={paid ? undefined : 'Smart reroute is a Paid feature — upgrade to reframe your prompt before fanning it out.'}
+                          className="w-full px-2.5 py-1 text-left text-[11px] text-gray-800 dark:text-white/85 whitespace-nowrap hover:bg-gray-100 dark:hover:bg-white/[0.07] transition-colors flex items-center justify-between gap-3"
                         >
-                          Smart Reroute
+                          <span>Smart Reroute</span>
+                          {!paid && (
+                            <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-500 dark:text-amber-300/90">
+                              <Lock size={9} /> Paid
+                            </span>
+                          )}
                         </button>
                       </div>
                     </>,
@@ -999,13 +1010,17 @@ export default function ChatMessage({
             )}
             {typeof onBruteForce === 'function' && (
               <button
-                onClick={() => { setBruteOpen((o) => !o); setEditing(false); }}
-                aria-expanded={bruteOpen}
-                title="Brute force: run 5 models for up to 10 rounds, rewriting the prompt without trigger words until one answers. Click to first say what matters most."
+                onClick={() => { if (!paid) { onUpgrade?.(); return; } setBruteOpen((o) => !o); setEditing(false); }}
+                aria-expanded={paid ? bruteOpen : undefined}
+                title={paid
+                  ? "Brute force: run 5 models for up to 10 rounds, rewriting the prompt without trigger words until one answers. Click to first say what matters most."
+                  : "Brute force is a Paid feature — upgrade to keep rewriting your prompt across every model until one answers."}
                 className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium text-blue-700 dark:text-blue-100 ring-1 ring-inset ring-blue-500/25 dark:ring-blue-400/30 transition-colors ${bruteOpen ? 'bg-blue-500/25 dark:bg-blue-400/30' : 'bg-blue-500/15 hover:bg-blue-500/25 dark:bg-blue-400/[0.18] dark:hover:bg-blue-400/30'}`}
               >
-                <Hammer size={10} /> Brute force
-                <ChevronDown size={10} className={`transition-transform ${bruteOpen ? 'rotate-180' : ''}`} />
+                {paid ? <Hammer size={10} /> : <Lock size={10} />} Brute force
+                {paid
+                  ? <ChevronDown size={10} className={`transition-transform ${bruteOpen ? 'rotate-180' : ''}`} />
+                  : <span className="text-[9px] font-semibold text-amber-500 dark:text-amber-300/90">Paid</span>}
               </button>
             )}
           </div>

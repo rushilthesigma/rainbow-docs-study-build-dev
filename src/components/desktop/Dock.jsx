@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import APP_REGISTRY from './appRegistry';
 import { useWindowManager } from '../../context/WindowManagerContext';
 import { useUIPreference } from '../../context/UIPreferenceContext';
 import { checkAdmin } from '../../api/admin';
-import Modal from '../shared/Modal';
 import { Z } from '../../styles/tokens';
 
 
@@ -115,8 +115,106 @@ function DockIcon({ app, mouseX, isOpen, isActive, onClick, size, iconStyle }) {
   );
 }
 
+// "Open another window?" prompt.
+//
+// Replaces the old full-screen scrim Modal — that dimmed the whole
+// desktop and felt intrusive. This is a small, non-resizable floating
+// card that behaves like its own little app window: a faux title bar you
+// can drag it around by, the app's own icon/label, and no backdrop so
+// the rest of the desktop stays live behind it. Three choices —
+//   • Yes                          → open a second window
+//   • No                           → dismiss (also Esc / the red dot)
+//   • Take me to my previous one   → focus the running window (⌘⇧D)
+function OpenAnotherWindowPrompt({ app, dark, onYes, onNo, onPrevious }) {
+  const PANEL_W = 340;
+  // Spawn centered-ish. Fixed size, never resizes — it's a dialog, not a
+  // real window, so there are no resize handles by design.
+  const [pos] = useState(() => ({
+    x: Math.max(16, Math.round(window.innerWidth / 2 - PANEL_W / 2)),
+    y: Math.max(72, Math.round(window.innerHeight / 2 - 130)),
+  }));
+
+  // Esc → No. ⌘⇧D (or Ctrl+Shift+D) → jump to the already-running window.
+  // preventDefault on the shortcut so the browser's own ⌘⇧D (bookmark all
+  // tabs) doesn't also fire.
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === 'Escape') { e.preventDefault(); onNo(); return; }
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'd' || e.key === 'D')) {
+        e.preventDefault();
+        onPrevious();
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onNo, onPrevious]);
+
+  return createPortal(
+    // Transparent full-screen catcher — no scrim, so the desktop behind
+    // stays undimmed (non-intrusive). A click anywhere outside the card
+    // auto-closes the prompt.
+    <div className="fixed inset-0" style={{ zIndex: Z.modal }} onPointerDown={onNo}>
+    <div
+      role="dialog"
+      aria-label={`${app.label} is already open`}
+      onPointerDown={(e) => e.stopPropagation()}
+      className="fixed rounded-xl overflow-hidden font-sans select-none animate-modal-in"
+      style={{
+        left: pos.x, top: pos.y, width: PANEL_W,
+        background: dark ? '#1b1b1f' : '#ffffff',
+        border: dark ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(0,0,0,0.10)',
+        boxShadow: '0 18px 50px rgba(0,0,0,0.45)',
+      }}
+    >
+      {/* No title bar — just the message + actions. Click outside to dismiss. */}
+      <div className="px-4 pt-4 pb-4">
+        <p className={`text-[13px] leading-5 ${dark ? 'text-white/60' : 'text-gray-600'}`}>
+          {app.label} is already open. Open another window?
+        </p>
+
+        <div className="mt-4 flex flex-col gap-2">
+          {/* Take me to my previous instance — primary path, with shortcut */}
+          <button
+            type="button"
+            onClick={onPrevious}
+            className={`h-9 px-3 rounded-lg flex items-center justify-between text-[12px] font-semibold transition-colors ${
+              dark ? 'bg-white/[0.06] hover:bg-white/[0.10] text-white/85' : 'bg-gray-100 hover:bg-gray-200 text-gray-800'
+            }`}
+          >
+            <span>Take me to my previous instance</span>
+            <kbd className={`ml-2 px-1.5 py-0.5 rounded text-[10px] font-sans tracking-tight ${
+              dark ? 'bg-white/10 text-white/55' : 'bg-black/[0.06] text-gray-500'
+            }`}>⌘⇧D</kbd>
+          </button>
+
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onNo}
+              className={`flex-1 h-9 rounded-lg text-[12px] font-semibold transition-colors ${
+                dark ? 'text-white/55 hover:bg-white/[0.06]' : 'text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              No
+            </button>
+            <button
+              type="button"
+              onClick={onYes}
+              className="flex-1 h-9 rounded-lg bg-blue-500 hover:bg-blue-400 text-[12px] font-semibold text-white transition-colors"
+            >
+              Yes
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    </div>,
+    document.body
+  );
+}
+
 export default function Dock(_props) {
-  const { state, openApp } = useWindowManager();
+  const { state, openApp, focusWindow, restoreWindow } = useWindowManager();
   const { dockSize, iconStyle, theme } = useUIPreference();
   const dark = theme !== 'light';
   const size = DOCK_SIZES[dockSize] || 50;
@@ -154,6 +252,21 @@ export default function Dock(_props) {
   function confirmNewInstance() {
     if (!pendingApp) return;
     openApp(pendingApp.id, pendingApp.label);
+    setPendingApp(null);
+  }
+
+  // "Take me to my previous instance" — focus the already-running window
+  // for this app (the top-most one if several are open), restoring it if
+  // it was minimized. Also the ⌘⇧D target inside the prompt.
+  function goToPreviousInstance() {
+    if (!pendingApp) return;
+    const existing = Object.values(state.windows)
+      .filter(w => w.appId === pendingApp.id && !w.isClosing)
+      .sort((a, b) => b.zIndex - a.zIndex)[0];
+    if (existing) {
+      if (existing.isMinimized) restoreWindow(existing.id);
+      else focusWindow(existing.id);
+    }
     setPendingApp(null);
   }
 
@@ -216,40 +329,15 @@ export default function Dock(_props) {
 
       </div>
 
-      <Modal
-        open={!!pendingApp}
-        onClose={() => setPendingApp(null)}
-        title="Open another window?"
-        closeOnOverlay
-        size="sm"
-        appearance="quiet"
-        initialFocus="dialog"
-      >
-        {pendingApp && (
-          <div className="font-sans">
-            <p className="text-[13px] leading-5 text-gray-600 dark:text-white/55">
-              {pendingApp.label} is already open. Would you like to open another window?
-            </p>
-
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setPendingApp(null)}
-                className="h-9 px-3.5 rounded-lg text-[12px] font-semibold text-gray-600 dark:text-white/55 hover:bg-gray-100 dark:hover:bg-white/[0.06] transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={confirmNewInstance}
-                className="h-9 px-3.5 rounded-lg bg-blue-500 hover:bg-blue-400 text-[12px] font-semibold text-white transition-colors"
-              >
-                Open Window
-              </button>
-            </div>
-          </div>
-        )}
-      </Modal>
+      {pendingApp && (
+        <OpenAnotherWindowPrompt
+          app={pendingApp}
+          dark={dark}
+          onYes={confirmNewInstance}
+          onNo={() => setPendingApp(null)}
+          onPrevious={goToPreviousInstance}
+        />
+      )}
     </>
   );
 }

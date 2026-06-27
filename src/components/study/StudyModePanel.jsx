@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { History, Trash2, Plus, ChevronLeft, ChevronDown, Compass, Lightbulb, Calculator, Beaker, Swords, BookOpen, Link2, X, Check, Paperclip, Globe, Cpu, Lock, PanelRightOpen, CircleHelp } from 'lucide-react';
+import { History, Trash2, Plus, ChevronLeft, ChevronDown, Compass, Lightbulb, Calculator, Beaker, Swords, BookOpen, Link2, X, Check, Paperclip, Globe, Cpu, Lock, PanelRightOpen, CircleHelp, Zap, ArrowRight } from 'lucide-react';
 import { sendStudyMessage, listStudySessions, getStudySession, deleteStudySession, listCurricula, extractSourceUrl, extractFiles } from '../../api/curriculum';
 import { syncData } from '../../api/auth';
 import ChatContainer from '../chat/ChatContainer';
@@ -17,7 +17,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useMathCanvas } from '../../context/MathCanvasContext';
 import { useWindowManagerOptional } from '../../context/WindowManagerContext';
 import { planFromUser } from '../billing/modelAccess';
-import { STUDY_MODELS, resolveStudyModel, canUseStudyModel, requiredPlanLabelFor, studyModelLabel, studyModelHasFreeCap, studyModelDailyCap, studyModelSupportsThinking, isGeminiOnlyEmail, visibleStudyModels, resolveGeminiOnlyModel, isBlockedForGeminiOnly } from './studyModels';
+import { STUDY_MODELS, resolveStudyModel, canUseStudyModel, requiredPlanLabelFor, studyModelLabel, studyModelHasFreeCap, studyModelDailyCap, studyModelSupportsThinking, isGeminiOnlyEmail, visibleStudyModels, resolveGeminiOnlyModel, isBlockedForGeminiOnly, studyModelEatsCreditsFast, recommendedCheapModel } from './studyModels';
 import VoiceMenu from './voice/VoiceMenu';
 import { useSpeechSynthesis, speechSynthesisSupported } from '../../hooks/useSpeechSynthesis';
 import { speechRecognitionSupported } from '../../hooks/useSpeechRecognition';
@@ -114,6 +114,10 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   );
   const [bestOfModels, setBestOfModels] = useState(() => initialBestOf.models);
   const [bestOfJudge, setBestOfJudge] = useState(() => initialBestOf.judge);
+  // Which heavy-model selection the user has dismissed the credit-burn notice
+  // for. Session-only (plain state, resets on reload); keyed by the active
+  // selection so switching to a different costly model surfaces it again.
+  const [creditNoticeDismissed, setCreditNoticeDismissed] = useState(null);
   const studyModelModeRef = useRef(studyModelMode);
   const bestOfModelsRef = useRef(bestOfModels);
   const bestOfJudgeRef = useRef(bestOfJudge);
@@ -242,6 +246,11 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   // entry is { id, name, url } (blob URL, revoked on close/unmount). The pane is
   // visual-only — the AI still reads the PDF via /api/files/extract.
   const wm = useWindowManagerOptional();
+  // "See how it works" on the credit-burn notice opens Settings on the Plans
+  // tab, which lays out the daily credit pool and per-message / per-generation cost.
+  const openCreditSettings = wm
+    ? () => wm.openApp('settings', 'Settings', { initialTab: 'plans' })
+    : null;
   const [previewDocs, setPreviewDocs] = useState([]);
   const previewDocsRef = useRef([]);
   previewDocsRef.current = previewDocs;
@@ -1041,6 +1050,23 @@ export default function StudyModePanel({ className = '', flush = false, initialM
             variant="surface"
           />
         }
+        composerNotice={(() => {
+          if (plan !== 'free') return null;
+          const heavy = studyModelMode === 'best-of'
+            ? bestOfModels.filter(studyModelEatsCreditsFast)
+            : (studyModelEatsCreditsFast(studyModel) ? [studyModel] : []);
+          if (!heavy.length) return null;
+          const key = heavy.join(',');
+          if (creditNoticeDismissed === key) return null;
+          return (
+            <CreditBurnNotice
+              models={heavy}
+              recommend={recommendedCheapModel(userEmail, studyModelMode === 'best-of' ? null : studyModel)}
+              onSeeHow={openCreditSettings}
+              onDismiss={() => setCreditNoticeDismissed(key)}
+            />
+          );
+        })()}
         composerExtras={
           <div className="flex items-center gap-1.5">
             <StudyModelDropdown
@@ -1071,6 +1097,8 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         onReroute={handleReroute}
         onSmartReroute={handleSmartReroute}
         onBruteForce={handleBruteForce}
+        paid={plan === 'paid'}
+        onUpgrade={openCreditSettings}
         emptyState={emptyState}
         enableDictation={speechRecognitionSupported}
         flush={flush}
@@ -1128,6 +1156,59 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         />
       )}
     </>
+  );
+}
+
+// ===== Credit-burn notice (just above the chat box) =====
+//
+// Free users have a small daily credit pool, so pricier models (more than 5
+// credits/message) drain it fast. Surface a quiet heads-up right above the
+// composer whenever such a model is the active pick (or in the Best of 3 set),
+// in the app accent color. It names a cheaper model to fall back to, links to
+// the Settings credits breakdown, and can be dismissed for the session.
+function CreditBurnNotice({ models, recommend, onSeeHow, onDismiss }) {
+  if (!models || models.length === 0) return null;
+  const names = models.map(studyModelLabel);
+  const subject =
+    names.length === 1
+      ? names[0]
+      : names.length === 2
+        ? `${names[0]} and ${names[1]}`
+        : `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
+  const verb = names.length === 1 ? 'takes' : 'take';
+  return (
+    <div className="px-4 pt-2 -mb-1">
+      <div className="flex items-center gap-2 text-[11px] font-medium text-blue-600 dark:text-blue-300/90">
+        <Zap size={12} className="shrink-0 fill-current" />
+        <span className="min-w-0">
+          {subject} {verb} up credits fast
+          {recommend && (
+            <> · try <span className="font-semibold">{studyModelLabel(recommend)}</span> to save</>
+          )}
+        </span>
+        {onSeeHow && (
+          <button
+            type="button"
+            onClick={onSeeHow}
+            className="inline-flex items-center gap-0.5 font-semibold text-blue-600 dark:text-blue-300 hover:underline whitespace-nowrap"
+          >
+            See how it works
+            <ArrowRight size={11} className="shrink-0" />
+          </button>
+        )}
+        {onDismiss && (
+          <button
+            type="button"
+            onClick={onDismiss}
+            title="Dismiss"
+            aria-label="Dismiss"
+            className="ml-auto shrink-0 p-0.5 rounded text-blue-500/70 hover:text-blue-600 dark:hover:text-blue-200 hover:bg-blue-500/10 transition-colors"
+          >
+            <X size={12} />
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
