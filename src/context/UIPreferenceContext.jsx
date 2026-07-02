@@ -15,6 +15,12 @@ const UIPreferenceContext = createContext(null);
 
 // Tailwind blue-500's OKLCH hue - the out-of-the-box accent.
 export const DEFAULT_ACCENT_HUE = 259.815;
+// HSV-style controls layered on top of the hue rotation below: saturation
+// scales chroma, value scales lightness, both as 0-100 multipliers against
+// the canonical Tailwind ramp. 100/100 is the identity (today's look), so
+// existing users see zero change until they touch the new S/V field.
+export const DEFAULT_ACCENT_SATURATION = 100;
+export const DEFAULT_ACCENT_VALUE = 100;
 
 // Canonical Tailwind v4 blue ramp: [shade, L, C, hue-offset-from-500].
 // We keep each step's lightness + chroma and only rotate the hue, which gives
@@ -42,29 +48,45 @@ const resolveHue = (hue) => {
 
 const rampByShade = Object.fromEntries(BLUE_RAMP.map(([shade, l, c, dh]) => [shade, { l, c, dh }]));
 
-export function accentColorForHue(hue, shade = '500', alpha = null) {
+// Clamp an HSV-style percentage to [0, 100], falling back to 100 (identity)
+// for anything non-numeric.
+const clampPct = (n) => {
+  const v = Number(n);
+  return Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : 100;
+};
+
+export function accentColorForHue(hue, shade = '500', alpha = null, saturation = 100, value = 100) {
   const step = rampByShade[shade] || rampByShade['500'];
   const base = resolveHue(hue);
-  const color = `oklch(${step.l} ${step.c} ${norm360(base + step.dh).toFixed(3)}`;
+  const l = step.l * (clampPct(value) / 100);
+  const c = step.c * (clampPct(saturation) / 100);
+  const color = `oklch(${l.toFixed(4)} ${c.toFixed(4)} ${norm360(base + step.dh).toFixed(3)}`;
   return alpha == null ? `${color})` : `${color} / ${alpha})`;
 }
 
 // Write the rotated blue palette (plus the brand/accent aliases) onto <html>.
 // Called both from the provider effect (on load / persisted change) and live
-// while the user drags the spectrum, so it must be cheap and side-effect-only.
-export function applyAccent(hue) {
+// while the user drags the spectrum/HSV field, so it must be cheap and
+// side-effect-only. `saturation`/`value` are HSV-style 0-100 multipliers on
+// chroma/lightness applied uniformly across the whole ramp - at 100/100
+// (the default) this is byte-identical to the old hue-only behavior.
+export function applyAccent(hue, saturation = 100, value = 100) {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
   const base = resolveHue(hue);
+  const satMul = clampPct(saturation) / 100;
+  const valMul = clampPct(value) / 100;
   for (const [shade, l, c, dh] of BLUE_RAMP) {
-    const color = `oklch(${l} ${c} ${norm360(base + dh).toFixed(3)})`;
+    const color = `oklch(${(l * valMul).toFixed(4)} ${(c * satMul).toFixed(4)} ${norm360(base + dh).toFixed(3)})`;
     root.style.setProperty(`--color-blue-${shade}`, color);
     // `brand` is the @theme alias of the same scale (no 950 step).
     if (shade !== '950') root.style.setProperty(`--color-brand-${shade}`, color);
   }
-  const accent = `oklch(0.623 0.214 ${base.toFixed(3)})`;
+  const accentL = (0.623 * valMul).toFixed(4);
+  const accentC = (0.214 * satMul).toFixed(4);
+  const accent = `oklch(${accentL} ${accentC} ${base.toFixed(3)})`;
   root.style.setProperty('--color-accent-dark', accent);
-  root.style.setProperty('--color-accent-glow-dark', `oklch(0.623 0.214 ${base.toFixed(3)} / 0.18)`);
+  root.style.setProperty('--color-accent-glow-dark', `oklch(${accentL} ${accentC} ${base.toFixed(3)} / 0.18)`);
   // Global default for the `.acc-*` helpers; per-app/mobile scopes still win.
   root.style.setProperty('--app-accent', accent);
 }
@@ -113,6 +135,8 @@ const RETIRED_WALLPAPERS = new Set(['desert', 'cherry']);
 const DEFAULTS = {
   theme: 'dark',
   accentHue: DEFAULT_ACCENT_HUE,
+  accentSaturation: DEFAULT_ACCENT_SATURATION,
+  accentValue: DEFAULT_ACCENT_VALUE,
   ...TOOL_ACCENT_DEFAULTS,
   wallpaper: 'milkyway',
   dockSize: 'medium',
@@ -165,6 +189,8 @@ export function UIPreferenceProvider({ children }) {
   // Theme is locked to dark - light mode is not supported.
   const theme = 'dark';
   const accentHue    = prefs.accentHue   ?? DEFAULTS.accentHue;
+  const accentSaturation = prefs.accentSaturation ?? DEFAULTS.accentSaturation;
+  const accentValue      = prefs.accentValue      ?? DEFAULTS.accentValue;
   const canvasAccentHue = prefs.canvasAccentHue ?? DEFAULTS.canvasAccentHue;
   const voiceAccentHue = prefs.voiceAccentHue ?? DEFAULTS.voiceAccentHue;
   const humanizeAccentHue = prefs.humanizeAccentHue ?? DEFAULTS.humanizeAccentHue;
@@ -182,11 +208,12 @@ export function UIPreferenceProvider({ children }) {
     document.documentElement.classList.add('dark');
   }, []);
 
-  // Rotate the blue palette to the chosen accent hue. Runs on mount and
-  // whenever the persisted hue changes (incl. a sync from another session).
+  // Rotate the blue palette to the chosen accent hue/saturation/value. Runs
+  // on mount and whenever a persisted value changes (incl. a sync from
+  // another session).
   useEffect(() => {
-    applyAccent(accentHue);
-  }, [accentHue]);
+    applyAccent(accentHue, accentSaturation, accentValue);
+  }, [accentHue, accentSaturation, accentValue]);
 
   useEffect(() => {
     applyToolAccent('canvasAccentHue', canvasAccentHue);
@@ -239,6 +266,8 @@ export function UIPreferenceProvider({ children }) {
   // eslint-disable-next-line no-unused-vars
   const setTheme = useCallback((_v) => {}, []);
   const setAccentHue    = useCallback((v) => setPref('accentHue', v),    [setPref]);
+  const setAccentSaturation = useCallback((v) => setPref('accentSaturation', v), [setPref]);
+  const setAccentValue      = useCallback((v) => setPref('accentValue', v),      [setPref]);
   const setCanvasAccentHue = useCallback((v) => setPref('canvasAccentHue', v), [setPref]);
   const setVoiceAccentHue = useCallback((v) => setPref('voiceAccentHue', v), [setPref]);
   const setHumanizeAccentHue = useCallback((v) => setPref('humanizeAccentHue', v), [setPref]);
@@ -277,6 +306,8 @@ export function UIPreferenceProvider({ children }) {
     uiMode: effectiveMode, rawUiMode: uiMode, setUiMode,
     wallpaper, setWallpaper,
     accentHue, setAccentHue, previewAccent: applyAccent,
+    accentSaturation, setAccentSaturation,
+    accentValue, setAccentValue,
     canvasAccentHue, setCanvasAccentHue, previewCanvasAccent,
     voiceAccentHue, setVoiceAccentHue, previewVoiceAccent,
     humanizeAccentHue, setHumanizeAccentHue, previewHumanizeAccent,
@@ -289,11 +320,11 @@ export function UIPreferenceProvider({ children }) {
     titlebarOpacity, setTitlebarOpacity,
     bottomBarTransparent, setBottomBarTransparent,
   }), [
-    effectiveMode, uiMode, wallpaper, accentHue,
+    effectiveMode, uiMode, wallpaper, accentHue, accentSaturation, accentValue,
     canvasAccentHue, voiceAccentHue, humanizeAccentHue, webSearchAccentHue,
     dockSize, iconStyle, dockPosition,
     theme, windowOpacity, titlebarOpacity, bottomBarTransparent,
-    setUiMode, setWallpaper, setAccentHue,
+    setUiMode, setWallpaper, setAccentHue, setAccentSaturation, setAccentValue,
     setCanvasAccentHue, setVoiceAccentHue, setHumanizeAccentHue, setWebSearchAccentHue,
     previewCanvasAccent, previewVoiceAccent, previewHumanizeAccent, previewWebSearchAccent,
     setDockSize, setIconStyle, setDockPosition,

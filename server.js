@@ -25,6 +25,13 @@ import {
   CURRICULUM_CATEGORIES,
 } from './prompts.js';
 import { PAUSD_CATALOG, getPausdTemplate, listPausdCatalog } from './data/pausdCurricula.js';
+import { COUNTRY_GEO_NOTES, COUNTRY_GEO_NOTES_BY_SLUG } from './data/countryGeoNotes/index.js';
+import { PAUSD_SCIENCE_NOTES, PAUSD_SCIENCE_NOTES_BY_SLUG } from './data/pausdScienceNotes.js';
+import {
+  initEmailCrypto,
+  encryptUsersForDisk, decryptUsersFromDisk,
+  encryptSessionsForDisk, decryptSessionsFromDisk,
+} from './lib/emailCrypto.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -326,6 +333,8 @@ console.log(`=== COVALENT STARTUP ===`);
 console.log(`Data directory: ${DATA_DIR}`);
 console.log(`Render: ${IS_RENDER}`);
 console.log(`Tried: ${CANDIDATE_DIRS.join(', ')}`);
+// Load the email-at-rest encryption key before any users/sessions read.
+initEmailCrypto(DATA_DIR);
 const USERS_FILE = join(DATA_DIR, 'users.json');
 // Preset blocks are static read-only data bundled with the codebase —
 // always read from the project root, never from DATA_DIR (which is a
@@ -360,7 +369,10 @@ function loadUsers() {
     if (existsSync(USERS_FILE)) {
       const mtimeMs = statSync(USERS_FILE).mtimeMs;
       if (usersCache && mtimeMs === usersCacheMtimeMs) return usersCache;
-      usersCache = JSON.parse(readFileSync(USERS_FILE, 'utf-8'));
+      // On disk emails are encrypted (both the map key and the `email`
+      // field); decrypt once here so the whole app works with plaintext.
+      // Plaintext pre-migration files pass through untouched.
+      usersCache = decryptUsersFromDisk(JSON.parse(readFileSync(USERS_FILE, 'utf-8')));
       usersCacheMtimeMs = mtimeMs;
       return usersCache;
     }
@@ -371,14 +383,17 @@ function loadUsers() {
 }
 
 function saveUsers(users) {
+  // Cache stays plaintext (in-memory contract); only the on-disk copy is
+  // encrypted. Serialize once, reuse for the fallback path.
+  const onDisk = JSON.stringify(encryptUsersForDisk(users), null, 2);
   try {
-    writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+    writeFileSync(USERS_FILE, onDisk);
     usersCache = users;
     try { usersCacheMtimeMs = statSync(USERS_FILE).mtimeMs; } catch {}
   } catch (e) {
     console.error('FAILED to save users to', USERS_FILE, e.message);
     // Fallback to __dirname
-    try { writeFileSync(join(__dirname, 'users.json'), JSON.stringify(users, null, 2)); console.log('Saved users to fallback location'); } catch {}
+    try { writeFileSync(join(__dirname, 'users.json'), onDisk); console.log('Saved users to fallback location'); } catch {}
   }
 }
 
@@ -392,7 +407,7 @@ const SESSIONS_FILE = join(DATA_DIR, 'sessions.json');
 function loadSessions() {
   try {
     if (existsSync(SESSIONS_FILE)) {
-      const data = JSON.parse(readFileSync(SESSIONS_FILE, 'utf-8'));
+      const data = decryptSessionsFromDisk(JSON.parse(readFileSync(SESSIONS_FILE, 'utf-8')));
       console.log(`Loaded ${Object.keys(data).length} sessions from ${SESSIONS_FILE}`);
       return data;
     }
@@ -400,12 +415,13 @@ function loadSessions() {
   return {};
 }
 function saveSessions() {
+  const onDisk = JSON.stringify(encryptSessionsForDisk(sessions), null, 2);
   try {
-    writeFileSync(SESSIONS_FILE, JSON.stringify(sessions, null, 2));
+    writeFileSync(SESSIONS_FILE, onDisk);
   } catch (e) {
     console.error('FAILED to save sessions:', e.message);
     // Fallback: try saving to __dirname if DATA_DIR fails
-    try { writeFileSync(join(__dirname, 'sessions.json'), JSON.stringify(sessions, null, 2)); } catch {}
+    try { writeFileSync(join(__dirname, 'sessions.json'), onDisk); } catch {}
   }
 }
 const sessions = loadSessions();
@@ -1574,6 +1590,14 @@ function migrateUserData(data) {
   // Make sure exactly one map is flagged as default. If none, mark the first.
   if (!data.noteMaps.some(m => m.isDefault)) {
     data.noteMaps[0].isDefault = true;
+  }
+  // Country geography presets used to be created as Cornell notes. Treat all
+  // preset country notes as regular notes so existing and future copies open
+  // in the normal editor.
+  if (Array.isArray(data.notes)) {
+    for (const note of data.notes) {
+      if (note?.presetSlug) note.type = 'regular';
+    }
   }
   // Backfill the QB secret profile from existing history on first migration.
   // Older accounts have quizbowlSets but no secretProfile - replay the sets
@@ -8083,9 +8107,18 @@ app.get('/api/notes', authMiddleware, (req, res) => {
     const users = loadUsers();
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
+    let normalizedPresetTypes = false;
+    for (const note of users[email].data?.notes || []) {
+      if (note.presetSlug && note.type !== 'regular') {
+        note.type = 'regular';
+        normalizedPresetTypes = true;
+      }
+    }
+    if (normalizedPresetTypes) saveUsers(users);
     const notes = (users[email].data?.notes || []).map(n => ({
       id: n.id, title: n.title, type: n.type || 'regular', createdAt: n.createdAt, updatedAt: n.updatedAt,
       topicId: n.topicId ?? null,
+      presetSlug: n.presetSlug ?? null,
       preview: (n.mainNotes || '').slice(0, 100),
     }));
     res.json({ notes });
@@ -8113,6 +8146,46 @@ app.post('/api/notes', authMiddleware, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Preset note catalog: built-in "Geography of <country>" study notes users can
+// add to their own notes. Registered before /api/notes/:nid so "presets" is
+// not captured as a note id.
+app.get('/api/notes/presets', authMiddleware, (req, res) => {
+  const geoPresets = COUNTRY_GEO_NOTES.map(p => ({
+    slug: p.slug, category: 'geo',
+    label: p.country, group: p.region, subgroup: p.subregion,
+    title: p.title, preview: p.summary,
+    // Legacy fields kept for older clients
+    country: p.country, region: p.region, subregion: p.subregion,
+  }));
+  const sciencePresets = PAUSD_SCIENCE_NOTES.map(p => ({
+    slug: p.slug, category: 'science',
+    label: p.subject, group: p.grade.split(' — ')[1] || p.course, subgroup: p.grade,
+    title: p.title, preview: p.summary,
+  }));
+  res.json({ presets: [...geoPresets, ...sciencePresets] });
+});
+
+app.post('/api/notes/presets/:slug', authMiddleware, (req, res) => {
+  try {
+    const preset = COUNTRY_GEO_NOTES_BY_SLUG[req.params.slug] || PAUSD_SCIENCE_NOTES_BY_SLUG[req.params.slug];
+    if (!preset) return res.status(404).json({ error: 'Preset not found' });
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const note = {
+      id: crypto.randomUUID(), title: preset.title, type: 'regular',
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      cues: [...preset.cues], mainNotes: preset.mainNotes, summary: preset.summary,
+      topicId: null, linkedCurriculumId: null, linkedLessonId: null,
+      presetSlug: preset.slug,
+    };
+    users[email].data.notes.unshift(note);
+    saveUsers(users);
+    res.json({ note });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/notes/:nid', authMiddleware, (req, res) => {
   try {
     let users, email;
@@ -8127,7 +8200,7 @@ app.get('/api/notes/:nid', authMiddleware, (req, res) => {
     }
     const note = (users[email].data?.notes || []).find(n => n.id === req.params.nid);
     if (!note) return res.status(404).json({ error: 'Note not found' });
-    res.json({ note });
+    res.json({ note: note.presetSlug ? { ...note, type: 'regular' } : note });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -8160,6 +8233,7 @@ app.put('/api/notes/:nid', authMiddleware, (req, res) => {
     if (cues !== undefined) note.cues = cues;
     if (mainNotes !== undefined) note.mainNotes = mainNotes;
     if (summary !== undefined) note.summary = summary;
+    if (note.presetSlug) note.type = 'regular';
     if (topicId !== undefined && !sharedWrite) {
       // null clears the topic; otherwise must reference a real topic.
       // Shared editors cannot refile the owner's note into a topic.
@@ -13311,6 +13385,14 @@ function isDemoOrDevEmail(email) {
   return e.startsWith('demo-landing-') || e.endsWith('@covalent.test') || e === 'dev@covalent.test';
 }
 
+// Activity timestamps are a mix of ISO strings and Date.now() ms numbers
+// depending on which feature wrote them - normalize to ms (0 = unknown).
+function activityMs(v) {
+  if (!v) return 0;
+  const t = typeof v === 'number' ? v : Date.parse(v);
+  return Number.isFinite(t) ? t : 0;
+}
+
 app.get('/api/admin/users', authMiddleware, adminMiddleware, (req, res) => {
   const users = loadUsers();
   const social = loadSocial();
@@ -13322,16 +13404,37 @@ app.get('/api/admin/users', authMiddleware, adminMiddleware, (req, res) => {
     .filter(([email]) => includeDemo || !isDemoOrDevEmail(email))
     .map(([email, u]) => {
     const plan = getPlan(u, email);
-    const totalStudyMsgs = (u.data?.studySessions || []).reduce((n, s) => n + (s.messages?.length || 0), 0);
-    const totalLessonMsgs = (u.data?.lessons || []).reduce((n, l) => n + (l.chatHistory?.length || 0), 0);
+    // "Real" activity = the user actually made something (chatted, edited a
+    // note, played a debate) - as opposed to lastVisitAt, which ticks on any
+    // login. Track the newest such timestamp while we walk the data anyway.
+    let lastReal = 0;
+    const bump = (v) => { const t = activityMs(v); if (t > lastReal) lastReal = t; };
+    const totalStudyMsgs = (u.data?.studySessions || []).reduce((n, s) => {
+      if (s.messages?.length) bump(s.lastMessageAt || s.updatedAt || s.startedAt || s.createdAt);
+      return n + (s.messages?.length || 0);
+    }, 0);
+    const totalLessonMsgs = (u.data?.lessons || []).reduce((n, l) => {
+      bump(l.lastActiveAt || l.completedAt || l.createdAt);
+      return n + (l.chatHistory?.length || 0);
+    }, 0);
     let curriculumMsgs = 0;
     for (const c of (u.data?.curricula || [])) {
       for (const unit of (c.units || [])) {
         for (const l of (unit.lessons || [])) {
           curriculumMsgs += (l.chatHistory?.length || 0);
+          const hist = l.chatHistory;
+          if (hist?.length) bump(hist[hist.length - 1]?.timestamp);
+          if (l.completedAt) bump(l.completedAt);
         }
       }
     }
+    for (const n of (u.data?.notes || [])) bump(n.updatedAt || n.createdAt);
+    // Skip untouched signup-default maps (createdAt 0, no nodes) - only a
+    // map the user actually built or edited counts as real activity.
+    for (const m of (u.data?.noteMaps || [])) {
+      if (m.updatedAt || m.nodes?.length || m.edges?.length) bump(m.updatedAt || m.createdAt);
+    }
+    for (const d of (u.debateHistory || [])) bump(d.finishedAt);
     return {
       id: u.id, email, name: u.name,
       handle: social.profiles[u.id]?.handle || null,
@@ -13356,6 +13459,7 @@ app.get('/api/admin/users', authMiddleware, adminMiddleware, (req, res) => {
       firstVisitAt: u.data?.firstVisitAt || null,
       createdAt: u.createdAt,
       lastActiveAt: u.data?.studyStreaks?.lastActiveDate || null,
+      lastRealActivityAt: lastReal ? new Date(lastReal).toISOString() : null,
       referralCode: u.data?.referralCode || null,
       referralsUsed: u.data?.referralsUsed || 0,
       referredBy: u.data?.referredBy || null,
@@ -14921,7 +15025,10 @@ function publicMatchState(match) {
     // mid-buzz can resume the same countdown everyone else is seeing.
     answerWindowMs: QUIZBOWL_BUZZ_ANSWER_MS,
     hostId: match.hostId,
+    questionSource: match.questionSource || 'qbreader',
+    questionCount: match.questionCount || match.questions.length || 10,
     category: match.category,
+    customTopic: match.customTopic || null,
     difficulty: match.difficulty,
     revealSpeedMs: match.revealSpeedMs,
     scoringFormat: match.scoringFormat || 'standard',
@@ -14969,7 +15076,10 @@ app.post('/api/quizbowl/match', authMiddleware, (req, res) => {
       players: [{ userId: req.userId, name: users[email].name || email.split('@')[0], stream: null }],
       hostId: req.userId,
       scores: { [req.userId]: 0 },
+      questionSource: 'qbreader',
+      questionCount: 10,
       category: 'Mixed', difficulty: 'Medium', revealSpeedMs: 140,
+      customTopic: null,
       scoringFormat: 'standard',
       createdAt: Date.now(),
       lastActivity: Date.now(),
@@ -15101,7 +15211,7 @@ app.get('/api/quizbowl/match/:code/stream', authMiddleware, (req, res) => {
 });
 
 // POST /api/quizbowl/match/:code/start - host configures + starts.
-// Accepts { category, difficulty, questionCount, revealSpeedMs }. Question
+// Accepts { questionSource, category, difficulty, questionCount, revealSpeedMs }. Question
 // generation happens HERE (so no Gemini spend for matches that don't launch).
 app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => {
   const match = matches.get(req.params.code);
@@ -15112,13 +15222,26 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
   }
 
   const {
+    questionSource: rawQuestionSource = match.questionSource || 'qbreader',
     category = match.category || 'Mixed',
     difficulty = match.difficulty || 'Medium',
     questionCount = 10,
     revealSpeedMs = match.revealSpeedMs || 140,
     scoringFormat = match.scoringFormat || 'standard',
+    customTopic,
+    setInstructions,
     bots,
   } = req.body || {};
+  const safeQuestionCount = Math.max(1, Math.min(40, Number(questionCount) || 10));
+  const requestedQuestionSource = rawQuestionSource === 'ai' || rawQuestionSource === 'gemini' ? 'ai' : 'qbreader';
+
+  // Custom lobbies: the host types any topic and Gemini writes the tossups on
+  // it instead of drawing from the preset category list. Study-material
+  // matches keep priority - their questions stay pinned to the material.
+  const customTopicText = (typeof customTopic === 'string' ? customTopic : '').trim().slice(0, 200);
+  const isCustomTopic = !!customTopicText && !(match.studyContext && match.studyContext.text);
+  const useGeminiTossups = requestedQuestionSource === 'ai' || isCustomTopic || !!(match.studyContext && match.studyContext.text);
+  const setInstructionsText = (typeof setInstructions === 'string' ? setInstructions : '').trim().slice(0, 1200);
 
   // Inject bots BEFORE player-count check so the host can start solo with bot fill.
   // Passing bots:[] clears any existing bots; passing undefined leaves the roster alone.
@@ -15135,8 +15258,8 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
 
   if (match.players.length < 2) return res.status(409).json({ error: 'Need at least 2 players (add bots or invite a friend)' });
 
-  // Generating the AI tossup set costs QB_TOSSUP_CREDIT_COST credits (host pays).
-  {
+  // Generating a Gemini tossup set costs QB_TOSSUP_CREDIT_COST credits (host pays).
+  if (useGeminiTossups) {
     const usersQB = loadUsers();
     const emailQB = findEmailById(usersQB, req.userId);
     if (emailQB) {
@@ -15154,7 +15277,10 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
   }
 
   // Persist settings + flip to "generating" so the opponent sees a spinner.
-  match.category = category;
+  match.questionSource = useGeminiTossups ? 'ai' : 'qbreader';
+  match.questionCount = safeQuestionCount;
+  match.category = isCustomTopic ? 'Custom' : category;
+  match.customTopic = isCustomTopic ? customTopicText : null;
   match.difficulty = difficulty;
   match.revealSpeedMs = revealSpeedMs;
   match.scoringFormat = QUIZBOWL_FORMATS[scoringFormat] ? scoringFormat : 'standard';
@@ -15167,7 +15293,11 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
 
   try {
     const grounded = !!(match.studyContext && match.studyContext.text);
-    const sys = grounded
+    let generatedQuestions;
+    if (!useGeminiTossups) {
+      generatedQuestions = await fetchQBReaderTossups({ count: safeQuestionCount, category, difficulty });
+    } else {
+      const sys = grounded
       ? `You are a quiz bowl question writer. Write pyramidal tossup questions based ONLY on the provided study material - never use outside knowledge; every clue and every answer must be checkable against the material text alone. Each question starts with obscure clues and progressively gets easier. Include a NAQT-style power mark "(*)" placed roughly 60-70% of the way through each question (after the hard clues but before the "giveaway" clue) - buzzing before the mark earns +15, after earns +10. Output ONLY valid JSON with no markdown, no code fences, no prose before or after.
 
 Exact format:
@@ -15176,32 +15306,36 @@ Exact format:
 
 Exact format:
 {"questions":[{"text":"Hard clues here, more clues, (*) easier clues here, giveaway clue.","answer":"Answer"}]}`;
-    const userMsg = grounded
-      ? `Write ${questionCount} pyramidal quiz bowl tossup questions at ${difficulty} difficulty using ONLY facts from the study material below. Every answer must be directly supported by the text. Each question MUST contain exactly one (*) power mark.
+      const userMsg = grounded
+        ? `Write ${safeQuestionCount} pyramidal quiz bowl tossup questions at ${difficulty} difficulty using ONLY facts from the study material below. Every answer must be directly supported by the text. Each question MUST contain exactly one (*) power mark.
 
 STUDY MATERIAL ("${match.studyContext.title}"):
 ${match.studyContext.text}
 
-Return ONLY the JSON object described - nothing else.`
-      : `Generate ${questionCount} pyramidal quiz bowl questions in category "${category}" at ${difficulty} difficulty. Each MUST contain exactly one (*) power mark. Return ONLY the JSON object described - nothing else.`;
-    // Flash is faster + more reliable for raw-JSON tasks; Pro's thinking
-    // tokens often consume the budget before emitting output.
-    const result = await callGemini(sys, [{ role: 'user', content: userMsg }], GEMINI_FLASH, 8192);
-    if (!result.success) throw new Error(result.error || 'Question generation failed');
-    const text = result.data.content?.[0]?.text || '';
-    const parsed = parseAIJson(text);
-    if (!parsed?.questions?.length) {
-      console.error('[match] parse failed. raw:', text.slice(0, 500));
-      throw new Error('Failed to parse questions');
+${setInstructionsText ? `Host set instructions:\n${setInstructionsText}\n\n` : ''}Return ONLY the JSON object described - nothing else.`
+        : isCustomTopic
+          ? `Generate ${safeQuestionCount} pyramidal quiz bowl questions about the topic "${customTopicText}" at ${difficulty} difficulty. Stay strictly on that topic - every question's answer must belong to it. Each MUST contain exactly one (*) power mark.${setInstructionsText ? `\nHost set instructions:\n${setInstructionsText}` : ''}\nReturn ONLY the JSON object described - nothing else.`
+          : `Generate ${safeQuestionCount} pyramidal quiz bowl questions in category "${category}" at ${difficulty} difficulty. Each MUST contain exactly one (*) power mark.${setInstructionsText ? `\nHost set instructions:\n${setInstructionsText}` : ''}\nReturn ONLY the JSON object described - nothing else.`;
+      // Flash is faster + more reliable for raw-JSON tasks; Pro's thinking
+      // tokens often consume the budget before emitting output.
+      const result = await callGemini(sys, [{ role: 'user', content: userMsg }], GEMINI_FLASH, 8192);
+      if (!result.success) throw new Error(result.error || 'Question generation failed');
+      const text = result.data.content?.[0]?.text || '';
+      const parsed = parseAIJson(text);
+      if (!parsed?.questions?.length) {
+        console.error('[match] parse failed. raw:', text.slice(0, 500));
+        throw new Error('Failed to parse questions');
+      }
+      generatedQuestions = parsed.questions;
     }
 
     // Double-check the match still exists - someone may have left during gen.
     if (!matches.has(match.code)) return;
     // Strip power marks into structured powerWordIndex so the scorer can
     // award +15 vs +10. Questions without (*) score flat +10 / -5 / 0.
-    match.questions = parsed.questions.map(q => {
+    match.questions = generatedQuestions.map(q => {
       const { text, powerWordIndex } = parseTossupText(q.text || '');
-      return { ...q, text, powerWordIndex };
+      return { ...q, text, powerWordIndex: powerWordIndex ?? q.powerWordIndex ?? null };
     });
     match.currentIdx = 0;
     match.state = 'playing';

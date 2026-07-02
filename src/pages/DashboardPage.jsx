@@ -91,7 +91,7 @@ export default function DashboardPage() {
         {[
           { to: '/goals', icon: Target, label: `${goals.filter(g => g.status === 'active').length} Goals`, sub: 'Active' },
           { to: '/flashcards', icon: Layers, label: 'Flashcards', sub: 'Review due' },
-          { to: '/notes', icon: Brain, label: 'Notes', sub: 'Cornell notes' },
+          { to: '/notes', icon: Brain, label: 'Notes', sub: 'Study notes' },
         ].map(item => (
           <button
             key={item.to}

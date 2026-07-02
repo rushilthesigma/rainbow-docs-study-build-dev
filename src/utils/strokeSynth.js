@@ -5,6 +5,10 @@
 // live drawing area and maps normalized→pixels at draw time. Dot radii and text
 // sizes are returned in pixels (kept legible regardless of fit). Defensive:
 // returns null for an empty board; a bad primitive is skipped, never thrown.
+//
+// Label text containing $…$ math becomes a `tex` op instead of a canvas `text`
+// op — the canvas can't typeset KaTeX, so the TutorCanvas renders those as a
+// positioned DOM layer over the overlay, revealed in draw order like any op.
 
 const VW = 480;
 const PLANE_H = 300;
@@ -100,7 +104,12 @@ function synthPlane(board) {
   const NP = (x, y) => ({ x: x / VW, y: y / PLANE_H });
   const stroke = (pxPts, color, w) => { if (pxPts.length >= 2) ops.push({ k: 'stroke', pts: pxPts.map(p => NP(p.x, p.y)), color, w }); };
   const dot = (x, y, color, open = false) => ops.push({ k: 'dot', x: x / VW, y: y / PLANE_H, color, r: 4.5, open });
-  const text = (x, y, t, color, anchor = 'start', size = 11) => { const s = cleanLabel(t); if (s) ops.push({ k: 'text', x: x / VW, y: y / PLANE_H, text: s, color, anchor, size }); };
+  const text = (x, y, t, color, anchor = 'start', size = 11) => {
+    const raw = String(t || '');
+    if (raw.includes('$')) { ops.push({ k: 'tex', x: x / VW, y: y / PLANE_H, text: raw, color, anchor, size }); return; }
+    const s = cleanLabel(raw);
+    if (s) ops.push({ k: 'text', x: x / VW, y: y / PLANE_H, text: s, color, anchor, size });
+  };
   const seg = (x1, y1, x2, y2, n = 6) => { const a = []; for (let i = 0; i <= n; i++) { const t = i / n; a.push({ x: x1 + (x2 - x1) * t, y: y1 + (y2 - y1) * t }); } return a; };
 
   if (board.caption) text(PAD - 6, 14, board.caption, C.subtle, 'start', 11);
@@ -209,7 +218,12 @@ function synthNumberLine(board) {
   const NP = (x, yy) => ({ x: x / VW, y: yy / LINE_H });
   const stroke = (pxPts, color, w) => { if (pxPts.length >= 2) ops.push({ k: 'stroke', pts: pxPts.map(p => NP(p.x, p.y)), color, w }); };
   const dot = (x, color, open = false) => ops.push({ k: 'dot', x: x / VW, y: y / LINE_H, color, r: 5, open });
-  const text = (x, yy, t, color, anchor = 'middle', size = 11) => { const s = String(t || '').replace(/\$/g, ''); if (s) ops.push({ k: 'text', x: x / VW, y: yy / LINE_H, text: s, color, anchor, size }); };
+  const text = (x, yy, t, color, anchor = 'middle', size = 11) => {
+    const raw = String(t || '');
+    if (raw.includes('$')) { ops.push({ k: 'tex', x: x / VW, y: yy / LINE_H, text: raw, color, anchor, size }); return; }
+    const s = raw.replace(/\$/g, '');
+    if (s) ops.push({ k: 'text', x: x / VW, y: yy / LINE_H, text: s, color, anchor, size });
+  };
   const seg = (x1, y1, x2, y2, n = 6) => { const a = []; for (let i = 0; i <= n; i++) { const t = i / n; a.push({ x: x1 + (x2 - x1) * t, y: y1 + (y2 - y1) * t }); } return a; };
 
   if (board.caption) text(PAD - 6, 16, board.caption, C.subtle, 'start', 11);

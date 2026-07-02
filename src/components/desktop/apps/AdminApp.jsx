@@ -146,7 +146,13 @@ export default function AdminApp() {
           || (u.name || '').toLowerCase().includes(q)
           || (u.handle || '').toLowerCase().includes(q);
     });
-    if (sort === 'messages') {
+    if (sort === 'real') {
+      // "Real" activity = the user actually produced something (chats, notes,
+      // debates) - server-computed. Users who only ever logged in drop out.
+      list = list
+        .filter(u => u.lastRealActivityAt)
+        .sort((a, b) => (b.lastRealActivityAt || '').localeCompare(a.lastRealActivityAt || ''));
+    } else if (sort === 'messages') {
       list = [...list].sort((a, b) => (sumMsgs(b) - sumMsgs(a)));
     } else if (sort === 'created') {
       list = [...list].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
@@ -384,7 +390,7 @@ function UserList({ users, total, metrics, query, setQuery, planFilter, setPlanF
           onChange={setPlanFilter}
         />
         <TabChips
-          options={[['active', 'Activeness'], ['recent', 'Recent'], ['messages', 'Most chats'], ['created', 'Newest']]}
+          options={[['active', 'Activeness'], ['real', 'Newest real'], ['recent', 'Recent'], ['messages', 'Most chats'], ['created', 'Newest']]}
           value={sort}
           onChange={setSort}
         />
@@ -401,7 +407,11 @@ function UserList({ users, total, metrics, query, setQuery, planFilter, setPlanF
           </div>
         )}
         {users.map(u => {
-          const t = lastSeen(u);
+          // In "Newest real" mode the trailing timestamp shows when the user
+          // last produced something, not when they last logged in.
+          const t = sort === 'real'
+            ? (Date.parse(u.lastRealActivityAt) || 0)
+            : lastSeen(u);
           // Force boolean - otherwise `t = 0` (no last-seen recorded) cascades
           // through `t && ...` as the value `0`, which React then renders as
           // a literal "0" text node under the avatar.

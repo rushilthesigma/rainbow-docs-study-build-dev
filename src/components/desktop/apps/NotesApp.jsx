@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { ArrowLeft, FileText, Plus, Trash2, Pencil, Layout, Wand2, Loader2, BookOpen, Network, Folder, Layers, ChevronRight, ChevronDown, Check, Share2 } from 'lucide-react';
+import { ArrowLeft, FileText, Plus, Trash2, Pencil, Layout, Wand2, Loader2, BookOpen, Network, Folder, Layers, ChevronRight, ChevronDown, Check, Share2, Globe } from 'lucide-react';
 import { InlineProgress } from '../../shared/ProgressBar';
 import { listNotes, createNote, deleteNote, getNote, updateNote, generateCues, generateSummary,
          listNoteMaps, createNoteMap, deleteNoteMap, updateNoteMap,
@@ -17,6 +17,7 @@ import SharedItemViewer from '../../library/SharedItemViewer';
 import { useSharing } from '../../../context/SharingContext';
 import useBrowserBack from '../../../hooks/useBrowserBack';
 import NoteActions, { QuizFromNotePanel, AIEditNotePanel } from '../../notes/NoteActions';
+import PresetNotesBrowser from '../../notes/PresetNotesBrowser';
 import NoteMap from '../../notes/NoteMap';
 import MarkdownNoteEditor from '../../notes/MarkdownNoteEditor';
 import NoteFlashcards from '../../notes/NoteFlashcards';
@@ -92,6 +93,11 @@ function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashca
   const [genCues, setGenCues] = useState(false);
   const [genSummary, setGenSummary] = useState(false);
   const [saveTimer, setSaveTimer] = useState(null);
+  // Cues/summary are opt-in sections - hidden until the user explicitly
+  // adds them, not shown-but-empty by default.
+  const cached = peek(`note:${noteId}`)?.note;
+  const [showCues, setShowCues] = useState(() => (cached?.cues || []).length > 0);
+  const [showSummary, setShowSummary] = useState(() => !!cached?.summary);
   const [fc, setFc] = useState({ count: null, due: 0 });
   const [shareOpen, setShareOpen] = useState(false);
   const [aiEditOpen, setAiEditOpen] = useState(false);
@@ -122,6 +128,8 @@ function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashca
     getNote(noteId).then(d => {
       if (cancelled) return;
       setNote(d.note);
+      setShowCues((d.note.cues || []).length > 0);
+      setShowSummary(!!d.note.summary);
       set(`note:${noteId}`, d);
       setLoading(false);
     }).catch(() => { if (!cancelled) setLoading(false); });
@@ -213,22 +221,38 @@ function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashca
       <div className="flex flex-col flex-1 min-h-0 min-w-0">
       {isCornell ? (
         <div className="flex flex-col flex-1 min-h-0 gap-3">
-          <div className="flex-1 min-h-0 grid grid-cols-[200px_1fr] border border-white/[0.08] rounded-lg overflow-hidden">
-            <div className="border-r border-white/[0.07] p-3 overflow-y-auto">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Cues</span>
-                <button onClick={handleGenCues} disabled={genCues} className="text-white/40 hover:text-white/70 disabled:opacity-50 transition-colors"><Wand2 size={12} /></button>
-              </div>
-              {(note.cues || []).length > 0 ? (
-                <div>
-                  {note.cues.map((cue, i) => (
-                    <p key={i} className="text-[11px] text-white/65 py-1 border-b border-white/[0.05] last:border-0 leading-snug">{cue}</p>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-[10px] text-white/25 italic">Write notes, then click the wand to generate cues</p>
+          {(!showCues || !showSummary) && (
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {!showCues && (
+                <button onClick={() => setShowCues(true)} className="flex items-center gap-1 text-[11px] text-white/40 hover:text-white/70 border border-dashed border-white/15 hover:border-white/25 rounded-md px-2 py-1 transition-colors">
+                  <Plus size={11} /> Cues
+                </button>
+              )}
+              {!showSummary && (
+                <button onClick={() => setShowSummary(true)} className="flex items-center gap-1 text-[11px] text-white/40 hover:text-white/70 border border-dashed border-white/15 hover:border-white/25 rounded-md px-2 py-1 transition-colors">
+                  <Plus size={11} /> Summary
+                </button>
               )}
             </div>
+          )}
+          <div className={`flex-1 min-h-0 grid ${showCues ? 'grid-cols-[200px_1fr]' : 'grid-cols-1'} border border-white/[0.08] rounded-lg overflow-hidden`}>
+            {showCues && (
+              <div className="border-r border-white/[0.07] p-3 overflow-y-auto">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Cues</span>
+                  <button onClick={handleGenCues} disabled={genCues} className="text-white/40 hover:text-white/70 disabled:opacity-50 transition-colors"><Wand2 size={12} /></button>
+                </div>
+                {(note.cues || []).length > 0 ? (
+                  <div>
+                    {note.cues.map((cue, i) => (
+                      <p key={i} className="text-[11px] text-white/65 py-1 border-b border-white/[0.05] last:border-0 leading-snug">{cue}</p>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-white/25 italic">Write notes, then click the wand to generate cues</p>
+                )}
+              </div>
+            )}
             <MarkdownNoteEditor
               value={note.mainNotes}
               onChange={v => handleChange('mainNotes', v)}
@@ -236,20 +260,22 @@ function NoteEditor({ noteId, onBack, topics = [], onTopicChanged, onOpenFlashca
               placeholder="Notes… markdown supported"
             />
           </div>
-          <div className="border-t border-white/[0.08] pt-3 flex-shrink-0">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Summary</span>
-              <button onClick={handleGenSummary} disabled={genSummary} className="flex items-center gap-1 text-[10px] text-white/40 hover:text-white/65 disabled:opacity-50 transition-colors">
-                Generate
-              </button>
+          {showSummary && (
+            <div className="border-t border-white/[0.08] pt-3 flex-shrink-0">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Summary</span>
+                <button onClick={handleGenSummary} disabled={genSummary} className="flex items-center gap-1 text-[10px] text-white/40 hover:text-white/65 disabled:opacity-50 transition-colors">
+                  Generate
+                </button>
+              </div>
+              <textarea
+                value={note.summary}
+                onChange={e => handleChange('summary', e.target.value)}
+                className="w-full bg-transparent text-sm text-white/88 placeholder-white/25 resize-none outline-none min-h-[40px]"
+                placeholder="Summary"
+              />
             </div>
-            <textarea
-              value={note.summary}
-              onChange={e => handleChange('summary', e.target.value)}
-              className="w-full bg-transparent text-sm text-white/88 placeholder-white/25 resize-none outline-none min-h-[40px]"
-              placeholder="Summary"
-            />
-          </div>
+          )}
         </div>
       ) : (
         <div className="flex-1 min-h-0 border border-white/[0.07] rounded-lg overflow-hidden">
@@ -821,6 +847,28 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
     );
   }
 
+  if (view === 'presets') {
+    return (
+      <ViewFade viewKey="presets" className="h-full flex flex-col">
+        <div className="flex items-center gap-3 pb-4 mb-6 border-b border-white/[0.06] flex-shrink-0">
+          <button onClick={() => setView('list')} className="flex items-center gap-2 text-sm text-white/40 hover:text-white/90 transition-colors">
+            <ArrowLeft size={16} /> Back
+          </button>
+          <h2 className="text-lg font-bold text-white/90">Preset notes</h2>
+        </div>
+        <div className="flex-1 overflow-y-auto min-h-0">
+          <div className="w-full max-w-2xl mx-auto pb-10">
+            <PresetNotesBrowser
+              notes={notes}
+              onOpenNote={openNote}
+              onAdded={(note) => { setNotes(prev => [note, ...prev]); bust('notes:list'); }}
+            />
+          </div>
+        </div>
+      </ViewFade>
+    );
+  }
+
   if (view === 'ai') {
     return (
       <ViewFade viewKey="ai" className="h-full flex flex-col">
@@ -1111,6 +1159,9 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
       <div className="flex items-center justify-between mb-5 flex-shrink-0">
         <h2 className="text-lg font-bold text-white/90">Notes</h2>
         <div className="flex items-center gap-2">
+          <Button size="sm" variant="secondary" onClick={() => setView('presets')}>
+            <Globe size={14} /> Preset
+          </Button>
           <Button size="sm" variant="secondary" onClick={() => setView('ai')}>
             <Wand2 size={14} /> AI
           </Button>
@@ -1283,4 +1334,3 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
     </ViewFade>
   );
 }
-

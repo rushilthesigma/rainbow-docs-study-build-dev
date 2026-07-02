@@ -86,6 +86,7 @@ export default function MobileMatch() {
   const [code, setCode] = useState('');
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [category, setCategory] = useState('Mixed');
+  const [customTopic, setCustomTopic] = useState('');
   const [difficulty, setDifficulty] = useState('Medium');
   const [questionCount, setQuestionCount] = useState(10);
   const [revealSpeedMs, setRevealSpeedMs] = useState(140);
@@ -289,7 +290,12 @@ export default function MobileMatch() {
     botEngRef.current.lockedOut = new Set();
     botEngRef.current.buzzTimers = {};
     botEngRef.current.thinkTimers = {};
-    try { await startMatch(code, { category, difficulty, questionCount, revealSpeedMs, bots }); }
+    try {
+      await startMatch(code, {
+        category, difficulty, questionCount, revealSpeedMs, bots,
+        customTopic: category === 'Custom' ? customTopic.trim() : undefined,
+      });
+    }
     catch (e) { setError(e.message); }
   }
 
@@ -380,10 +386,18 @@ export default function MobileMatch() {
           <div>
             <SectionLabel>Category</SectionLabel>
             <div className="flex flex-wrap gap-1.5">
-              {['Science','History','Literature','Geography','Math','Art','Music','Philosophy','Mixed'].map(o => (
+              {['Science','History','Literature','Geography','Math','Art','Music','Philosophy','Mixed','Custom'].map(o => (
                 <Chip key={o} active={category === o} onClick={() => setCategory(o)}>{o}</Chip>
               ))}
             </div>
+            {category === 'Custom' && (
+              <input
+                type="text" value={customTopic} maxLength={200}
+                onChange={e => setCustomTopic(e.target.value)}
+                placeholder="Any topic - the AI writes the tossups on it"
+                className="mt-2 w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.1] text-[13px] text-white placeholder:text-white/25 focus:outline-none focus:border-amber-400/50 transition-colors"
+              />
+            )}
           </div>
           <div>
             <SectionLabel>Difficulty</SectionLabel>
@@ -445,7 +459,7 @@ export default function MobileMatch() {
         <div className="px-4 pb-4 pt-2 border-t border-white/[0.06]">
           <button
             onClick={handleCreate}
-            disabled={busy}
+            disabled={busy || (category === 'Custom' && !customTopic.trim())}
             className="w-full h-12 rounded-2xl bg-amber-500 text-black font-bold text-[15px] flex items-center justify-center gap-2 disabled:opacity-40 active:bg-amber-600"
           >
             {busy ? <InlineProgress active /> : <Zap size={17} />} Create Room
@@ -534,7 +548,7 @@ export default function MobileMatch() {
           <div className="px-4 pb-4 pt-2 border-t border-white/[0.06]">
             <button
               onClick={handleStart}
-              disabled={waiting && !fillWithBots}
+              disabled={(waiting && !fillWithBots) || (category === 'Custom' && !customTopic.trim())}
               className="w-full h-12 rounded-2xl bg-amber-500 text-black font-bold text-[15px] flex items-center justify-center gap-2 disabled:opacity-40 active:bg-amber-600"
             >
               <Play size={17} />
@@ -555,7 +569,7 @@ export default function MobileMatch() {
       <div className="flex-1 min-h-0 flex flex-col items-center justify-center bg-[#0a0a14] text-white gap-3">
         <InlineProgress active />
         <p className="text-[13px] text-white/40">Generating questions…</p>
-        <p className="text-[11px] text-white/25">{match?.questionCount || questionCount} questions · {match?.category || category}</p>
+        <p className="text-[11px] text-white/25">{match?.questionCount || questionCount} questions · {match?.customTopic || match?.category || category}</p>
       </div>
     );
   }

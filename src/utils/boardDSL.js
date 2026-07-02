@@ -35,8 +35,11 @@ function extractOpts(body) {
   const opts = {};
   const flags = new Set();
   body = body.replace(/(\w+)\s*=\s*"([^"]*)"/g, (_, k, v) => { opts[k.toLowerCase()] = v; return ' '; });
-  body = body.replace(/(\w+)\s*=\s*([^\s"]+)/g, (_, k, v) => { opts[k.toLowerCase()] = v; return ' '; });
+  // Standalone quoted text must come out BEFORE the bare key=value pass, or an
+  // "=" inside the quotes (label 1.5,1 "$y=\sin(x)$") gets shredded into a
+  // bogus option and the label loses its content.
   body = body.replace(/"([^"]*)"/g, (_, v) => { if (opts.label === undefined) opts.label = v; return ' '; });
+  body = body.replace(/(\w+)\s*=\s*([^\s"]+)/g, (_, k, v) => { opts[k.toLowerCase()] = v; return ' '; });
   for (const f of ['equal', 'dash', 'open', 'closed', 'halfopen']) {
     const re = new RegExp('\\b' + f + '\\b', 'i');
     if (re.test(body)) { flags.add(f); body = body.replace(re, ' '); }

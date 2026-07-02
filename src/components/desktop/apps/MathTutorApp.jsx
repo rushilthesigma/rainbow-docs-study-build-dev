@@ -10,6 +10,7 @@ import { parseBoard } from '../../../utils/boardDSL';
 import { synthBoard } from '../../../utils/strokeSynth';
 import MathProblemSet from './MathProblemSet';
 import { useMathCanvasOptional } from '../../../context/MathCanvasContext';
+import MathText from '../../shared/MathText';
 import ChatContainer from '../../chat/ChatContainer';
 import { errorChatMessage } from '../../../utils/aiErrors';
 import useBrowserBack from '../../../hooks/useBrowserBack';
@@ -23,6 +24,12 @@ import {
 } from '../../study/studyModels';
 
 const STORAGE_KEY = 'covalent-math-tutor-state-v1';
+// Kill-switch for the Draw · BETA feature (tutor sketches figures on the board
+// via ```board blocks). While false: the header pill is hidden, drawRef is
+// forced off (draw:false to the server, board routing no-ops) even for users
+// who persisted drawEnabled:true. Flip to true to fully restore — the toggle,
+// tex-label layer, and synth pipeline are all left intact underneath.
+const DRAW_BETA_ENABLED = false;
 const PEN_SIZES = { thin: 2, medium: 4, thick: 7 };
 
 // QBpedia-style surfaces — flat, notes-like rather than glassy: subtle fields
@@ -98,6 +105,13 @@ export function TutorCanvas({
   const tutorRef       = useRef(null);  // { ops, aspect, caption }
   const tutorAnimRef   = useRef(null);
   const [tutorMarks, setTutorMarks] = useState(false);
+  // KaTeX board labels — `tex` ops can't be painted with fillText, so they
+  // render as a DOM layer positioned over the overlay canvas. Reveal (opacity)
+  // is driven imperatively from the same op-by-op animation as the strokes.
+  const [texLabels, setTexLabels] = useState([]);   // [{ i, x, y, text, color, anchor, size }]
+  const [texFit, setTexFit]       = useState(null); // px box the figure occupies in the canvas
+  const texElsRef   = useRef({});                   // op index -> label element
+  const texShownRef = useRef(new Set());            // op indices already revealed
 
   function clearCanvas(ctx, w, h) { ctx.clearRect(0, 0, w, h); }
   const cloneStrokes = () => strokesRef.current.map(s => ({ ...s, points: [...s.points] }));
@@ -241,13 +255,26 @@ export function TutorCanvas({
       ctx.fillText(op.text, q.x, q.y);
     }
   }
+  // Reveal a KaTeX label once. The element may not have mounted yet when the
+  // reveal fires (setTexLabels is async); the label's ref callback re-applies
+  // visibility from texShownRef on mount, so marking the set is enough.
+  function revealTex(i) {
+    if (texShownRef.current.has(i)) return;
+    texShownRef.current.add(i);
+    const el = texElsRef.current[i];
+    if (el) el.style.opacity = '1';
+  }
   function drawTutorStatic() {
     const canvas = tutorCanvasRef.current, ctx = tutorCtxRef.current;
     if (!canvas || !ctx || !tutorRef.current) return;
     const rect = canvas.getBoundingClientRect();
     ctx.clearRect(0, 0, rect.width, rect.height);
     const fit = tutorFit(rect.width, rect.height, tutorRef.current.aspect);
-    for (const op of tutorRef.current.ops) drawTutorOp(ctx, fit, op, op.k === 'stroke' ? op.pts.length : 1);
+    setTexFit(fit);
+    tutorRef.current.ops.forEach((op, i) => {
+      if (op.k === 'tex') revealTex(i);
+      else drawTutorOp(ctx, fit, op, op.k === 'stroke' ? op.pts.length : 1);
+    });
   }
   // Animate the figure being drawn, op by op, like a teacher at the board.
   function animateTutor() {
@@ -256,6 +283,7 @@ export function TutorCanvas({
     const { ops, aspect } = tutorRef.current;
     const rect = canvas.getBoundingClientRect();
     const fit = tutorFit(rect.width, rect.height, aspect);
+    setTexFit(fit);
     const cost = ops.map(op => op.k === 'stroke' ? Math.max(2, op.pts.length) : 6);
     const total = cost.reduce((a, b) => a + b, 0);
     if (!total) return;
@@ -270,7 +298,9 @@ export function TutorCanvas({
       for (let i = 0; i < ops.length; i++) {
         if (acc >= reveal) break;
         const op = ops[i], c = cost[i];
-        if (op.k === 'stroke') {
+        if (op.k === 'tex') {
+          revealTex(i);
+        } else if (op.k === 'stroke') {
           const lf = Math.min(1, (reveal - acc) / c);
           drawTutorOp(ctx, fit, op, Math.max(1, Math.ceil(lf * op.pts.length)));
         } else {
@@ -288,12 +318,19 @@ export function TutorCanvas({
     tutorRef.current = null;
     const canvas = tutorCanvasRef.current, ctx = tutorCtxRef.current;
     if (canvas && ctx) { const rect = canvas.getBoundingClientRect(); ctx.clearRect(0, 0, rect.width, rect.height); }
+    texShownRef.current = new Set();
+    texElsRef.current = {};
+    setTexLabels([]);
+    setTexFit(null);
     setTutorMarks(false);
   }
   function drawBoard(board, { animate = true } = {}) {
     const synth = synthBoard(board);
     if (!synth || !synth.ops.length) { clearTutor(); return; }
     tutorRef.current = synth;
+    texShownRef.current = new Set();
+    texElsRef.current = {};
+    setTexLabels(synth.ops.map((op, i) => (op.k === 'tex' ? { ...op, i } : null)).filter(Boolean));
     setTutorMarks(true);
     if (animate && !prefersReduced()) animateTutor();
     else drawTutorStatic();
@@ -472,6 +509,35 @@ export function TutorCanvas({
         />
         {/* Tutor's figure draws on this overlay — clicks pass through to the canvas below */}
         <canvas ref={tutorCanvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />
+        {/* KaTeX board labels — DOM layer aligned to the figure's fit box.
+            Visibility is set imperatively (revealTex) in stroke order; keep
+            opacity OUT of the style prop so re-renders never clobber it. */}
+        {texLabels.length > 0 && texFit && (
+          <div className="absolute inset-0 pointer-events-none overflow-hidden">
+            {texLabels.map((l) => (
+              <span
+                key={l.i}
+                ref={(el) => {
+                  if (!el) { delete texElsRef.current[l.i]; return; }
+                  texElsRef.current[l.i] = el;
+                  el.style.opacity = texShownRef.current.has(l.i) ? '1' : '0';
+                }}
+                className="absolute whitespace-nowrap transition-opacity duration-300 select-none"
+                style={{
+                  left: texFit.x + l.x * texFit.w,
+                  top: texFit.y + l.y * texFit.h,
+                  color: l.color,
+                  fontSize: (l.size || 11) + 1,
+                  // Match the canvas text ops: x is the anchor point, y sits
+                  // on the text baseline.
+                  transform: `translate(${l.anchor === 'middle' ? '-50%' : l.anchor === 'end' ? '-100%' : '0%'}, -72%)`,
+                }}
+              >
+                <MathText>{l.text}</MathText>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -586,9 +652,13 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
   const [error, setError]                       = useState(null);
   const [input, setInput]                       = useState('');
   const [showSettings, setShowSettings]         = useState(false);
-  // Tutor-generated board drawings are intentionally disabled. Keep the
-  // request flag fixed off even if an older session persisted the beta as on.
-  const drawRef = useRef(false);
+  // Draw · BETA — when on, the tutor may sketch figures on the board via a
+  // fenced ```board block (server prompt gains the drawing rules). Persisted
+  // per-user; a ref mirrors the state so doSend reads the latest value through
+  // memoized callbacks.
+  const [drawEnabled, setDrawEnabled] = useState(() => !!persisted?.drawEnabled);
+  const drawRef = useRef(DRAW_BETA_ENABLED && drawEnabled);
+  drawRef.current = DRAW_BETA_ENABLED && drawEnabled;
   const seedKickedOff = useRef(false);
   const streamRef  = useRef('');
   const thinkRef   = useRef('');
@@ -632,8 +702,8 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
     const trimmed = messages.slice(-50).map(m => ({
       role: m.role, content: (m.content || '').slice(0, 3000), _edited: m._edited, _error: m._error,
     }));
-    saveState({ view, mode, topic, customInstructions, messages: trimmed, strokes: standaloneStrokes, drawEnabled: false });
-  }, [view, mode, topic, customInstructions, messages, standaloneStrokes, seedTopic]);
+    saveState({ view, mode, topic, customInstructions, messages: trimmed, strokes: standaloneStrokes, drawEnabled });
+  }, [view, mode, topic, customInstructions, messages, standaloneStrokes, drawEnabled, seedTopic]);
 
   // Lesson-progression: the "Continue" button (embedded worked examples only)
   // is gated on the tutor AI's own judgment, not a fixed step. The server
@@ -679,6 +749,19 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
     if (last) showBoardOnCanvas(last.content, { animate: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Toggling on re-surfaces the latest figure from history; toggling off wipes
+  // the tutor's marks (the student's own strokes are untouched).
+  function toggleDraw() {
+    const next = !drawRef.current;
+    drawRef.current = next;
+    setDrawEnabled(next);
+    if (next) {
+      const last = [...messagesRef.current].reverse().find(m => m.role === 'assistant' && /```board/.test(m.content || ''));
+      if (last) showBoardOnCanvas(last.content, { animate: false });
+    } else {
+      captureRef.current?.clearTutor?.();
+    }
+  }
 
   function doSend({ text, phase = 'lesson', imageDataUrl = null, hidden = false, topicOverride = null }) {
     if (streaming) return;
@@ -979,6 +1062,19 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
         <div className="flex-1" />
 
         <MathModelPicker active={model} plan={plan} onPick={pickModel} disabled={streaming} />
+
+        {DRAW_BETA_ENABLED && (
+          <button
+            onClick={toggleDraw}
+            title={drawEnabled ? 'Tutor draws figures on the board — click to turn off' : 'Let the tutor draw figures on the board (beta)'}
+            className={`flex items-center gap-1 px-2 h-7 rounded-lg text-[11px] font-semibold transition-colors ${
+              drawEnabled ? 'bg-blue-500/20 text-blue-300 ring-1 ring-blue-400/30' : 'text-white/40 hover:text-white/80 hover:bg-white/10'
+            }`}
+          >
+            <Shapes size={13} /> Draw
+            <span className={`text-[8px] font-bold uppercase tracking-wider ${drawEnabled ? 'text-blue-300/70' : 'text-white/25'}`}>Beta</span>
+          </button>
+        )}
 
         <button
           onClick={() => setShowSettings(s => !s)}

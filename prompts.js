@@ -657,6 +657,7 @@ caption "<one short sentence describing the figure>"
 - Coordinates are abstract math coordinates and the board auto-fits to the screen — NEVER use pixels.
 - Commands: view xmin xmax ymin ymax [equal] | axes [xlabel="x" ylabel="y"] | grid [step=1] | plot <expr> from=a to=b | point x,y [label="P"] | line x1,y1 x2,y2 | arrow x1,y1 x2,y2 | circle cx,cy r | arc cx,cy r a0 a1 | polygon x1,y1 x2,y2 ... | numline from to [step=1] | tick t [label] | plotpoint t [open] [label] | interval a b [open|closed] | angle vx,vy ax,ay bx,by [label] | label x,y "text" | note "text".
 - Options on any line: color=(blue|green|red|amber|gray|purple, or correct=green / error=red), weight=1..4, dash, label="...".
+- When a label IS math (an equation, expression, or symbol like $y=(x+1)^2$, $x_1$, $\\frac{\\pi}{2}$), wrap it in $...$ — e.g. label="$y=(x+1)^2$" — and it typesets as real KaTeX on the board. Plain words (label="vertex") and simple coordinates need no $. Keep labels SHORT (a symbol or expression, not a sentence).
 - For plot, write y=f(x) with explicit operators: plot (x+1)^2 from=-4 to=2  or  plot sin(x) from=-6.3 to=6.3. Allowed in expressions: + - * / ^ ( ) and sin cos tan sqrt abs exp ln log pi e.
 - DRAW for: inequalities/intervals (a number line), functions/graphs (axes + curve + key points), geometry (the labelled figure), trig/the unit circle.
 - Do NOT draw for pure arithmetic, definitions, or plain symbol-pushing with no spatial meaning. At most ONE figure per message.

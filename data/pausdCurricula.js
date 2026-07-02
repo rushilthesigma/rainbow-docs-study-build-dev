@@ -19,6 +19,7 @@
 // and live in their own modules.
 import { AFRICA_GEOGRAPHY_COURSE } from './africaGeography.js';
 import { EUROPE_GEOGRAPHY_COURSE } from './europeGeography.js';
+import { ASIA_GEOGRAPHY_COURSE } from './asiaGeography.js';
 
 export const PAUSD_CATALOG = [
   // =====================================================================
@@ -1531,6 +1532,7 @@ export const PAUSD_CATALOG = [
   // =====================================================================
   AFRICA_GEOGRAPHY_COURSE,
   EUROPE_GEOGRAPHY_COURSE,
+  ASIA_GEOGRAPHY_COURSE,
 ];
 
 // Helper: get a single template by slug.

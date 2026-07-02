@@ -9,8 +9,11 @@ import PillGroup from '../components/shared/PillGroup';
 import Toggle from '../components/shared/Toggle';
 import { Textarea } from '../components/shared/Input';
 import Button from '../components/shared/Button';
-import { GraduationCap, ChevronDown, Check, RotateCcw } from 'lucide-react';
-import { DEFAULT_ACCENT_HUE, TOOL_ACCENT_DEFAULTS, useUIPreference } from '../context/UIPreferenceContext';
+import { GraduationCap, ChevronDown, Check, RotateCcw, SlidersHorizontal, X } from 'lucide-react';
+import {
+  DEFAULT_ACCENT_HUE, DEFAULT_ACCENT_SATURATION, DEFAULT_ACCENT_VALUE,
+  TOOL_ACCENT_DEFAULTS, accentColorForHue, useUIPreference,
+} from '../context/UIPreferenceContext';
 import { WALLPAPER_LIST } from '../components/desktop/DesktopBackground';
 import { openBillingPortal, createCheckoutSession, getTiers, getMyUsage } from '../api/billing';
 import { planFromUser } from '../components/billing/modelAccess';
@@ -117,9 +120,15 @@ const ACCENT_PRESETS = [
 function AccentSpectrum({ value, defaultHue = DEFAULT_ACCENT_HUE, onCommit, onPreview }) {
   const fallbackHue = defaultHue ?? DEFAULT_ACCENT_HUE;
   const [local, setLocal] = useState(value ?? fallbackHue);
+  const localRef = useRef(local);
   const dragging = useRef(false);
 
-  useEffect(() => { if (!dragging.current) setLocal(value ?? fallbackHue); }, [value, fallbackHue]);
+  useEffect(() => {
+    if (dragging.current) return;
+    const next = value ?? fallbackHue;
+    localRef.current = next;
+    setLocal(next);
+  }, [value, fallbackHue]);
 
   // Rainbow built from the SAME oklch space the accent uses, so the bar is a
   // faithful preview of every shade you can land on.
@@ -192,6 +201,314 @@ function AccentSpectrum({ value, defaultHue = DEFAULT_ACCENT_HUE, onCommit, onPr
         })}
       </div>
     </div>
+  );
+}
+
+// Full HSV accent picker: a 2D saturation/value field on top of the hue bar
+// from AccentSpectrum. X = saturation (chroma multiplier), Y = value
+// (lightness multiplier) - both scale the whole OKLCH ramp uniformly, so
+// dragging the field darkens/desaturates the entire interface live, the same
+// way the hue bar recolors it. Committed together on release so a single
+// drag only writes one preference update.
+function AccentHSVField({
+  hue, saturation, value,
+  defaultHue = DEFAULT_ACCENT_HUE,
+  defaultSaturation = DEFAULT_ACCENT_SATURATION,
+  defaultValue = DEFAULT_ACCENT_VALUE,
+  large = false,
+  onCommit, onPreview,
+}) {
+  const [localHue, setLocalHue] = useState(hue ?? defaultHue);
+  const [localSat, setLocalSat] = useState(saturation ?? defaultSaturation);
+  const [localVal, setLocalVal] = useState(value ?? defaultValue);
+  const localHueRef = useRef(localHue);
+  const localSatRef = useRef(localSat);
+  const localValRef = useRef(localVal);
+  const fieldRef = useRef(null);
+  const dragging = useRef(false);
+
+  useEffect(() => {
+    if (dragging.current) return;
+    const nextHue = hue ?? defaultHue;
+    const nextSat = saturation ?? defaultSaturation;
+    const nextVal = value ?? defaultValue;
+    localHueRef.current = nextHue;
+    localSatRef.current = nextSat;
+    localValRef.current = nextVal;
+    setLocalHue(nextHue);
+    setLocalSat(nextSat);
+    setLocalVal(nextVal);
+  }, [hue, saturation, value, defaultHue, defaultSaturation, defaultValue]);
+
+  const preview = (h, s, v) => {
+    localHueRef.current = h;
+    localSatRef.current = s;
+    localValRef.current = v;
+    setLocalHue(h);
+    setLocalSat(s);
+    setLocalVal(v);
+    onPreview?.(h, s, v);
+  };
+  const commit = () => onCommit?.(localHueRef.current, localSatRef.current, localValRef.current);
+
+  const updateFromPoint = (clientX, clientY, commitNow) => {
+    const rect = fieldRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    const y = Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
+    const s = Math.round(x * 100);
+    const v = Math.round((1 - y) * 100);
+    preview(localHueRef.current, s, v);
+    if (commitNow) commit();
+  };
+
+  const onFieldPointerDown = (e) => {
+    dragging.current = true;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    updateFromPoint(e.clientX, e.clientY, false);
+  };
+  const onFieldPointerMove = (e) => { if (dragging.current) updateFromPoint(e.clientX, e.clientY, false); };
+  const onFieldPointerUp = (e) => {
+    if (!dragging.current) return;
+    dragging.current = false;
+    updateFromPoint(e.clientX, e.clientY, true);
+  };
+
+  const previewHue = (h) => preview(h, localSatRef.current, localValRef.current);
+  const commitHue  = () => commit();
+
+  const resetToDefault = () => {
+    preview(defaultHue, defaultSaturation, defaultValue);
+    commit();
+  };
+  const defaultActive = Math.round(localHue) === Math.round(defaultHue)
+    && Math.round(localSat) === Math.round(defaultSaturation)
+    && Math.round(localVal) === Math.round(defaultValue);
+
+  const stops = [];
+  for (let h = 0; h <= 360; h += 15) stops.push(`oklch(0.62 0.19 ${h})`);
+  const hueGrad = `linear-gradient(to right, ${stops.join(', ')})`;
+  const swatch = accentColorForHue(localHue, '500', null, localSat, localVal);
+  const fieldHeight = large ? 'h-64 sm:h-72' : 'h-32';
+  const fieldRadius = large ? 'rounded-[14px]' : 'rounded-lg';
+  const handleSize = large ? 'h-7 w-7 border-[3px]' : 'h-3.5 w-3.5 border-2';
+
+  return (
+    <div className={`${large ? 'w-full space-y-4' : 'w-full max-w-xs space-y-3'}`}>
+      <div className={`${fieldRadius} bg-[#050507] p-px shadow-[0_18px_50px_rgba(0,0,0,0.38)]`}>
+        <div
+          ref={fieldRef}
+          onPointerDown={onFieldPointerDown}
+          onPointerMove={onFieldPointerMove}
+          onPointerUp={onFieldPointerUp}
+          onPointerCancel={onFieldPointerUp}
+          className={`relative ${fieldHeight} w-full ${fieldRadius} cursor-crosshair touch-none select-none overflow-hidden`}
+          style={{
+            background: `linear-gradient(to top, rgba(0,0,0,0.98) 0%, rgba(0,0,0,0.78) 18%, rgba(0,0,0,0.16) 62%, transparent 100%),
+              linear-gradient(to right, rgba(255,255,255,0.96), rgba(255,255,255,0)),
+              hsl(${localHue}, 100%, 50%)`,
+            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16), inset 1px 0 0 rgba(255,255,255,0.08), inset -1px 0 0 rgba(255,255,255,0.06), inset 0 -1px 0 rgba(0,0,0,0.78)',
+          }}
+        >
+          <span className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-black/70 via-black/25 to-transparent" />
+          <span
+            className={`absolute z-10 ${handleSize} -translate-x-1/2 -translate-y-1/2 rounded-full border-white shadow-[0_2px_10px_rgba(0,0,0,0.55),0_0_0_1px_rgba(0,0,0,0.18)] pointer-events-none`}
+            style={{ left: `${localSat}%`, top: `${100 - localVal}%`, background: swatch }}
+          />
+        </div>
+      </div>
+      <div className="flex items-center gap-3">
+        <span
+          className="h-7 w-7 rounded-full border border-white/15 shrink-0"
+          style={{ background: swatch, boxShadow: `0 0 14px ${accentColorForHue(localHue, '500', 0.55, localSat, localVal)}` }}
+        />
+        <input
+          type="range" min={0} max={360} step={1} value={Math.round(localHue)}
+          aria-label="Accent color hue"
+          onPointerDown={() => { dragging.current = true; }}
+          onPointerUp={commitHue}
+          onPointerCancel={commitHue}
+          onKeyUp={commitHue}
+          onChange={e => previewHue(Number(e.target.value))}
+          style={{ background: hueGrad }}
+          className="flex-1 h-2.5 rounded-full appearance-none cursor-pointer outline-none
+            [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4
+            [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white
+            [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-black/25
+            [&::-webkit-slider-thumb]:shadow-[0_1px_4px_rgba(0,0,0,0.55)]
+            [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full
+            [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-0"
+        />
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={resetToDefault}
+          className={`inline-flex h-6 items-center gap-1 rounded-lg border px-2 text-[10px] font-semibold transition-colors ${
+            defaultActive
+              ? 'border-white/25 bg-white/[0.08] text-white/80'
+              : 'border-white/[0.08] bg-white/[0.03] text-white/45 hover:border-white/[0.16] hover:bg-white/[0.06] hover:text-white/70'
+          }`}
+        >
+          <RotateCcw size={10} />
+          Default
+        </button>
+        {ACCENT_PRESETS.map(p => {
+          const active = Math.round(localHue) === Math.round(p.hue)
+            && Math.round(localSat) === 100 && Math.round(localVal) === 100;
+          return (
+            <button
+              key={p.label}
+              type="button"
+              title={p.label}
+              onClick={() => { preview(p.hue, 100, 100); commit(); }}
+              className={`h-5 w-5 rounded-full transition-transform hover:scale-110 ${
+                active ? 'ring-2 ring-white/70 ring-offset-2 ring-offset-[#0c0c18]' : 'ring-1 ring-white/10'
+              }`}
+              style={{ background: `oklch(0.623 0.214 ${p.hue})` }}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function AccentHueBar({ value, defaultHue = DEFAULT_ACCENT_HUE, onCommit, onPreview }) {
+  const fallbackHue = defaultHue ?? DEFAULT_ACCENT_HUE;
+  const [local, setLocal] = useState(value ?? fallbackHue);
+  const dragging = useRef(false);
+
+  useEffect(() => { if (!dragging.current) setLocal(value ?? fallbackHue); }, [value, fallbackHue]);
+
+  const stops = [];
+  for (let h = 0; h <= 360; h += 15) stops.push(`oklch(0.62 0.19 ${h})`);
+  const grad = `linear-gradient(to right, ${stops.join(', ')})`;
+
+  const preview = (v) => {
+    localRef.current = v;
+    setLocal(v);
+    onPreview?.(v);
+  };
+  const commit = () => {
+    dragging.current = false;
+    onCommit?.(localRef.current);
+  };
+
+  return (
+    <input
+      type="range" min={0} max={360} step={1} value={Math.round(local)}
+      aria-label="Accent color hue"
+      onPointerDown={() => { dragging.current = true; }}
+      onPointerUp={commit}
+      onPointerCancel={commit}
+      onKeyUp={commit}
+      onChange={e => preview(Number(e.target.value))}
+      style={{ background: grad }}
+      className="h-5 min-w-0 flex-1 rounded-full appearance-none cursor-pointer outline-none
+        [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-7 [&::-webkit-slider-thumb]:h-7
+        [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white
+        [&::-webkit-slider-thumb]:border-[3px] [&::-webkit-slider-thumb]:border-zinc-400/80
+        [&::-webkit-slider-thumb]:shadow-[0_2px_8px_rgba(0,0,0,0.5),0_0_0_1px_rgba(255,255,255,0.65)]
+        [&::-moz-range-thumb]:w-7 [&::-moz-range-thumb]:h-7 [&::-moz-range-thumb]:rounded-full
+        [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-[3px] [&::-moz-range-thumb]:border-zinc-400/80"
+    />
+  );
+}
+
+function AccentHSVModal({
+  open, onClose,
+  hue, saturation, value,
+  defaultHue, defaultSaturation, defaultValue,
+  onCommit, onPreview,
+}) {
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKeyDown = (e) => { if (e.key === 'Escape') onClose?.(); };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 px-4 py-8 backdrop-blur-sm"
+      onPointerDown={(e) => { if (e.target === e.currentTarget) onClose?.(); }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Advanced accent color"
+        className="w-full max-w-[680px] overflow-hidden rounded-2xl border border-white/[0.08] bg-[#121214]/95 shadow-[0_30px_90px_rgba(0,0,0,0.62),0_0_0_1px_rgba(255,255,255,0.03)]"
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4 px-5 pt-5">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-white/38">Accent color</p>
+            <p className="mt-2 text-[13px] text-white/36">Drag the field to recolor the entire interface.</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close accent color picker"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-white/[0.08] bg-white/[0.04] text-white/45 transition-colors hover:bg-white/[0.08] hover:text-white/75"
+          >
+            <X size={15} />
+          </button>
+        </div>
+        <div className="px-5 pb-5 pt-4">
+          <AccentHSVField
+            large
+            hue={hue} saturation={saturation} value={value}
+            defaultHue={defaultHue} defaultSaturation={defaultSaturation} defaultValue={defaultValue}
+            onPreview={onPreview}
+            onCommit={onCommit}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AccentColorControl({
+  hue, saturation, value,
+  defaultHue = DEFAULT_ACCENT_HUE,
+  defaultSaturation = DEFAULT_ACCENT_SATURATION,
+  defaultValue = DEFAULT_ACCENT_VALUE,
+  onCommit, onPreview,
+}) {
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const resolvedSat = saturation ?? defaultSaturation;
+  const resolvedVal = value ?? defaultValue;
+
+  const previewHue = (nextHue) => onPreview?.(nextHue, resolvedSat, resolvedVal);
+  const commitHue = (nextHue) => onCommit?.(nextHue, resolvedSat, resolvedVal);
+
+  return (
+    <>
+      <div className="flex w-full max-w-[560px] items-center gap-3">
+        <AccentHueBar value={hue} defaultHue={defaultHue} onPreview={previewHue} onCommit={commitHue} />
+        <button
+          type="button"
+          onClick={() => setAdvancedOpen(true)}
+          title="Open HSV controls"
+          aria-label="Open HSV accent color controls"
+          className="inline-flex h-9 shrink-0 items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.05] px-3 text-[11px] font-semibold text-white/58 transition-colors hover:border-white/[0.16] hover:bg-white/[0.08] hover:text-white/82"
+        >
+          <SlidersHorizontal size={14} />
+          HSV
+        </button>
+      </div>
+      <AccentHSVModal
+        open={advancedOpen}
+        onClose={() => setAdvancedOpen(false)}
+        hue={hue} saturation={saturation} value={value}
+        defaultHue={defaultHue} defaultSaturation={defaultSaturation} defaultValue={defaultValue}
+        onPreview={onPreview}
+        onCommit={onCommit}
+      />
+    </>
   );
 }
 
@@ -405,6 +722,8 @@ function PlansTab({ user }) {
 function AppearanceTab() {
   const {
     accentHue, setAccentHue, previewAccent,
+    accentSaturation, setAccentSaturation,
+    accentValue, setAccentValue,
     canvasAccentHue, setCanvasAccentHue, previewCanvasAccent,
     voiceAccentHue, setVoiceAccentHue, previewVoiceAccent,
     humanizeAccentHue, setHumanizeAccentHue, previewHumanizeAccent,
@@ -422,8 +741,13 @@ function AppearanceTab() {
 
   return (
     <div>
-      <Block label="Accent color" hint="Drag the spectrum to recolor the entire interface.">
-        <AccentSpectrum value={accentHue} defaultHue={DEFAULT_ACCENT_HUE} onCommit={setAccentHue} onPreview={previewAccent} />
+      <Block label="Accent color" hint="Use the bar for hue; open HSV for saturation and brightness.">
+        <AccentColorControl
+          hue={accentHue} saturation={accentSaturation} value={accentValue}
+          defaultHue={DEFAULT_ACCENT_HUE} defaultSaturation={DEFAULT_ACCENT_SATURATION} defaultValue={DEFAULT_ACCENT_VALUE}
+          onPreview={(h, s, v) => previewAccent(h, s, v)}
+          onCommit={(h, s, v) => { setAccentHue(h); setAccentSaturation(s); setAccentValue(v); }}
+        />
       </Block>
       <Block label="Canvas accent color" hint="Controls the Study math canvas button, chip, and pane icon.">
         <AccentSpectrum value={canvasAccentHue} defaultHue={TOOL_ACCENT_DEFAULTS.canvasAccentHue} onCommit={setCanvasAccentHue} onPreview={previewCanvasAccent} />

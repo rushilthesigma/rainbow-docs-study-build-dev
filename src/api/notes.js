@@ -8,6 +8,16 @@ export async function createNote(title, type = 'regular', topicId = null) {
   return apiFetch('/api/notes', { method: 'POST', body: JSON.stringify({ title, type, topicId }) });
 }
 
+// Built-in preset notes (country geography). List the catalog, or add one
+// preset as a new regular note in the user's notes.
+export async function listNotePresets() {
+  return apiFetch('/api/notes/presets');
+}
+
+export async function addNotePreset(slug) {
+  return apiFetch(`/api/notes/presets/${slug}`, { method: 'POST' });
+}
+
 export async function getNote(id) {
   return apiFetch(`/api/notes/${id}`);
 }

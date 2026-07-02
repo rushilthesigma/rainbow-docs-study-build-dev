@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useWindowManager } from '../../../context/WindowManagerContext';
-import { Zap, Users, Copy, Check, X, Trophy, Play, LogOut, ArrowLeft, Flag, Bot, Loader2, BookOpen } from 'lucide-react';
+import { Zap, Users, Copy, Check, X, Trophy, Play, LogOut, ArrowLeft, Flag, Bot, Loader2, BookOpen, Sparkles } from 'lucide-react';
 import ProgressBar, { InlineProgress } from '../../shared/ProgressBar';
 import {
   createMatch, joinMatch, startMatch, buzzMatch, answerMatch, nextMatchQuestion,
@@ -58,6 +58,8 @@ const QB_SCORING_FORMATS = [
   { id: 'iac-playoff', label: 'IAC Playoff', desc: '6/5/4/3 · −2 / −1 neg' },
   { id: 'jv',          label: 'JV',          desc: '10 get · no power · no neg' },
 ];
+const QB_MATCH_CATEGORIES = ['Science', 'History', 'Literature', 'Geography', 'Math', 'Art', 'Music', 'Philosophy', 'Pop Culture', 'Mixed', 'Custom'];
+const QB_MATCH_DIFFICULTIES = ['Easy', 'Medium', 'Hard', 'Tournament'];
 
 function useWordReveal(text, startedAt, speedMs, frozen, frozenAt) {
   const [, setTick] = useState(0);
@@ -109,7 +111,10 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
   const [view, setView] = useState('menu');
   const [code, setCode] = useState('');
   const [joinCodeInput, setJoinCodeInput] = useState('');
+  const [questionSource, setQuestionSource] = useState('qbreader');
   const [category, setCategory] = useState('Mixed');
+  const [customTopic, setCustomTopic] = useState('');
+  const [setInstructions, setSetInstructions] = useState('');
   const [difficulty, setDifficulty] = useState('Medium');
   const [questionCount, setQuestionCount] = useState(10);
   const [revealSpeedMs, setRevealSpeedMs] = useState(140);
@@ -385,7 +390,13 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
     botEngRef.current.lockedOut = new Set();
     botEngRef.current.buzzTimers = {};
     botEngRef.current.thinkTimers = {};
-    try { await startMatch(code, { category, difficulty, questionCount, revealSpeedMs, scoringFormat, bots }); }
+    try {
+      await startMatch(code, {
+        questionSource, category, difficulty, questionCount, revealSpeedMs, scoringFormat, bots,
+        customTopic: category === 'Custom' ? customTopic.trim() : undefined,
+        setInstructions: questionSource === 'ai' ? setInstructions.trim() : undefined,
+      });
+    }
     catch (e) { setError(e.message); }
   }
 
@@ -519,25 +530,52 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
             <ArrowLeft size={12} /> Back
           </button>
 
-          <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70">Category</p>
-          <MatchSelector value={category} onChange={setCategory}
-            options={['Science','History','Literature','Geography','Math','Art','Music','Philosophy','Pop Culture','Mixed']} />
+          <div className="grid grid-cols-2 gap-2">
+            <SetupTile active={questionSource === 'qbreader'} icon={<BookOpen size={14} />} label="Past QB" sub="qbreader.org" onClick={() => setQuestionSource('qbreader')} />
+            <SetupTile active={questionSource === 'ai'} icon={<Sparkles size={14} />} label="AI" sub="Gemini" onClick={() => setQuestionSource('ai')} />
+          </div>
 
-          <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mt-1">Difficulty</p>
-          <MatchSelector value={difficulty} onChange={setDifficulty}
-            options={['Easy','Medium','Hard','Tournament']} grid="grid-cols-4" />
+          <div className="flex flex-wrap gap-1.5">
+            {QB_MATCH_CATEGORIES.map(c => (
+              <SetupPill key={c} active={category === c} onClick={() => { setCategory(c); if (c === 'Custom') setQuestionSource('ai'); }}>{c}</SetupPill>
+            ))}
+          </div>
+          {category === 'Custom' && (
+            <input
+              type="text" value={customTopic} maxLength={200}
+              onChange={e => setCustomTopic(e.target.value)}
+              placeholder="Any topic - the AI writes the tossups on it"
+              className="w-full px-3 py-2 rounded-lg bg-blue-500/[0.06] border border-blue-500/25 text-[12.5px] text-blue-100 placeholder:text-blue-300/35 focus:outline-none focus:border-blue-400/60 transition-colors"
+            />
+          )}
+          {questionSource === 'ai' && (
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 mb-1.5">Set instructions</p>
+              <textarea
+                value={setInstructions}
+                onChange={e => setSetInstructions(e.target.value)}
+                placeholder="e.g. Focus on 20th-century literature, avoid sports, make answers canon-friendly..."
+                rows={2}
+                className="w-full px-3 py-2.5 rounded-lg border border-white/[0.08] bg-white/[0.04] text-[12px] text-white/80 placeholder-white/20 resize-none outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20 transition-colors"
+              />
+            </div>
+          )}
 
-          <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mt-1">Scoring Format</p>
+          <div className="grid grid-cols-4 gap-1.5">
+            {QB_MATCH_DIFFICULTIES.map(d => <SetupPill key={d} active={difficulty === d} onClick={() => setDifficulty(d)}>{d}</SetupPill>)}
+          </div>
+
+          <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 mt-1">Scoring Format</p>
           <div className="grid grid-cols-2 gap-1.5">
             {QB_SCORING_FORMATS.map(f => (
               <button key={f.id} onClick={() => setScoringFormat(f.id)}
-                className={`px-2.5 py-1.5 rounded-md text-left transition-colors border ${
+                className={`rounded-lg border p-2.5 text-left transition-all focus:outline-none ${
                   scoringFormat === f.id
-                    ? 'bg-blue-500/20 text-blue-100 border-blue-500/50'
-                    : 'bg-blue-500/[0.06] border-blue-500/20 text-blue-300/75 hover:bg-blue-500/15 hover:text-blue-200'
+                    ? 'bg-blue-500/[0.18] text-white border-blue-400/[0.40]'
+                    : 'bg-white/[0.02] border-white/[0.06] text-white/75 hover:border-white/[0.14] hover:bg-white/[0.05]'
                 }`}>
-                <div className="text-[11px] font-semibold leading-tight">{f.label}</div>
-                <div className="text-[9px] opacity-70 leading-tight mt-0.5">{f.desc}</div>
+                <div className="text-[12px] font-semibold leading-tight">{f.label}</div>
+                <div className="text-[10px] text-white/35 leading-tight mt-0.5">{f.desc}</div>
               </button>
             ))}
           </div>
@@ -770,29 +808,53 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
             <>
               {!match?.studyTitle && (
                 <>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2">Category</p>
-                  <div className="mb-3">
-                    <MatchSelector value={category} onChange={setCategory}
-                      options={['Science','History','Literature','Geography','Math','Art','Music','Philosophy','Pop Culture','Mixed']} />
+                  <div className="mb-3 grid grid-cols-2 gap-2">
+                    <SetupTile active={questionSource === 'qbreader'} icon={<BookOpen size={14} />} label="Past QB" sub="qbreader.org" onClick={() => setQuestionSource('qbreader')} />
+                    <SetupTile active={questionSource === 'ai'} icon={<Sparkles size={14} />} label="AI" sub="Gemini" onClick={() => setQuestionSource('ai')} />
+                  </div>
+                  <div className="mb-3 space-y-2">
+                    <div className="flex flex-wrap gap-1.5">
+                      {QB_MATCH_CATEGORIES.map(c => (
+                        <SetupPill key={c} active={category === c} onClick={() => { setCategory(c); if (c === 'Custom') setQuestionSource('ai'); }}>{c}</SetupPill>
+                      ))}
+                    </div>
+                    {category === 'Custom' && (
+                      <input
+                        type="text" value={customTopic} maxLength={200}
+                        onChange={e => setCustomTopic(e.target.value)}
+                        placeholder="Any topic - the AI writes the tossups on it"
+                        className="w-full px-3 py-2 rounded-lg bg-blue-500/[0.06] border border-blue-500/25 text-[12.5px] text-blue-100 placeholder:text-blue-300/35 focus:outline-none focus:border-blue-400/60 transition-colors"
+                      />
+                    )}
+                    {questionSource === 'ai' && (
+                      <div>
+                        <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 mb-1.5">Set instructions</p>
+                        <textarea
+                          value={setInstructions}
+                          onChange={e => setSetInstructions(e.target.value)}
+                          placeholder="e.g. Focus on 20th-century literature, avoid sports, make answers canon-friendly..."
+                          rows={2}
+                          className="w-full px-3 py-2.5 rounded-lg border border-white/[0.08] bg-white/[0.04] text-[12px] text-white/80 placeholder-white/20 resize-none outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20 transition-colors"
+                        />
+                      </div>
+                    )}
                   </div>
                 </>
               )}
-              <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2">Difficulty</p>
-              <div className="mb-3">
-                <MatchSelector value={difficulty} onChange={setDifficulty}
-                  options={['Easy','Medium','Hard','Tournament']} grid="grid-cols-4" />
+              <div className="mb-3 grid grid-cols-4 gap-1.5">
+                {QB_MATCH_DIFFICULTIES.map(d => <SetupPill key={d} active={difficulty === d} onClick={() => setDifficulty(d)}>{d}</SetupPill>)}
               </div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70 mb-2">Scoring Format</p>
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 mb-2">Scoring Format</p>
               <div className="mb-3 grid grid-cols-2 gap-1.5">
                 {QB_SCORING_FORMATS.map(f => (
                   <button key={f.id} onClick={() => setScoringFormat(f.id)}
-                    className={`px-2.5 py-1.5 rounded-md text-left transition-colors border ${
+                    className={`rounded-lg border p-2.5 text-left transition-all focus:outline-none ${
                       scoringFormat === f.id
-                        ? 'bg-blue-500/20 text-blue-100 border-blue-500/50'
-                        : 'bg-blue-500/[0.06] border-blue-500/20 text-blue-300/75 hover:bg-blue-500/15 hover:text-blue-200'
+                        ? 'bg-blue-500/[0.18] text-white border-blue-400/[0.40]'
+                        : 'bg-white/[0.02] border-white/[0.06] text-white/75 hover:border-white/[0.14] hover:bg-white/[0.05]'
                     }`}>
-                    <div className="text-[11px] font-semibold leading-tight">{f.label}</div>
-                    <div className="text-[9px] opacity-70 leading-tight mt-0.5">{f.desc}</div>
+                    <div className="text-[12px] font-semibold leading-tight">{f.label}</div>
+                    <div className="text-[10px] text-white/35 leading-tight mt-0.5">{f.desc}</div>
                   </button>
                 ))}
               </div>
@@ -827,7 +889,7 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
           {isHost && (
             <button
               onClick={handleStart}
-              disabled={waiting && !fillWithBots}
+              disabled={(waiting && !fillWithBots) || (!match?.studyTitle && category === 'Custom' && !customTopic.trim())}
               className="w-full py-3 rounded-xl bg-blue-500 text-white text-sm font-semibold border border-blue-400/40 hover:bg-blue-400 disabled:opacity-40 disabled:shadow-none flex items-center justify-center gap-2 transition-all"
             >
               <Play size={14} />
@@ -861,7 +923,7 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
           <ProgressBar
             active
             label="Generating questions"
-            hint={`${(match?.questionCount || questionCount)} ${match?.category || category} · ${match?.difficulty || difficulty}`}
+            hint={`${(match?.questionCount || questionCount)} ${(match?.questionSource || questionSource) === 'ai' ? 'Gemini' : 'Past QB'} · ${match?.customTopic || match?.category || category} · ${match?.difficulty || difficulty}`}
             duration={15000}
           />
         </div>
@@ -1213,5 +1275,35 @@ function MatchSelector({ label, options, value, onChange, grid }) {
         ))}
       </div>
     </div>
+  );
+}
+
+function SetupTile({ active, icon, label, sub, onClick }) {
+  return (
+    <button onClick={onClick}
+      className={`text-left rounded-2xl border p-3 transition-all backdrop-blur-sm ${
+        active
+          ? 'border-blue-400/45 bg-blue-500/15 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_14px_rgba(59,130,246,0.25)]'
+          : 'border-white/[0.08] bg-white/[0.03] text-white/60 hover:bg-white/[0.07] hover:text-white/80'
+      }`}>
+      <div className="flex items-center gap-1.5 mb-0.5">
+        {icon}
+        <p className="text-[12px] font-bold">{label}</p>
+      </div>
+      {sub && <p className="text-[10px] opacity-55">{sub}</p>}
+    </button>
+  );
+}
+
+function SetupPill({ active, onClick, children }) {
+  return (
+    <button onClick={onClick}
+      className={`px-3 py-1.5 rounded-xl text-[11px] font-semibold transition-all whitespace-nowrap backdrop-blur-sm ${
+        active
+          ? 'bg-blue-500/20 text-white border border-blue-400/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_12px_rgba(59,130,246,0.28)]'
+          : 'bg-white/[0.05] border border-white/[0.08] text-white/55 hover:bg-white/[0.09] hover:text-white/80'
+      }`}>
+      {children}
+    </button>
   );
 }

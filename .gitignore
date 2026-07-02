@@ -5,6 +5,8 @@ dist/
 uploads/
 users.json
 sessions.json
+# Email-at-rest encryption key — server-only secret, NEVER commit.
+.email-enc-key
 social.json
 textbooks.json
 parties.json
