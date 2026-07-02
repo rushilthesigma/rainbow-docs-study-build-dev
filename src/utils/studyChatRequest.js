@@ -9,6 +9,7 @@ export function buildStudyChatBody({
   model = null,
   humanize = false,
   bestOf = null,
+  superimpose = false,
   reroute = false,
   smartReroute = false,
   bruteForce = false,
@@ -46,6 +47,9 @@ export function buildStudyChatBody({
           judgeModel: bestOf.judgeModel,
         }
       : undefined,
+    // Superimpose reuses the bestOf candidate/judge selection above, but asks
+    // the judge model to merge all three answers into one instead of picking a winner.
+    superimpose: superimpose ? true : undefined,
     images: (images || []).slice(0, manualImageLimit).map(i => ({
       dataUrl: i.dataUrl,
       mimeType: i.mimeType,

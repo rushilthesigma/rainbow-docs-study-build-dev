@@ -20,9 +20,6 @@ import { peek, fetchOnce, bust, bustPrefix } from '../../../api/cache';
 import ViewFade from '../../shared/ViewFade';
 import { useToast } from '../../shared/Toast';
 
-const ADVISOR_EMAILS = new Set(['william.qiao.yang@gmail.com']);
-const isAdvisorEmail = (email) => ADVISOR_EMAILS.has((email || '').toLowerCase());
-
 /* ====================== TOP-LEVEL ====================== */
 export default function AdminApp() {
   const [isAdmin, setIsAdmin] = useState(null);
@@ -434,7 +431,7 @@ function UserList({ users, total, metrics, query, setQuery, planFilter, setPlanF
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <p className="text-sm font-medium text-white/90 truncate">{u.name || u.email}</p>
-                  {isAdvisorEmail(u.email) ? <AdvisorBadge /> : <PlanPill plan={u.plan} />}
+                  {u.isAdvisor ? <AdvisorBadge /> : <PlanPill plan={u.plan} />}
                   {u.banned && <span className="px-1.5 py-0.5 rounded bg-rose-900/30 text-rose-400 text-[10px] font-medium">Banned</span>}
                   {u.isDemo && <span className="px-1.5 py-0.5 rounded bg-amber-900/20 text-amber-400 text-[10px] font-bold uppercase tracking-wider">Demo</span>}
                 </div>
@@ -796,7 +793,7 @@ function UserDetail({ user: u, onBack, onBan, canBan, onDelete, onSetPlan, onOpe
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-lg font-bold text-white/90 truncate">{u.name || 'Unknown'}</h2>
-            {isAdvisorEmail(u.email) ? <AdvisorBadge /> : <PlanPill plan={u.plan} />}
+            {u.isAdvisor ? <AdvisorBadge /> : <PlanPill plan={u.plan} />}
             {u.banned && <span className="px-2 py-0.5 rounded-full bg-rose-900/30 text-rose-400 text-xs font-medium">Banned</span>}
           </div>
           <p className="text-xs text-white/40 truncate">
@@ -1623,7 +1620,7 @@ function BillingTab({ u }) {
         <div className="flex items-center justify-between">
           <span className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-white/40">Plan</span>
           <div className="flex items-center gap-1.5">
-            {isAdvisorEmail(u.email) ? <AdvisorBadge /> : (u.plan && u.plan !== 'free' ? <PlanPill plan={u.plan} /> : <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/[0.08] text-white/40">FREE</span>)}
+            {u.isAdvisor ? <AdvisorBadge /> : (u.plan && u.plan !== 'free' ? <PlanPill plan={u.plan} /> : <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/[0.08] text-white/40">FREE</span>)}
           </div>
         </div>
         <KV label="Granted by" value={u.proGrantedBy || '-'} />

@@ -62,6 +62,7 @@ function ThinkingPanel({ text, streaming }) {
 function BestOfResponses({ bestOf }) {
   const responses = Array.isArray(bestOf?.responses) ? bestOf.responses : [];
   const isReroute = bestOf?.mode === 'reroute';
+  const isSuperimpose = bestOf?.mode === 'superimpose';
   const firstOther = Math.max(0, responses.findIndex((r) => !r.selected));
   const [open, setOpen] = useState(isReroute);
   const [activeIndex, setActiveIndex] = useState(firstOther);
@@ -103,7 +104,9 @@ function BestOfResponses({ bestOf }) {
         <span className="text-[11.5px] font-semibold">
           {isReroute
             ? (open ? 'All model answers' : 'See all model answers')
-            : (open ? 'Other responses' : 'See other responses')}
+            : isSuperimpose
+              ? (open ? 'Merged from 3 models' : 'See the 3 merged sources')
+              : (open ? 'Other responses' : 'See other responses')}
         </span>
         <span className="text-[10.5px] font-medium text-white/35 truncate">
           {isReroute ? (
@@ -112,6 +115,10 @@ function BestOfResponses({ bestOf }) {
                 ? <span className="text-blue-300/80"> · brute force{bruteRounds ? ` · ${bruteRounds} round${bruteRounds === 1 ? '' : 's'}` : ''}</span>
                 : smartRewrite && <span className="text-violet-300/70"> · {smartRewrite.proactive ? 'smart reroute' : 'smart retry'}</span>}
               {refusedCount > 0 && <span className="text-rose-300/60"> · {refusedCount} refused</span>}
+            </>
+          ) : isSuperimpose ? (
+            <>· {responses.length} model{responses.length === 1 ? '' : 's'}
+              {bestOf?.judge?.label && <span className="text-white/30"> · merged by {bestOf.judge.label}</span>}
             </>
           ) : (
             <>· {otherCount} other model{otherCount === 1 ? '' : 's'}
@@ -200,7 +207,7 @@ function BestOfResponses({ bestOf }) {
             <>
               {bestOf?.judge?.label && (
                 <p className="px-1 text-[10px] font-semibold uppercase tracking-[0.13em] text-white/35">
-                  Judged by {bestOf.judge.label}
+                  {isSuperimpose ? `Superimposed by ${bestOf.judge.label}` : `Judged by ${bestOf.judge.label}`}
                 </p>
               )}
               {bestOf?.rationale && (
@@ -214,7 +221,9 @@ function BestOfResponses({ bestOf }) {
               const isWinner = !!r.selected;
               const status = isReroute
                 ? (r.refused ? 'Refused' : (r.error ? 'Failed' : (isWinner ? 'Shown above' : 'Answered')))
-                : (isWinner ? 'Winner' : (r.error ? 'Failed' : 'Alternative'));
+                : isSuperimpose
+                  ? (r.error ? 'Failed' : 'Source')
+                  : (isWinner ? 'Winner' : (r.error ? 'Failed' : 'Alternative'));
               return (
                 <button
                   key={`${r.key || r.label}-${index}`}

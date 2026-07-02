@@ -104,7 +104,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   const studyModelRef = useRef(studyModel);
   studyModelRef.current = studyModel;
   const [studyModelMode, setStudyModelMode] = useState(() => (
-    user?.data?.preferences?.studyModelMode === 'best-of' ? 'best-of' : 'single'
+    ['best-of', 'superimpose'].includes(user?.data?.preferences?.studyModelMode) ? user.data.preferences.studyModelMode : 'single'
   ));
   const initialBestOf = normalizeBestOfState(
     user?.data?.preferences?.studyBestOfModels,
@@ -143,7 +143,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   }, [user?.data?.preferences?.studyModel, plan, geminiOnly]);
 
   useEffect(() => {
-    setStudyModelMode(user?.data?.preferences?.studyModelMode === 'best-of' ? 'best-of' : 'single');
+    setStudyModelMode(['best-of', 'superimpose'].includes(user?.data?.preferences?.studyModelMode) ? user.data.preferences.studyModelMode : 'single');
     const normalized = normalizeBestOfState(
       user?.data?.preferences?.studyBestOfModels,
       user?.data?.preferences?.studyBestOfJudge,
@@ -178,18 +178,19 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   }
 
   function pickStudyModelMode(mode) {
-    const nextMode = mode === 'best-of' ? 'best-of' : 'single';
+    const nextMode = ['best-of', 'superimpose'].includes(mode) ? mode : 'single';
     setStudyModelMode(nextMode);
     saveStudyPrefs({ studyModelMode: nextMode });
   }
 
   function pickBestOfModels(nextModels) {
     const normalized = normalizeBestOfState(nextModels, bestOfJudgeRef.current, userEmail, plan);
-    setStudyModelMode('best-of');
+    const nextMode = ['best-of', 'superimpose'].includes(studyModelModeRef.current) ? studyModelModeRef.current : 'best-of';
+    setStudyModelMode(nextMode);
     setBestOfModels(normalized.models);
     setBestOfJudge(normalized.judge);
     saveStudyPrefs({
-      studyModelMode: 'best-of',
+      studyModelMode: nextMode,
       studyBestOfModels: normalized.models,
       studyBestOfJudge: normalized.judge,
     });
@@ -198,11 +199,12 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   function pickBestOfJudge(nextJudge) {
     if (!canUseStudyModel(nextJudge, plan)) return;
     const normalized = normalizeBestOfState(bestOfModelsRef.current, nextJudge, userEmail, plan);
-    setStudyModelMode('best-of');
+    const nextMode = ['best-of', 'superimpose'].includes(studyModelModeRef.current) ? studyModelModeRef.current : 'best-of';
+    setStudyModelMode(nextMode);
     setBestOfModels(normalized.models);
     setBestOfJudge(normalized.judge);
     saveStudyPrefs({
-      studyModelMode: 'best-of',
+      studyModelMode: nextMode,
       studyBestOfModels: normalized.models,
       studyBestOfJudge: normalized.judge,
     });
@@ -510,7 +512,11 @@ export default function StudyModePanel({ className = '', flush = false, initialM
     // this mode. Mirror the humanize precedent and drop sourced when comparing.
     const bestOfActive = !fanOutActive && studyModelModeRef.current === 'best-of'
       && bestOfModelsRef.current.length === 3 && !!bestOfJudgeRef.current;
-    const wasSourced = !fanOutActive && !wantsHumanize && !bestOfActive && !!(opts.sourced ?? sourceModeRef.current);
+    // Superimpose shares Best of 3's candidate/judge picker, but the judge merges
+    // all three answers into one instead of picking a winner.
+    const superimposeActive = !fanOutActive && studyModelModeRef.current === 'superimpose'
+      && bestOfModelsRef.current.length === 3 && !!bestOfJudgeRef.current;
+    const wasSourced = !fanOutActive && !wantsHumanize && !bestOfActive && !superimposeActive && !!(opts.sourced ?? sourceModeRef.current);
     const attachedImages = opts.images || [];
     const canvasApi = mathCanvasRef.current;
     const canvasPaneOpen = mathTutorSideScreenRef.current;
@@ -666,7 +672,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         setStreaming(false);
       },
     }, wasSourced, !thinkingOnRef.current, studyModelRef.current, canvasImage, wantsHumanize,
-      bestOfActive
+      (bestOfActive || superimposeActive)
         ? {
             models: bestOfModelsRef.current,
             judgeModel: bestOfJudgeRef.current,
@@ -675,7 +681,8 @@ export default function StudyModePanel({ className = '', flush = false, initialM
       rerouteActive,
       rerouteActive && !!opts.smartReroute,
       bruteForceActive,
-      bruteForceActive ? (opts.bruteForceFocus || '') : '');
+      bruteForceActive ? (opts.bruteForceFocus || '') : '',
+      superimposeActive);
     abortRef.current = abort;
   }
 
@@ -911,6 +918,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
     return (
       <div className={`flex flex-col min-h-0 ${className}`}>
         <BestOfModeInfoView
+          mode={studyModelMode}
           bestOfModels={bestOfModels}
           bestOfJudge={bestOfJudge}
           onBack={() => setBestOfInfoOpen(false)}
@@ -1030,8 +1038,8 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         onSideScreenQuiz={openQuizSideScreen}
         sourceMode={sourceMode}
         onToggleSource={setSourceMode}
-        sourceDisabled={studyModelMode === 'best-of' && bestOfModels.length === 3 && !!bestOfJudge}
-        sourceDisabledReason="Web search is off while comparing models in Best of 3"
+        sourceDisabled={['best-of', 'superimpose'].includes(studyModelMode) && bestOfModels.length === 3 && !!bestOfJudge}
+        sourceDisabledReason={studyModelMode === 'superimpose' ? 'Web search is off while superimposing models' : 'Web search is off while comparing models in Best of 3'}
         humanizeMode={humanizeMode}
         onToggleHumanize={setHumanizeMode}
         showThinking={studyModelMode === 'single' && studyModelSupportsThinking(studyModel)}
@@ -1052,7 +1060,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         }
         composerNotice={(() => {
           if (plan !== 'free') return null;
-          const heavy = studyModelMode === 'best-of'
+          const heavy = ['best-of', 'superimpose'].includes(studyModelMode)
             ? bestOfModels.filter(studyModelEatsCreditsFast)
             : (studyModelEatsCreditsFast(studyModel) ? [studyModel] : []);
           if (!heavy.length) return null;
@@ -1061,7 +1069,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
           return (
             <CreditBurnNotice
               models={heavy}
-              recommend={recommendedCheapModel(userEmail, studyModelMode === 'best-of' ? null : studyModel)}
+              recommend={recommendedCheapModel(userEmail, ['best-of', 'superimpose'].includes(studyModelMode) ? null : studyModel)}
               onSeeHow={openCreditSettings}
               onDismiss={() => setCreditNoticeDismissed(key)}
             />
@@ -1237,11 +1245,12 @@ function ModelCapPill({ cap, remaining, model }) {
   );
 }
 
-function BestOfModeInfoView({ bestOfModels, bestOfJudge, onBack }) {
+function BestOfModeInfoView({ mode = 'best-of', bestOfModels, bestOfJudge, onBack }) {
+  const isSuperimpose = mode === 'superimpose';
   const responseLabels = bestOfModels.length
     ? bestOfModels.map((key) => studyModelLabel(key))
     : ['Response model 1', 'Response model 2', 'Response model 3'];
-  const judgeLabel = bestOfJudge ? studyModelLabel(bestOfJudge) : 'Judge model';
+  const judgeLabel = bestOfJudge ? studyModelLabel(bestOfJudge) : (isSuperimpose ? 'Merge model' : 'Judge model');
 
   return (
     <ViewFade viewKey="best-of-mode-info" className="h-full min-h-0 overflow-y-auto bg-transparent px-5 py-5">
@@ -1255,27 +1264,46 @@ function BestOfModeInfoView({ bestOfModels, bestOfJudge, onBack }) {
 
       <div className="mx-auto w-full max-w-2xl text-white/60">
         <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/35">Study model mode</p>
-        <h2 className="mt-2 text-[20px] font-bold text-white/90">Best of mode</h2>
+        <h2 className="mt-2 text-[20px] font-bold text-white/90">{isSuperimpose ? 'Superimpose mode' : 'Best of mode'}</h2>
 
         <div className="mt-5 space-y-4 text-[13px] leading-relaxed">
-          <p>
-            Best of sends your prompt to three response models, then asks a separate fourth model to judge the answers.
-          </p>
-          <p>
-            Study Mode shows the judged winner first. The other responses stay under the answer so you can compare what each model did differently.
-          </p>
-          <p>
-            It is useful for harder prompts where multiple attempts can catch nuance, but it can feel slower than Single because it creates several answers before choosing one.
-          </p>
-          <p>
-            Web search stays off in this mode. Grounding routes every model through Gemini, which would collapse your three picks onto the same engine, so each model answers as itself instead.
-          </p>
+          {isSuperimpose ? (
+            <>
+              <p>
+                Superimpose sends your prompt to three response models, then asks a separate fourth model to merge all three answers into one.
+              </p>
+              <p>
+                Study Mode shows the merged answer first. The three raw responses stay under it so you can see what each model contributed.
+              </p>
+              <p>
+                It is useful for prompts where different models catch different pieces of the answer, but it can feel slower than Single because it creates several answers before merging them.
+              </p>
+              <p>
+                Web search stays off in this mode. Grounding routes every model through Gemini, which would collapse your three picks onto the same engine, so each model answers as itself instead.
+              </p>
+            </>
+          ) : (
+            <>
+              <p>
+                Best of sends your prompt to three response models, then asks a separate fourth model to judge the answers.
+              </p>
+              <p>
+                Study Mode shows the judged winner first. The other responses stay under the answer so you can compare what each model did differently.
+              </p>
+              <p>
+                It is useful for harder prompts where multiple attempts can catch nuance, but it can feel slower than Single because it creates several answers before choosing one.
+              </p>
+              <p>
+                Web search stays off in this mode. Grounding routes every model through Gemini, which would collapse your three picks onto the same engine, so each model answers as itself instead.
+              </p>
+            </>
+          )}
         </div>
 
         <div className="mt-7 space-y-2 text-[12px] leading-relaxed text-white/45">
           <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/32">Current setup</p>
           <p>Responses: {responseLabels.join(', ')}</p>
-          <p>Judge: {judgeLabel}</p>
+          <p>{isSuperimpose ? 'Merges with' : 'Judge'}: {judgeLabel}</p>
         </div>
       </div>
     </ViewFade>
@@ -1316,7 +1344,8 @@ function StudyModelDropdown({
   const popRef = useRef(null);
   const [candidateSlot, setCandidateSlot] = useState(0);
 
-  const WIDTH = mode === 'best-of' ? 318 : 256;
+  const multiModelMode = mode === 'best-of' || mode === 'superimpose';
+  const WIDTH = multiModelMode ? 318 : 256;
   const pickerModels = visibleStudyModels(email);
   const unlockedKeys = unlockedStudyModelKeys(email, plan);
   const canUseBestOf = unlockedKeys.length >= 4;
@@ -1410,7 +1439,11 @@ function StudyModelDropdown({
       >
         <Cpu size={13} />
         <span className="text-[11px] font-semibold max-w-[96px] truncate">
-          {mode === 'best-of' ? (bestOfReady ? 'Best of 3' : 'Best setup') : studyModelLabel(active)}
+          {mode === 'best-of'
+            ? (bestOfReady ? 'Best of 3' : 'Best setup')
+            : mode === 'superimpose'
+              ? (bestOfReady ? 'Superimpose' : 'Super setup')
+              : studyModelLabel(active)}
         </span>
         <ChevronDown size={11} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
@@ -1429,7 +1462,7 @@ function StudyModelDropdown({
           }}
           className="rounded-xl border border-gray-200 dark:border-white/[0.12] bg-white dark:bg-[#1b1b1f] shadow-2xl p-1.5"
         >
-          <div className="grid grid-cols-[1fr_1fr_1.75rem] gap-1 rounded-lg bg-gray-100 dark:bg-white/[0.05] p-1 mb-1.5">
+          <div className="grid grid-cols-[1fr_1fr_1fr_1.75rem] gap-1 rounded-lg bg-gray-100 dark:bg-white/[0.05] p-1 mb-1.5">
             <button
               type="button"
               onClick={() => onModeChange?.('single')}
@@ -1456,16 +1489,29 @@ function StudyModelDropdown({
             </button>
             <button
               type="button"
+              onClick={() => { if (canUseBestOf) onModeChange?.('superimpose'); }}
+              disabled={!canUseBestOf}
+              title={canUseBestOf ? 'Run three models, then have a fourth merge them into one answer' : 'Superimpose needs four unlocked models'}
+              className={`px-2 py-1 rounded-md text-[11px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                mode === 'superimpose'
+                  ? 'bg-white dark:bg-white/[0.11] text-gray-900 dark:text-white'
+                  : 'text-gray-500 dark:text-white/45 hover:text-gray-800 dark:hover:text-white/75'
+              }`}
+            >
+              Superimpose
+            </button>
+            <button
+              type="button"
               onClick={openBestOfInfo}
-              aria-label="Explain Best of mode"
-              title="Explain Best of mode"
+              aria-label="Explain this mode"
+              title="Explain this mode"
               className="grid h-7 w-7 place-items-center rounded-md text-gray-400 transition-colors hover:bg-white hover:text-gray-700 dark:text-white/40 dark:hover:bg-white/[0.09] dark:hover:text-white/75"
             >
               <CircleHelp size={14} />
             </button>
           </div>
 
-          {mode !== 'best-of' && pickerModels.map((m) => {
+          {mode === 'single' && pickerModels.map((m) => {
             const locked = !canUseStudyModel(m.key, plan);
             const lockLabel = locked ? requiredPlanLabelFor(m.key, plan) : null;
             return (
@@ -1498,7 +1544,7 @@ function StudyModelDropdown({
             );
           })}
 
-          {mode === 'best-of' && (
+          {multiModelMode && (
             <div className="max-h-[430px] overflow-y-auto pr-0.5">
               <div className="flex items-center justify-between px-1.5 py-1">
                 <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400 dark:text-white/35">Responses</p>
@@ -1538,7 +1584,7 @@ function StudyModelDropdown({
                             <Lock size={9} /> {lockLabel}
                           </span>
                         )}
-                        {blockedByJudge && !locked && <span className="text-[9px] font-semibold text-gray-400 dark:text-white/35">Judge</span>}
+                        {blockedByJudge && !locked && <span className="text-[9px] font-semibold text-gray-400 dark:text-white/35">{mode === 'superimpose' ? 'Merge' : 'Judge'}</span>}
                       </p>
                     </div>
                     {selected && (
@@ -1558,7 +1604,9 @@ function StudyModelDropdown({
               })}
 
               <div className="flex items-center justify-between px-1.5 pb-1 pt-2.5 mt-1 border-t border-gray-200 dark:border-white/[0.08]">
-                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400 dark:text-white/35">Judge AI</p>
+                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-gray-400 dark:text-white/35">
+                  {mode === 'superimpose' ? 'Merge AI' : 'Judge AI'}
+                </p>
                 <span className={`text-[10px] font-semibold ${bestOfJudge ? 'text-emerald-500 dark:text-emerald-300/80' : 'text-amber-500 dark:text-amber-300/80'}`}>
                   Fourth model
                 </span>

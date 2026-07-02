@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { FileText, Plus, ChevronRight, ArrowLeft, Save, Trash2 } from 'lucide-react';
+import { FileText, Plus, ChevronRight, ArrowLeft, Save, Trash2, Download } from 'lucide-react';
 import { listNotes, createNote, getNote, updateNote, deleteNote } from '../../api/notes';
+import { exportNoteAsPdf } from '../../lib/notesPdf';
 import MobilePage from './MobilePage';
 import MarkdownNoteEditor from '../notes/MarkdownNoteEditor';
 
@@ -16,9 +17,13 @@ export default function MobileNotes() {
   // not `content`. Keep our state name aligned to avoid the same off-by-key
   // bug that caused "make new note doesn't work" the first time.
   const [activeId, setActiveId] = useState(null);
+  const [activeType, setActiveType] = useState('regular');
   const [title, setTitle] = useState('');
   const [mainNotes, setMainNotes] = useState('');
+  const [cues, setCues] = useState([]);
+  const [summary, setSummary] = useState('');
   const [saving, setSaving] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [savedAt, setSavedAt] = useState(null);
 
   useEffect(() => {
@@ -39,12 +44,18 @@ export default function MobileNotes() {
   async function openNote(note) {
     setView('edit');
     setActiveId(note.id);
+    setActiveType(note.type || 'regular');
     setTitle(note.title || 'Untitled note');
     setMainNotes('');
+    setCues([]);
+    setSummary('');
     try {
       const d = await getNote(note.id);
       setTitle(d.note?.title ?? note.title ?? '');
       setMainNotes(d.note?.mainNotes ?? '');
+      setActiveType(d.note?.type ?? note.type ?? 'regular');
+      setCues(Array.isArray(d.note?.cues) ? d.note.cues : []);
+      setSummary(d.note?.summary ?? '');
     } catch {}
   }
 
@@ -68,7 +79,20 @@ export default function MobileNotes() {
       setNotes((prev) => prev.filter((n) => n.id !== activeId));
       setView('list');
       setActiveId(null);
+      setActiveType('regular');
     } catch (err) { console.error(err); }
+  }
+
+  async function handleExportPdf() {
+    if (!activeId || exportingPdf) return;
+    setExportingPdf(true);
+    try {
+      await exportNoteAsPdf({ id: activeId, title, mainNotes, type: activeType, cues, summary });
+    } catch {
+      alert('Could not export this note as a PDF.');
+    } finally {
+      setExportingPdf(false);
+    }
   }
 
   // ===== EDIT =====
@@ -82,6 +106,15 @@ export default function MobileNotes() {
           <p className="flex-1 text-[12.5px] font-medium text-white/35 truncate">
             {savedAt ? `Saved ${timeAgo(savedAt)}` : (saving ? 'Saving…' : 'Tap save to keep changes')}
           </p>
+          <button
+            onClick={handleExportPdf}
+            disabled={exportingPdf}
+            aria-label="Export as PDF"
+            title="Export as PDF"
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-white/[0.08] border border-white/[0.12] disabled:opacity-50 text-white/65 text-[12px] font-bold"
+          >
+            <Download size={11} /> PDF
+          </button>
           <button
             onClick={handleSave}
             disabled={saving}

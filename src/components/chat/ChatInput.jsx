@@ -437,12 +437,11 @@ const ChatInput = forwardRef(function ChatInput({
               onClick={() => onToggleHumanize(!humanizeMode)}
               title="Humanize: draft or rewrite in natural, specific prose (no em dashes, no stiff filler)"
               style={TOOL_ACCENTS.humanize}
-              className={`inline-flex items-center gap-1 pl-1.5 pr-2 py-1.5 rounded-lg transition-colors tool-accent-button ${
+              className={`p-1.5 rounded-lg transition-colors tool-accent-button ${
                 humanizeMode ? 'is-active' : 'text-gray-400 dark:text-blue-200/55'
               }`}
             >
               <PenLine size={13} />
-              <span className="text-[11px] font-semibold leading-none">Humanize</span>
             </button>
           )}
           {showThinking && (

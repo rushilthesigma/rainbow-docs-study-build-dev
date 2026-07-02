@@ -152,10 +152,10 @@ function TrailNode({ lesson, x, prevX, isCompleted, isCurrent, hasStarted, onOpe
   // Color tokens
   let ring, fill, text, badgeBg;
   if (isCompleted) {
-    ring = 'ring-emerald-500/0';
-    fill = 'bg-emerald-500';
+    ring = 'ring-blue-500/0';
+    fill = 'bg-blue-500';
     text = 'text-white';
-    badgeBg = 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300';
+    badgeBg = 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300';
   } else if (isCurrent) {
     ring = 'ring-white/40';
     fill = 'bg-white/20';
@@ -191,7 +191,7 @@ function TrailNode({ lesson, x, prevX, isCompleted, isCurrent, hasStarted, onOpe
         <path
           d={`M ${dx >= 0 ? 10 : Math.abs(dx) + 10} 0 Q ${(Math.abs(dx) + 20) / 2} ${NODE_SPACING / 2} ${dx >= 0 ? Math.abs(dx) + 10 : 10} ${NODE_SPACING}`}
           fill="none"
-          stroke={isCompleted ? 'rgb(16 185 129)' : 'rgba(156,163,175,0.35)'}
+          stroke={isCompleted ? 'rgb(59 130 246)' : 'rgba(156,163,175,0.35)'}
           strokeWidth="3"
           strokeLinecap="round"
           strokeDasharray={isCompleted ? 'none' : '4 4'}

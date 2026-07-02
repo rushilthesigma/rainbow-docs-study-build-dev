@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { googleLogin } from '../api/auth';
 import {
   Loader2 as Loader, Sparkles, X, Check, ChevronDown,
-  BookOpen, Brain, Zap, Repeat,
+  BookOpen, Zap, Repeat,
   Lightbulb, Calculator, MessageSquare,
   Scale, Link2,
 } from 'lucide-react';
@@ -793,9 +793,6 @@ function MenuBar() {
       }}
     >
       <div className="flex items-center gap-1.5">
-        <div className="w-4 h-4 rounded-[5px] bg-blue-500 grid place-items-center">
-          <Brain size={9} className="text-white" strokeWidth={2.2} />
-        </div>
         <span className="text-[12.5px] font-semibold tracking-[-0.005em] text-white/95">RushilAI</span>
       </div>
       <div className="ml-auto flex items-center gap-3 text-[12px] font-medium text-white/85 tabular-nums tracking-tight">

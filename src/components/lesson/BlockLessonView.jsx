@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Trophy } from 'lucide-react';
+import { ArrowLeft, SkipForward, Trophy } from 'lucide-react';
+import { checkAdmin } from '../../api/admin';
 import StageTracker from './StageTracker';
 import ReadingBlock from './ReadingBlock';
 import QuizBlock from './QuizBlock';
@@ -60,6 +61,12 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
   // Tracks whether the server has recorded isCompleted for this lesson so we
   // don't double-call the complete endpoint.
   const serverMarkedRef = useRef(!!lesson.isCompleted);
+
+  // Admin-only escape hatch for testing: skip the current step regardless of
+  // block type or completion state. One shared affordance for every step
+  // (reading/example/quiz/etc.) rather than something each block reimplements.
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => { checkAdmin().then(d => setIsAdmin(!!d.isAdmin)).catch(() => {}); }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -176,8 +183,11 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
   })();
 
   // Every block is its own sequential step at the same reading width -
-  // the student advances through them one at a time.
-  const wrapWidth = 'max-w-3xl';
+  // the student advances through them one at a time. The worked-example
+  // block is the exception: it embeds the Math Tutor's chat+canvas split
+  // view, which needs real horizontal room to be usable in a maximized
+  // window rather than being squeezed into a 768px reading column.
+  const wrapWidth = active?.type === 'example' ? 'max-w-none' : 'max-w-3xl';
 
   // Dispatch the active block to the component that renders its type.
   // Self-contained blocks (reading / example / recap / application /
@@ -225,19 +235,19 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
       {/* Back button */}
       <button
         onClick={onBack}
-        className="group inline-flex items-center gap-1.5 text-[12px] font-medium text-blue-200/55 hover:text-blue-100 mb-6 transition-colors"
+        className="group inline-flex items-center gap-1.5 text-[12px] font-medium text-white/40 hover:text-white/75 mb-5 transition-colors"
       >
         <ArrowLeft size={13} className="group-hover:-translate-x-0.5 transition-transform" />
         {backLabel}
       </button>
 
       {/* Lesson title - headline + subtitle */}
-      <header className="mb-8">
-        <h1 className="text-[30px] md:text-[36px] font-semibold tracking-[-0.02em] text-white/95 leading-[1.1] mb-2">
+      <header className="mb-7">
+        <h1 className="text-[22px] md:text-[27px] font-semibold tracking-[-0.02em] text-white/90 leading-[1.15] mb-2">
           {lesson.title}
         </h1>
         {lesson.description && (
-          <p className="text-white/45 text-[14px] leading-relaxed max-w-[640px]">
+          <p className="text-white/40 text-[14px] leading-relaxed max-w-[640px]">
             {lesson.description}
           </p>
         )}
@@ -273,8 +283,8 @@ export default function BlockLessonView({ curriculumId, lesson, onBack, api: api
             <div className="p-8">
               {/* Icon + title */}
               <div className="flex items-center gap-3 mb-6">
-                <div className="w-10 h-10 rounded-lg bg-blue-500/[0.10] border border-blue-400/20 grid place-items-center flex-shrink-0">
-                  <Trophy size={18} className="text-blue-400" />
+                <div className="grid place-items-center flex-shrink-0">
+                  <Trophy size={20} className="text-blue-400" />
                 </div>
                 <div>
                   <p className="text-[10px] uppercase tracking-[0.18em] font-bold text-blue-400/60 mb-0.5">Completed</p>

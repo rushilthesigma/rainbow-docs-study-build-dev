@@ -727,9 +727,9 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
           </div>
         </div>
         {!trailMode && (
-          <>
+          <div className="w-full">
             <h1 className="text-xl font-bold text-white mb-1">{c.title}</h1>
-            {c.description && <p className="text-sm text-white/45 mb-3">{c.description}</p>}
+            {c.description && <p className="text-sm text-white/45 mb-3 max-w-3xl">{c.description}</p>}
             <div className="flex items-center gap-3 mb-4">
               <ProgressBar value={completedLessons} max={totalLessons} className="flex-1" />
               <span className="text-xs text-white/45 tabular-nums flex-shrink-0">{completedLessons}/{totalLessons}</span>
@@ -746,28 +746,34 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
                 <span className="text-[11px] text-white/30">{c.courseGrade.gradedCount} graded</span>
               </div>
             )}
-          </>
+          </div>
         )}
         {trailMode && isBeta && !activeShare ? (
           <TrailView curriculum={c} onOpenLesson={(l) => openLesson(l, c.id)} />
         ) : (
-          <div className="space-y-3">
-            {(c.units || []).map((unit, i) => (
-              <UnitSection
-                key={unit.id}
-                unit={i === 0 ? { ...unit, tourAnchorFirst: true } : unit}
-                onOpenLesson={(l) => openLesson(l, c.id)}
-              />
-            ))}
+          <>
+            {/* Single stacked column of unit cards, stretched full-width so
+                a maximized/fullscreen window doesn't leave the whole right
+                side of the screen empty. */}
+            <div className="w-full space-y-3">
+              {(c.units || []).map((unit, i) => (
+                <UnitSection
+                  key={unit.id}
+                  unit={i === 0 ? { ...unit, tourAnchorFirst: true } : unit}
+                  onOpenLesson={(l) => openLesson(l, c.id)}
+                />
+              ))}
+            </div>
 
-            {/* Course-level midterm + final, with spaced repetition.
-                Exams stay owner-only - their endpoints don't carry a shareId. */}
+            {/* Course-level midterm + final, with spaced repetition. Sits
+                full-width below the unit columns. Exams stay owner-only -
+                their endpoints don't carry a shareId. */}
             {!activeShare && (
-              <div className="pt-4">
+              <div className="w-full pt-4">
                 <ExamBlock curriculumId={c.id} />
               </div>
             )}
-          </div>
+          </>
         )}
 
       </ViewFade>
@@ -915,7 +921,7 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
                   onChange={e => setSourceUrlInput(e.target.value)}
                   placeholder="https://…"
                   disabled={sourceBusy || sources.length >= 8}
-                  className="flex-1 px-3 py-2 rounded-lg border border-white/10 bg-white dark:bg-[#0D0D14] text-sm text-white outline-none focus:ring-2 focus:ring-white/20 disabled:opacity-50"
+                  className="flex-1 px-3 py-2 rounded-lg border border-white/10 bg-white dark:bg-transparent text-sm text-white outline-none focus:ring-2 focus:ring-white/20 disabled:opacity-50"
                 />
                 <button
                   type="submit"

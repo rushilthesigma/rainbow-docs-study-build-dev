@@ -8,7 +8,11 @@
 
 // Accounts that should not see Claude/OpenAI options. DeepSeek remains
 // selectable and is rejected or fallen back only by its own server-side checks.
-export const GEMINI_ONLY_EMAILS = new Set(['kelapure@gmail.com']);
+// Real address lives in .env (VITE_GEMINI_ONLY_EMAILS), not tracked source -
+// mirrors GEMINI_ONLY_EMAILS in server.js.
+export const GEMINI_ONLY_EMAILS = new Set(
+  (import.meta.env.VITE_GEMINI_ONLY_EMAILS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+);
 export function isGeminiOnlyEmail(email) {
   return GEMINI_ONLY_EMAILS.has((email || '').toLowerCase());
 }

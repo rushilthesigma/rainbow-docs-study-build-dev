@@ -375,6 +375,7 @@ export function sendStudyMessage(
   smartReroute,
   bruteForce,
   bruteForceFocus,
+  superimpose,
 ) {
   let images = [], handlers, sourced = false;
   if (Array.isArray(handlersOrImages)) {
@@ -402,6 +403,7 @@ export function sendStudyMessage(
       smartReroute,
       bruteForce,
       bruteForceFocus,
+      superimpose,
     }),
     handlers,
   );

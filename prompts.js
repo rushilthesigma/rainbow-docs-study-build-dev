@@ -614,7 +614,7 @@ CONTEXT: This is assistant turn #${turnCount + 1} of the conversation. On turn 1
 // A chat-style tutor that teaches a topic, then gives problems the student
 // works on a handwriting canvas; the student can ask for step feedback on a
 // snapshot of their canvas, and for a final grade at the end.
-export function buildMathTutorPrompt(topic, customInstructions, _profile, _prefs, _assessmentHistory = [], phase = 'lesson', drawEnabled = false) {
+export function buildMathTutorPrompt(topic, customInstructions, _profile, _prefs, _assessmentHistory = [], phase = 'lesson', drawEnabled = false, continueGate = false) {
   const phaseGuide = {
     lesson: `LESSON mode. Teach the method, then move on. Format:
 1. One-sentence definition.
@@ -678,6 +678,12 @@ point -1,0 label="vertex" color=green
 \`\`\`
 ` : '';
 
+  // When embedded in a curriculum worked example, the client's "Continue" button
+  // to the next lesson block is gated on YOUR judgment, not a fixed step count.
+  const continueRules = continueGate ? `
+
+LESSON-PROGRESSION SIGNAL: This session is embedded in a curriculum lesson. The student only advances to the next part of the lesson when you say they're ready. Append the exact marker \`[[CONTINUE_READY]]\` as its own line at the very end of your reply, but ONLY the moment the student has just demonstrated (via a graded or feedback-checked canvas submission) that they've got this worked example - a correct or near-correct grade, or feedback confirming their solution is right. Do NOT append it during the initial walkthrough, mid-hint, on a wrong/incomplete attempt, or "just in case" - omit it entirely otherwise. Never mention this marker to the student or explain it; it is stripped before they see your reply.` : '';
+
   return `You are a focused, standalone 1-on-1 math tutor for the topic: "${topic}".
 
 This is a SELF-CONTAINED math session. Do NOT reference the student's curriculum, courses, goals, past assessments, preferences, profile, or anything outside this conversation - none of that context is available to you here. Treat the student as an anonymous learner who just wants help with this single topic.
@@ -696,7 +702,7 @@ GLOBAL RULES:
   Multi-line: $$ on line 1, \\begin{aligned} on line 2, content, \\end{aligned} on its own line, $$ alone on the final line. NEVER \\( \\) or \\[ \\].
 - NEVER write $$\\begin{aligned} together on one line, and NEVER write \\end{aligned}$$ on one line — both break rendering. NEVER use \\begin{align} (not supported).
 - Image unreadable? Say so plainly and ask them to clarify a specific step.
-- Stay on the topic "${topic}" unless the student explicitly switches.${drawRules}`;
+- Stay on the topic "${topic}" unless the student explicitly switches.${drawRules}${continueRules}`;
 }
 
 // ===== MATH PROBLEM SETS =====

@@ -411,14 +411,23 @@ function saveSessions() {
 const sessions = loadSessions();
 console.log(`Active sessions: ${Object.keys(sessions).length}`);
 
-const OWNER_EMAILS = ['rushilkelapure@gmail.com'];
+// Real addresses live only in .env (gitignored) - never hardcode a personal
+// email in source, since this file is mirrored to a public repo.
+function emailListFromEnv(name) {
+  return (process.env[name] || '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+const OWNER_EMAILS = emailListFromEnv('OWNER_EMAILS');
 function isOwner(email) {
   return OWNER_EMAILS.includes(email?.toLowerCase());
 }
 
 // Accounts restricted away from Claude/OpenAI models in Study Mode.
-// Mirrors GEMINI_ONLY_EMAILS in src/components/study/studyModels.js.
-const GEMINI_ONLY_EMAILS = new Set(['kelapure@gmail.com']);
+// Mirrors VITE_GEMINI_ONLY_EMAILS in src/components/study/studyModels.js.
+const GEMINI_ONLY_EMAILS = new Set(emailListFromEnv('GEMINI_ONLY_EMAILS'));
 function isGeminiOnly(email) {
   return GEMINI_ONLY_EMAILS.has((email || '').toLowerCase());
 }
@@ -427,14 +436,14 @@ function isBlockedForGeminiOnly(provider) {
 }
 
 // Viewer admins can access the admin panel (read + plan changes) but cannot ban users.
-const VIEWER_ADMIN_EMAILS = ['mnaman446@gmail.com'];
+const VIEWER_ADMIN_EMAILS = emailListFromEnv('VIEWER_ADMIN_EMAILS');
 function isViewerAdmin(email) {
   return VIEWER_ADMIN_EMAILS.includes((email || '').toLowerCase());
 }
 
 // Advisors: auto-Pro, get a red "Advisor" badge in UIs, and can see
 // beta/early-access features (flagged in /api/auth/me as isBeta:true).
-const ADVISOR_EMAILS = ['william.qiao.yang@gmail.com'];
+const ADVISOR_EMAILS = emailListFromEnv('ADVISOR_EMAILS');
 function isAdvisor(email) {
   return ADVISOR_EMAILS.includes((email || '').toLowerCase());
 }
@@ -5382,6 +5391,112 @@ Judge for accuracy, directness, teaching value, and whether the answer follows t
   };
 }
 
+// Superimpose reuses Best of 3's candidate/judge resolution (three response
+// models + a fourth), but instead of picking a single winner, the fourth
+// model MERGES all three answers into one unified response. The three raw
+// answers are still carried in bestOfMeta.responses so the UI can show them
+// the same way it shows Best of's alternatives.
+async function runSuperimposeStudyResponse({ sse, systemPrompt, messages, bestOf, opts = {} }) {
+  sse({ status: 'Generating three model responses...' });
+  const candidateOpts = { ...opts, enableWebSearch: false };
+  const candidateResults = await Promise.all(bestOf.candidates.map(async (candidate, index) => {
+    try {
+      const result = await callGemini(systemPrompt, messages, candidate.id, 8192, candidateOpts);
+      const servedCandidate = candidateWithActualModel(candidate, result?.model || candidate.id);
+      if (!result?.success) {
+        return {
+          index,
+          candidate: servedCandidate,
+          content: '',
+          sources: [],
+          error: result?.error || 'Model failed to answer.',
+        };
+      }
+      return {
+        index,
+        candidate: servedCandidate,
+        content: bestOfText(result),
+        sources: result?.data?.sources || [],
+        actualModel: result.model || candidate.id,
+      };
+    } catch (err) {
+      return {
+        index,
+        candidate,
+        content: '',
+        sources: [],
+        error: err?.message || String(err),
+      };
+    }
+  }));
+
+  const successful = candidateResults.filter((r) => r.content);
+  if (!successful.length) throw new Error('None of the selected Superimpose models returned a response.');
+
+  sse({ status: 'Superimposing the responses...' });
+  let mergedContent = successful[0].content;
+  let judgeError = null;
+  try {
+    const mergeSystem = `You are the fourth AI in a Study Mode "Superimpose" workflow. You are given ${successful.length} independent answers to the same student question from different AI models. Superimpose them into ONE unified answer: merge every correct, useful point from all candidates, resolve contradictions in favor of the most accurate and well-supported claim, remove redundancy, and keep the combined answer well-organized. Answer the student directly as a single coherent response - do not mention the candidates, the models, or that this is a merge.`;
+    const mergeUser = [
+      'Conversation:',
+      judgeTranscript(messages),
+      '',
+      ...successful.map((r) => (
+        `Candidate ${r.index + 1} (${r.candidate.requestedLabel || r.candidate.label}):\n${r.content.slice(0, 12000)}`
+      )),
+    ].join('\n\n---\n\n');
+    const mergeResult = await callGemini(mergeSystem, [{ role: 'user', content: mergeUser }], bestOf.judge.id, 8192, {
+      ...opts,
+      enableWebSearch: false,
+      disableThinking: true,
+      temperature: 0.3,
+    });
+    bestOf.judge = candidateWithActualModel(bestOf.judge, mergeResult?.model || bestOf.judge.id);
+    const text = bestOfText(mergeResult);
+    if (text) mergedContent = text;
+  } catch (err) {
+    judgeError = err?.message || String(err);
+  }
+
+  const sources = successful.flatMap((r) => r.sources || []);
+  const responses = candidateResults.map((r) => ({
+    key: r.candidate.key,
+    requestedKey: r.candidate.requestedKey,
+    label: r.candidate.requestedLabel || r.candidate.label,
+    servedLabel: r.candidate.label,
+    provider: r.candidate.provider,
+    selected: false,
+    switched: !!r.candidate.switched,
+    reason: r.candidate.reason || null,
+    content: r.content,
+    sources: r.sources || [],
+    error: r.error || null,
+  }));
+
+  return {
+    content: mergedContent,
+    sources,
+    bestOfMeta: {
+      mode: 'superimpose',
+      judge: {
+        key: bestOf.judge.key,
+        requestedKey: bestOf.judge.requestedKey,
+        label: bestOf.judge.requestedLabel || bestOf.judge.label,
+        servedLabel: bestOf.judge.label,
+        provider: bestOf.judge.provider,
+        switched: !!bestOf.judge.switched,
+        reason: bestOf.judge.reason || null,
+      },
+      winnerKey: null,
+      winnerLabel: null,
+      rationale: null,
+      judgeError,
+      responses,
+    },
+  };
+}
+
 // Heuristic "did the model refuse?" check for the regular-reroute feature. We
 // only look at the HEAD of the answer (the first ~400 chars) so a long, genuine
 // answer that happens to say "I can't stress this enough" mid-paragraph is not
@@ -5410,7 +5525,7 @@ function rerouteStats(results, candidates) {
 function comparisonBillKeys(bestOfMeta, plan) {
   if (PAID_TIERS.has(plan)) return [];
   const keys = [];
-  if (bestOfMeta?.mode === 'best-of' && freeCapConfig(bestOfMeta?.judge?.key)) {
+  if ((bestOfMeta?.mode === 'best-of' || bestOfMeta?.mode === 'superimpose') && freeCapConfig(bestOfMeta?.judge?.key)) {
     keys.push(bestOfMeta.judge.key);
   }
   for (const response of (bestOfMeta?.responses || [])) {
@@ -5432,7 +5547,7 @@ function comparisonRawCreditCost(bestOfMeta) {
     total += c;
     if (c > priciest) priciest = c;
   }
-  if (bestOfMeta?.mode === 'best-of' && bestOfMeta?.judge?.key) {
+  if ((bestOfMeta?.mode === 'best-of' || bestOfMeta?.mode === 'superimpose') && bestOfMeta?.judge?.key) {
     const j = studyModelCreditCost(bestOfMeta.judge.key);
     total += j;
     if (j > priciest) priciest = j;
@@ -7582,13 +7697,22 @@ app.post('/api/study/chat', authMiddleware, requireMessageQuota, async (req, res
     }
 
     if (bestOfConfig) {
-      const result = await runBestOfStudyResponse({
-        sse,
-        systemPrompt,
-        messages: aiMessages,
-        bestOf: bestOfConfig,
-        opts: responseOpts,
-      });
+      const superimposeActive = req.body.superimpose === true;
+      const result = superimposeActive
+        ? await runSuperimposeStudyResponse({
+            sse,
+            systemPrompt,
+            messages: aiMessages,
+            bestOf: bestOfConfig,
+            opts: responseOpts,
+          })
+        : await runBestOfStudyResponse({
+            sse,
+            systemPrompt,
+            messages: aiMessages,
+            bestOf: bestOfConfig,
+            opts: responseOpts,
+          });
       const winnerContent = humanizeMode ? stripDashChars(result.content) : result.content;
       chargeMultiModelCredits(req, users, email, result.bestOfMeta);
       sse({ bestOf: result.bestOfMeta });
@@ -9716,7 +9840,7 @@ async function searchWikipediaImage(query) {
   try {
     // Direct page summary first - cleanest thumbnail match.
     const summary = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(q)}`, {
-      headers: { 'User-Agent': 'RushilAI/1.0 (rushilkelapure@gmail.com)' },
+      headers: { 'User-Agent': `RushilAI/1.0 (${process.env.CONTACT_EMAIL || 'contact@example.com'})` },
     }).then(r => r.ok ? r.json() : null).catch(() => null);
     if (summary?.originalimage?.source) return summary.originalimage.source;
     if (summary?.thumbnail?.source) return summary.thumbnail.source;
@@ -12613,6 +12737,7 @@ app.post('/api/math-tutor/chat', authMiddleware, requireMessageQuota, async (req
       users[email].data.assessmentHistory || [],
       validPhase,
       !!req.body?.draw,
+      !!req.body?.continueGate,
     );
 
     // Attach any images sent this turn to the last user message.
@@ -13205,6 +13330,7 @@ app.get('/api/admin/users', authMiddleware, adminMiddleware, (req, res) => {
       handle: social.profiles[u.id]?.handle || null,
       banned: !!u.banned,
       isDemo: isDemoOrDevEmail(email),
+      isAdvisor: isAdvisor(email),
       plan,
       proUntil: u.data?.proUntil || null,
       proGrantedBy: u.data?.proGrantedBy || null,
@@ -13269,6 +13395,7 @@ app.get('/api/admin/users/:uid', authMiddleware, adminMiddleware, (req, res) => 
       handle: social.profiles[u.id]?.handle || null,
       createdAt: u.createdAt,
       profile: u.data?.profile,
+      isAdvisor: isAdvisor(email),
       // Billing
       plan,
       proUntil: u.data?.proUntil || null,

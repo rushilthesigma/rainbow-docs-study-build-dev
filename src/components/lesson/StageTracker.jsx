@@ -52,7 +52,7 @@ export default function StageTracker({ blocks = [], activeIdx = 0, onJump }) {
               title={title}
               className={`flex-1 h-1 rounded-full transition-all duration-200 ${
                 isCurrent
-                  ? 'bg-gradient-to-r from-blue-400 to-blue-500'
+                  ? 'bg-blue-400'
                   : done
                     ? 'bg-blue-500/55'
                     : 'bg-blue-400/[0.12] hover:bg-blue-400/[0.28]'

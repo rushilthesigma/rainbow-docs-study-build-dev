@@ -184,10 +184,7 @@ export default function DictationButton({ onStart, onLiveText, onTranscript, onL
             <span className="text-[10px] font-semibold">Listening…</span>
           </>
         ) : (
-          <>
-            <Mic2 size={13} />
-            <span className="text-[10px] font-semibold leading-none">Voice</span>
-          </>
+          <Mic2 size={13} />
         )}
         {micBlocked && (
           <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-amber-400" />

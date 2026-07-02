@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Calculator, Pen, Eraser, Undo2, Trash2, Check, Send,
-  ArrowLeft, ClipboardCheck, Settings, MessageSquare, Layers, RotateCcw,
+  ArrowLeft, ClipboardCheck, Settings, MessageSquare, RotateCcw,
   Play, ChevronLeft, ChevronRight, ListChecks, Cpu, ChevronDown, Lock, Shapes,
 } from 'lucide-react';
 import { sendMathTutorMessage, generateProblemSet } from '../../../api/mathTutor';
@@ -47,6 +47,17 @@ function loadState() {
 }
 function saveState(s) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch {}
+}
+
+// Strips the tutor's hidden lesson-progression marker (server-side prompt:
+// continueGate) from a reply and reports whether it was present, so the
+// caller can gate the curriculum "Continue" button on the AI's own call
+// rather than a fixed step count.
+function extractContinueMarker(content) {
+  if (!content) return { content, ready: false };
+  const marker = /\n?\[\[CONTINUE_READY\]\]\s*$/;
+  const ready = marker.test(content);
+  return { content: ready ? content.replace(marker, '').trimEnd() : content, ready };
 }
 
 // ============== CANVAS ==============
@@ -447,7 +458,9 @@ export function TutorCanvas({
           </button>
         )}
         <div className="flex-1" />
-        <span className="max-w-[45%] truncate text-[10px] text-white/25">{replaying ? 'Replaying…' : hint}</span>
+        {(replaying || hint) && (
+          <span className="max-w-[45%] truncate text-[10px] text-white/25">{replaying ? 'Replaying…' : hint}</span>
+        )}
       </div>
       <div className="flex-1 relative min-h-0">
         <canvas
@@ -545,27 +558,28 @@ function MathModelPicker({ active, plan, onPick, disabled = false }) {
 }
 
 // ============== MAIN APP ==============
-export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, onBack = null, defaultMode = 'both' } = {}) {
+export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, seedPrompt = null, title = null, embedded = false, onContinue = null, continueLabel = 'Continue', onBack = null, defaultMode = 'both' } = {}) {
   const persisted = loadState();
+  // Seeded mode = launched to teach a specific thing (a topic, or a fully
+  // formed prompt e.g. a curriculum worked example). In seeded mode we skip
+  // the setup screen, start with a fresh transcript + canvas, and never touch
+  // the standalone Math Tutor's persisted state. `embedded` additionally hides
+  // the window chrome (back-to-setup, new-session) for use inside a lesson.
+  const isSeeded = !!(seedTopic || seedPrompt);
   // Problem-set mode: when set, render the standalone problem-set runner.
   // Seeded from a curriculum `problem_set` lesson, or started on the setup screen.
   const [psConfig, setPsConfig] = useState(seedProblemSet || null);
   const [setupKind, setSetupKind] = useState('tutor'); // 'tutor' | 'problemset'
   const [psCount, setPsCount] = useState(5);
-  const [standaloneStrokes, setStandaloneStrokes] = useState(() => persisted?.strokes || []);
-  const [view, setView] = useState(seedTopic ? 'tutor' : (persisted?.view || 'setup'));
-  const [mode, setMode] = useState(() => {
-    const valid = ['both', 'tutor', 'canvas'];
-    if (defaultMode && valid.includes(defaultMode)) return defaultMode;
-    if (persisted?.mode && valid.includes(persisted.mode)) return persisted.mode;
-    return 'both';
-  });
+  const [standaloneStrokes, setStandaloneStrokes] = useState(() => isSeeded ? [] : (persisted?.strokes || []));
+  const [view, setView] = useState(isSeeded ? 'tutor' : (persisted?.view || 'setup'));
+  const [mode, setMode] = useState('both');
   const modeRef = useRef(mode);
   modeRef.current = mode;
-  useBrowserBack(!onBack && view === 'tutor', () => setView('setup'));
-  const [topic, setTopic]                       = useState(seedTopic || persisted?.topic || '');
+  useBrowserBack(!embedded && !onBack && view === 'tutor', () => setView('setup'));
+  const [topic, setTopic]                       = useState(seedTopic || title || persisted?.topic || '');
   const [customInstructions, setCustomInstructions] = useState(persisted?.customInstructions || '');
-  const [messages, setMessages]                 = useState(seedTopic ? [] : (persisted?.messages || []));
+  const [messages, setMessages]                 = useState(isSeeded ? [] : (persisted?.messages || []));
   const [streaming, setStreaming]               = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
   const [streamingThinking, setStreamingThinking] = useState('');
@@ -614,12 +628,22 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
   }
 
   useEffect(() => {
-    if (seedTopic) return;
+    if (isSeeded) return;
     const trimmed = messages.slice(-50).map(m => ({
       role: m.role, content: (m.content || '').slice(0, 3000), _edited: m._edited, _error: m._error,
     }));
     saveState({ view, mode, topic, customInstructions, messages: trimmed, strokes: standaloneStrokes, drawEnabled: false });
   }, [view, mode, topic, customInstructions, messages, standaloneStrokes, seedTopic]);
+
+  // Lesson-progression: the "Continue" button (embedded worked examples only)
+  // is gated on the tutor AI's own judgment, not a fixed step. The server
+  // prompt (continueGate) asks it to append a hidden [[CONTINUE_READY]]
+  // marker once the student has actually shown they've got it; we strip the
+  // marker before display and flip this on only then. Any new turn resets it
+  // until the fresh reply confirms readiness again. (The admin skip-past-gate
+  // control lives one level up, in BlockLessonView, so it's one affordance
+  // shared by every curriculum step type rather than duplicated per block.)
+  const [continueReady, setContinueReady] = useState(false);
 
   useEffect(() => () => abortRef.current?.(), []);
 
@@ -667,6 +691,9 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
     setStreamingThinking('');
     streamRef.current = '';
     thinkRef.current = '';
+    // A fresh turn is in flight - hold the Continue button until this reply
+    // confirms readiness again.
+    if (onContinue) setContinueReady(false);
 
     const history = [...messages, userMsg].slice(-50).map((m, i, arr) => {
       const isLast = i === arr.length - 1;
@@ -679,6 +706,7 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
       phase,
       model: modelRef.current,
       draw: drawRef.current,
+      continueGate: !!onContinue,
       messages: history.map(({ role, content }) => ({ role, content })),
       images: imageDataUrl ? [{ dataUrl: imageDataUrl, mimeType: 'image/png' }] : [],
     };
@@ -687,10 +715,11 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
       onChunk: (c) => { streamRef.current += c; setStreamingContent(streamRef.current); },
       onThinking: (t) => { thinkRef.current += t; setStreamingThinking(thinkRef.current); },
       onDone: () => {
-        const full = streamRef.current;
+        const { content: full, ready } = onContinue ? extractContinueMarker(streamRef.current) : { content: streamRef.current, ready: false };
         const think = thinkRef.current;
         if (full) setMessages(m => [...m, { role: 'assistant', content: full, thinking: think || undefined, timestamp: new Date().toISOString() }]);
         if (full) showBoardOnCanvas(full);
+        if (onContinue) setContinueReady(ready);
         setStreaming(false); setStreamingContent(''); setStreamingThinking(''); streamRef.current = ''; thinkRef.current = '';
       },
       onError: (err) => {
@@ -718,14 +747,13 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
 
 
   useEffect(() => {
-    if (!seedTopic || seedKickedOff.current) return;
+    if (!isSeeded || seedKickedOff.current) return;
     seedKickedOff.current = true;
-    setTimeout(() => doSend({
-      text: `Teach me about "${seedTopic}". Give me a real lesson - definition, why it matters, worked examples in KaTeX, then one problem to try on the canvas.`,
-      phase: 'lesson', hidden: true,
-    }), 60);
+    const seedText = seedPrompt
+      || `Teach me about "${seedTopic}". Give me a real lesson - definition, why it matters, worked examples in KaTeX, then one problem to try on the canvas.`;
+    setTimeout(() => doSend({ text: seedText, phase: 'lesson', hidden: true }), 60);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seedTopic]);
+  }, [isSeeded]);
 
   function handleSend(text) {
     if (!text.trim() || streaming) return;
@@ -877,15 +905,17 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
       };
     }
     setStreaming(true); setStreamingContent(''); setStreamingThinking(''); streamRef.current = ''; thinkRef.current = '';
-    const body = { topic: topic.trim(), customInstructions: customInstructions.trim(), phase: 'practice', model: modelRef.current, draw: drawRef.current, messages: apiHistory, images: [] };
+    if (onContinue) setContinueReady(false);
+    const body = { topic: topic.trim(), customInstructions: customInstructions.trim(), phase: 'practice', model: modelRef.current, draw: drawRef.current, continueGate: !!onContinue, messages: apiHistory, images: [] };
     const abort = sendMathTutorMessage(body, {
       onChunk: (c) => { streamRef.current += c; setStreamingContent(streamRef.current); },
       onThinking: (t) => { thinkRef.current += t; setStreamingThinking(thinkRef.current); },
       onDone: () => {
-        const full = streamRef.current;
+        const { content: full, ready } = onContinue ? extractContinueMarker(streamRef.current) : { content: streamRef.current, ready: false };
         const think = thinkRef.current;
         if (full) setMessages(m => [...m, { role: 'assistant', content: full, thinking: think || undefined, timestamp: new Date().toISOString(), _edited: true }]);
         if (full) showBoardOnCanvas(full);
+        if (onContinue) setContinueReady(ready);
         setStreaming(false); setStreamingContent(''); setStreamingThinking(''); streamRef.current = ''; thinkRef.current = '';
       },
       onError: (err) => {
@@ -896,41 +926,59 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
     abortRef.current = abort;
   }
 
+  // Solid-blue canvas actions — reused in the composer (split / chat views) and
+  // as a footer when the board is shown full-width (mode === 'canvas'), so
+  // "Get feedback" / "Grade my work" stay reachable in every view.
+  const renderCanvasActions = (className = '') => (
+    <div className={`space-y-1.5 ${className}`}>
+      <div className="flex gap-1.5">
+        <button
+          onClick={handleFeedback}
+          disabled={streaming}
+          className="inline-flex items-center justify-center gap-1.5 rounded-lg font-medium flex-1 px-2.5 py-2 text-[12px] disabled:opacity-50 disabled:cursor-not-allowed bg-blue-500 hover:bg-blue-400 text-white transition-colors"
+        >
+          <Check size={12} /> Get feedback
+        </button>
+        <button
+          onClick={handleGrade}
+          disabled={streaming}
+          className="inline-flex items-center justify-center gap-1.5 rounded-lg font-medium flex-1 px-2.5 py-2 text-[12px] disabled:opacity-50 disabled:cursor-not-allowed bg-blue-500 hover:bg-blue-400 text-white transition-colors"
+        >
+          <ClipboardCheck size={12} /> Grade my work
+        </button>
+      </div>
+      {/* Lesson-progression action, when embedded in a curriculum block - only
+          once the tutor AI itself has signalled the student is ready. */}
+      {onContinue && continueReady && (
+        <button
+          onClick={onContinue}
+          className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg font-semibold px-2.5 py-2.5 text-[12.5px] text-white bg-blue-500 hover:bg-blue-400 transition-colors animate-fade-in"
+        >
+          {continueLabel} <ChevronRight size={14} />
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <div key="mt-tutor" className="flex flex-col h-full bg-transparent animate-view-fade" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif' }}>
       {/* Header — notes-style: inline back link + topic, quiet icon actions */}
       <div className="flex items-center gap-2.5 mb-3 flex-shrink-0">
-        <button
-          onClick={() => setView('setup')}
-          className="flex items-center gap-2 text-sm text-white/35 hover:text-white/60 transition-colors flex-shrink-0"
-        >
-          <ArrowLeft size={16} /> Math Tutor
-        </button>
-        <span className="w-1 h-1 rounded-full bg-white/20 flex-shrink-0" />
+        {!embedded && (
+          <>
+            <button
+              onClick={() => setView('setup')}
+              className="flex items-center gap-2 text-sm text-white/35 hover:text-white/60 transition-colors flex-shrink-0"
+            >
+              <ArrowLeft size={16} /> Math Tutor
+            </button>
+            <span className="w-1 h-1 rounded-full bg-white/20 flex-shrink-0" />
+          </>
+        )}
         <span className="text-sm font-bold text-white/90 truncate">{topic}</span>
         <div className="flex-1" />
 
         <MathModelPicker active={model} plan={plan} onPick={pickModel} disabled={streaming} />
-
-        {/* Mode toggle */}
-        <div className="flex items-center gap-0.5 bg-white/[0.04] border border-white/[0.08] rounded-lg p-0.5">
-          {[
-            { id: 'tutor',  Icon: MessageSquare, label: 'Tutor only' },
-            { id: 'both',   Icon: Layers,        label: 'Tutor + Canvas' },
-            { id: 'canvas', Icon: Pen,           label: 'Canvas only' },
-          ].map(o => (
-            <button
-              key={o.id}
-              onClick={() => setMode(o.id)}
-              title={o.label}
-              className={`w-7 h-7 rounded-md flex items-center justify-center transition-colors ${
-                mode === o.id ? 'bg-white/10 text-white' : 'text-white/30 hover:text-white/70'
-              }`}
-            >
-              <o.Icon size={12} />
-            </button>
-          ))}
-        </div>
 
         <button
           onClick={() => setShowSettings(s => !s)}
@@ -941,13 +989,15 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
         >
           <Settings size={14} />
         </button>
-        <button
-          onClick={handleReset}
-          title="New session"
-          className={HEADER_ICON_BTN}
-        >
-          <RotateCcw size={14} />
-        </button>
+        {!embedded && (
+          <button
+            onClick={handleReset}
+            title="New session"
+            className={HEADER_ICON_BTN}
+          >
+            <RotateCcw size={14} />
+          </button>
+        )}
       </div>
 
       {showSettings && (
@@ -964,13 +1014,9 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
       )}
 
       {/* Main split */}
-      <div className={`flex-1 min-h-0 grid gap-3 bg-transparent ${
-        mode === 'both' ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'
-      }`}>
+      <div className="flex-1 min-h-0 grid gap-3 bg-transparent grid-cols-1 md:grid-cols-2">
         {/* Chat column */}
-        <div className={`flex flex-col min-h-0 overflow-hidden ${
-          mode === 'canvas' ? 'hidden' : ''
-        }`}>
+        <div className="flex flex-col min-h-0 overflow-hidden">
           <div className="flex-1 min-h-0 overflow-hidden">
             <ChatContainer
               messages={visibleMessages}
@@ -1015,33 +1061,21 @@ export default function MathTutorApp({ seedTopic = null, seedProblemSet = null, 
               )}
             </div>
             {/* Canvas actions — blue accent buttons */}
-            <div className="flex gap-1.5">
-              <button
-                onClick={handleFeedback}
-                disabled={streaming}
-                className="inline-flex items-center justify-center gap-1.5 rounded-lg font-medium flex-1 px-2.5 py-2 text-[12px] disabled:opacity-50 disabled:cursor-not-allowed bg-blue-500 hover:bg-blue-400 text-white transition-colors"
-              >
-                <Check size={12} /> Get feedback
-              </button>
-              <button
-                onClick={handleGrade}
-                disabled={streaming}
-                className="inline-flex items-center justify-center gap-1.5 rounded-lg font-medium flex-1 px-2.5 py-2 text-[12px] disabled:opacity-50 disabled:cursor-not-allowed bg-blue-500 hover:bg-blue-400 text-white transition-colors"
-              >
-                <ClipboardCheck size={12} /> Grade my work
-              </button>
-            </div>
+            {renderCanvasActions()}
             {error && <p className="text-[11px] text-[#f87171] px-1 animate-fade-in">{error}</p>}
           </div>
         </div>
 
         {/* Canvas column */}
-        <div className={`min-h-[280px] ${mode === 'tutor' ? 'hidden' : ''}`}>
-          <TutorCanvas
-            onCaptureReady={handleCaptureReady}
-            initialStrokes={standaloneStrokes}
-            onStrokesChange={setStandaloneStrokes}
-          />
+        <div className="flex flex-col min-h-[280px]">
+          <div className="flex-1 min-h-0">
+            <TutorCanvas
+              onCaptureReady={handleCaptureReady}
+              initialStrokes={standaloneStrokes}
+              onStrokesChange={setStandaloneStrokes}
+              hint=""
+            />
+          </div>
         </div>
       </div>
     </div>

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { MessageSquare, ClipboardCheck, BookOpen, X, CheckCircle2, XCircle, ArrowRight, ArrowLeft, Wand2, Share2, Cpu, ChevronDown, Lock, Check } from 'lucide-react';
+import { MessageSquare, ClipboardCheck, BookOpen, X, CheckCircle2, XCircle, ArrowRight, ArrowLeft, Wand2, Share2, Cpu, ChevronDown, Lock, Check, Download } from 'lucide-react';
 import Modal from '../shared/Modal';
 import Button from '../shared/Button';
 import PillGroup from '../shared/PillGroup';
@@ -16,6 +16,7 @@ import { useAuth } from '../../context/AuthContext';
 import { planFromUser } from '../billing/modelAccess';
 import { canUseStudyModel, requiredPlanLabelFor, resolveStudyModel, studyModelLabel, visibleStudyModels } from '../study/studyModels';
 import { useWindowManagerOptional } from '../../context/WindowManagerContext';
+import { exportNoteAsPdf } from '../../lib/notesPdf';
 
 // Actions that "create from a note": a Study session seeded with
 // the note text as a source, a Quiz grounded in the note's content
@@ -38,6 +39,7 @@ export default function NoteActions({ note, onNoteUpdated, onMakeQuiz, onAiEdit,
   const navigate = useNavigate();
   const [quizOpen, setQuizOpen] = useState(false);
   const [aiEditOpen, setAiEditOpen] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   const noteText = buildNoteText(note);
   const hasContent = noteText.length > 20;
@@ -60,6 +62,18 @@ export default function NoteActions({ note, onNoteUpdated, onMakeQuiz, onAiEdit,
       wm.openApp('curricula', 'Curricula', { seedTopic, seedSources, seedView: 'new' });
     } else {
       navigate('/new', { state: { seedTopic, seedSources } });
+    }
+  }
+
+  async function handleExportPdf() {
+    if (!note || exportingPdf) return;
+    setExportingPdf(true);
+    try {
+      await exportNoteAsPdf(note);
+    } catch {
+      alert('Could not export this note as a PDF.');
+    } finally {
+      setExportingPdf(false);
     }
   }
 
@@ -88,6 +102,12 @@ export default function NoteActions({ note, onNoteUpdated, onMakeQuiz, onAiEdit,
           icon={<Wand2 size={13} />}
           label="AI Edit"
           onClick={() => (onAiEdit ? onAiEdit() : setAiEditOpen(true))}
+        />
+        <ActionButton
+          icon={<Download size={13} />}
+          label={exportingPdf ? 'Exporting...' : 'Export as PDF'}
+          onClick={handleExportPdf}
+          disabled={exportingPdf}
         />
         {onShare && (
           <ActionButton

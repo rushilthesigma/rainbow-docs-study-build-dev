@@ -12,7 +12,7 @@ import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import { Bold, Italic, Underline, Strikethrough, Heading2, List, ListOrdered, Code2 } from 'lucide-react';
+import { Bold, Italic, Underline, Strikethrough, Heading2, List, ListOrdered } from 'lucide-react';
 
 // Shared markdown rendering used by the read-only MarkdownNoteView below (and
 // the same way notes display elsewhere). rehype-raw parses inline HTML (e.g.
@@ -129,7 +129,6 @@ export default function MarkdownNoteEditor({
       h2: editor.isActive('heading', { level: 2 }),
       bullet: editor.isActive('bulletList'),
       ordered: editor.isActive('orderedList'),
-      code: editor.isActive('code'),
     } : {}),
   }) || {};
 
@@ -151,7 +150,6 @@ export default function MarkdownNoteEditor({
         <button type="button" onClick={run(c => c.toggleHeading({ level: 2 }))} className={tBtn(active.h2)} title="Heading"><Heading2 size={15} /></button>
         <button type="button" onClick={run(c => c.toggleBulletList())} className={tBtn(active.bullet)} title="Bullet list"><List size={15} /></button>
         <button type="button" onClick={run(c => c.toggleOrderedList())} className={tBtn(active.ordered)} title="Numbered list"><ListOrdered size={15} /></button>
-        <button type="button" onClick={run(c => c.toggleCode())} className={tBtn(active.code)} title="Inline code"><Code2 size={15} /></button>
       </div>
 
       {/* Content */}
