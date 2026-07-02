@@ -1892,11 +1892,15 @@ app.post('/api/auth/signup', async (req, res) => {
     if (password.length < 6) {
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
+    if (!password.match(/[A-Z]/g)) return res.status(400).json({ error: 'Password must contain one uppercase letter' });
+    if (!password.match(/[0-9]/g)) return res.status(400).json({ error: 'Password must contain one digit' });
+    if (!password.match(/[[!@#^&*()\-=_+{}|\[\]\\;':",./<>?]]/g)) return res.status(400).json({ error: 'Password must contain one special character' });
     const trimEmail = email.trim().toLowerCase();
     const users = loadUsers();
     if (users[trimEmail]) {
       return res.status(409).json({ error: 'An account with this email already exists' });
     }
+    if (isDemoOrDevEmail(trimEmail)) return res.status(501).json({ error: 'Email and password logins are deprecated. Please sign up with Google instead! ' })
 
     const hashed = await bcrypt.hash(password, 10);
     const userId = crypto.randomUUID();
@@ -1926,7 +1930,7 @@ app.post('/api/auth/signup', async (req, res) => {
   }
 });
 
-// Email + password login
+// Email + password login (private)
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -1939,6 +1943,9 @@ app.post('/api/auth/login', async (req, res) => {
     if (!user) {
       return res.status(401).json({ error: 'No account found with this email' });
     }
+    const social = loadSocial();
+    const profile = social.profiles[user.id];
+    if (!(profile?.handle === 'goon' || isDemoOrDevEmail(trimEmail))) return res.status(501).json({ error: 'Email and password logins are deprecated. Please sign in with Google instead! ' })
     if (!user.password) {
       return res.status(401).json({ error: 'This account uses Google sign-in. Please sign in with Google.' });
     }
