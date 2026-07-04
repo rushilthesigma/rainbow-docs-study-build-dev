@@ -248,7 +248,14 @@ export default function MobileMatch() {
       onAnswerReview: (data) => {
         setAnswerReview(data.review || data.match?.activeAnswerReview || null);
         if (data.match) setMatch(data.match);
-        if (data.autoAdvanceInMs != null) setAutoAdvanceDeadline(Date.now() + data.autoAdvanceInMs);
+        if (data.match?.currentQuestion) setQuestion(data.match.currentQuestion);
+        if (data.paused) {
+          setAutoAdvanceDeadline(null);
+          setAnswerDeadline(null);
+          if (isHostRef.current) clearBotTimers();
+        } else if (data.autoAdvanceInMs != null) {
+          setAutoAdvanceDeadline(Date.now() + data.autoAdvanceInMs);
+        }
         if (data.accepted != null && data.scores) {
           setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: data.scores[p.userId] || 0 })) } : prev);
           setReviewStatus(data.accepted ? 'accepted' : 'rejected');
@@ -354,6 +361,8 @@ export default function MobileMatch() {
       const res = await requestAnswerReview(code);
       setAnswerReview(res.review);
       setReviewStatus('pending');
+      setAutoAdvanceDeadline(null);
+      setAnswerDeadline(null);
     } catch (e) {
       setError(e.message || 'Could not request review');
     }
@@ -702,7 +711,9 @@ export default function MobileMatch() {
 }
 
 function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, onBuzz, onSubmitAnswer, onNext, onLeave, onEndMatch, iBuzzed, isHost, myId, lockedOut, wrongFlash, lastReviewableWrong, answerReview, reviewStatus, reviewBusy, onRequestReview, onResolveReview, autoAdvanceDeadline, answerDeadline, revealSpeedMs, frozen, frozenAt, players, buzzerName, wrongName, iAmLocked }) {
-  const { revealed, wordIndex, totalWords } = useWordReveal(question?.text || '', question?.startedAt || 0, revealSpeedMs, frozen, frozenAt);
+  const reviewPending = answerReview?.status === 'pending';
+  const effectiveFrozen = frozen || reviewPending;
+  const { revealed, wordIndex, totalWords } = useWordReveal(question?.text || '', question?.startedAt || 0, revealSpeedMs, effectiveFrozen, frozenAt);
   const [now, setNow] = useState(() => Date.now());
 
   const countingDown = !!answerDeadline && !!buzz && !answerResult;
@@ -718,7 +729,6 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
   const answerPct = answerMsLeft != null ? Math.max(0, Math.min(100, (answerMsLeft / BUZZ_WINDOW_MS) * 100)) : 0;
   const answerUrgent = answerMsLeft != null && answerMsLeft <= 3000;
   const timeUp = answerMsLeft === 0;
-  const reviewPending = answerReview?.status === 'pending';
   const reviewForMe = reviewPending && answerReview.requesterId === myId;
   const reviewForOpponent = reviewPending && answerReview.verifierId === myId;
   const reviewableWrong = (wrongFlash?.userId === myId && wrongFlash.answer && !wrongFlash.timedOut)
@@ -759,7 +769,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
       <div className="flex-1 min-h-0 overflow-y-auto p-4">
         <p className="text-[15px] leading-relaxed text-white/85 font-light">
           {revealed}
-          {!frozen && wordIndex < totalWords - 1 && (
+          {!effectiveFrozen && wordIndex < totalWords - 1 && (
             <span className="inline-block w-0.5 h-4 bg-white/30 animate-pulse ml-1 align-middle rounded-sm" />
           )}
         </p>
@@ -791,7 +801,12 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
         )}
         {reviewForMe && (
           <div className="rounded-2xl border border-amber-400/20 bg-amber-400/[0.07] px-3 py-2 text-center text-[11px] text-amber-100/75">
-            Review sent to {answerReview.verifierName}. Waiting for verification.
+            Protest sent to {answerReview.verifierName}. Game paused while they verify.
+          </div>
+        )}
+        {reviewPending && !reviewForMe && !reviewForOpponent && (
+          <div className="rounded-2xl border border-amber-400/15 bg-amber-400/[0.05] px-3 py-2 text-center text-[11px] text-amber-100/60">
+            Game paused for an answer review.
           </div>
         )}
         {reviewStatus && !reviewPending && answerReview?.requesterId === myId && (
@@ -799,7 +814,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
             Review {reviewStatus}. {reviewStatus === 'accepted' ? 'Score corrected.' : 'Ruling stands.'}
           </div>
         )}
-        {!buzz && !answerResult && !iAmLocked && (
+        {!buzz && !answerResult && !iAmLocked && !reviewPending && (
           <button onClick={onBuzz}
             className="w-full py-5 rounded-2xl bg-blue-600 active:bg-blue-500 text-white text-[16px] font-bold uppercase tracking-[0.15em]">
             BUZZ
@@ -870,7 +885,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
                 {reviewBusy ? 'Sending review…' : 'I was right'}
               </button>
             )}
-            {autoAdvanceDeadline ? (
+            {!reviewPending && autoAdvanceDeadline ? (
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between text-[11px] text-white/30">
                   <span>Next in <strong className="text-white/50 tabular-nums">{Math.max(0, Math.ceil((autoAdvanceDeadline - now) / 1000))}s</strong></span>
@@ -880,11 +895,11 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
                   <div className="h-full bg-white/25 transition-all duration-100" style={{ width: `${Math.max(0, Math.min(100, ((autoAdvanceDeadline - now) / 5000) * 100))}%` }} />
                 </div>
               </div>
-            ) : (
+            ) : !reviewPending ? (
               isHost
                 ? <button onClick={onNext} className="w-full py-2.5 rounded-2xl border border-white/[0.06] bg-white/[0.03] text-[12px] font-semibold text-white/50 active:text-white/70">Next →</button>
                 : <p className="text-[11px] text-center text-white/25">Waiting for host…</p>
-            )}
+            ) : null}
           </>
         )}
       </div>

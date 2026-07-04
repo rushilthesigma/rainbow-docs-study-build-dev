@@ -319,7 +319,14 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
       onAnswerReview: (data) => {
         setAnswerReview(data.review || data.match?.activeAnswerReview || null);
         if (data.match) setMatch(data.match);
-        if (data.autoAdvanceInMs != null) setAutoAdvanceDeadline(Date.now() + data.autoAdvanceInMs);
+        if (data.match?.currentQuestion) setQuestion(data.match.currentQuestion);
+        if (data.paused) {
+          setAutoAdvanceDeadline(null);
+          setAnswerDeadline(null);
+          if (isHostRef.current) clearBotTimers();
+        } else if (data.autoAdvanceInMs != null) {
+          setAutoAdvanceDeadline(Date.now() + data.autoAdvanceInMs);
+        }
         if (data.accepted != null && data.scores) {
           setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: data.scores[p.userId] || 0 })) } : prev);
           setReviewStatus(data.accepted ? 'accepted' : 'rejected');
@@ -461,6 +468,8 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
       const res = await requestAnswerReview(code);
       setAnswerReview(res.review);
       setReviewStatus('pending');
+      setAutoAdvanceDeadline(null);
+      setAnswerDeadline(null);
     } catch (e) {
       setError(e.message || 'Could not request review');
     }
@@ -1103,7 +1112,8 @@ export function PlayerCard({ player, isMe, buzz, lockedOut, answerResult, maxSco
 
 // ===== PLAYING VIEW =====
 function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, onBuzz, onSubmitAnswer, onNext, onLeave, onEndMatch, iBuzzed, isHost, myId, lockedOut = [], wrongFlash, lastReviewableWrong, answerReview, reviewStatus, reviewBusy, onRequestReview, onResolveReview, autoAdvanceDeadline, answerDeadline, revealSpeedMs }) {
-  const frozen = !!buzz || !!answerResult;
+  const reviewPending = answerReview?.status === 'pending';
+  const frozen = !!buzz || !!answerResult || reviewPending;
   const frozenAt = buzz?.buzzAt || answerResult?.buzzAt || null;
   const { revealed, wordIndex, totalWords } = useWordReveal(question?.text || '', question?.startedAt || 0, revealSpeedMs, frozen, frozenAt);
 
@@ -1143,7 +1153,6 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
         : (answerResult.timeout || !answerResult.userId) ? 'No one got it'
         : (answerResult.userId === myId ? 'Wrong!' : `${buzzerName} was wrong`))
     : '';
-  const reviewPending = answerReview?.status === 'pending';
   const reviewForMe = reviewPending && answerReview.requesterId === myId;
   const reviewForOpponent = reviewPending && answerReview.verifierId === myId;
   const reviewableWrong = (wrongFlash?.userId === myId && wrongFlash.answer && !wrongFlash.timedOut)
@@ -1212,7 +1221,12 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
             )}
             {reviewForMe && (
               <div className="rounded-2xl border border-amber-400/20 bg-amber-400/[0.07] px-3 py-2 text-center text-[11px] text-amber-100/75">
-                Review sent to {answerReview.verifierName}. Waiting for verification.
+                Protest sent to {answerReview.verifierName}. Game paused while they verify.
+              </div>
+            )}
+            {reviewPending && !reviewForMe && !reviewForOpponent && (
+              <div className="rounded-2xl border border-amber-400/15 bg-amber-400/[0.05] px-3 py-2 text-center text-[11px] text-amber-100/60">
+                Game paused for an answer review.
               </div>
             )}
             {reviewStatus && !reviewPending && answerReview?.requesterId === myId && (
@@ -1220,7 +1234,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
                 Review {reviewStatus}. {reviewStatus === 'accepted' ? 'Score corrected.' : 'Ruling stands.'}
               </div>
             )}
-            {!buzz && !answerResult && !iAmLocked && (
+            {!buzz && !answerResult && !iAmLocked && !reviewPending && (
               <>
                 <button onClick={onBuzz}
                   className="w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white text-[15px] font-bold uppercase tracking-[0.15em] active:scale-[0.98] transition-all">
@@ -1291,7 +1305,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
                     {reviewBusy ? 'Sending review…' : 'I was right'}
                   </button>
                 )}
-                <AutoAdvanceCountdown deadline={autoAdvanceDeadline} isHost={isHost} onNext={onNext} />
+                {!reviewPending && <AutoAdvanceCountdown deadline={autoAdvanceDeadline} isHost={isHost} onNext={onNext} />}
               </>
             )}
           </div>

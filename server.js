@@ -14973,6 +14973,36 @@ function scheduleAutoAdvance(match, delayMs = 5000) {
   }, delayMs);
 }
 
+function pauseMatchForAnswerReview(match) {
+  if (match.questionTimeoutId) { clearTimeout(match.questionTimeoutId); match.questionTimeoutId = null; }
+  if (match.buzzTimeoutId) { clearTimeout(match.buzzTimeoutId); match.buzzTimeoutId = null; }
+  if (match.revealTimeoutId) { clearTimeout(match.revealTimeoutId); match.revealTimeoutId = null; }
+  if ((match.state === 'playing' || match.state === 'reveal') && !match.reviewPaused) {
+    match.reviewPaused = {
+      state: match.state,
+      pausedAt: Date.now(),
+      questionStartedAt: match.questionStartedAt,
+    };
+  }
+}
+
+function resumeMatchAfterAnswerReview(match) {
+  const paused = match.reviewPaused;
+  match.reviewPaused = null;
+  if (paused?.state === 'playing' && match.state === 'playing') {
+    const pausedMs = Math.max(0, Date.now() - (paused.pausedAt || Date.now()));
+    match.questionStartedAt = (match.questionStartedAt || paused.questionStartedAt || Date.now()) + pausedMs;
+    scheduleQuestionTimeout(match);
+    return null;
+  }
+  if (match.state === 'reveal') {
+    const autoAdvanceInMs = 3000;
+    scheduleAutoAdvance(match, autoAdvanceInMs);
+    return autoAdvanceInMs;
+  }
+  return null;
+}
+
 // When a player's SSE stream closes mid-game (tab close, network drop), give
 // them 10s to reconnect before ending the match. Prevents dangling timers
 // that kept the question "running" on the server even though the player
@@ -15035,6 +15065,7 @@ function publicMatchState(match) {
     scoringFormat: match.scoringFormat || 'standard',
     maxPlayers: QUIZBOWL_MAX_PLAYERS,
     activeAnswerReview: match.activeAnswerReview || null,
+    reviewPaused: !!match.reviewPaused,
     // Group study matches: questions are generated from this material rather
     // than a category, and the lobby shows the title instead of the picker.
     studyTitle: match.studyContext?.title || null,
@@ -15402,6 +15433,7 @@ app.post('/api/quizbowl/match/:code/buzz', authMiddleware, (req, res) => {
   if (!match) return res.status(404).json({ error: 'Match not found' });
   if (match.state !== 'playing') return res.status(409).json({ error: 'Not in a live question' });
   if (!match.players.some(p => p.userId === req.userId)) return res.status(403).json({ error: 'Not a player' });
+  if (match.activeAnswerReview?.status === 'pending') return res.status(409).json({ error: 'Game paused for review' });
   if (match.buzzWinner) return res.status(409).json({ error: 'Already buzzed', winner: match.buzzWinner });
   if (match.lockedOutForQ && match.lockedOutForQ[req.userId]) return res.status(403).json({ error: 'Locked out for this question' });
 
@@ -15581,12 +15613,8 @@ app.post('/api/quizbowl/match/:code/review', authMiddleware, (req, res) => {
   };
   match.activeAnswerReview = review;
   match.lastActivity = Date.now();
-  let autoAdvanceInMs = null;
-  if (match.state === 'reveal') {
-    autoAdvanceInMs = 15000;
-    scheduleAutoAdvance(match, autoAdvanceInMs);
-  }
-  pushMatchEvent(match, 'answer_review', { review, match: publicMatchState(match), autoAdvanceInMs });
+  pauseMatchForAnswerReview(match);
+  pushMatchEvent(match, 'answer_review', { review, match: publicMatchState(match), autoAdvanceInMs: null, paused: true });
   res.json({ ok: true, review });
 });
 
@@ -15631,8 +15659,7 @@ app.post('/api/quizbowl/match/:code/review/:reviewId', authMiddleware, (req, res
 
   match.activeAnswerReview = { ...review, status: acceptedApplied ? 'accepted' : 'rejected', resolvedAt: Date.now(), resolvedBy: req.userId };
   match.lastActivity = Date.now();
-  const autoAdvanceInMs = match.state === 'reveal' ? 3000 : null;
-  if (autoAdvanceInMs) scheduleAutoAdvance(match, autoAdvanceInMs);
+  const autoAdvanceInMs = resumeMatchAfterAnswerReview(match);
   pushMatchEvent(match, 'answer_review', {
     review: match.activeAnswerReview,
     accepted: acceptedApplied,
@@ -15640,6 +15667,7 @@ app.post('/api/quizbowl/match/:code/review/:reviewId', authMiddleware, (req, res
     scoreDelta,
     ptsGained,
     autoAdvanceInMs,
+    paused: false,
     match: publicMatchState(match),
   });
   res.json({ ok: true, accepted: acceptedApplied, scores: match.scores, scoreDelta, ptsGained });
@@ -15650,6 +15678,7 @@ app.post('/api/quizbowl/match/:code/next', authMiddleware, (req, res) => {
   const match = matches.get(req.params.code);
   if (!match) return res.status(404).json({ error: 'Match not found' });
   if (match.hostId !== req.userId) return res.status(403).json({ error: 'Only the host can advance' });
+  if (match.activeAnswerReview?.status === 'pending') return res.status(409).json({ error: 'Game paused for review' });
   advanceMatchToNextQuestion(match);
   res.json({ ok: true, finished: match.state === 'finished' });
 });
@@ -15735,6 +15764,7 @@ app.post('/api/quizbowl/match/:code/bot-buzz', authMiddleware, (req, res) => {
   if (!match) return res.status(404).json({ error: 'Match not found' });
   if (match.hostId !== req.userId) return res.status(403).json({ error: 'Host only' });
   if (match.state !== 'playing') return res.json({ ok: false, reason: 'not_playing' });
+  if (match.activeAnswerReview?.status === 'pending') return res.json({ ok: false, reason: 'review_paused' });
   if (match.buzzWinner) return res.json({ ok: false, reason: 'already_buzzed' });
 
   const { botId } = req.body || {};
