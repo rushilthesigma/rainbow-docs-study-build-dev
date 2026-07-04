@@ -133,6 +133,7 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
   const [comparison, setComparison] = useState(null);
   const [lockedOut, setLockedOut] = useState([]);
   const [wrongFlash, setWrongFlash] = useState(null);
+  const [lastReviewableWrong, setLastReviewableWrong] = useState(null);
   const [answerReview, setAnswerReview] = useState(null);
   const [reviewStatus, setReviewStatus] = useState(null);
   const [reviewBusy, setReviewBusy] = useState(false);
@@ -226,6 +227,7 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
         setAnswerDeadline(null);
         setLockedOut([]);
         setWrongFlash(null);
+        setLastReviewableWrong(null);
         setAnswerReview(null);
         setReviewStatus(null);
         setReviewBusy(false);
@@ -277,6 +279,9 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
         setLockedOut(lock || []);
         if (newStart && question) setQuestion(q => q ? { ...q, startedAt: newStart } : q);
         setWrongFlash({ userId, answer: wrongAns, timedOut });
+        if (userId === myId && wrongAns && !timedOut) {
+          setLastReviewableWrong({ userId, answer: wrongAns, timedOut });
+        }
         if (scores) setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: scores[p.userId] || 0 })) } : prev);
         setTimeout(() => setWrongFlash(null), 1800);
         // Bot engine: re-schedule non-locked bots after the question resumes.
@@ -322,6 +327,9 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
           if (data.accepted && data.review?.requesterId) {
             setLockedOut(prev => prev.filter(id => id !== data.review.requesterId));
           }
+          if (data.review?.requesterId === myId) {
+            setLastReviewableWrong(null);
+          }
           if (data.accepted && data.review?.requesterId === myId) {
             setAnswerResult(prev => prev ? { ...prev, correct: true, userId: myId, ptsGained: data.ptsGained, scores: data.scores } : prev);
           }
@@ -330,7 +338,7 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
       onMatchEnd: ({ scores, abandoned: wasAbandoned, leftBy, reason, comparison: cmp }) => {
         setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: scores[p.userId] || 0 })) } : prev);
         setQuestion(null); setBuzz(null); setAnswer(''); setAnswerResult(null);
-        setAutoAdvanceDeadline(null); setAnswerDeadline(null); setWrongFlash(null); setAnswerReview(null); setReviewStatus(null); setReviewBusy(false);
+        setAutoAdvanceDeadline(null); setAnswerDeadline(null); setWrongFlash(null); setLastReviewableWrong(null); setAnswerReview(null); setReviewStatus(null); setReviewBusy(false);
         if (cmp) setComparison(cmp);
         if (wasAbandoned) setAbandoned({ leftBy, reason });
         setView('finished');
@@ -470,6 +478,7 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
     try { await leaveMatch(code); } catch {}
     setCode(''); setMatch(null); setQuestion(null); setBuzz(null); setAnswerResult(null);
     setAbandoned(null); setAnswerDeadline(null); setComparison(null); setAnswerReview(null); setReviewStatus(null); setReviewBusy(false);
+    setLastReviewableWrong(null);
     setView('menu');
     onExit?.();
   }
@@ -982,7 +991,7 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
       onBuzz={handleBuzz} onSubmitAnswer={handleSubmitAnswer} onNext={handleNext}
       onLeave={handleLeave} onEndMatch={handleEndMatch}
       iBuzzed={iBuzzed} isHost={isHost} myId={myId}
-      lockedOut={lockedOut} wrongFlash={wrongFlash}
+      lockedOut={lockedOut} wrongFlash={wrongFlash} lastReviewableWrong={lastReviewableWrong}
       answerReview={answerReview} reviewStatus={reviewStatus} reviewBusy={reviewBusy}
       onRequestReview={handleRequestReview} onResolveReview={handleResolveReview}
       autoAdvanceDeadline={autoAdvanceDeadline}
@@ -1093,7 +1102,7 @@ export function PlayerCard({ player, isMe, buzz, lockedOut, answerResult, maxSco
 }
 
 // ===== PLAYING VIEW =====
-function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, onBuzz, onSubmitAnswer, onNext, onLeave, onEndMatch, iBuzzed, isHost, myId, lockedOut = [], wrongFlash, answerReview, reviewStatus, reviewBusy, onRequestReview, onResolveReview, autoAdvanceDeadline, answerDeadline, revealSpeedMs }) {
+function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, onBuzz, onSubmitAnswer, onNext, onLeave, onEndMatch, iBuzzed, isHost, myId, lockedOut = [], wrongFlash, lastReviewableWrong, answerReview, reviewStatus, reviewBusy, onRequestReview, onResolveReview, autoAdvanceDeadline, answerDeadline, revealSpeedMs }) {
   const frozen = !!buzz || !!answerResult;
   const frozenAt = buzz?.buzzAt || answerResult?.buzzAt || null;
   const { revealed, wordIndex, totalWords } = useWordReveal(question?.text || '', question?.startedAt || 0, revealSpeedMs, frozen, frozenAt);
@@ -1137,8 +1146,11 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
   const reviewPending = answerReview?.status === 'pending';
   const reviewForMe = reviewPending && answerReview.requesterId === myId;
   const reviewForOpponent = reviewPending && answerReview.verifierId === myId;
+  const reviewableWrong = (wrongFlash?.userId === myId && wrongFlash.answer && !wrongFlash.timedOut)
+    ? wrongFlash
+    : lastReviewableWrong;
   const canRequestReview = !reviewPending && !reviewBusy && (
-    (wrongFlash?.userId === myId && wrongFlash.answer && !wrongFlash.timedOut)
+    !!reviewableWrong
     || (answerResult?.userId === myId && answerResult.correct === false && answerResult.answer)
   );
 
@@ -1218,8 +1230,14 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
               </>
             )}
             {!buzz && !answerResult && iAmLocked && (
-              <div className="w-full py-3 rounded-2xl border border-white/[0.05] bg-white/[0.02] text-center text-[11px] text-white/25">
-                Locked out · wait for next question
+              <div className="w-full rounded-2xl border border-white/[0.05] bg-white/[0.02] px-3 py-3 text-center text-[11px] text-white/30 space-y-2">
+                <p>Locked out · wait for next question</p>
+                {canRequestReview && (
+                  <button onClick={onRequestReview} disabled={reviewBusy}
+                    className="rounded-lg border border-amber-400/25 bg-amber-400/[0.10] px-3 py-1.5 text-[11px] font-semibold text-amber-100/85 hover:border-amber-300/45 disabled:opacity-40">
+                    {reviewBusy ? 'Sending review…' : 'I was right'}
+                  </button>
+                )}
               </div>
             )}
             {buzz && !answerResult && iBuzzed && (
