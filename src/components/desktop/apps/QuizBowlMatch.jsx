@@ -4,7 +4,7 @@ import { Zap, Users, Copy, Check, X, Trophy, Play, LogOut, ArrowLeft, Flag, Bot,
 import ProgressBar, { InlineProgress } from '../../shared/ProgressBar';
 import {
   createMatch, joinMatch, startMatch, buzzMatch, answerMatch, nextMatchQuestion,
-  endMatch, leaveMatch, streamMatch, botBuzz, botAnswer,
+  endMatch, leaveMatch, streamMatch, botBuzz, botAnswer, requestAnswerReview, resolveAnswerReview,
 } from '../../../api/quizMatch';
 import { AnswerResultPanel } from '../../trial/TrialSession';
 import MatchComparison from '../../shared/MatchComparison';
@@ -133,6 +133,9 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
   const [comparison, setComparison] = useState(null);
   const [lockedOut, setLockedOut] = useState([]);
   const [wrongFlash, setWrongFlash] = useState(null);
+  const [answerReview, setAnswerReview] = useState(null);
+  const [reviewStatus, setReviewStatus] = useState(null);
+  const [reviewBusy, setReviewBusy] = useState(false);
   const [abandoned, setAbandoned] = useState(null);
   const [fillWithBots, setFillWithBots] = useState(false);
   const [botLevel, setBotLevel] = useState('varsity');
@@ -188,6 +191,7 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
     const abort = streamMatch(code, {
       onSnapshot: (m) => {
         setMatch(m);
+        setAnswerReview(m.activeAnswerReview || null);
         if (m.state === 'playing' && m.currentQuestion) {
           setQuestion(m.currentQuestion);
           if (m.buzzWinner) {
@@ -222,6 +226,9 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
         setAnswerDeadline(null);
         setLockedOut([]);
         setWrongFlash(null);
+        setAnswerReview(null);
+        setReviewStatus(null);
+        setReviewBusy(false);
         setView('playing');
         // Bot engine: schedule buzz timers for this question (host only).
         if (isHostRef.current && botEngRef.current.bots.length) {
@@ -304,10 +311,26 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
         setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: data.scores[p.userId] || 0 })) } : prev);
         if (isHostRef.current) clearBotTimers();
       },
+      onAnswerReview: (data) => {
+        setAnswerReview(data.review || data.match?.activeAnswerReview || null);
+        if (data.match) setMatch(data.match);
+        if (data.autoAdvanceInMs != null) setAutoAdvanceDeadline(Date.now() + data.autoAdvanceInMs);
+        if (data.accepted != null && data.scores) {
+          setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: data.scores[p.userId] || 0 })) } : prev);
+          setReviewStatus(data.accepted ? 'accepted' : 'rejected');
+          setReviewBusy(false);
+          if (data.accepted && data.review?.requesterId) {
+            setLockedOut(prev => prev.filter(id => id !== data.review.requesterId));
+          }
+          if (data.accepted && data.review?.requesterId === myId) {
+            setAnswerResult(prev => prev ? { ...prev, correct: true, userId: myId, ptsGained: data.ptsGained, scores: data.scores } : prev);
+          }
+        }
+      },
       onMatchEnd: ({ scores, abandoned: wasAbandoned, leftBy, reason, comparison: cmp }) => {
         setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: scores[p.userId] || 0 })) } : prev);
         setQuestion(null); setBuzz(null); setAnswer(''); setAnswerResult(null);
-        setAutoAdvanceDeadline(null); setAnswerDeadline(null); setWrongFlash(null);
+        setAutoAdvanceDeadline(null); setAnswerDeadline(null); setWrongFlash(null); setAnswerReview(null); setReviewStatus(null); setReviewBusy(false);
         if (cmp) setComparison(cmp);
         if (wasAbandoned) setAbandoned({ leftBy, reason });
         setView('finished');
@@ -423,10 +446,30 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
     try { await nextMatchQuestion(code); } catch (e) { setError(e.message); }
   }
 
+  async function handleRequestReview() {
+    if (reviewBusy) return;
+    setReviewBusy(true); setError(null);
+    try {
+      const res = await requestAnswerReview(code);
+      setAnswerReview(res.review);
+      setReviewStatus('pending');
+    } catch (e) {
+      setError(e.message || 'Could not request review');
+    }
+    setReviewBusy(false);
+  }
+
+  async function handleResolveReview(reviewId, accepted) {
+    if (reviewBusy) return;
+    setReviewBusy(true); setError(null);
+    try { await resolveAnswerReview(code, reviewId, accepted); }
+    catch (e) { setError(e.message || 'Could not resolve review'); setReviewBusy(false); }
+  }
+
   async function handleLeave() {
     try { await leaveMatch(code); } catch {}
     setCode(''); setMatch(null); setQuestion(null); setBuzz(null); setAnswerResult(null);
-    setAbandoned(null); setAnswerDeadline(null); setComparison(null);
+    setAbandoned(null); setAnswerDeadline(null); setComparison(null); setAnswerReview(null); setReviewStatus(null); setReviewBusy(false);
     setView('menu');
     onExit?.();
   }
@@ -940,6 +983,8 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
       onLeave={handleLeave} onEndMatch={handleEndMatch}
       iBuzzed={iBuzzed} isHost={isHost} myId={myId}
       lockedOut={lockedOut} wrongFlash={wrongFlash}
+      answerReview={answerReview} reviewStatus={reviewStatus} reviewBusy={reviewBusy}
+      onRequestReview={handleRequestReview} onResolveReview={handleResolveReview}
       autoAdvanceDeadline={autoAdvanceDeadline}
       answerDeadline={answerDeadline}
       revealSpeedMs={match.revealSpeedMs || 140}
@@ -1048,7 +1093,7 @@ export function PlayerCard({ player, isMe, buzz, lockedOut, answerResult, maxSco
 }
 
 // ===== PLAYING VIEW =====
-function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, onBuzz, onSubmitAnswer, onNext, onLeave, onEndMatch, iBuzzed, isHost, myId, lockedOut = [], wrongFlash, autoAdvanceDeadline, answerDeadline, revealSpeedMs }) {
+function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, onBuzz, onSubmitAnswer, onNext, onLeave, onEndMatch, iBuzzed, isHost, myId, lockedOut = [], wrongFlash, answerReview, reviewStatus, reviewBusy, onRequestReview, onResolveReview, autoAdvanceDeadline, answerDeadline, revealSpeedMs }) {
   const frozen = !!buzz || !!answerResult;
   const frozenAt = buzz?.buzzAt || answerResult?.buzzAt || null;
   const { revealed, wordIndex, totalWords } = useWordReveal(question?.text || '', question?.startedAt || 0, revealSpeedMs, frozen, frozenAt);
@@ -1089,6 +1134,13 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
         : (answerResult.timeout || !answerResult.userId) ? 'No one got it'
         : (answerResult.userId === myId ? 'Wrong!' : `${buzzerName} was wrong`))
     : '';
+  const reviewPending = answerReview?.status === 'pending';
+  const reviewForMe = reviewPending && answerReview.requesterId === myId;
+  const reviewForOpponent = reviewPending && answerReview.verifierId === myId;
+  const canRequestReview = !reviewPending && !reviewBusy && (
+    (wrongFlash?.userId === myId && wrongFlash.answer && !wrongFlash.timedOut)
+    || (answerResult?.userId === myId && answerResult.correct === false && answerResult.answer)
+  );
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-transparent">
@@ -1131,9 +1183,29 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
           {/* Action bar */}
           <div className="px-4 py-3 border-t border-white/[0.04] flex-shrink-0 space-y-2">
             {wrongFlash && !buzz && !answerResult && (
-              <div className="px-3 py-1.5 rounded-2xl bg-rose-500/[0.08] border border-rose-500/15 text-[11px] text-rose-400/70 text-center">
-                {wrongFlash.userId === myId ? 'Wrong' : `${wrongName} was wrong`}
-                {wrongFlash.timedOut ? ' — ran out of time' : wrongFlash.answer ? ` — "${wrongFlash.answer}"` : ''} · continues
+              <div className="px-3 py-2 rounded-2xl bg-rose-500/[0.08] border border-rose-500/15 text-[11px] text-rose-400/70 text-center space-y-1.5">
+                <p>
+                  {wrongFlash.userId === myId ? 'Wrong' : `${wrongName} was wrong`}
+                  {wrongFlash.timedOut ? ' — ran out of time' : wrongFlash.answer ? ` — "${wrongFlash.answer}"` : ''} · continues
+                </p>
+                {canRequestReview && (
+                  <button onClick={onRequestReview} className="rounded-lg border border-amber-400/25 bg-amber-400/[0.10] px-2 py-1 text-[10px] font-semibold text-amber-200 hover:border-amber-300/45">
+                    I was right
+                  </button>
+                )}
+              </div>
+            )}
+            {reviewForOpponent && (
+              <AnswerReviewPanel review={answerReview} busy={reviewBusy} onResolve={onResolveReview} />
+            )}
+            {reviewForMe && (
+              <div className="rounded-2xl border border-amber-400/20 bg-amber-400/[0.07] px-3 py-2 text-center text-[11px] text-amber-100/75">
+                Review sent to {answerReview.verifierName}. Waiting for verification.
+              </div>
+            )}
+            {reviewStatus && !reviewPending && answerReview?.requesterId === myId && (
+              <div className={`rounded-2xl border px-3 py-2 text-center text-[11px] ${reviewStatus === 'accepted' ? 'border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-200/80' : 'border-white/[0.08] bg-white/[0.03] text-white/45'}`}>
+                Review {reviewStatus}. {reviewStatus === 'accepted' ? 'Score corrected.' : 'Ruling stands.'}
               </div>
             )}
             {!buzz && !answerResult && !iAmLocked && (
@@ -1195,6 +1267,12 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
                   officialAnswer={answerResult.correctAnswer}
                   meta={resultMeta}
                 />
+                {canRequestReview && (
+                  <button onClick={onRequestReview} disabled={reviewBusy}
+                    className="w-full py-2 rounded-2xl border border-amber-400/25 bg-amber-400/[0.08] text-[12px] font-semibold text-amber-100/80 hover:border-amber-300/45 disabled:opacity-40 transition-colors">
+                    {reviewBusy ? 'Sending review…' : 'I was right'}
+                  </button>
+                )}
                 <AutoAdvanceCountdown deadline={autoAdvanceDeadline} isHost={isHost} onNext={onNext} />
               </>
             )}
@@ -1229,6 +1307,42 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function AnswerReviewPanel({ review, busy, onResolve }) {
+  return (
+    <div className="rounded-2xl border border-amber-400/25 bg-amber-400/[0.07] p-3 text-left">
+      <div className="flex items-start justify-between gap-3 mb-2">
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-amber-200/70">Verify answer</p>
+          <p className="text-[12px] text-white/55">{review.requesterName} says they were right.</p>
+        </div>
+      </div>
+      <p className="max-h-24 overflow-y-auto rounded-xl border border-white/[0.06] bg-black/15 p-2 text-[12px] leading-relaxed text-white/75">
+        {review.questionText}
+      </p>
+      <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+        <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-2">
+          <p className="text-white/30">Submitted</p>
+          <p className="font-semibold text-white/75">{review.submittedAnswer || 'No answer'}</p>
+        </div>
+        <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-2">
+          <p className="text-white/30">Official</p>
+          <p className="font-semibold text-white/75">{review.correctAnswer}</p>
+        </div>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <button onClick={() => onResolve(review.id, false)} disabled={busy}
+          className="rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-[12px] font-semibold text-white/55 hover:bg-white/[0.07] disabled:opacity-40">
+          Keep wrong
+        </button>
+        <button onClick={() => onResolve(review.id, true)} disabled={busy}
+          className="rounded-xl border border-emerald-400/30 bg-emerald-400/[0.12] px-3 py-2 text-[12px] font-semibold text-emerald-100 hover:bg-emerald-400/[0.18] disabled:opacity-40">
+          Mark right
+        </button>
       </div>
     </div>
   );

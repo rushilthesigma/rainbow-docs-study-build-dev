@@ -14875,6 +14875,7 @@ function advanceMatchToNextQuestion(match) {
   match.buzzWinner = null;
   match.buzzAt = null;
   match.lockedOutForQ = {};
+  match.activeAnswerReview = null;
   match.lastActivity = Date.now();
   pushMatchEvent(match, 'question_start', {
     idx: nextIdx,
@@ -15033,6 +15034,7 @@ function publicMatchState(match) {
     revealSpeedMs: match.revealSpeedMs,
     scoringFormat: match.scoringFormat || 'standard',
     maxPlayers: QUIZBOWL_MAX_PLAYERS,
+    activeAnswerReview: match.activeAnswerReview || null,
     // Group study matches: questions are generated from this material rather
     // than a category, and the lobby shows the title instead of the picker.
     studyTitle: match.studyContext?.title || null,
@@ -15081,6 +15083,7 @@ app.post('/api/quizbowl/match', authMiddleware, (req, res) => {
       category: 'Mixed', difficulty: 'Medium', revealSpeedMs: 140,
       customTopic: null,
       scoringFormat: 'standard',
+      activeAnswerReview: null,
       createdAt: Date.now(),
       lastActivity: Date.now(),
     };
@@ -15142,6 +15145,34 @@ function quizbowlScoreForBuzz(match, { correct }) {
   }
   if (Array.isArray(fmt.tiers) && fmt.tiers.length) {
     if (afterEnd && fmt.afterEndPts != null) return fmt.afterEndPts;
+    for (const tier of fmt.tiers) if (ratio < tier.upTo) return tier.pts;
+    return fmt.tiers[fmt.tiers.length - 1].pts;
+  }
+  if (fmt.powerThreshold != null && ratio < fmt.powerThreshold) return fmt.powerPts;
+  return fmt.getPts || 0;
+}
+
+function quizbowlScoreForLoggedBuzz(match, q, buzz, { correct }) {
+  const fmt = QUIZBOWL_FORMATS[match.scoringFormat] || QUIZBOWL_FORMATS.standard;
+  const totalWords = buzz?.totalWords || ((q?.text || '').split(/\s+/).filter(Boolean).length || 1);
+  const buzzWord = Math.max(0, Math.min(totalWords - 1, Number(buzz?.buzzWord) || 0));
+
+  if (fmt.naqt) {
+    if (correct) {
+      const powerIdx = Number.isInteger(q?.powerWordIndex) ? q.powerWordIndex : null;
+      return powerIdx != null && buzzWord < powerIdx ? fmt.powerPts : fmt.getPts;
+    }
+    return buzzWord >= totalWords - 1 ? fmt.negAfter : fmt.negDuring;
+  }
+
+  const ratio = totalWords > 1 ? buzzWord / Math.max(1, totalWords - 1) : 1;
+  if (!correct) {
+    if (ratio >= 1 && fmt.negAfter != null) return fmt.negAfter;
+    if (fmt.negDuring != null) return fmt.negDuring;
+    return fmt.negPts || 0;
+  }
+  if (Array.isArray(fmt.tiers) && fmt.tiers.length) {
+    if (ratio >= 1 && fmt.afterEndPts != null) return fmt.afterEndPts;
     for (const tier of fmt.tiers) if (ratio < tier.upTo) return tier.pts;
     return fmt.tiers[fmt.tiers.length - 1].pts;
   }
@@ -15343,6 +15374,7 @@ ${setInstructionsText ? `Host set instructions:\n${setInstructionsText}\n\n` : '
     match.buzzWinner = null;
     match.buzzAt = null;
     match.lockedOutForQ = {};
+    match.activeAnswerReview = null;
     match.questionLog = [];
     match.currentQuestionBuzzes = [];
     match.lastActivity = Date.now();
@@ -15515,6 +15547,102 @@ app.post('/api/quizbowl/match/:code/answer', authMiddleware, (req, res) => {
     }
   }
   res.json({ ok: true, correct });
+});
+
+// POST /api/quizbowl/match/:code/review - a player who was marked wrong can
+// ask another human player to verify the ruling with the full question shown.
+app.post('/api/quizbowl/match/:code/review', authMiddleware, (req, res) => {
+  const match = matches.get(req.params.code);
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+  if (!['playing', 'reveal'].includes(match.state)) return res.status(409).json({ error: 'No live answer to review' });
+  if (!match.players.some(p => p.userId === req.userId && !p.isBot)) return res.status(403).json({ error: 'Not a player' });
+  if (match.activeAnswerReview?.status === 'pending') return res.status(409).json({ error: 'A review is already pending' });
+
+  const q = match.questions[match.currentIdx];
+  const buzzes = Array.isArray(match.currentQuestionBuzzes) ? match.currentQuestionBuzzes : [];
+  const lastWrong = [...buzzes].reverse().find(b => b.userId === req.userId && !b.correct);
+  if (!q || !lastWrong) return res.status(409).json({ error: 'No wrong answer from you to review' });
+
+  const verifier = match.players.find(p => p.userId !== req.userId && !p.isBot);
+  if (!verifier) return res.status(409).json({ error: 'Need another human player to verify' });
+  const requester = match.players.find(p => p.userId === req.userId);
+  const review = {
+    id: crypto.randomUUID(),
+    status: 'pending',
+    requesterId: req.userId,
+    requesterName: requester?.name || 'Player',
+    verifierId: verifier.userId,
+    verifierName: verifier.name || 'Opponent',
+    questionIdx: match.currentIdx,
+    questionText: q.text || '',
+    submittedAnswer: lastWrong.answer || '',
+    correctAnswer: q.answer || '',
+    createdAt: Date.now(),
+  };
+  match.activeAnswerReview = review;
+  match.lastActivity = Date.now();
+  let autoAdvanceInMs = null;
+  if (match.state === 'reveal') {
+    autoAdvanceInMs = 15000;
+    scheduleAutoAdvance(match, autoAdvanceInMs);
+  }
+  pushMatchEvent(match, 'answer_review', { review, match: publicMatchState(match), autoAdvanceInMs });
+  res.json({ ok: true, review });
+});
+
+// POST /api/quizbowl/match/:code/review/:reviewId - verifier accepts or
+// rejects the review. Accepting converts the logged wrong buzz to correct and
+// adjusts the score by removing the neg and adding the correct buzz value.
+app.post('/api/quizbowl/match/:code/review/:reviewId', authMiddleware, (req, res) => {
+  const match = matches.get(req.params.code);
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+  const review = match.activeAnswerReview;
+  if (!review || review.id !== req.params.reviewId || review.status !== 'pending') {
+    return res.status(404).json({ error: 'Review not found' });
+  }
+  if (review.verifierId !== req.userId) return res.status(403).json({ error: 'Only the selected verifier can resolve this' });
+
+  const accepted = !!req.body?.accepted;
+  let acceptedApplied = false;
+  let scoreDelta = 0;
+  let ptsGained = 0;
+  if (accepted && review.questionIdx === match.currentIdx) {
+    const q = match.questions[match.currentIdx];
+    const buzzes = Array.isArray(match.currentQuestionBuzzes) ? match.currentQuestionBuzzes : [];
+    const idx = buzzes.findLastIndex
+      ? buzzes.findLastIndex(b => b.userId === review.requesterId && !b.correct)
+      : (() => {
+          for (let i = buzzes.length - 1; i >= 0; i--) if (buzzes[i].userId === review.requesterId && !buzzes[i].correct) return i;
+          return -1;
+        })();
+    if (q && idx >= 0) {
+      const buzz = buzzes[idx];
+      const previousPts = typeof buzz.points === 'number' ? buzz.points : 0;
+      ptsGained = quizbowlScoreForLoggedBuzz(match, q, buzz, { correct: true });
+      scoreDelta = ptsGained - previousPts;
+      buzz.correct = true;
+      buzz.points = ptsGained;
+      buzz.reviewAccepted = true;
+      match.scores[review.requesterId] = (match.scores[review.requesterId] || 0) + scoreDelta;
+      if (match.lockedOutForQ) delete match.lockedOutForQ[review.requesterId];
+      acceptedApplied = true;
+    }
+  }
+
+  match.activeAnswerReview = { ...review, status: acceptedApplied ? 'accepted' : 'rejected', resolvedAt: Date.now(), resolvedBy: req.userId };
+  match.lastActivity = Date.now();
+  const autoAdvanceInMs = match.state === 'reveal' ? 3000 : null;
+  if (autoAdvanceInMs) scheduleAutoAdvance(match, autoAdvanceInMs);
+  pushMatchEvent(match, 'answer_review', {
+    review: match.activeAnswerReview,
+    accepted: acceptedApplied,
+    scores: match.scores,
+    scoreDelta,
+    ptsGained,
+    autoAdvanceInMs,
+    match: publicMatchState(match),
+  });
+  res.json({ ok: true, accepted: acceptedApplied, scores: match.scores, scoreDelta, ptsGained });
 });
 
 // POST /api/quizbowl/match/:code/next - host advances to the next question.

@@ -14,6 +14,11 @@ export const answerMatch = (code, answer) => apiFetch(`/api/quizbowl/match/${cod
   method: 'POST',
   body: JSON.stringify({ answer }),
 });
+export const requestAnswerReview = (code) => apiFetch(`/api/quizbowl/match/${code}/review`, { method: 'POST' });
+export const resolveAnswerReview = (code, reviewId, accepted) => apiFetch(`/api/quizbowl/match/${code}/review/${reviewId}`, {
+  method: 'POST',
+  body: JSON.stringify({ accepted }),
+});
 export const nextMatchQuestion = (code) => apiFetch(`/api/quizbowl/match/${code}/next`, { method: 'POST' });
 export const endMatch = (code) => apiFetch(`/api/quizbowl/match/${code}/end`, { method: 'POST' });
 export const leaveMatch = (code) => apiFetch(`/api/quizbowl/match/${code}/leave`, { method: 'POST' });
@@ -77,7 +82,7 @@ export const botAnswer = (code, botUserId, correct) => apiFetch(`/api/quizbowl/m
 });
 
 // Subscribe to an SSE stream of match events.
-// handlers: { onSnapshot, onPlayerJoined, onQuestionStart, onBuzz, onAnswerResult, onMatchEnd, onPlayerLeft, onError }
+// handlers: { onSnapshot, onPlayerJoined, onQuestionStart, onBuzz, onAnswerResult, onAnswerReview, onMatchEnd, onPlayerLeft, onError }
 export function streamMatch(code, handlers) {
   const token = getToken();
   const controller = new AbortController();
@@ -114,6 +119,7 @@ export function streamMatch(code, handlers) {
             else if (t === 'buzz') handlers.onBuzz?.(data);
             else if (t === 'wrong_answer') handlers.onWrongAnswer?.(data);
             else if (t === 'answer_result') handlers.onAnswerResult?.(data);
+            else if (t === 'answer_review') handlers.onAnswerReview?.(data);
             else if (t === 'match_end') handlers.onMatchEnd?.(data);
             else if (t === 'player_left') handlers.onPlayerLeft?.(data);
           } catch {}
