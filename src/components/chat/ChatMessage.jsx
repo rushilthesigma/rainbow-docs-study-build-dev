@@ -439,6 +439,7 @@ export default function ChatMessage({
   // render locked and route the click to the upgrade flow instead of firing.
   paid = true,
   onUpgrade = null,
+  onQuizComplete = null,
 }) {
   const isUser = message.role === 'user';
   const raw = message.content || '';
@@ -599,13 +600,42 @@ export default function ChatMessage({
   if (quizJson) {
     try { quizTopic = JSON.parse(quizJson)?.topic || 'Practice'; } catch { /* rendered quiz handles invalid JSON */ }
   }
+  // Report the graded quiz to the parent so it can be folded into the Study
+  // Mode chat's context - otherwise the AI never learns what the student
+  // answered, since this component's state is local and never re-sent.
+  function submitQuiz() {
+    setQuizSubmitted(true);
+    if (typeof onQuizComplete !== 'function' || !quizJson) return;
+    try {
+      const quiz = JSON.parse(quizJson);
+      // Resolve letters to their full option text (e.g. "A" -> "A) 10") so the
+      // reported result is unambiguous even without the original option list.
+      const optionText = (q, letter) => (q.options || []).find(o => o.charAt(0) === letter) || letter;
+      const results = (quiz.questions || []).map(q => {
+        const studentLetter = quizAnswers[q.question] || null;
+        return {
+          question: q.question,
+          studentAnswer: studentLetter ? optionText(q, studentLetter) : '(no answer)',
+          correctAnswer: optionText(q, q.correct),
+          isCorrect: studentLetter === q.correct,
+        };
+      });
+      onQuizComplete({
+        topic: quiz.topic || 'Practice',
+        score: results.filter(r => r.isCorrect).length,
+        total: results.length,
+        results,
+      });
+    } catch { /* malformed quiz JSON - nothing to report */ }
+  }
+
   const quizView = quizJson ? (
     <InlineQuiz
       quizJson={quizJson}
       answers={quizAnswers}
       submitted={quizSubmitted}
       onAnswer={(question, letter) => setQuizAnswers(prev => ({ ...prev, [question]: letter }))}
-      onSubmit={() => setQuizSubmitted(true)}
+      onSubmit={submitQuiz}
       unboxed={quizIsSideScreened}
     />
   ) : null;

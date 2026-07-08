@@ -30,6 +30,15 @@ export const fetchQBReaderTossups = ({ count = 10, category = 'Mixed', difficult
   return apiFetch(`/api/quizbowl/tossups?${params.toString()}`);
 };
 
+// Clue Lab - clue analysis over a set of tossups. Either pass
+// { categories, difficulties, answerQuery } to pull from QBReader, or
+// { questions: [...] } with pasted question text. Returns n-gram lists
+// plus the deduped question set.
+export const runClueAnalysis = (payload) => apiFetch('/api/quizbowl/clue-analysis', {
+  method: 'POST',
+  body: JSON.stringify(payload || {}),
+});
+
 // ===== Solo set history + recommendations =====
 // Saves a completed solo set so the QuizBowl hub can show past sets +
 // category accuracy, and so the AI can target the player's weak spots.

@@ -197,6 +197,7 @@ function SoloDebate({ onExit }) {
   const [starting, setStarting] = useState(false);
   const [verdict, setVerdict] = useState(null);
   const [judging, setJudging] = useState(false);
+  const [singleProtestAccepted, setSingleProtestAccepted] = useState(false);
   const [err, setErr] = useState('');
   const systemRef = useRef('');
   const scrollerRef = useRef(null);
@@ -274,6 +275,7 @@ function SoloDebate({ onExit }) {
         body: JSON.stringify({ topic: topic.trim(), userSide: side, transcript }),
       });
       setVerdict(r.verdict);
+      setSingleProtestAccepted(false);
       setStage('verdict');
     } catch (e) {
       setErr(e.message || 'Could not generate verdict');
@@ -283,7 +285,19 @@ function SoloDebate({ onExit }) {
   }
 
   function reset() {
-    setStage('setup'); setMessages([]); setInput(''); setVerdict(null); setErr('');
+    setStage('setup'); setMessages([]); setInput(''); setVerdict(null); setSingleProtestAccepted(false); setErr('');
+  }
+
+  function handleSingleplayerProtest() {
+    setVerdict(prev => {
+      if (!prev) return prev;
+      const currentStudent = Number(prev.studentScore) || 0;
+      const currentAi = Number(prev.aiScore) || 0;
+      const aiScore = currentAi >= 100 ? 99 : currentAi;
+      const studentScore = Math.min(100, Math.max(currentStudent, aiScore + 1));
+      return { ...prev, winner: 'student', studentScore, aiScore };
+    });
+    setSingleProtestAccepted(true);
   }
 
   // ── SETUP ──
@@ -353,6 +367,19 @@ function SoloDebate({ onExit }) {
               <div className="text-white/20 text-[16px]">vs</div>
               <div><p className="text-[10px] uppercase tracking-wider text-white/40">AI</p><p className="text-[22px] font-bold">{verdict.aiScore}</p></div>
             </div>
+            {!won && !singleProtestAccepted && (
+              <button
+                onClick={handleSingleplayerProtest}
+                className="mt-4 inline-flex h-9 items-center justify-center rounded-xl border border-amber-400/25 bg-amber-400/[0.10] px-3 text-[12px] font-bold text-amber-100 active:bg-amber-400/[0.16]"
+              >
+                I was right
+              </button>
+            )}
+            {singleProtestAccepted && (
+              <div className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.08] px-3 py-2 text-[11px] font-semibold text-emerald-100/80">
+                Review accepted. Score corrected.
+              </div>
+            )}
           </div>
           <VerdictRow label="Summary" body={verdict.summary} />
           <VerdictRow label="Your strongest" body={verdict.studentStrongest} tone="emerald" />

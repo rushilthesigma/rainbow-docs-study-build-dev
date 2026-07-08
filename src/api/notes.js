@@ -132,6 +132,14 @@ export async function generateNoteFlashcards(noteId, { count, difficulty } = {})
   });
 }
 
+// Add hand-written cards to a note (no AI, no credits).
+export async function addNoteFlashcards(noteId, cards) {
+  return apiFetch(`/api/notes/${noteId}/flashcards`, {
+    method: 'POST',
+    body: JSON.stringify({ cards }),
+  });
+}
+
 export async function reviewNoteCard(noteId, cardId, quality) {
   return apiFetch(`/api/notes/${noteId}/flashcards/review`, {
     method: 'POST',

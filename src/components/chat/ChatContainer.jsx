@@ -29,6 +29,7 @@ export default function ChatContainer({
   // controls render locked and clicking them calls `onUpgrade` instead.
   paid = true,
   onUpgrade = null,
+  onQuizComplete = null,
   emptyState = null,
   // When true, renders flush (no glass-card, no rounded corners) - use for full-page panels
   flush = false,
@@ -143,6 +144,7 @@ export default function ChatContainer({
               onBruteForce={typeof onBruteForce === 'function' && msg.role === 'assistant' && !msg._streaming ? (clarify) => onBruteForce(i, clarify) : undefined}
               paid={paid}
               onUpgrade={onUpgrade}
+              onQuizComplete={typeof onQuizComplete === 'function' ? (result) => onQuizComplete(i, result) : undefined}
             />
           );
         })}

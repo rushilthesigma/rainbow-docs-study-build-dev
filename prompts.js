@@ -809,6 +809,31 @@ LIVE MATH CANVAS:
 - If handwriting is ambiguous, state the exact symbol or line you cannot read and answer from the legible work.
 `;
   }
+  if (Array.isArray(context?.quizResults) && context.quizResults.length) {
+    // Spell out every question as a flat, unambiguous line (WRONG/RIGHT +
+    // the actual answer text, not just a letter) - a weak model asked to
+    // cross-reference a letter against a separate options list will guess.
+    const quizBlock = context.quizResults
+      .map((q, i) => {
+        const lines = (q.results || []).map((r) => {
+          if (r.isCorrect) return `  - RIGHT: "${r.question}" - the student answered "${r.studentAnswer}", which is correct.`;
+          return `  - WRONG: "${r.question}" - the student answered "${r.studentAnswer}", but the correct answer is "${r.correctAnswer}".`;
+        }).join('\n');
+        return `[${i + 1}] "${q.topic}" - the student scored ${q.score} out of ${q.total} correct.\n${lines}`;
+      })
+      .join('\n\n');
+    integrationCtx += `
+
+QUIZ RESULTS FROM THIS CONVERSATION:
+The student completed the quiz(zes) below earlier in this same chat. This is ground truth - trust it exactly as written, do not recompute or guess at correctness, and do not ask them how they did.
+${quizBlock}
+
+QUIZ RESULTS RULES:
+- Reference their actual performance when relevant (e.g. if they ask to review, ask what to study next, or ask about a topic they missed).
+- For every question marked WRONG above, treat it as missed - re-teach the underlying concept when it comes up, don't tell the student they got it right.
+- Don't bring this up unprompted on unrelated questions.
+`;
+  }
 
   return `You are a general-purpose AI study assistant for RushilAI. The student opens this when they want to chat, ask, learn, or work through whatever's on their mind. You follow THEIR lead.
 

@@ -11,6 +11,7 @@ import { setPendingLesson } from '../../../utils/pendingLesson';
 import useBrowserBack from '../../../hooks/useBrowserBack';
 import { useAuth } from '../../../context/AuthContext';
 import QuizBowlMatch, { PlayerCard } from './QuizBowlMatch';
+import ClueLabView from './ClueLabView';
 import ProgressBar, { InlineProgress } from '../../shared/ProgressBar';
 import QbModelPicker from '../../shared/QbModelPicker';
 import { useQbModel } from '../../../hooks/useQbModel';
@@ -871,6 +872,26 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
     );
   }
 
+  // ===== CLUE LAB - clue analysis across past tossups =====
+  if (view === 'clue-lab') {
+    return (
+      <ViewFade viewKey="clue-lab" className="h-full">
+        <ClueLabView
+          onBack={() => setView('hub')}
+          onPractice={topic => {
+            // Same handoff as a QBpedia topic deep-link: park on the custom
+            // form with the answer line as the AI focus (the instructions
+            // only apply to generated questions, not qbreader ones — and
+            // replaying the very tossups just analyzed would be spoiled).
+            setCustomInstructions(`Focus on: ${topic}`);
+            setQuestionSource('ai');
+            setView('custom');
+          }}
+        />
+      </ViewFade>
+    );
+  }
+
   // ===== LOADING (between hub launch and 'playing') =====
   // Gemini generation typically takes 10-20s; qbreader is faster but
   // can stall. A simulated progress bar reads better than a bare
@@ -934,6 +955,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
       onLaunch={launchSet}
       onMultiplayer={() => setView('multiplayer')}
       onCustom={() => setView('custom')}
+      onClueLab={() => setView('clue-lab')}
       onAILobby={() => { setAiLobbyInitial('lobby'); setView('ai-lobby'); }}
       onReplay={(s) => { setReplaySet(s); setView('replay'); }}
       onReplayMatch={(rec) => { setMatchReplayRec(rec); setView('match-replay'); }}
@@ -946,7 +968,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
 // ============================================================
 // HUB
 // ============================================================
-function QuizBowlHub({ hubLoading, history, skillProfile, recs, patterns, sm2Due = [], matchList = [], error, generating, onLaunch, onMultiplayer, onCustom, onAILobby, onReplay, onReplayMatch, onReplays }) {
+function QuizBowlHub({ hubLoading, history, skillProfile, recs, patterns, sm2Due = [], matchList = [], error, generating, onLaunch, onMultiplayer, onCustom, onClueLab, onAILobby, onReplay, onReplayMatch, onReplays }) {
   const stats = history?.stats || { sets: 0, accuracy: 0, studyMs: 0, categoryStats: {} };
   const sets = history?.sets || [];
 
@@ -1044,8 +1066,8 @@ function QuizBowlHub({ hubLoading, history, skillProfile, recs, patterns, sm2Due
           <p className="text-[11px] text-white/55">Join a lobby of 8 or go 1v1. Buzz against AI opponents with real tournament timing across niche history and more.</p>
         </button>
 
-        {/* Quick access: head-to-head + custom set + replays */}
-        <div className="grid grid-cols-3 gap-2">
+        {/* Quick access: head-to-head + custom set + replays + clue analysis */}
+        <div className="grid grid-cols-4 gap-2">
           <button onClick={onMultiplayer}
             className="py-2.5 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[12px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
             Multiplayer
@@ -1057,6 +1079,10 @@ function QuizBowlHub({ hubLoading, history, skillProfile, recs, patterns, sm2Due
           <button onClick={onReplays}
             className="py-2.5 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[12px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
             Replays
+          </button>
+          <button onClick={onClueLab}
+            className="py-2.5 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[12px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
+            Clue Lab
           </button>
         </div>
 

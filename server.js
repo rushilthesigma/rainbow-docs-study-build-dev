@@ -25,6 +25,7 @@ import {
   CURRICULUM_CATEGORIES,
 } from './prompts.js';
 import { PAUSD_CATALOG, getPausdTemplate, listPausdCatalog } from './data/pausdCurricula.js';
+import { dedupeTexts, analyzeQuestions } from './clueAnalysis.js';
 import { COUNTRY_GEO_NOTES, COUNTRY_GEO_NOTES_BY_SLUG } from './data/countryGeoNotes/index.js';
 import { PAUSD_SCIENCE_NOTES, PAUSD_SCIENCE_NOTES_BY_SLUG } from './data/pausdScienceNotes.js';
 import {
@@ -14712,6 +14713,76 @@ app.get('/api/quizbowl/tossups', authMiddleware, async (req, res) => {
   } catch (e) {
     console.error('qbreader tossups failed:', e);
     res.status(502).json({ error: e.message || 'Failed to fetch from QBReader' });
+  }
+});
+
+// POST /api/quizbowl/clue-analysis - Clue Lab. Pulls up to 200 tossups
+// matching an answer-line search + category/difficulty filter from
+// QBReader's query API (or accepts pasted question text), drops
+// near-duplicate questions, and returns the most informative
+// unigrams/bigrams/trigrams/quadgrams - the recurring clue vocabulary
+// for that answer line. Analysis adapted from Quizolytics (MIT).
+app.post('/api/quizbowl/clue-analysis', authMiddleware, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const maxResults = Math.max(5, Math.min(50, Number(body.maxResults) || 15));
+    let questions;
+    if (Array.isArray(body.questions) && body.questions.length) {
+      questions = body.questions.slice(0, 500)
+        .map(q => (typeof q === 'string' ? { question: q } : (q || {})))
+        .map(q => ({
+          question: qbStripHtml(q.question),
+          answer: qbStripHtml(q.answer || ''),
+          setName: q.setName || '',
+          category: q.category || '',
+          subcategory: q.subcategory || '',
+          difficulty: q.difficulty ?? null,
+        }))
+        .filter(q => q.question);
+    } else {
+      const categories = (Array.isArray(body.categories) ? body.categories : []).filter(c => typeof c === 'string' && c);
+      const difficulties = (Array.isArray(body.difficulties) ? body.difficulties : [])
+        .map(Number).filter(d => Number.isInteger(d) && d >= 1 && d <= 10);
+      const params = new URLSearchParams({
+        questionType: 'tossup',
+        searchType: 'answer',
+        queryString: String(body.answerQuery || '').slice(0, 200),
+        maxReturnLength: '200',
+        randomize: 'false',
+        regex: 'false',
+      });
+      if (categories.length) params.set('categories', categories.join(','));
+      if (difficulties.length) params.set('difficulties', difficulties.join(','));
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 20000);
+      let r;
+      try {
+        r = await fetch(`${QBREADER_BASE}/query?${params.toString()}`, {
+          signal: controller.signal,
+          headers: { 'User-Agent': 'covalent-ai/1.0 (+https://covalent.app)' },
+        });
+      } finally { clearTimeout(timeout); }
+      if (!r.ok) throw new Error(`QBReader ${r.status} ${r.statusText}`);
+      const data = await r.json();
+      questions = (data?.tossups?.questionArray || []).map(t => ({
+        question: qbStripHtml(t.question_sanitized || t.question),
+        answer: qbStripHtml(t.answer_sanitized || t.answer || ''),
+        setName: t.set?.name || t.setName || '',
+        category: t.category || '',
+        subcategory: t.subcategory || '',
+        difficulty: t.difficulty ?? null,
+      })).filter(q => q.question);
+    }
+    if (!questions.length) {
+      return res.json({ numQuestions: 0, numDuplicates: 0, questions: [], unigrams: [], bigrams: [], trigrams: [], quadgrams: [] });
+    }
+    const { keptIndices, removedCount } = dedupeTexts(questions.map(q => q.question));
+    const kept = keptIndices.map(i => questions[i]);
+    const ngrams = analyzeQuestions(kept.map(q => q.question), { maxResults });
+    res.json({ ...ngrams, questions: kept, numQuestions: kept.length, numDuplicates: removedCount });
+  } catch (e) {
+    console.error('clue analysis failed:', e);
+    res.status(502).json({ error: e.message || 'Clue analysis failed' });
   }
 });
 

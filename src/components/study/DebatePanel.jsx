@@ -1809,6 +1809,7 @@ function Singleplayer({ mode, setMode, onExit, initialTopic = null, initialSide 
   const [streamingContent, setStreamingContent] = useState('');
   const [verdict, setVerdict] = useState(null);
   const [verdictLoading, setVerdictLoading] = useState(false);
+  const [singleProtestAccepted, setSingleProtestAccepted] = useState(false);
   const [error, setError] = useState(null);
   const systemRef = useRef('');
 
@@ -1928,11 +1929,24 @@ function Singleplayer({ mode, setMode, onExit, initialTopic = null, initialSide 
         }),
       });
       setVerdict(r.verdict);
+      setSingleProtestAccepted(false);
       setMode('single-verdict');
     } catch (e) {
       setError(e.message || 'Failed to get verdict');
     }
     setVerdictLoading(false);
+  }
+
+  function handleSingleplayerProtest() {
+    setVerdict(prev => {
+      if (!prev) return prev;
+      const currentStudent = Number(prev.studentScore) || 0;
+      const currentAi = Number(prev.aiScore) || 0;
+      const aiScore = currentAi >= 100 ? 99 : currentAi;
+      const studentScore = Math.min(100, Math.max(currentStudent, aiScore + 1));
+      return { ...prev, winner: 'student', studentScore, aiScore };
+    });
+    setSingleProtestAccepted(true);
   }
 
   // SETUP
@@ -2015,6 +2029,19 @@ function Singleplayer({ mode, setMode, onExit, initialTopic = null, initialSide 
           <p className="text-xs text-blue-300/80 mt-1.5 tabular-nums">
             You: <span className="font-bold">{verdict.studentScore}/100</span> · AI: <span className="font-bold">{verdict.aiScore}/100</span>
           </p>
+          {!won && !singleProtestAccepted && (
+            <button
+              onClick={handleSingleplayerProtest}
+              className="mt-4 inline-flex items-center justify-center gap-1.5 rounded-lg border border-amber-400/25 bg-amber-400/[0.10] px-3 py-1.5 text-[11px] font-semibold text-amber-100/90 transition-colors hover:border-amber-300/45 hover:bg-amber-400/[0.14]"
+            >
+              <AlertCircle size={12} /> I was right
+            </button>
+          )}
+          {singleProtestAccepted && (
+            <div className="mt-4 rounded-xl border border-emerald-400/20 bg-emerald-400/[0.08] px-3 py-2 text-center text-[11px] font-medium text-emerald-100/80">
+              Review accepted. Score corrected.
+            </div>
+          )}
         </div>
         <div className="bg-white/[0.04] border border-white/[0.08] rounded-xl p-4 mb-3">
           <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-white/40 mb-1.5">Verdict</p>

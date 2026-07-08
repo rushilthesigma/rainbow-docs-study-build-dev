@@ -237,6 +237,17 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   const [sources, setSources] = useState([]);
   const sourcesRef = useRef([]);
   sourcesRef.current = sources;
+  // Quiz results the student has submitted earlier in THIS chat - folded into
+  // the request context on every subsequent send so the AI actually knows
+  // what they answered, instead of the score living and dying in the quiz's
+  // own local component state.
+  const [quizResults, setQuizResults] = useState([]);
+  const quizResultsRef = useRef([]);
+  quizResultsRef.current = quizResults;
+
+  function handleQuizComplete(messageIndex, result) {
+    setQuizResults(prev => [...prev, { ...result, messageIndex }]);
+  }
   const [showCurriculumPicker, setShowCurriculumPicker] = useState(false);
   const [showSourcesSheet, setShowSourcesSheet] = useState(false);
 
@@ -571,6 +582,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         content: s.content || s.text || '',
       }));
     }
+    if (quizResultsRef.current.length) ctx.quizResults = quizResultsRef.current;
 
     const abort = sendStudyMessage(text, sessionId, ctx, images, {
       onChunk: (chunk) => {
@@ -758,6 +770,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
       if (data.session) {
         setSessionId(data.session.id);
         setMessages(data.session.messages || []);
+        setQuizResults(data.session.context?.quizResults || []);
         setShowHistory(false);
       }
     } catch (err) {
@@ -785,6 +798,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
     setSourceMode(false);
     setSources([]);
     setLinkedCurriculumId(null);
+    setQuizResults([]);
   }
 
   function formatDate(d) {
@@ -1036,6 +1050,7 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         sideScreenQuizId={sideScreenQuiz?.id || null}
         quizSideScreenTarget={quizSideScreenTarget}
         onSideScreenQuiz={openQuizSideScreen}
+        onQuizComplete={handleQuizComplete}
         sourceMode={sourceMode}
         onToggleSource={setSourceMode}
         sourceDisabled={['best-of', 'superimpose'].includes(studyModelMode) && bestOfModels.length === 3 && !!bestOfJudge}
