@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
-  BookOpen, Lightbulb, MessageSquare, Zap, FileText, Settings, Users,
+  AlertCircle, BookOpen, ChevronRight, Grid3X3, Lightbulb, MessageSquare, Zap, FileText, Users,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { listCurricula } from '../../api/curriculum';
 import { listLessons } from '../../api/lessons';
+import Skeleton from '../shared/Skeleton';
 
 // Mobile home: greeting + Continue card + a 6-tile quick-actions grid.
 // Stats / recent-lessons sections were intentionally cut - the home
@@ -14,20 +15,31 @@ export default function MobileHome({ onNavigate }) {
   const [curricula, setCurricula] = useState([]);
   const [lessons, setLessons] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+
+  const loadProgress = useCallback(async (signal) => {
+    setLoading(true);
+    setLoadError(false);
+    const [curriculaResult, lessonsResult] = await Promise.allSettled([
+      listCurricula(),
+      listLessons(),
+    ]);
+    if (signal?.aborted) return;
+    if (curriculaResult.status === 'fulfilled') {
+      setCurricula(curriculaResult.value.curricula || []);
+    }
+    if (lessonsResult.status === 'fulfilled') {
+      setLessons(lessonsResult.value.lessons || []);
+    }
+    setLoadError(curriculaResult.status === 'rejected' || lessonsResult.status === 'rejected');
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    Promise.all([
-      listCurricula().catch(() => ({ curricula: [] })),
-      listLessons().catch(() => ({ lessons: [] })),
-    ]).then(([c, l]) => {
-      if (cancelled) return;
-      setCurricula(c.curricula || []);
-      setLessons(l.lessons || []);
-      setLoading(false);
-    });
-    return () => { cancelled = true; };
-  }, []);
+    const controller = new AbortController();
+    loadProgress(controller.signal);
+    return () => controller.abort();
+  }, [loadProgress]);
 
   const firstName = (user?.name || user?.email || 'there').split(/[\s@]/)[0];
   const continueCard = pickContinueCard(curricula, lessons);
@@ -45,10 +57,18 @@ export default function MobileHome({ onNavigate }) {
       </div>
 
       {/* Continue card - only shown when there's actual progress to resume */}
+      {loading && (
+        <div className="h-[126px] rounded-2xl border border-gray-200 dark:border-white/[0.06] bg-white dark:bg-[#13131f] p-4 mb-5 space-y-4" aria-label="Loading your progress">
+          <Skeleton w="42%" h={10} className="bg-gray-200 dark:bg-white/[0.06]" />
+          <Skeleton w="74%" h={16} className="bg-gray-200 dark:bg-white/[0.06]" />
+          <Skeleton w="100%" h={6} className="bg-gray-200 dark:bg-white/[0.06]" />
+        </div>
+      )}
       {continueCard && !loading && (
         <button
+          type="button"
           onClick={() => onNavigate(continueCard.kind === 'curriculum' ? 'curricula' : 'lessons')}
-          className="w-full rounded-2xl bg-blue-500 text-white p-4 mb-5 active:scale-[0.99] transition-transform text-left"
+          className="w-full rounded-2xl bg-blue-500 text-white p-4 mb-5 active:scale-[0.99] motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-[#0a0a14] transition-transform text-left"
         >
           <div className="flex items-center gap-2 mb-2">
             <span className="text-[10px] uppercase tracking-[0.18em] font-bold opacity-90">Continue</span>
@@ -68,6 +88,14 @@ export default function MobileHome({ onNavigate }) {
         </button>
       )}
 
+      {loadError && !loading && (
+        <div className="flex items-center gap-3 rounded-2xl border border-amber-300/70 dark:border-amber-400/20 bg-amber-50 dark:bg-amber-400/[0.07] px-3.5 py-3 mb-5" role="status">
+          <AlertCircle size={18} className="shrink-0 text-amber-600 dark:text-amber-300" />
+          <p className="min-w-0 flex-1 text-[12px] leading-snug text-amber-900/75 dark:text-amber-100/65">Your progress could not fully refresh.</p>
+          <button type="button" onClick={() => loadProgress()} className="min-h-11 px-2 text-[12px] font-bold text-amber-700 dark:text-amber-200 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60">Retry</button>
+        </div>
+      )}
+
       {/* Quick actions - bigger tiles, icon + title only, no subtext */}
       <div className="grid grid-cols-2 gap-3">
         <Action tone="blue"     icon={<BookOpen size={28} />}      title="Build a course" onClick={() => onNavigate('curricula')} />
@@ -76,8 +104,22 @@ export default function MobileHome({ onNavigate }) {
         <Action tone="orange"   icon={<Zap size={28} />}           title="Quiz Bowl"      onClick={() => onNavigate('quizbowl')} />
         <Action tone="sky"      icon={<MessageSquare size={28} />} title="Study chat"     onClick={() => onNavigate('study')} />
         <Action tone="emerald"  icon={<FileText size={28} />}      title="Notes"          onClick={() => onNavigate('notes')} />
-        <Action tone="gray"     icon={<Settings size={28} />}      title="Settings"       onClick={() => onNavigate('settings')} />
       </div>
+
+      <button
+        type="button"
+        onClick={() => onNavigate('apps')}
+        className="mt-3 w-full min-h-14 rounded-2xl border border-gray-200 dark:border-white/[0.06] bg-white dark:bg-[#13131f] px-4 flex items-center gap-3 text-left active:scale-[0.99] motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 transition-transform"
+      >
+        <span className="w-9 h-9 rounded-xl grid place-items-center bg-violet-100/80 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300">
+          <Grid3X3 size={18} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[14px] font-bold text-gray-900 dark:text-white">All apps</span>
+          <span className="block text-[11px] text-gray-500 dark:text-white/40">Math Tutor, Debate, QBpedia, Widgets, and more</span>
+        </span>
+        <ChevronRight size={17} className="text-gray-300 dark:text-white/25" />
+      </button>
     </div>
   );
 }
@@ -132,8 +174,9 @@ const TONE = {
 function Action({ tone, icon, title, onClick }) {
   return (
     <button
+      type="button"
       onClick={onClick}
-      className="aspect-square rounded-3xl border border-gray-200 dark:border-white/[0.06] bg-white dark:bg-[#13131f] p-4 flex flex-col items-start justify-between active:scale-[0.97] transition-transform text-left"
+      className="aspect-square rounded-3xl border border-gray-200 dark:border-white/[0.06] bg-white dark:bg-[#13131f] p-4 flex flex-col items-start justify-between active:scale-[0.97] motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 transition-transform text-left"
     >
       <div className={`w-14 h-14 rounded-2xl grid place-items-center ${TONE[tone]}`}>
         {icon}

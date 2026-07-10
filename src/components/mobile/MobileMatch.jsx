@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { InlineProgress } from '../shared/ProgressBar';
 import { AnswerResultPanel } from '../trial/TrialSession';
 import {
-  createMatch, joinMatch, startMatch, buzzMatch, answerMatch, nextMatchQuestion,
+  createMatch, joinMatch, setMatchTeam, startMatch, buzzMatch, answerMatch, answerMatchBonus, nextMatchQuestion,
   endMatch, leaveMatch, streamMatch, botBuzz, botAnswer, requestAnswerReview, resolveAnswerReview,
 } from '../../api/quizMatch';
 import MatchComparison from '../shared/MatchComparison';
@@ -85,6 +85,7 @@ export default function MobileMatch() {
   const [view, setView] = useState('menu');
   const [code, setCode] = useState('');
   const [joinCodeInput, setJoinCodeInput] = useState('');
+  const [matchMode, setMatchMode] = useState('individual');
   const [category, setCategory] = useState('Mixed');
   const [customTopic, setCustomTopic] = useState('');
   const [difficulty, setDifficulty] = useState('Medium');
@@ -100,6 +101,9 @@ export default function MobileMatch() {
   const [question, setQuestion] = useState(null);
   const [buzz, setBuzz] = useState(null);
   const [answer, setAnswer] = useState('');
+  const [bonusAnswer, setBonusAnswer] = useState('');
+  const [bonusResult, setBonusResult] = useState(null);
+  const [bonusDeadline, setBonusDeadline] = useState(null);
   const [answerResult, setAnswerResult] = useState(null);
   const [autoAdvanceDeadline, setAutoAdvanceDeadline] = useState(null);
   const [answerDeadline, setAnswerDeadline] = useState(null);
@@ -134,8 +138,11 @@ export default function MobileMatch() {
     const abort = streamMatch(code, {
       onSnapshot: (m) => {
         setMatch(m);
+        if (m.mode) setMatchMode(m.mode);
         setAnswerReview(m.activeAnswerReview || null);
-        if (m.state === 'playing' && m.currentQuestion) {
+        if (m.state === 'bonus' || m.state === 'bonus_reveal') {
+          setBonusDeadline(m.bonus?.deadlineAt || null); setView('playing');
+        } else if (m.state === 'playing' && m.currentQuestion) {
           setQuestion(m.currentQuestion);
           if (m.buzzWinner) {
             setBuzz({ userId: m.buzzWinner, buzzAt: m.buzzAt });
@@ -144,6 +151,7 @@ export default function MobileMatch() {
             setAnswerDeadline(null);
           }
           setAnswerResult(null);
+          setBonusResult(null); setBonusAnswer(''); setBonusDeadline(null);
           setView('playing');
         } else if (m.state === 'generating') {
           setView('generating');
@@ -156,12 +164,14 @@ export default function MobileMatch() {
       },
       onPlayerJoined: (m) => setMatch(m),
       onPlayerLeft:   (m) => setMatch(m.match || m),
+      onTeamUpdated:   (m) => setMatch(m),
       onGenerating:   (m) => { setMatch(m); setView('generating'); },
       onStartFailed:  (data) => { setError(data.error || 'Failed to start'); setMatch(data.match); setView('lobby'); },
       onQuestionStart: ({ text, startedAt, match: m }) => {
         setMatch(m);
         setQuestion({ text, startedAt });
         setBuzz(null); setAnswer(''); setAnswerResult(null);
+        setBonusAnswer(''); setBonusResult(null); setBonusDeadline(null);
         setAutoAdvanceDeadline(null); setAnswerDeadline(null); setLockedOut([]); setWrongFlash(null);
         setLastReviewableWrong(null);
         setAnswerReview(null); setReviewStatus(null); setReviewBusy(false);
@@ -204,7 +214,7 @@ export default function MobileMatch() {
           }
         }
       },
-      onWrongAnswer: ({ userId, answer: wrongAns, lockedOut: lock, questionStartedAt: newStart, scores, timedOut }) => {
+      onWrongAnswer: ({ userId, answer: wrongAns, lockedOut: lock, lockedOutTeams: lockTeams, questionStartedAt: newStart, scores, teamScores, timedOut }) => {
         setBuzz(null); setAnswer(''); setAnswerDeadline(null);
         setLockedOut(lock || []);
         if (newStart && question) setQuestion(q => q ? { ...q, startedAt: newStart } : q);
@@ -213,6 +223,7 @@ export default function MobileMatch() {
           setLastReviewableWrong({ userId, answer: wrongAns, timedOut });
         }
         if (scores) setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: scores[p.userId] || 0 })) } : prev);
+        if (teamScores) setMatch(prev => prev ? { ...prev, teamScores, lockedOutTeams: lockTeams || prev.lockedOutTeams } : prev);
         setTimeout(() => setWrongFlash(null), 1800);
         if (isHostRef.current && botEngRef.current.bots.length) {
           for (const t of Object.values(botEngRef.current.thinkTimers)) clearTimeout(t);
@@ -243,8 +254,11 @@ export default function MobileMatch() {
         setAnswerDeadline(null);
         setAutoAdvanceDeadline(data.autoAdvanceInMs ? Date.now() + data.autoAdvanceInMs : null);
         setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: data.scores[p.userId] || 0 })) } : prev);
+        setMatch(prev => prev ? { ...prev, teamScores: data.teamScores || prev.teamScores } : prev);
         if (isHostRef.current) clearBotTimers();
       },
+      onBonusStart: (data) => { if (data.match) setMatch(data.match); setBonusDeadline(data.bonus?.deadlineAt || null); setBonusResult(null); setBonusAnswer(''); setView('playing'); },
+      onBonusResult: (data) => { setBonusResult(data); setBonusDeadline(null); if (data.match) setMatch(data.match); else setMatch(prev => prev ? { ...prev, teamScores: data.teamScores || prev.teamScores } : prev); },
       onAnswerReview: (data) => {
         setAnswerReview(data.review || data.match?.activeAnswerReview || null);
         if (data.match) setMatch(data.match);
@@ -271,8 +285,8 @@ export default function MobileMatch() {
           }
         }
       },
-      onMatchEnd: ({ scores, abandoned: wasAbandoned, leftBy, reason, comparison: cmp }) => {
-        setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: scores[p.userId] || 0 })) } : prev);
+      onMatchEnd: ({ scores, teamScores, abandoned: wasAbandoned, leftBy, reason, comparison: cmp }) => {
+        setMatch(prev => prev ? { ...prev, teamScores: teamScores || prev.teamScores, players: prev.players.map(p => ({ ...p, score: scores[p.userId] || 0 })) } : prev);
         setQuestion(null); setBuzz(null); setAnswer(''); setAnswerResult(null);
         setAutoAdvanceDeadline(null); setAnswerDeadline(null); setWrongFlash(null);
         setLastReviewableWrong(null);
@@ -293,8 +307,8 @@ export default function MobileMatch() {
     if (busy) return;
     setBusy(true); setError(null);
     try {
-      const res = await createMatch();
-      setCode(res.code); setMatch(res.match); setView('lobby');
+      const res = await createMatch({ mode: matchMode });
+      setCode(res.code); setMatch(res.match); setMatchMode(res.match?.mode || matchMode); setView('lobby');
     } catch (e) { setError(e.message || 'Failed to create'); }
     setBusy(false);
   }
@@ -305,7 +319,7 @@ export default function MobileMatch() {
     setBusy(true); setError(null);
     try {
       const res = await joinMatch(c);
-      setCode(c); setMatch(res.match); setView('lobby');
+      setCode(c); setMatch(res.match); setMatchMode(res.match?.mode || 'individual'); setView('lobby');
     } catch (e) { setError(e.message || 'Failed to join'); }
     setBusy(false);
   }
@@ -317,7 +331,7 @@ export default function MobileMatch() {
     if (fillWithBots && realCount < 8) {
       const botCount = 8 - realCount;
       const scaled = scaleRoster(BOT_ROSTER, botLevel);
-      bots = scaled.slice(0, botCount).map(b => ({ id: b.id, name: b.name }));
+      bots = scaled.slice(0, botCount).map((b, i) => ({ id: b.id, name: b.name, team: matchMode === 'team' ? (i % 2 === 0 ? 'A' : 'B') : undefined, accuracy: b.accuracy, thinkMs: b.thinkMs }));
       botEngRef.current.bots = scaled.slice(0, botCount).map(b => ({
         userId: `bot:${code}:${b.id}`,
         buzzAt: b.buzzAt, accuracy: b.accuracy, thinkMs: b.thinkMs,
@@ -348,6 +362,17 @@ export default function MobileMatch() {
   async function handleSubmitAnswer() {
     if (!answer.trim()) return;
     try { await answerMatch(code, answer.trim()); } catch (e) { setError(e.message); }
+  }
+
+  async function handleSubmitBonus(pass = false) {
+    if (!pass && !bonusAnswer.trim()) return;
+    try { await answerMatchBonus(code, bonusAnswer.trim(), pass); setBonusAnswer(''); }
+    catch (e) { setError(e.message || 'Could not submit bonus answer'); }
+  }
+
+  async function handleSelectTeam(team, userId = myId) {
+    try { const data = await setMatchTeam(code, team, userId); if (data.match) setMatch(data.match); }
+    catch (e) { setError(e.message || 'Could not change teams'); }
   }
 
   async function handleNext() {
@@ -446,6 +471,13 @@ export default function MobileMatch() {
         <MatchHeader title="New Room" onBack={() => setView('menu')} />
         <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-6 space-y-4">
           <div>
+            <SectionLabel>Game type</SectionLabel>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => setMatchMode('individual')} className={`rounded-2xl border p-3 text-left ${matchMode === 'individual' ? 'border-amber-400/50 bg-amber-500/15' : 'border-white/[0.08] bg-white/[0.03]'}`}><Zap size={14} className="text-amber-300 mb-1" /><p className="text-[12px] font-bold">Open match</p><p className="text-[10px] text-white/35">Individual scoring</p></button>
+              <button onClick={() => setMatchMode('team')} className={`rounded-2xl border p-3 text-left ${matchMode === 'team' ? 'border-amber-400/50 bg-amber-500/15' : 'border-white/[0.08] bg-white/[0.03]'}`}><Users size={14} className="text-amber-300 mb-1" /><p className="text-[12px] font-bold">Team scrimmage</p><p className="text-[10px] text-white/35">Tossups + bonuses</p></button>
+            </div>
+          </div>
+          <div>
             <SectionLabel>Category</SectionLabel>
             <div className="flex flex-wrap gap-1.5">
               {['Science','History','Literature','Geography','Math','Art','Music','Philosophy','Mixed','Custom'].map(o => (
@@ -535,6 +567,7 @@ export default function MobileMatch() {
   if (view === 'lobby') {
     const playerCount = match?.players?.length || 0;
     const waiting = playerCount < 2;
+    const teamReady = match?.mode !== 'team' || ['A', 'B'].every(t => (match?.players || []).some(p => p.team === t));
     const maxPlayers = match?.maxPlayers || 8;
     return (
       <div className="flex-1 min-h-0 flex flex-col bg-[#0a0a14] text-white">
@@ -553,7 +586,13 @@ export default function MobileMatch() {
           <div>
             <SectionLabel>Players ({playerCount}/{maxPlayers})</SectionLabel>
             <div className="space-y-1.5">
-              {(match?.players || []).map(p => (
+              {match?.mode === 'team' ? ['A', 'B'].map(team => (
+                <div key={team} className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-3">
+                  <div className="flex items-center gap-2 mb-2"><span className={`w-2 h-2 rounded-full ${team === 'A' ? 'bg-blue-400' : 'bg-amber-400'}`} /><span className="text-[12px] font-bold">{match.teamNames?.[team] || `Team ${team}`}</span><span className="ml-auto text-[10px] text-white/30">{(match.players || []).filter(p => p.team === team).length}/4</span></div>
+                  {(match.players || []).filter(p => p.team === team).map(p => <div key={p.userId} className="flex items-center gap-2 py-1"><span className="w-6 h-6 rounded-full grid place-items-center bg-white/[0.06] text-[10px]">{p.isBot ? <Bot size={11} /> : (p.name || '?')[0]?.toUpperCase()}</span><span className="flex-1 text-[13px] text-white/75 truncate">{p.name}</span>{p.userId === myId && <span className="text-[9px] text-white/30">you</span>}</div>)}
+                  {!match.players?.find(p => p.userId === myId)?.isBot && <button onClick={() => handleSelectTeam(team)} className="mt-2 w-full rounded-xl border border-white/[0.08] py-2 text-[11px] font-semibold text-white/50 active:bg-white/[0.06]">Join {match.teamNames?.[team] || `Team ${team}`}</button>}
+                </div>
+              )) : (match?.players || []).map(p => (
                 <div key={p.userId} className="flex items-center gap-2 rounded-xl bg-white/[0.03] border border-white/[0.06] px-3 py-2">
                   <div className={`w-6 h-6 rounded-full grid place-items-center text-[10px] font-bold ${p.isBot ? 'bg-white/[0.06] text-white/30' : 'bg-amber-500/15 text-amber-300'}`}>
                     {p.isBot ? <Bot size={11} /> : (p.name || '?')[0]?.toUpperCase()}
@@ -610,11 +649,13 @@ export default function MobileMatch() {
           <div className="px-4 pb-4 pt-2 border-t border-white/[0.06]">
             <button
               onClick={handleStart}
-              disabled={(waiting && !fillWithBots) || (category === 'Custom' && !customTopic.trim())}
+              disabled={(waiting && !fillWithBots) || (match?.mode === 'team' && !teamReady) || (category === 'Custom' && !customTopic.trim())}
               className="w-full h-12 rounded-2xl bg-amber-500 text-black font-bold text-[15px] flex items-center justify-center gap-2 disabled:opacity-40 active:bg-amber-600"
             >
               <Play size={17} />
-              {waiting && !fillWithBots
+              {match?.mode === 'team' && !teamReady
+                ? 'Place players on both teams…'
+                : waiting && !fillWithBots
                 ? 'Need at least one more…'
                 : `Start · ${playerCount} player${playerCount !== 1 ? 's' : ''}${fillWithBots ? ` + ${Math.max(0, 8 - (match?.players?.filter(p => !p.isBot)?.length || 0))} bots` : ''}`
               }
@@ -645,6 +686,10 @@ export default function MobileMatch() {
     const wrongName = wrongFlash ? (players.find(p => p.userId === wrongFlash.userId)?.name || 'Opponent') : '';
     const iAmLocked = lockedOut.includes(myId);
 
+    if (match.mode === 'team' && ['bonus', 'bonus_reveal', 'reveal'].includes(match.state) && (match.bonus || match.pendingBonusTeam || bonusResult)) {
+      return <MobileBonusView match={match} myId={myId} bonusAnswer={bonusAnswer} setBonusAnswer={setBonusAnswer} bonusResult={bonusResult} bonusDeadline={bonusDeadline} onSubmitBonus={handleSubmitBonus} onNext={handleNext} onLeave={handleLeave} isHost={isHost} />;
+    }
+
     return (
       <PlayingView
         match={match} question={question} buzz={buzz} answerResult={answerResult}
@@ -671,14 +716,18 @@ export default function MobileMatch() {
     const winner = sorted[0];
     const amIWinner = winner?.userId === myId;
     const opponentAbandoned = !!abandoned && abandoned.leftBy !== myId;
+    const teamMode = match?.mode === 'team';
+    const teamScores = match?.teamScores || { A: 0, B: 0 };
+    const winningTeam = teamMode ? (teamScores.A === teamScores.B ? null : teamScores.A > teamScores.B ? 'A' : 'B') : null;
     return (
       <div className="flex-1 min-h-0 flex flex-col bg-[#0a0a14] text-white">
         <MatchHeader title="Match Over" onBack={handleLeave} />
         <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-6 pt-6 space-y-4 text-center">
           <Trophy size={36} className={`mx-auto ${amIWinner && !opponentAbandoned ? 'text-amber-400/70' : 'text-white/20'}`} />
           <p className="text-[18px] font-bold text-white/80">
-            {opponentAbandoned ? 'Opponent left' : amIWinner ? 'You won' : winner ? `${winner.name} won` : 'Match over'}
+            {opponentAbandoned ? 'Opponent left' : teamMode ? (winningTeam ? `${match.teamNames?.[winningTeam] || `Team ${winningTeam}`} won` : 'Team tie') : amIWinner ? 'You won' : winner ? `${winner.name} won` : 'Match over'}
           </p>
+          {teamMode && <div className="grid grid-cols-2 gap-2"><div className="rounded-2xl border border-blue-400/20 bg-blue-500/[0.08] p-3 text-left"><p className="text-[10px] text-white/35">{match.teamNames?.A || 'Blue Team'}</p><p className="text-[24px] font-bold">{teamScores.A || 0}</p></div><div className="rounded-2xl border border-amber-400/20 bg-amber-500/[0.08] p-3 text-left"><p className="text-[10px] text-white/35">{match.teamNames?.B || 'Orange Team'}</p><p className="text-[24px] font-bold">{teamScores.B || 0}</p></div></div>}
           <div className="space-y-1.5">
             {sorted.map((p, i) => (
               <div key={p.userId} className={`flex items-center gap-3 px-4 py-2.5 rounded-2xl border ${i === 0 ? 'bg-white/[0.05] border-white/10' : 'bg-white/[0.02] border-white/[0.04]'}`}>
@@ -708,6 +757,24 @@ export default function MobileMatch() {
       <InlineProgress active /> Loading…
     </div>
   );
+}
+
+function MobileBonusView({ match, myId, bonusAnswer, setBonusAnswer, bonusResult, bonusDeadline, onSubmitBonus, onNext, onLeave, isHost }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { if (!bonusDeadline) return undefined; const id = setInterval(() => setNow(Date.now()), 100); return () => clearInterval(id); }, [bonusDeadline]);
+  const bonus = match.bonus;
+  const activeTeam = bonus?.team || match.pendingBonusTeam;
+  const me = match.players?.find(p => p.userId === myId);
+  const controlling = me?.team === activeTeam;
+  const seconds = bonusDeadline ? Math.max(0, Math.ceil((bonusDeadline - now) / 1000)) : 0;
+  const scores = match.teamScores || { A: 0, B: 0 };
+  return <div className="flex-1 min-h-0 flex flex-col bg-[#0a0a14] text-white">
+    <MatchHeader title="Team Bonus" onBack={onLeave} />
+    <div className="flex-1 min-h-0 overflow-y-auto px-4 py-5 space-y-4">
+      <div className="grid grid-cols-2 gap-2"><div className="rounded-2xl border border-blue-400/20 bg-blue-500/[0.08] p-3"><p className="text-[10px] text-white/35 truncate">{match.teamNames?.A || 'Blue Team'}</p><p className="text-[22px] font-bold tabular-nums">{scores.A || 0}</p></div><div className="rounded-2xl border border-amber-400/20 bg-amber-500/[0.08] p-3"><p className="text-[10px] text-white/35 truncate">{match.teamNames?.B || 'Orange Team'}</p><p className="text-[22px] font-bold tabular-nums">{scores.B || 0}</p></div></div>
+      {bonus ? <><div><p className="text-[10px] font-bold uppercase tracking-[0.15em] text-amber-300/70">{match.teamNames?.[activeTeam] || `Team ${activeTeam}`} · Part {(bonus.partIndex || 0) + 1}/{bonus.totalParts || 3}</p><p className="text-[11px] text-white/35 mt-1">{bonus.leadin}</p></div><div className="rounded-2xl border border-amber-400/20 bg-amber-400/[0.06] p-4"><p className="text-[16px] leading-relaxed text-white/90">{bonus.part}</p></div>{bonusResult ? <div className={`rounded-2xl border p-4 ${bonusResult.correct ? 'border-emerald-400/25 bg-emerald-400/[0.08]' : 'border-rose-400/20 bg-rose-400/[0.06]'}`}><p className="text-[12px] font-semibold">{bonusResult.correct ? `+${bonusResult.points} · Correct` : bonusResult.timedOut ? 'Time expired' : 'No points'}</p><p className="text-[13px] text-white/70 mt-1">Answer: <strong>{bonusResult.correctAnswer}</strong></p></div> : controlling && match.state === 'bonus' ? <div className="space-y-2"><div className="flex justify-end text-[18px] font-bold tabular-nums text-amber-200">{seconds}s</div><div className="flex gap-2"><input autoFocus value={bonusAnswer} onChange={e => setBonusAnswer(e.target.value)} onKeyDown={e => e.key === 'Enter' && onSubmitBonus(false)} placeholder="Team answer…" className="flex-1 rounded-2xl border border-amber-400/30 bg-white/[0.04] px-4 py-3 text-[14px] text-white outline-none" /><button onClick={() => onSubmitBonus(false)} disabled={!bonusAnswer.trim()} className="rounded-2xl bg-amber-500 px-4 py-3 font-semibold text-black disabled:opacity-30">Submit</button></div><button onClick={() => onSubmitBonus(true)} className="w-full rounded-2xl border border-white/[0.08] py-2.5 text-[12px] text-white/45">Pass</button></div> : <p className="rounded-2xl border border-white/[0.07] bg-white/[0.03] p-3 text-center text-[12px] text-white/40">{controlling ? 'Bonus starting…' : 'Other team is conferring…'}</p>}{isHost && (bonusResult || match.state === 'reveal') && <button onClick={onNext} className="w-full rounded-2xl border border-white/[0.08] py-3 text-[13px] text-white/55">Next →</button>}</> : <div className="py-16 text-center text-[12px] text-white/40"><InlineProgress active /> Preparing bonus…</div>}
+    </div>
+  </div>;
 }
 
 function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, onBuzz, onSubmitAnswer, onNext, onLeave, onEndMatch, iBuzzed, isHost, myId, lockedOut, wrongFlash, lastReviewableWrong, answerReview, reviewStatus, reviewBusy, onRequestReview, onResolveReview, autoAdvanceDeadline, answerDeadline, revealSpeedMs, frozen, frozenAt, players, buzzerName, wrongName, iAmLocked }) {

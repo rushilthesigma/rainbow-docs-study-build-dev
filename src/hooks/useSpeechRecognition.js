@@ -35,6 +35,11 @@ export function useSpeechRecognition({
   const wantRef = useRef(false);   // do we intend to be listening? (auto-restart guard)
   const stoppedRef = useRef(false); // suppress onresult after stop/abort to prevent duplicate words
   const silenceTimer = useRef(null);
+  // Chrome's speech service reports 'network' for any hiccup in its own
+  // backend, online or not, and a retry usually succeeds. Track consecutive
+  // network errors so we can retry silently before surfacing a real failure.
+  const netRetriesRef = useRef(0);
+  const netRetryRef = useRef(false); // tells onend to do a delayed restart
 
   const cbRef = useRef({ onFinal, onResult, onError });
   cbRef.current = { onFinal, onResult, onError };
@@ -67,6 +72,8 @@ export function useSpeechRecognition({
       // Ignore results that arrive after stop()/abort() — they would duplicate
       // text that finalize() already committed via the interim buffer.
       if (stoppedRef.current) return;
+      // Real results mean the speech service is healthy again.
+      netRetriesRef.current = 0;
       let live = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const r = e.results[i];
@@ -91,13 +98,31 @@ export function useSpeechRecognition({
     rec.onerror = (e) => {
       // no-speech / aborted are routine (pauses, manual stop) — stay quiet.
       if (e.error === 'no-speech' || e.error === 'aborted') return;
-      // Real error (not-allowed, network, service-not-allowed…): stop auto-
-      // restart so we don't spin in an infinite error loop.
+      // 'network' is usually a transient speech-service drop, not real
+      // connectivity loss. Retry silently a couple of times (onend does the
+      // actual restart) before treating it as a failure.
+      if (e.error === 'network' && wantRef.current && netRetriesRef.current < 2) {
+        netRetriesRef.current += 1;
+        netRetryRef.current = true;
+        return;
+      }
+      // Real error (not-allowed, service-not-allowed, repeated network…):
+      // stop auto-restart so we don't spin in an infinite error loop.
       wantRef.current = false;
       cbRef.current.onError?.(e.error);
     };
 
     rec.onend = () => {
+      // Delayed restart after a 'network' hiccup: an immediate start() tends
+      // to hit the same dead speech-service connection.
+      if (netRetryRef.current) {
+        netRetryRef.current = false;
+        setTimeout(() => {
+          if (!wantRef.current) return;
+          try { rec.start(); } catch { /* already running */ }
+        }, 400);
+        return;
+      }
       // Chrome ends the session on its own after pauses. If the caller still
       // wants to listen (continuous), restart transparently.
       if (wantRef.current && cfgRef.current.continuous) {
@@ -120,6 +145,8 @@ export function useSpeechRecognition({
     try { rec.lang = cfgRef.current.lang; } catch {}
     stoppedRef.current = false;
     wantRef.current = true;
+    netRetriesRef.current = 0;
+    netRetryRef.current = false;
     finalRef.current = '';
     interimRef.current = '';
     setInterim('');

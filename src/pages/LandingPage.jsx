@@ -371,7 +371,7 @@ function FeaturesSection({ isMobile }) {
     {
       icon: Zap,
       title: 'Quiz Bowl',
-      body: 'Pyramidal tossups from a pool of 500+ questions. Practice solo or go head-to-head.',
+      body: 'Buzz against a full lobby of AI opponents, not just one bot. Play 180,000+ real packet questions or a custom set on any topic.',
     },
     {
       icon: Scale,
@@ -387,7 +387,7 @@ function FeaturesSection({ isMobile }) {
           What&apos;s inside
         </h2>
         <p className="text-[14px] text-white/65 mb-8">
-          Eight apps share one account. Quiz results turn into flashcards, and notes come back as spaced review.
+          Every app shares one account. Quiz results turn into flashcards, and notes come back as spaced review.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 sm:gap-x-14 border-t border-white/[0.08]">
           {FEATURES.map((f) => {
@@ -526,7 +526,7 @@ function QuizBowlSection({ isMobile }) {
           Quiz Bowl
         </h2>
         <p className="text-[14px] text-white/65 mb-8">
-          Pyramidal tossups with a buzzer and a live scoreboard. The AI opponent reads the same clues you do.
+          Pyramidal tossups with a buzzer and a live scoreboard. Face a whole lobby of AI opponents at once, tuned to your level, not a single practice bot.
         </p>
 
         <div className="rounded-xl ring-1 ring-white/[0.10] bg-white/[0.05] overflow-hidden">
@@ -571,7 +571,7 @@ function QuizBowlSection({ isMobile }) {
         </div>
 
         <p className="text-[12px] text-white/40 mt-6">
-          The questions come from real packets.
+          Play real packet questions, or have a custom set written for any topic you name. No other quiz bowl trainer does that.
         </p>
       </FadeUp>
     </section>

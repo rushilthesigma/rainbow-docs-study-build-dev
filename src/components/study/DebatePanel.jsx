@@ -256,31 +256,13 @@ const PRESET_DEBATE_TOPICS = [
   { topic: 'Football is too dangerous to continue', category: 'Sports' },
 ];
 
-// Flavor lines that make a preset read like a real bot pick rather than a
-// static row. Paired with a topic at roll time, varied so two cards never
-// show the same line.
-const RECOMMEND_REASONS = [
-  'The bot will take the other side.',
-  'A sharp one for practicing rebuttals.',
-  'No easy answer — build your strongest case.',
-  'Pick a side and defend it.',
-  'Great for testing your reasoning under pressure.',
-  'A contentious classic the bot loves.',
-  'Fresh resolution — make it concrete.',
-  'The bot picked this one for you.',
-];
-
-// Pull `n` distinct presets at random and pin a (distinct) reason to each.
+// Pull `n` distinct presets at random for the recommendation cards.
 function rollRecommended(n = 2) {
   const idxs = new Set();
   while (idxs.size < n && idxs.size < PRESET_DEBATE_TOPICS.length) {
     idxs.add(Math.floor(Math.random() * PRESET_DEBATE_TOPICS.length));
   }
-  const reasonStart = Math.floor(Math.random() * RECOMMEND_REASONS.length);
-  return [...idxs].map((i, k) => ({
-    ...PRESET_DEBATE_TOPICS[i],
-    reason: RECOMMEND_REASONS[(reasonStart + k) % RECOMMEND_REASONS.length],
-  }));
+  return [...idxs].map(i => PRESET_DEBATE_TOPICS[i]);
 }
 
 // Reusable topic chip row used by every debate setup screen (solo,
@@ -526,8 +508,7 @@ function ModeMenu({ onSelect, onPickTopic, onRejoinTournament, onBack }) {
         <div className="flex items-center gap-1.5 mb-1.5">
           <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Multiplayer</span>
         </div>
-        <p className="text-[14px] font-bold text-white/90 mb-0.5">Debate a Friend Head-to-Head</p>
-        <p className="text-[11px] text-white/55">Create a room or join with a code, pick your side, and argue a live 1v1 with the AI scoring every turn. Timed mode optional.</p>
+        <p className="text-[14px] font-bold text-white/90">Debate a Friend Head-to-Head</p>
       </button>
 
       {/* Quick access: solo vs AI + tournament */}
@@ -563,9 +544,6 @@ function ModeMenu({ onSelect, onPickTopic, onRejoinTournament, onBack }) {
             >
               <div className="flex-1 min-w-0">
                 <p className="text-[13px] font-semibold text-white/90 leading-snug">{r.topic}</p>
-                <p className="text-[11px] text-white/45 truncate mt-0.5">
-                  <span className="text-white/25">{r.category} · </span>{r.reason}
-                </p>
               </div>
               <ArrowRight size={14} className="text-white/25 group-hover:text-white/55 transition-colors flex-shrink-0" />
             </button>

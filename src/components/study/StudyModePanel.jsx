@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { History, Trash2, Plus, ChevronLeft, ChevronDown, Compass, Lightbulb, Calculator, Beaker, Swords, BookOpen, Link2, X, Check, Paperclip, Globe, Cpu, Lock, PanelRightOpen, CircleHelp, Zap, ArrowRight } from 'lucide-react';
-import { sendStudyMessage, listStudySessions, getStudySession, deleteStudySession, listCurricula, extractSourceUrl, extractFiles } from '../../api/curriculum';
+import { sendStudyMessage, listStudySessions, getStudySession, deleteStudySession, listCurricula, extractSourceUrl, extractFiles, refineStudyPrompt } from '../../api/curriculum';
 import { syncData } from '../../api/auth';
 import ChatContainer from '../chat/ChatContainer';
 import DebatePanel from './DebatePanel';
@@ -41,8 +41,11 @@ const BEST_OF_DEFAULT_ORDER = [
   'gpt-5.4-mini',
   'deepseek-flash',
   'flash-lite',
+  'gpt-5.6-luna',
   'deepseek-pro',
+  'gpt-5.6-terra',
   'flash',
+  'gpt-5.6-sol',
   'gpt-5.4',
   'gemini-pro',
 ];
@@ -225,6 +228,17 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   const [humanizeMode, setHumanizeMode] = useState(false);
   const humanizeModeRef = useRef(false);
   humanizeModeRef.current = humanizeMode;
+  // Auto-refine: when on, every send routes through /api/study/refine-prompt
+  // first so a rough draft reaches the model as a stronger prompt. Persisted
+  // locally like the Quiz Bowl voice toggle - it's a device-level habit, not
+  // account data.
+  const [autoRefine, setAutoRefine] = useState(() => {
+    try { return localStorage.getItem('covalent-study-auto-refine') === '1'; } catch { return false; }
+  });
+  const persistAutoRefine = useCallback((on) => {
+    setAutoRefine(!!on);
+    try { localStorage.setItem('covalent-study-auto-refine', on ? '1' : '0'); } catch { /* private mode */ }
+  }, []);
   const [streaming, setStreaming] = useState(false);
   const [sessionId, setSessionId] = useState(null);
   // Debate sub-view - replaces the chat with the DebatePanel when true.
@@ -552,6 +566,9 @@ export default function StudyModePanel({ className = '', flush = false, initialM
     const images = attachedImages.slice(0, canvasImage ? 3 : 4);
     const userMsg = { role: 'user', content: text, timestamp: new Date().toISOString() };
     if (attachedImages.length) userMsg.images = attachedImages.map(i => ({ dataUrl: i.dataUrl, name: i.name }));
+    // Auto-refined sends carry { original, note } so the bubble can show a
+    // "refined" marker with the student's original draft behind it.
+    if (opts.refined?.original) userMsg.refined = opts.refined;
     // Used by the AI-instruct regenerate flow: hide the hidden-instruction
     // user turn from the visible transcript while still sending it to the API.
     if (!opts.hideUserInDisplay) setMessages(prev => [...prev, userMsg]);
@@ -725,8 +742,19 @@ export default function StudyModePanel({ className = '', flush = false, initialM
       return;
     }
     restartCountRef.current = 0;
-    doSend(text, { images, autoPlay: !!opts.isVoice });
+    doSend(text, { images, autoPlay: !!opts.isVoice, refined: opts.refined });
   }, [streaming, sessionId, messages]);
+
+  // Prompt refine for the composer wand: a small [{role, content}] slice of
+  // the conversation rides along so drafts like "explain that again but
+  // simpler" keep their reference intact.
+  const handleRefinePrompt = useCallback(async (draft) => {
+    const recent = messages
+      .filter(m => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+      .slice(-6)
+      .map(m => ({ role: m.role, content: m.content.slice(0, 600) }));
+    return refineStudyPrompt(draft, recent);
+  }, [messages]);
 
   // Seed sources from a parent page (e.g. "Study this note" launches the
   // panel with the note text pre-attached as a source). Only runs once on
@@ -1061,6 +1089,9 @@ export default function StudyModePanel({ className = '', flush = false, initialM
         thinkingMode={thinkingOn}
         thinkingLocked={thinkingLocked}
         onToggleThinking={setThinkingPref}
+        onRefine={handleRefinePrompt}
+        autoRefine={autoRefine}
+        onToggleAutoRefine={persistAutoRefine}
         composerPrefix={
           <VoiceMenu
             voices={synth.voices}

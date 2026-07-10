@@ -974,6 +974,38 @@ REVISION PASS BEFORE SENDING:
 Now write the piece, and only the piece.`;
 }
 
+// Study Mode prompt refine: turns a rough draft message into a clearer,
+// more specific prompt for the tutor AI. Used by POST /api/study/refine-prompt
+// (the composer's wand button + auto-refine mode). Cheap one-shot call on
+// Flash Lite; must never answer the question itself.
+export function buildPromptRefinePrompt(draft, recentMessages = []) {
+  const system = `You improve a student's draft message to an AI tutor. Rewrite the draft into a clearer, more effective prompt.
+
+RULES:
+1. Preserve the student's intent, subject, and any constraints exactly. Never change what they are asking for.
+2. Make the request specific: name the concept precisely, and ask for the response shape that best fits (step-by-step walkthrough, worked example, quiz, comparison, plain-language explanation) ONLY when the draft already implies it.
+3. Never invent details the student did not give or imply: no made-up grade levels, courses, page numbers, or requirements.
+4. Never answer the question. Your output is the improved prompt itself, written in the student's first-person voice.
+5. Keep it concise. Usually 1-3 sentences, and no more than roughly twice the draft's length.
+6. Fix grammar and vague wording. Keep the student's tone; do not make it formal or robotic.
+7. If the draft is already clear and specific, return it unchanged or with only tiny fixes.
+8. If the draft references the conversation ("that", "the second one", "explain it again"), keep the reference intact; use the recent messages only to resolve ambiguity, not to import new asks.
+9. No em dashes in the rewritten prompt.
+
+Output ONLY valid JSON: {"refined": "the improved prompt", "note": "what you improved, max 8 words, e.g. 'Named the topic and asked for steps'"}`;
+
+  const contextLines = (recentMessages || [])
+    .filter(m => m && typeof m.content === 'string' && m.content.trim())
+    .slice(-6)
+    .map(m => `${m.role === 'assistant' ? 'TUTOR' : 'STUDENT'}: ${m.content.trim().slice(0, 600)}`);
+  const user = [
+    contextLines.length ? `RECENT CONVERSATION (for reference only):\n${contextLines.join('\n')}` : '',
+    `DRAFT:\n${draft}`,
+  ].filter(Boolean).join('\n\n');
+
+  return { system, user };
+}
+
 // ===== GOALS =====
 
 export function buildGoalMilestonesPrompt(title, description, curricula) {

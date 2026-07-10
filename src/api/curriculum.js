@@ -422,6 +422,16 @@ export async function deleteStudySession(sid) {
   return apiFetch(`/api/study/sessions/${sid}`, { method: 'DELETE' });
 }
 
+// Study Mode prompt refine: AI rewrites a rough draft message into a clearer
+// prompt before it's sent. recentMessages is a small [{role, content}] slice
+// of the conversation so pronouns like "that" resolve correctly.
+export async function refineStudyPrompt(prompt, recentMessages = []) {
+  return apiFetch('/api/study/refine-prompt', {
+    method: 'POST',
+    body: JSON.stringify({ prompt, recentMessages }),
+  });
+}
+
 // Legacy static lesson generation (kept as fallback)
 export function generateLesson(curriculumId, unitId, lessonId, onChunk, onDone, onError) {
   return streamSSE(`/api/curriculum/${curriculumId}/lesson/generate`, { unitId, lessonId }, { onChunk, onDone, onError });

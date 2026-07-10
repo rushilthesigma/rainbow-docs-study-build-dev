@@ -8,6 +8,7 @@ export default function ChatContainer({
   header, className = '', sourceMode, onToggleSource, searchStatus,
   sourceDisabled = false, sourceDisabledReason = '',
   humanizeMode = false, onToggleHumanize,
+  onRefine = null, autoRefine = false, onToggleAutoRefine,
   showThinking = false, thinkingMode = true, thinkingLocked = false, onToggleThinking,
   composerExtras = null,
   composerPrefix = null,
@@ -177,6 +178,9 @@ export default function ChatContainer({
           sourceDisabledReason={sourceDisabledReason}
           humanizeMode={humanizeMode}
           onToggleHumanize={onToggleHumanize}
+          onRefine={onRefine}
+          autoRefine={autoRefine}
+          onToggleAutoRefine={onToggleAutoRefine}
           showThinking={showThinking}
           thinkingMode={thinkingMode}
           thinkingLocked={thinkingLocked}

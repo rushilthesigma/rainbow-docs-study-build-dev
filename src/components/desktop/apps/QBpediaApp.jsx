@@ -3,7 +3,7 @@ import { Search, AlertTriangle, Check, RefreshCw, ArrowLeft, Loader2, List, Zap,
 import { getWikiPage, searchWiki, listWikiPages, listWikiTitles, reportWikiPage, updateWikiPage, aiEditWikiPage, listWikiReports, resolveWikiReport } from '../../../api/wiki';
 import { checkAdmin } from '../../../api/admin';
 import { createNote, updateNote } from '../../../api/notes';
-import { useWindowManager } from '../../../context/WindowManagerContext';
+import { useWindowManagerOptional } from '../../../context/WindowManagerContext';
 import ViewFade from '../../shared/ViewFade';
 import Button from '../../shared/Button';
 import LoadingSpinner from '../../shared/LoadingSpinner';
@@ -210,7 +210,7 @@ function formatRelative(isoDate) {
 }
 
 // ─── Main App ──────────────────────────────────────────────────────────────
-export default function QBpediaApp() {
+export default function QBpediaApp({ onOpenApp } = {}) {
   const [view, setView] = useState('hub'); // hub | article | report | edit | why | reports
   const [currentSlug, setCurrentSlug] = useState(null);
   const [currentPage, setCurrentPage] = useState(null);
@@ -405,6 +405,7 @@ export default function QBpediaApp() {
           isAdmin={isAdmin}
           onEdit={() => setView('edit')}
           titles={allTitles}
+          onOpenApp={onOpenApp}
         />
       </ViewFade>
     );
@@ -626,7 +627,7 @@ function PageRow({ page, onClick }) {
 }
 
 // ─── Article ──────────────────────────────────────────────────────────────
-function ArticleView({ slug, page, loading, generating, refreshing, error, onBack, onNavigate, onRetry, onReport, isAdmin, onEdit, titles }) {
+function ArticleView({ slug, page, loading, generating, refreshing, error, onBack, onNavigate, onRetry, onReport, isAdmin, onEdit, titles, onOpenApp }) {
   const [tocOpen, setTocOpen] = useState(false);
   const [readPct, setReadPct] = useState(0);
   // Wikipedia-style right rail (actions + contents + related + page notes),
@@ -643,7 +644,8 @@ function ArticleView({ slug, page, loading, generating, refreshing, error, onBac
   const full = layout === 'full';
   const scrollRef = useRef(null);
   const sectionRefs = useRef([]);
-  const { openApp } = useWindowManager();
+  const windowManager = useWindowManagerOptional();
+  const openApp = onOpenApp || windowManager?.openApp;
   const [noteBusy, setNoteBusy] = useState(false);
   const [noteErr, setNoteErr] = useState(null);
 
@@ -656,7 +658,7 @@ function ArticleView({ slug, page, loading, generating, refreshing, error, onBac
     try {
       const { note } = await createNote(stripCites(page.title));
       await updateNote(note.id, { mainNotes: buildNoteSeed(page), cues: buildCues(page) });
-      openApp('notes', 'Notes', { initialNoteId: note.id });
+      openApp?.('notes', 'Notes', { initialNoteId: note.id });
     } catch (e) {
       setNoteErr(e.message || 'Could not create the note.');
     }

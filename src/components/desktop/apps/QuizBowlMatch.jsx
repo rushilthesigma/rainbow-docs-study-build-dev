@@ -4,7 +4,7 @@ import { Zap, Users, Copy, Check, X, Trophy, Play, LogOut, ArrowLeft, Flag, Bot,
 import ProgressBar, { InlineProgress } from '../../shared/ProgressBar';
 import {
   createMatch, joinMatch, startMatch, buzzMatch, answerMatch, nextMatchQuestion,
-  endMatch, leaveMatch, streamMatch, botBuzz, botAnswer, requestAnswerReview, resolveAnswerReview,
+  answerMatchBonus, setMatchTeam, endMatch, leaveMatch, streamMatch, botBuzz, botAnswer, requestAnswerReview, resolveAnswerReview,
 } from '../../../api/quizMatch';
 import { AnswerResultPanel } from '../../trial/TrialSession';
 import MatchComparison from '../../shared/MatchComparison';
@@ -111,6 +111,7 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
   const [view, setView] = useState('menu');
   const [code, setCode] = useState('');
   const [joinCodeInput, setJoinCodeInput] = useState('');
+  const [matchMode, setMatchMode] = useState('individual');
   const [questionSource, setQuestionSource] = useState('qbreader');
   const [category, setCategory] = useState('Mixed');
   const [customTopic, setCustomTopic] = useState('');
@@ -127,6 +128,9 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
   const [question, setQuestion] = useState(null);
   const [buzz, setBuzz] = useState(null);
   const [answer, setAnswer] = useState('');
+  const [bonusAnswer, setBonusAnswer] = useState('');
+  const [bonusResult, setBonusResult] = useState(null);
+  const [bonusDeadline, setBonusDeadline] = useState(null);
   const [answerResult, setAnswerResult] = useState(null);
   const [autoAdvanceDeadline, setAutoAdvanceDeadline] = useState(null);
   const [answerDeadline, setAnswerDeadline] = useState(null);
@@ -192,8 +196,12 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
     const abort = streamMatch(code, {
       onSnapshot: (m) => {
         setMatch(m);
+        if (m.mode) setMatchMode(m.mode);
         setAnswerReview(m.activeAnswerReview || null);
-        if (m.state === 'playing' && m.currentQuestion) {
+        if (m.state === 'bonus' || m.state === 'bonus_reveal') {
+          setBonusDeadline(m.bonus?.deadlineAt || null);
+          setView('playing');
+        } else if (m.state === 'playing' && m.currentQuestion) {
           setQuestion(m.currentQuestion);
           if (m.buzzWinner) {
             setBuzz({ userId: m.buzzWinner, buzzAt: m.buzzAt });
@@ -203,6 +211,8 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
             setAnswerDeadline(null);
           }
           setAnswerResult(null);
+          setBonusResult(null);
+          setBonusAnswer('');
           setView('playing');
         } else if (m.state === 'generating') {
           setView('generating');
@@ -215,6 +225,7 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
       },
       onPlayerJoined: (m) => setMatch(m),
       onPlayerLeft:   (m) => setMatch(m.match || m),
+      onTeamUpdated:   (m) => { setMatch(m); if (m?.mode) setMatchMode(m.mode); },
       onGenerating:   (m) => { setMatch(m); setView('generating'); },
       onStartFailed:  (data) => { setError(data.error || 'Failed to start match'); setMatch(data.match); setView('lobby'); },
       onQuestionStart: ({ text, startedAt, match: m }) => {
@@ -222,6 +233,7 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
         setQuestion({ text, startedAt });
         setBuzz(null);
         setAnswer('');
+        setBonusAnswer(''); setBonusResult(null); setBonusDeadline(null);
         setAnswerResult(null);
         setAutoAdvanceDeadline(null);
         setAnswerDeadline(null);
@@ -314,7 +326,20 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
         setAnswerDeadline(null);
         setAutoAdvanceDeadline(data.autoAdvanceInMs ? Date.now() + data.autoAdvanceInMs : null);
         setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: data.scores[p.userId] || 0 })) } : prev);
+        setMatch(prev => prev ? { ...prev, teamScores: data.teamScores || prev.teamScores } : prev);
         if (isHostRef.current) clearBotTimers();
+      },
+      onBonusStart: (data) => {
+        if (data.match) setMatch(data.match);
+        setBonusDeadline(data.bonus?.deadlineAt || null);
+        setBonusResult(null); setBonusAnswer(''); setAnswerResult(null); setBuzz(null);
+        setView('playing');
+      },
+      onBonusResult: (data) => {
+        setBonusResult(data);
+        setBonusDeadline(null);
+        if (data.match) setMatch(data.match);
+        else setMatch(prev => prev ? { ...prev, teamScores: data.teamScores || prev.teamScores } : prev);
       },
       onAnswerReview: (data) => {
         setAnswerReview(data.review || data.match?.activeAnswerReview || null);
@@ -342,9 +367,10 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
           }
         }
       },
-      onMatchEnd: ({ scores, abandoned: wasAbandoned, leftBy, reason, comparison: cmp }) => {
-        setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: scores[p.userId] || 0 })) } : prev);
+      onMatchEnd: ({ scores, teamScores, abandoned: wasAbandoned, leftBy, reason, comparison: cmp }) => {
+        setMatch(prev => prev ? { ...prev, teamScores: teamScores || prev.teamScores, players: prev.players.map(p => ({ ...p, score: scores[p.userId] || 0 })) } : prev);
         setQuestion(null); setBuzz(null); setAnswer(''); setAnswerResult(null);
+        setBonusAnswer(''); setBonusResult(null); setBonusDeadline(null);
         setAutoAdvanceDeadline(null); setAnswerDeadline(null); setWrongFlash(null); setLastReviewableWrong(null); setAnswerReview(null); setReviewStatus(null); setReviewBusy(false);
         if (cmp) setComparison(cmp);
         if (wasAbandoned) setAbandoned({ leftBy, reason });
@@ -386,7 +412,7 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
     if (busy) return;
     setBusy(true); setError(null);
     try {
-      const res = await createMatch();
+      const res = await createMatch({ mode: matchMode });
       setCode(res.code);
       setMatch(res.match);
       setView('lobby');
@@ -416,7 +442,7 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
     if (fillWithBots && realCount < 8) {
       const botCount = 8 - realCount;
       const scaled = scaleRoster(BOT_ROSTER, botLevel);
-      bots = scaled.slice(0, botCount).map(b => ({ id: b.id, name: b.name }));
+      bots = scaled.slice(0, botCount).map((b, i) => ({ id: b.id, name: b.name, team: matchMode === 'team' ? (i % 2 === 0 ? 'A' : 'B') : undefined, accuracy: b.accuracy, thinkMs: b.thinkMs }));
       // Prime the engine so the first onQuestionStart can schedule timers.
       botEngRef.current.bots = scaled.slice(0, botCount).map(b => ({
         userId: `bot:${code}:${b.id}`,
@@ -455,6 +481,21 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
   async function handleSubmitAnswer() {
     if (!answer.trim()) return;
     try { await answerMatch(code, answer.trim()); } catch (e) { setError(e.message); }
+  }
+
+  async function handleSubmitBonus(pass = false) {
+    if (!pass && !bonusAnswer.trim()) return;
+    try {
+      await answerMatchBonus(code, bonusAnswer.trim(), pass);
+      setBonusAnswer('');
+    } catch (e) { setError(e.message || 'Could not submit bonus answer'); }
+  }
+
+  async function handleSelectTeam(team, userId = myId) {
+    try {
+      const data = await setMatchTeam(code, team, userId);
+      if (data.match) setMatch(data.match);
+    } catch (e) { setError(e.message || 'Could not change teams'); }
   }
 
   async function handleNext() {
@@ -590,6 +631,12 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
           <button onClick={() => setView('menu')} className="text-xs text-blue-300/60 hover:text-blue-200 mb-1 inline-flex items-center gap-1 transition-colors">
             <ArrowLeft size={12} /> Back
           </button>
+
+          <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Game type</p>
+          <div className="grid grid-cols-2 gap-2">
+            <SetupTile active={matchMode === 'individual'} icon={<Zap size={14} />} label="Open match" sub="Individual scoring" onClick={() => setMatchMode('individual')} />
+            <SetupTile active={matchMode === 'team'} icon={<Users size={14} />} label="Team scrimmage" sub="Tossups + 3-part bonuses" onClick={() => { setMatchMode('team'); setScoringFormat('standard'); }} />
+          </div>
 
           <div className="grid grid-cols-2 gap-2">
             <SetupTile active={questionSource === 'qbreader'} icon={<BookOpen size={14} />} label="Past QB" sub="qbreader.org" onClick={() => setQuestionSource('qbreader')} />
@@ -761,6 +808,7 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
   if (view === 'lobby') {
     const playerCount = match?.players?.length || 0;
     const waiting = playerCount < 2;
+    const teamReady = match?.mode !== 'team' || ['A', 'B'].every(t => (match?.players || []).some(p => p.team === t));
     const maxPlayers = match?.maxPlayers || 8;
     const lobbyFull = playerCount >= maxPlayers;
     function copyCode() {
@@ -792,7 +840,28 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
               Players <span className="text-blue-300/40">({playerCount}/{maxPlayers})</span>
             </p>
             <div className="space-y-1.5">
-              {(match?.players || []).map(p => (
+              {match?.mode === 'team' ? ['A', 'B'].map(team => (
+                <div key={team} className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-2.5">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className={`w-2 h-2 rounded-full ${team === 'A' ? 'bg-blue-400' : 'bg-amber-400'}`} />
+                    <span className="text-[11px] font-bold text-white/75">{match.teamNames?.[team] || `Team ${team}`}</span>
+                    <span className="text-[9px] text-white/30 ml-auto">{(match.players || []).filter(p => p.team === team).length}/4</span>
+                  </div>
+                  <div className="space-y-1">
+                    {(match.players || []).filter(p => p.team === team).map(p => (
+                      <div key={p.userId} className="flex items-center gap-2">
+                        <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold ${p.isBot ? 'bg-white/[0.06] text-white/30' : team === 'A' ? 'bg-blue-500/15 text-blue-300' : 'bg-amber-500/15 text-amber-300'}`}>{p.isBot ? <Bot size={10} /> : (p.name || '?')[0]?.toUpperCase()}</div>
+                        <span className="text-[12px] text-gray-800 dark:text-gray-200 flex-1 truncate">{p.name}</span>
+                        {!p.isBot && p.userId === myId && <span className="text-[9px] text-white/35">you</span>}
+                        {!p.isBot && p.userId !== myId && <button onClick={() => handleSelectTeam(team === 'A' ? 'B' : 'A', p.userId)} className="text-[9px] text-white/25 hover:text-blue-300">Move</button>}
+                      </div>
+                    ))}
+                  </div>
+                  {(!match.players || !match.players.some(p => p.userId === myId && p.team === team)) && !match.players?.find(p => p.userId === myId)?.isBot && (
+                    <button onClick={() => handleSelectTeam(team)} className="mt-2 w-full rounded-lg border border-white/[0.07] bg-white/[0.03] py-1.5 text-[10px] font-semibold text-white/45 hover:text-white/75">Join {match.teamNames?.[team] || `Team ${team}`}</button>
+                  )}
+                </div>
+              )) : (match?.players || []).map(p => (
                 <div key={p.userId} className="flex items-center gap-2">
                   <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${p.isBot ? 'bg-white/[0.06] text-white/30' : 'bg-blue-500/15 text-blue-300'}`}>
                     {p.isBot ? <Bot size={11} /> : (p.name || '?')[0]?.toUpperCase()}
@@ -950,11 +1019,13 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
           {isHost && (
             <button
               onClick={handleStart}
-              disabled={(waiting && !fillWithBots) || (!match?.studyTitle && category === 'Custom' && !customTopic.trim())}
+              disabled={(waiting && !fillWithBots) || (match?.mode === 'team' && !teamReady) || (!match?.studyTitle && category === 'Custom' && !customTopic.trim())}
               className="w-full py-3 rounded-xl bg-blue-500 text-white text-sm font-semibold border border-blue-400/40 hover:bg-blue-400 disabled:opacity-40 disabled:shadow-none flex items-center justify-center gap-2 transition-all"
             >
               <Play size={14} />
-              {waiting && !fillWithBots
+              {match?.mode === 'team' && !teamReady
+                ? 'Place players on both teams…'
+                : waiting && !fillWithBots
                 ? 'Waiting for at least one more…'
                 : fillWithBots
                   ? `Start · ${playerCount} player${playerCount !== 1 ? 's' : ''} + ${Math.max(0, 8 - (match?.players?.filter(p => !p.isBot)?.length || 0))} bots`
@@ -997,7 +1068,9 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
     return <PlayingView
       match={match} question={question} buzz={buzz} answerResult={answerResult}
       answer={answer} setAnswer={setAnswer}
+      bonusAnswer={bonusAnswer} setBonusAnswer={setBonusAnswer} bonusResult={bonusResult} bonusDeadline={bonusDeadline}
       onBuzz={handleBuzz} onSubmitAnswer={handleSubmitAnswer} onNext={handleNext}
+      onSubmitBonus={handleSubmitBonus}
       onLeave={handleLeave} onEndMatch={handleEndMatch}
       iBuzzed={iBuzzed} isHost={isHost} myId={myId}
       lockedOut={lockedOut} wrongFlash={wrongFlash} lastReviewableWrong={lastReviewableWrong}
@@ -1014,19 +1087,23 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
     const sorted = [...(match?.players || [])].sort((a, b) => (b.score || 0) - (a.score || 0));
     const winner = sorted[0];
     const amIWinner = winner?.userId === myId;
+    const teamMode = match?.mode === 'team';
+    const teamScores = match?.teamScores || { A: 0, B: 0 };
+    const winningTeam = teamMode ? (teamScores.A === teamScores.B ? null : teamScores.A > teamScores.B ? 'A' : 'B') : null;
     const opponentAbandoned = !!abandoned && abandoned.leftBy !== myId;
     return (
       <div className="h-full overflow-y-auto bg-transparent">
         <div className="p-5 space-y-4 text-center">
           <Trophy size={36} className={`mx-auto ${amIWinner && !opponentAbandoned ? 'text-amber-400/70' : 'text-white/20'}`} />
           <p className="text-[17px] font-bold text-white/80">
-            {opponentAbandoned ? 'Opponent left' : amIWinner ? 'You won' : winner ? `${winner.name} won` : 'Match over'}
+            {opponentAbandoned ? 'Opponent left' : teamMode ? (winningTeam ? `${match.teamNames?.[winningTeam] || `Team ${winningTeam}`} won` : 'Team tie') : amIWinner ? 'You won' : winner ? `${winner.name} won` : 'Match over'}
           </p>
           {opponentAbandoned && (
             <p className="text-[11px] text-white/30 -mt-2">
               {abandoned?.reason === 'disconnect' ? 'Disconnected mid-game.' : 'Left mid-game.'}
             </p>
           )}
+          {teamMode && <div className="grid grid-cols-2 gap-2 text-left">{['A', 'B'].map(team => <div key={team} className={`rounded-2xl border p-3 ${winningTeam === team ? 'border-amber-400/30 bg-amber-400/[0.08]' : 'border-white/[0.06] bg-white/[0.03]'}`}><p className="text-[10px] uppercase tracking-wider text-white/40">{match.teamNames?.[team] || `Team ${team}`}</p><p className="text-[24px] font-bold tabular-nums text-white/85 mt-1">{teamScores[team] || 0}</p></div>)}</div>}
           <div className="space-y-1.5">
             {sorted.map((p, i) => (
               <div key={p.userId} className={`flex items-center gap-3 px-4 py-2.5 rounded-2xl border ${i === 0 ? 'bg-white/[0.05] border-white/10' : 'bg-white/[0.02] border-white/[0.04]'}`}>
@@ -1110,8 +1187,78 @@ export function PlayerCard({ player, isMe, buzz, lockedOut, answerResult, maxSco
   );
 }
 
+function TeamBonusView({ match, bonusAnswer, setBonusAnswer, bonusResult, bonusDeadline, onSubmitBonus, onNext, onLeave, isHost, myId }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!bonusDeadline) return undefined;
+    const id = setInterval(() => setNow(Date.now()), 100);
+    return () => clearInterval(id);
+  }, [bonusDeadline]);
+  const bonus = match.bonus;
+  const activeTeam = bonus?.team || match.pendingBonusTeam;
+  const me = match.players?.find(p => p.userId === myId);
+  const isControlling = me?.team === activeTeam;
+  const msLeft = bonusDeadline ? Math.max(0, bonusDeadline - now) : 0;
+  const seconds = Math.ceil(msLeft / 1000);
+  const pct = bonusDeadline ? Math.max(0, Math.min(100, msLeft / (match.bonusWindowMs || 15000) * 100)) : 0;
+  const teamName = match.teamNames?.[activeTeam] || `Team ${activeTeam || ''}`;
+  const scores = match.teamScores || { A: 0, B: 0 };
+  return (
+    <div className="flex flex-col h-full min-h-0 bg-transparent">
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/[0.04]">
+        <Users size={14} className="text-amber-300/80" />
+        <span className="text-[13px] font-bold text-white/85">Team bonus</span>
+        <span className="text-[10px] text-white/35">Q{(match.currentIdx || 0) + 1}/{match.totalQuestions}</span>
+        <div className="flex-1" />
+        <span className="text-[12px] font-bold text-blue-300">{match.teamNames?.A || 'Blue'} {scores.A}</span>
+        <span className="text-white/20">·</span>
+        <span className="text-[12px] font-bold text-amber-300">{match.teamNames?.B || 'Orange'} {scores.B}</span>
+        <button onClick={onLeave} aria-label="Leave match" className="text-white/20 hover:text-rose-400/60 transition-colors"><LogOut size={12} /></button>
+      </div>
+      <div className="flex-1 min-h-0 overflow-y-auto p-5">
+        {bonus ? (
+          <div className="max-w-2xl mx-auto space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-amber-300/70">{teamName} confers</p>
+                <p className="text-[12px] text-white/45">Part {(bonus.partIndex || 0) + 1} of {bonus.totalParts || 3} · {bonus.value || 10} points</p>
+              </div>
+              {bonusDeadline && <span className={`text-[18px] font-bold tabular-nums ${seconds <= 3 ? 'text-rose-300' : 'text-amber-200'}`}>{seconds}s</span>}
+            </div>
+            <div className="h-1 rounded-full bg-white/[0.06] overflow-hidden"><div className={`h-full ${seconds <= 3 ? 'bg-rose-400' : 'bg-amber-400'} transition-all`} style={{ width: `${pct}%` }} /></div>
+            <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-4">
+              <p className="text-[11px] text-amber-200/70 mb-3">{bonus.leadin}</p>
+              <p className="text-[16px] leading-relaxed text-white/90">{bonus.part}</p>
+            </div>
+            {bonusResult ? (
+              <div className={`rounded-xl border p-4 ${bonusResult.correct ? 'border-emerald-400/25 bg-emerald-400/[0.08]' : 'border-rose-400/20 bg-rose-400/[0.06]'}`}>
+                <p className={`text-[12px] font-semibold ${bonusResult.correct ? 'text-emerald-200' : 'text-rose-200'}`}>{bonusResult.correct ? `+${bonusResult.points} · Correct` : bonusResult.timedOut ? 'Time expired' : 'No points'}</p>
+                <p className="text-[13px] text-white/80 mt-1">Answer: <strong>{bonusResult.correctAnswer}</strong></p>
+              </div>
+            ) : isControlling && match.state === 'bonus' ? (
+              <div className="flex gap-2">
+                <input autoFocus value={bonusAnswer} onChange={e => setBonusAnswer(e.target.value)} onKeyDown={e => e.key === 'Enter' && onSubmitBonus(false)} placeholder="Team answer…" className="flex-1 rounded-xl border border-amber-400/30 bg-white/[0.04] px-3 py-3 text-sm text-white/85 placeholder-white/25 outline-none focus:border-amber-300/60" />
+                <button onClick={() => onSubmitBonus(false)} disabled={!bonusAnswer.trim()} className="rounded-xl bg-amber-500 px-4 py-3 text-sm font-semibold text-black disabled:opacity-30">Submit</button>
+                <button onClick={() => onSubmitBonus(true)} className="rounded-xl border border-white/[0.10] px-3 py-3 text-sm text-white/50 hover:text-white/80">Pass</button>
+              </div>
+            ) : (
+              <p className="rounded-xl border border-white/[0.07] bg-white/[0.03] px-3 py-3 text-center text-[12px] text-white/40">{isControlling ? 'Bonus starting…' : `${teamName} is conferring…`}</p>
+            )}
+            {isHost && (bonusResult || match.state === 'reveal') && <button onClick={onNext} className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] py-2.5 text-[12px] font-semibold text-white/55 hover:text-white/80">Next →</button>}
+          </div>
+        ) : (
+          <div className="h-full flex items-center justify-center text-center"><div><Loader2 size={20} className="animate-spin text-amber-300/60 mx-auto mb-2" /><p className="text-[13px] text-white/50">Preparing the bonus…</p></div></div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ===== PLAYING VIEW =====
-function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, onBuzz, onSubmitAnswer, onNext, onLeave, onEndMatch, iBuzzed, isHost, myId, lockedOut = [], wrongFlash, lastReviewableWrong, answerReview, reviewStatus, reviewBusy, onRequestReview, onResolveReview, autoAdvanceDeadline, answerDeadline, revealSpeedMs }) {
+function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, bonusAnswer, setBonusAnswer, bonusResult, bonusDeadline, onBuzz, onSubmitAnswer, onSubmitBonus, onNext, onLeave, onEndMatch, iBuzzed, isHost, myId, lockedOut = [], wrongFlash, lastReviewableWrong, answerReview, reviewStatus, reviewBusy, onRequestReview, onResolveReview, autoAdvanceDeadline, answerDeadline, revealSpeedMs }) {
+  if (match?.mode === 'team' && ['bonus', 'bonus_reveal', 'reveal'].includes(match.state) && (match.bonus || match.pendingBonusTeam || bonusResult)) {
+    return <TeamBonusView match={match} bonusAnswer={bonusAnswer} setBonusAnswer={setBonusAnswer} bonusResult={bonusResult} bonusDeadline={bonusDeadline} onSubmitBonus={onSubmitBonus} onNext={onNext} onLeave={onLeave} isHost={isHost} myId={myId} />;
+  }
   const reviewPending = answerReview?.status === 'pending';
   const frozen = !!buzz || !!answerResult || reviewPending;
   const frozenAt = buzz?.buzzAt || answerResult?.buzzAt || null;
@@ -1141,6 +1288,8 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
   const wrongName = wrongFlash ? (players.find(p => p.userId === wrongFlash.userId)?.name || 'Opponent') : '';
   const iAmLocked = lockedOut.includes(myId);
   const myScore = players.find(p => p.userId === myId)?.score || 0;
+  const myTeam = players.find(p => p.userId === myId)?.team || null;
+  const teamScores = match.teamScores || { A: 0, B: 0 };
   const maxScore = Math.max(1, ...players.map(p => p.score || 0));
   const progressPct = totalWords > 0 ? Math.min(100, ((wordIndex + 1) / totalWords) * 100) : 0;
 
@@ -1175,9 +1324,9 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
           Match
         </span>
         <div className="flex-1" />
-        <span className={`text-[12px] font-bold tabular-nums ${myScore > 0 ? 'text-emerald-400' : 'text-white/40'}`}>
-          {myScore}
-        </span>
+        {match.mode === 'team' ? (
+          <span className="text-[11px] font-bold tabular-nums text-white/60">{match.teamNames?.[myTeam] || 'Your team'} · {teamScores[myTeam] || 0}</span>
+        ) : <span className={`text-[12px] font-bold tabular-nums ${myScore > 0 ? 'text-emerald-400' : 'text-white/40'}`}>{myScore}</span>}
         {isHost && (
           <button onClick={onEndMatch} title="End match early"
             className="inline-flex items-center gap-1 text-[10px] font-semibold text-rose-400/70 hover:text-rose-300 px-2 py-1 rounded-md border border-rose-500/20 hover:border-rose-500/40 bg-rose-500/[0.05] transition-colors">
@@ -1319,6 +1468,11 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
               Match · {players.length}P
             </span>
           </div>
+          {match.mode === 'team' && (
+            <div className="grid grid-cols-2 gap-1.5 mb-1">
+              {['A', 'B'].map(team => <div key={team} className={`rounded-lg border px-2 py-1.5 ${myTeam === team ? 'border-blue-400/30 bg-blue-500/[0.08]' : 'border-white/[0.06] bg-white/[0.02]'}`}><p className="text-[9px] text-white/35 truncate">{match.teamNames?.[team] || `Team ${team}`}</p><p className="text-[15px] font-bold tabular-nums text-white/75">{teamScores[team] || 0}</p></div>)}
+            </div>
+          )}
           {players.map(p => (
             <PlayerCard
               key={p.userId}

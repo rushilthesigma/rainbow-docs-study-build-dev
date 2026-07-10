@@ -4,7 +4,12 @@ export const createMatch = (opts) => apiFetch('/api/quizbowl/match', {
   method: 'POST',
   body: JSON.stringify(opts || {}),
 });
-export const joinMatch = (code) => apiFetch(`/api/quizbowl/match/${code}/join`, { method: 'POST' });
+export const joinMatch = (code, opts = {}) => apiFetch(`/api/quizbowl/match/${code}/join`, {
+  method: 'POST', body: JSON.stringify(opts || {}),
+});
+export const setMatchTeam = (code, team, userId, teamNames) => apiFetch(`/api/quizbowl/match/${code}/team`, {
+  method: 'POST', body: JSON.stringify({ team, userId, teamNames }),
+});
 export const startMatch = (code, settings) => apiFetch(`/api/quizbowl/match/${code}/start`, {
   method: 'POST',
   body: JSON.stringify(settings || {}),
@@ -13,6 +18,9 @@ export const buzzMatch = (code) => apiFetch(`/api/quizbowl/match/${code}/buzz`, 
 export const answerMatch = (code, answer) => apiFetch(`/api/quizbowl/match/${code}/answer`, {
   method: 'POST',
   body: JSON.stringify({ answer }),
+});
+export const answerMatchBonus = (code, answer = '', pass = false) => apiFetch(`/api/quizbowl/match/${code}/bonus-answer`, {
+  method: 'POST', body: JSON.stringify({ answer, pass }),
 });
 export const requestAnswerReview = (code) => apiFetch(`/api/quizbowl/match/${code}/review`, { method: 'POST' });
 export const resolveAnswerReview = (code, reviewId, accepted) => apiFetch(`/api/quizbowl/match/${code}/review/${reviewId}`, {
@@ -122,12 +130,15 @@ export function streamMatch(code, handlers) {
             const t = data.type;
             if (t === 'snapshot') handlers.onSnapshot?.(data.match);
             else if (t === 'player_joined') handlers.onPlayerJoined?.(data.match);
+            else if (t === 'team_updated') handlers.onTeamUpdated?.(data.match);
             else if (t === 'generating') handlers.onGenerating?.(data.match);
             else if (t === 'start_failed') handlers.onStartFailed?.(data);
             else if (t === 'question_start') handlers.onQuestionStart?.(data);
             else if (t === 'buzz') handlers.onBuzz?.(data);
             else if (t === 'wrong_answer') handlers.onWrongAnswer?.(data);
             else if (t === 'answer_result') handlers.onAnswerResult?.(data);
+            else if (t === 'bonus_start') handlers.onBonusStart?.(data);
+            else if (t === 'bonus_result') handlers.onBonusResult?.(data);
             else if (t === 'answer_review') handlers.onAnswerReview?.(data);
             else if (t === 'match_end') handlers.onMatchEnd?.(data);
             else if (t === 'player_left') handlers.onPlayerLeft?.(data);

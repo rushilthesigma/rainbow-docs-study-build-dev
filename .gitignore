@@ -20,6 +20,8 @@ parties.json
 # Do NOT commit; rerun the script to restore locally.
 games/
 .write-test
+MacIsland/.build/
+MacIsland/build/
 
 # Electron build output and backup files - not source, never commit.
 release/

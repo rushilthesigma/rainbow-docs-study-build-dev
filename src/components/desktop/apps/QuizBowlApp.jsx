@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Zap, Play, Pause, Check, X, Loader2, Lightbulb, Users, BookOpen, Sparkles, Settings, ArrowRight, Target, TrendingDown, TrendingUp, Clock, History, Flame, ChevronRight, ArrowLeft, Trophy, Swords, RefreshCw, Eye } from 'lucide-react';
+import { Zap, Play, Pause, Check, X, Loader2, Lightbulb, Users, BookOpen, Sparkles, Settings, ArrowRight, Target, TrendingDown, TrendingUp, Clock, History, Flame, ChevronRight, ArrowLeft, Trophy, Swords, RefreshCw, Eye, EyeOff, Volume2, VolumeX, Mic } from 'lucide-react';
 import TrialSession, { AnswerResultPanel } from '../../trial/TrialSession';
 import { apiFetch } from '../../../api/client';
 import { fetchQBReaderTossups, saveQuizBowlSet, fetchQuizBowlHistory, fetchQuizBowlRecommendations, fetchQuizBowlPatterns, fetchQuizBowlSm2Due, fetchQuizBowlMatches, saveAiMatchReplay } from '../../../api/quizMatch';
@@ -16,9 +16,30 @@ import ProgressBar, { InlineProgress } from '../../shared/ProgressBar';
 import QbModelPicker from '../../shared/QbModelPicker';
 import { useQbModel } from '../../../hooks/useQbModel';
 import { studyModelLabel } from '../../study/studyModels';
+import { useSpeechRecognition, speechRecognitionSupported } from '../../../hooks/useSpeechRecognition';
+import { speechSynthesisSupported } from '../../../hooks/useSpeechSynthesis';
+
+// Explicitly open (then immediately release) an audio stream before starting
+// recognition. This is the same permission flow as Study Mode dictation.
+async function requestMicPermission() {
+  try {
+    const stream = await navigator.mediaDevices?.getUserMedia({ audio: true });
+    stream?.getTracks().forEach(t => t.stop());
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const DIFFICULTIES = ['Easy', 'Medium', 'Hard', 'Tournament'];
 const CATEGORIES = ['Science', 'History', 'Literature', 'Geography', 'Math', 'Art', 'Music', 'Philosophy', 'Pop Culture', 'Mixed'];
+const MIC_ERROR_MESSAGES = {
+  'not-allowed': 'Microphone access is blocked. Allow it in your browser settings, then retry.',
+  'service-not-allowed': 'Speech recognition is blocked in this browser.',
+  'audio-capture': 'No working microphone was found.',
+  'network': 'You appear to be offline. Speech recognition needs an internet connection.',
+  'language-not-supported': 'Dictation language is not supported by your browser.',
+};
 const QB_LOBBY_CATEGORIES = ['History', 'American History', 'World History', 'European History', 'Science', 'Literature', 'Geography', 'Math', 'Art', 'Music', 'Philosophy', 'Mixed'];
 const BOT_ROSTER = [
   { id: 'biscuit', name: 'Player 2', label: 'Newbie',       stars: 1, color: 'slate',   buzzAt: 0.90, accuracy: 0.40, thinkMs: 3000 },
@@ -48,13 +69,63 @@ Format:
 // are the ONLY permitted fact base — the prompt flips from "write about a
 // category" to "write from this text", because framing the article as a mere
 // instruction let the model fall back on its own knowledge of the topic.
-function generatePrompt(category, difficulty, count, customInstructions, source = null) {
+// Tokenize a generation context (custom instructions + note title) for
+// similarity matching against past sets. Drops filler words so
+// "Focus on: the Krebs Cycle" and "krebs cycle questions" line up.
+const CTX_STOPWORDS = new Set(['focus', 'on', 'the', 'a', 'an', 'of', 'in', 'about', 'questions', 'question', 'tossups', 'tossup', 'and', 'or', 'for', 'to', 'with', 'please', 'make', 'give', 'me', 'some', 'only', 'exclusively']);
+function ctxTokens(...parts) {
+  const raw = parts.filter(Boolean).join(' ').toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+  return new Set(raw.split(/\s+/).filter(w => w.length > 1 && !CTX_STOPWORDS.has(w)));
+}
+
+// A past set counts as "the same request" when its instructions/title
+// share most of their meaningful words with the current request, or when
+// both are plain category drills in the same category. Used to steer the
+// AI away from answers the student has already seen.
+function isSimilarPastSet(set, { category, tokens }) {
+  if (set.source !== 'ai') return false;
+  const setTokens = ctxTokens(set.customInstructions, set.noteTitle);
+  if (tokens.size && setTokens.size) {
+    let shared = 0;
+    for (const t of tokens) if (setTokens.has(t)) shared++;
+    return shared / Math.min(tokens.size, setTokens.size) >= 0.5;
+  }
+  // Both plain (no instructions saved): same category = same request.
+  return tokens.size === 0 && setTokens.size === 0 && (set.category || 'Mixed') === category;
+}
+
+// Walk recent history (newest first) and collect the answers from past
+// AI sets that match the current request, so the prompt can ban them.
+function collectSeenAnswers(sets, { category, customInstructions, noteTitle }, cap = 40) {
+  const tokens = ctxTokens(customInstructions, noteTitle);
+  const seen = new Set();
+  const answers = [];
+  for (const set of sets || []) {
+    if (!isSimilarPastSet(set, { category, tokens })) continue;
+    for (const pq of set.perQuestion || []) {
+      const a = (pq.correctAnswer || '').trim();
+      const key = a.toLowerCase();
+      if (!a || seen.has(key)) continue;
+      seen.add(key);
+      answers.push(a);
+      if (answers.length >= cap) return answers;
+    }
+  }
+  return answers;
+}
+
+function generatePrompt(category, difficulty, count, customInstructions, source = null, avoidAnswers = []) {
   const difficultyGuide = {
     Easy: 'Use well-known facts. Giveaway clue should be very obvious. Target: high school students.',
     Medium: 'Mix of common and uncommon knowledge. Standard college quiz bowl level.',
     Hard: 'Use obscure clues early. Require deep subject expertise. Only the giveaway should be accessible to non-experts.',
     Tournament: 'NAQT/ACF Nationals level. Opening clues should be nearly impossible except for top players. Use extremely obscure references, secondary works, lesser-known facts. Questions should be 5-7 sentences. Even the giveaway should require solid knowledge.',
   };
+  const avoidBlock = avoidAnswers.length
+    ? `\nThe student has already played AI-generated sets on this exact request. Do NOT repeat them:
+- None of these may be the answer to any question: ${avoidAnswers.join('; ')}.
+- Do not recycle the signature clues associated with those answers either - pick different answers, sub-topics, and angles so the set feels brand new.`
+    : '';
   if (source?.text) {
     return `Generate ${count} pyramidal quiz bowl tossup questions sourced ENTIRELY from the source notes below.
 Difficulty: ${difficulty}
@@ -71,14 +142,15 @@ HARD RULES (these override everything above):
 - Vary the answers when the notes name enough distinct entities - a set where every answer is "${source.title}" is guessable after question one.
 - Pyramidal means within the notes: open with the notes' most obscure details, end with the giveaway built from the notes' most famous fact.
 - If the notes cannot support ${count} fully distinct questions, reuse different facts and angles from the notes rather than inventing material.
-${customInstructions ? `- Additional instructions from the user: ${customInstructions}` : ''}
+${customInstructions ? `- Additional instructions from the user: ${customInstructions}` : ''}${avoidBlock ? `${avoidBlock}
+- If the notes are too thin to avoid every banned answer, prefer fresh answers first and only then reuse a banned one with entirely different clues.` : ''}
 Return JSON: {"questions":[{"text":"...","answer":"..."}]}`;
   }
   return `Generate ${count} pyramidal quiz bowl tossup questions.
 Category: ${category}
 Difficulty: ${difficulty}
 ${difficultyGuide[difficulty] || ''}
-${customInstructions ? `\nAdditional instructions from the user: ${customInstructions}` : ''}
+${customInstructions ? `\nAdditional instructions from the user: ${customInstructions}` : ''}${avoidBlock}
 Each question must be pyramidal (hardest clues first, easiest giveaway last).
 Return JSON: {"questions":[{"text":"...","answer":"..."}]}`;
 }
@@ -142,6 +214,73 @@ function useWordReveal(text, speed = 140, active = false) {
   return { revealed, done, wordIndex, totalWords: words.length, stop };
 }
 
+// Read-aloud twin of useWordReveal (ported from eric-lu-VT's QuizBowl Discord
+// bot, swapping Google Cloud TTS for the Web Speech API). The reveal is driven
+// by the synthesizer's word-boundary events instead of a timer so the on-screen
+// text tracks the spoken word — buzz-point scoring stays honest. Spoken one
+// sentence per utterance to dodge Chrome's long-utterance cutoff; boundary
+// events can drift on some voices (or not fire at all), so we snap the index
+// exact at each sentence end, which also serves as the no-boundary fallback.
+function useSpokenReveal(text, active, paused = false) {
+  const [wordIndex, setWordIndex] = useState(0);
+  const [spokenDone, setSpokenDone] = useState(false);
+  const words = text ? text.split(/\s+/) : [];
+
+  useEffect(() => { setWordIndex(0); setSpokenDone(false); }, [text]);
+
+  useEffect(() => {
+    if (!active || !words.length || !speechSynthesisSupported) return;
+    const synth = window.speechSynthesis;
+    const chunks = text.match(/[^.!?]+[.!?]*/g) || [text];
+    let cancelled = false;
+    let base = 0; // word offset of the chunk currently being spoken
+
+    const speakChunk = (i) => {
+      if (cancelled) return;
+      if (i >= chunks.length) { setSpokenDone(true); return; }
+      const chunk = chunks[i].trim();
+      const chunkWords = chunk ? chunk.split(/\s+/).length : 0;
+      // Strip power marks and pronunciation guides from the AUDIO only; the
+      // displayed text keeps them, and the end-of-chunk snap absorbs the
+      // small word-count drift stripping introduces mid-sentence.
+      const spokenText = chunk.replace(/\(\*\)/g, '').replace(/\([^)]*\)/g, '').replace(/\s+/g, ' ').trim();
+      if (!spokenText) { base += chunkWords; speakChunk(i + 1); return; }
+      const u = new window.SpeechSynthesisUtterance(spokenText);
+      u.onboundary = (e) => {
+        if (cancelled || e.name !== 'word') return;
+        const upto = spokenText.slice(0, e.charIndex).trim();
+        const w = upto ? upto.split(/\s+/).length : 0;
+        setWordIndex(prev => Math.max(prev, Math.min(words.length - 1, base + w)));
+      };
+      const advance = () => {
+        if (cancelled) return;
+        base += chunkWords;
+        setWordIndex(prev => Math.max(prev, Math.min(words.length - 1, base - 1)));
+        speakChunk(i + 1);
+      };
+      u.onend = advance;
+      u.onerror = advance;
+      try { synth.speak(u); } catch { advance(); }
+    };
+
+    try { synth.cancel(); } catch {}
+    speakChunk(0);
+    return () => { cancelled = true; try { synth.cancel(); } catch {} };
+  }, [active, text]);
+
+  // Pause/resume the utterance in place — toggling `active` instead would
+  // restart the current sentence from its first word.
+  useEffect(() => {
+    if (!active || !speechSynthesisSupported) return;
+    try { paused ? window.speechSynthesis.pause() : window.speechSynthesis.resume(); } catch {}
+  }, [paused, active]);
+
+  function stop() { if (speechSynthesisSupported) try { window.speechSynthesis.cancel(); } catch {} }
+  const revealed = words.slice(0, wordIndex + 1).join(' ');
+  const done = spokenDone || wordIndex >= words.length - 1;
+  return { revealed, done, wordIndex, totalWords: words.length, stop };
+}
+
 export default function QuizBowlApp({ initialTopic = null, initialDifficulty = null, initialQuestions = null, initialContext = null, autoStart = false } = {}) {
   const { openApp, state } = useWindowManager();
   function openLessonFor(topic) {
@@ -202,6 +341,20 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   const [hubLoading, setHubLoading] = useState(!(cachedHist && cachedRecs && cachedPats));
   const setStartedAtRef = useRef(hasPreloaded ? Date.now() : null);
   const savedSetIdRef = useRef(null);       // guard so we save each set exactly once
+  // Generation context of the set currently being played (AI sets only) -
+  // saved with the set so future generations of the same request can
+  // avoid repeating its answers.
+  const playingCtxRef = useRef(null);
+
+  // Answers from past AI sets that match this request. The generation
+  // prompt bans them so replaying the same topic yields fresh questions.
+  async function seenAnswersFor(ctx) {
+    let sets = history?.sets;
+    if (!sets) {
+      try { sets = (await fetchOnce('qb:history', fetchQuizBowlHistory))?.sets; } catch { sets = []; }
+    }
+    return collectSeenAnswers(sets, ctx);
+  }
 
   async function loadHub() {
     // Only show the skeleton if we have NOTHING to render - otherwise
@@ -274,8 +427,41 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   const QB_BATCH_SIZE = 5;
   const QB_PREFETCH_THRESHOLD = 3;
 
+  // Read-aloud mode: TTS reads the tossup and the mic takes the answer.
+  const [voiceMode, setVoiceMode] = useState(() => {
+    try { return localStorage.getItem('covalent-qb-voice') === '1'; } catch { return false; }
+  });
+  const [micError, setMicError] = useState('');
+  const [dictationLang] = useState(() => {
+    try { return localStorage.getItem('covalent.dictation.lang') || 'en-US'; } catch { return 'en-US'; }
+  });
+  function toggleVoiceMode() {
+    setMicError('');
+    setVoiceMode(v => {
+      try { localStorage.setItem('covalent-qb-voice', v ? '0' : '1'); } catch {}
+      return !v;
+    });
+  }
+
+  // Audio-only play: hide the on-screen tossup text so the question is heard,
+  // not read. Only meaningful in read-aloud mode. The word reveal keeps
+  // advancing underneath, so buzz-point scoring is unaffected; the text comes
+  // back on the result screen for review.
+  const [hideText, setHideText] = useState(() => {
+    try { return localStorage.getItem('covalent-qb-hide-text') === '1'; } catch { return false; }
+  });
+  function toggleHideText() {
+    setHideText(h => {
+      try { localStorage.setItem('covalent-qb-hide-text', h ? '0' : '1'); } catch {}
+      return !h;
+    });
+  }
+
   const q = questions[currentQ];
-  const { revealed, done, stop, wordIndex, totalWords } = useWordReveal(q?.text || '', revealSpeedMs, reading && !buzzed && !isPaused && view === 'playing');
+  const revealActive = reading && !buzzed && view === 'playing';
+  const timedReveal = useWordReveal(q?.text || '', revealSpeedMs, !voiceMode && revealActive && !isPaused);
+  const spokenReveal = useSpokenReveal(q?.text || '', voiceMode && revealActive, isPaused);
+  const { revealed, done, stop, wordIndex, totalWords } = voiceMode ? spokenReveal : timedReveal;
 
   // Refs so the keydown handler (registered once per view change) always
   // reads the latest state without needing a stale-closure re-registration.
@@ -283,8 +469,10 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   const _readingRef   = useRef(reading);   _readingRef.current   = reading;
   const _isPausedRef  = useRef(isPaused);  _isPausedRef.current  = isPaused;
   const _showResultRef= useRef(showResult);_showResultRef.current= showResult;
+  const _voiceModeRef = useRef(voiceMode); _voiceModeRef.current = voiceMode;
   const _isActiveRef  = useRef(false);    _isActiveRef.current  = state.windows[state.activeWindowId]?.appId === 'quizbowl';
   const _stopRef      = useRef(stop);      _stopRef.current      = stop;
+  const _startMicRef  = useRef(null);
   const _submitRef    = useRef(null);
   const _nextQRef     = useRef(null);
 
@@ -317,11 +505,14 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
         setQuestions(tossups);
         setPlayingSource('qbreader');
       } else {
+        const ctx = { category: cat, customInstructions: customInstr, noteTitle: notes?.title || '' };
+        const avoid = await seenAnswersFor(ctx);
+        playingCtxRef.current = ctx;
         const result = await apiFetch('/api/chat', {
           method: 'POST',
           body: JSON.stringify({
             system: SYSTEM_PROMPT,
-            messages: [{ role: 'user', content: generatePrompt(cat, diff, 10, customInstr, notes) }],
+            messages: [{ role: 'user', content: generatePrompt(cat, diff, 10, customInstr, notes, avoid) }],
             max_tokens: 8192,
             model: qbModel,
           }),
@@ -366,11 +557,14 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
       return;
     }
     try {
+      const ctx = { category, customInstructions, noteTitle: sourceNotes?.title || '' };
+      const avoid = await seenAnswersFor(ctx);
+      playingCtxRef.current = ctx;
       const result = await apiFetch('/api/chat', {
         method: 'POST',
         body: JSON.stringify({
           system: SYSTEM_PROMPT,
-          messages: [{ role: 'user', content: generatePrompt(category, difficulty, questionCount, customInstructions, sourceNotes) }],
+          messages: [{ role: 'user', content: generatePrompt(category, difficulty, questionCount, customInstructions, sourceNotes, avoid) }],
           max_tokens: 8192,
           model: qbModel,
         }),
@@ -427,12 +621,18 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   function handleBuzz() {
     if (buzzed) return;
     setBuzzed(true); setReading(false); stop();
+    // Match Study Mode dictation: stop TTS, request the mic, then begin the
+    // same push-to-talk recognition session used by its composer.
+    if (voiceMode && speechRecognitionSupported) _startMicRef.current?.();
   }
 
-  function handleSubmit() {
-    if (!answer.trim()) return;
+  // `spoken` can carry a transcript directly when submission happens in the
+  // same tick as a final recognition result.
+  function handleSubmit(spoken) {
+    const given = typeof spoken === 'string' ? spoken : answer;
+    if (!given.trim()) return;
     const norm = s => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9\s]/g, '').trim();
-    const a = norm(answer); const ca = norm(q.answer);
+    const a = norm(given); const ca = norm(q.answer);
     function lev(s1, s2) {
       const m = s1.length, n = s2.length;
       if (m === 0) return n; if (n === 0) return m;
@@ -449,7 +649,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
       a.split(/[\s,]+/).some(w => w.length > 2 && (ca.includes(w) || lev(ca, w) <= 1));
     setCorrect(isCorrect); setShowResult(true);
     const points = naqtPointsFor(isCorrect, wordIndex, q.powerWordIndex, totalWords);
-    setScores(prev => [...prev, { question: currentQ, correct: isCorrect, buzzWord: wordIndex, totalWords, powerWordIndex: q.powerWordIndex ?? null, points, answer: answer.trim(), correctAnswer: q.answer }]);
+    setScores(prev => [...prev, { question: currentQ, correct: isCorrect, buzzWord: wordIndex, totalWords, powerWordIndex: q.powerWordIndex ?? null, points, answer: given.trim(), correctAnswer: q.answer }]);
   }
 
   function handleTimeout() {
@@ -503,6 +703,12 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
       source: playingSource === 'qbreader' ? 'qbreader' : 'ai',
       score, points, total, durationMs,
       perQuestion,
+      // AI sets carry their generation context so future runs of the
+      // same request can steer away from these answers.
+      ...(playingSource !== 'qbreader' && playingCtxRef.current ? {
+        customInstructions: playingCtxRef.current.customInstructions || '',
+        noteTitle: playingCtxRef.current.noteTitle || '',
+      } : {}),
     }).then(r => {
       savedSetIdRef.current = r?.set?.id || 'saved';
       // Quietly refresh the hub data so the next time the user returns
@@ -548,17 +754,77 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
         e.preventDefault();
         if (paused) { setIsPaused(false); return; }
         setBuzzed(true); setReading(false); _stopRef.current?.();
+        if (_voiceModeRef.current && speechRecognitionSupported) _startMicRef.current?.();
       }
       if (e.key === 'p' && !buzzed && !showResult && !(e.target instanceof HTMLInputElement)) {
         e.preventDefault();
         setIsPaused(p => !p);
       }
-      if (e.key === 'Enter' && buzzed && !showResult) { e.preventDefault(); _submitRef.current?.(); }
+      if (e.key === 'Enter' && buzzed && !showResult) {
+        e.preventDefault();
+        _micRef.current?.stop({ finalizeNow: false });
+        _submitRef.current?.();
+      }
       else if (e.key === 'Enter' && showResult) { e.preventDefault(); _nextQRef.current?.(); }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [view]);
+
+  // Read-aloud answer leg uses the exact Study Mode dictation shape:
+  // continuous push-to-talk, live text, and no silence-based auto-submit.
+  const mic = useSpeechRecognition({
+    lang: dictationLang,
+    continuous: true,
+    interimResults: true,
+    silenceMs: 0,
+    onResult: (t) => setAnswer(t),
+    onFinal: (t) => {
+      const text = t.trim();
+      if (!text) return;
+      setAnswer(text);
+    },
+    onError: (err) => {
+      if (!err) return;
+      console.warn('QB dictation error:', err);
+      // Chrome reports 'network' for any speech-service failure. Only blame
+      // the connection when the browser actually says it's offline.
+      if (err === 'network' && navigator.onLine !== false) {
+        setMicError("Speech service didn't respond. Retry the mic or type your answer.");
+        return;
+      }
+      setMicError(MIC_ERROR_MESSAGES[err] || 'Dictation stopped. Retry the microphone.');
+    },
+  });
+  const _micRef = useRef(mic); _micRef.current = mic;
+
+  async function startDictation() {
+    setMicError('');
+    const granted = await requestMicPermission();
+    if (!granted) {
+      setMicError(MIC_ERROR_MESSAGES['not-allowed']);
+      return;
+    }
+    _micRef.current.start();
+  }
+  _startMicRef.current = startDictation;
+
+  // Keep recognition alive for the entire answer leg. Stop it only when that
+  // leg actually ends; tying abort() to the start effect's cleanup made a
+  // harmless render/state transition capable of cancelling a fresh session.
+  useEffect(() => {
+    if (!voiceMode || !buzzed || showResult || view !== 'playing') {
+      _micRef.current.abort();
+    }
+  }, [voiceMode, buzzed, showResult, view]);
+
+  // Read the verdict back, like the bot announcing the result in-channel.
+  useEffect(() => {
+    if (!voiceMode || !showResult || view !== 'playing' || !speechSynthesisSupported) return;
+    const answerSpoken = String(q?.answer || '').replace(/\[[^\]]*\]/g, '').replace(/\([^)]*\)/g, '').trim();
+    const u = new window.SpeechSynthesisUtterance(correct ? 'Correct.' : `The answer was ${answerSpoken}.`);
+    try { window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } catch {}
+  }, [showResult]);
 
   // ===== REVIEW =====
   if (view === 'review') {
@@ -648,6 +914,26 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
           <span className={`text-[12px] font-bold tabular-nums ${scores.filter(s => s.correct).length > 0 ? 'text-emerald-400' : 'text-white/40'}`}>
             {scores.filter(s => s.correct).length}
           </span>
+          {speechSynthesisSupported && (
+            <button
+              onClick={toggleVoiceMode}
+              aria-label={voiceMode ? 'Turn off read aloud' : 'Read aloud'}
+              title={voiceMode ? 'Read aloud on — questions are spoken, answer by voice' : 'Read aloud'}
+              className={`p-1 rounded-lg border transition-colors ${voiceMode ? 'border-blue-400/30 bg-blue-500/[0.12] text-blue-300' : 'border-transparent text-white/30 hover:text-white/60 hover:bg-white/5'}`}
+            >
+              {voiceMode ? <Volume2 size={13} /> : <VolumeX size={13} />}
+            </button>
+          )}
+          {speechSynthesisSupported && voiceMode && (
+            <button
+              onClick={toggleHideText}
+              aria-label={hideText ? 'Show the question text' : 'Hide the question text'}
+              title={hideText ? 'Text hidden. Click to show it.' : 'Hide the text and play by ear'}
+              className={`p-1 rounded-lg border transition-colors ${hideText ? 'border-blue-400/30 bg-blue-500/[0.12] text-blue-300' : 'border-transparent text-white/30 hover:text-white/60 hover:bg-white/5'}`}
+            >
+              {hideText ? <EyeOff size={13} /> : <Eye size={13} />}
+            </button>
+          )}
           {!buzzed && !showResult && (
             <button
               onClick={() => setIsPaused(p => !p)}
@@ -712,15 +998,27 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
 
         <div className="flex-1 overflow-y-auto p-5">
           <div className="min-h-[120px]">
-            <p className="text-[15px] leading-relaxed text-white/90 font-light">
-              {revealed}
-              {reading && !done && !isPaused && <span className="inline-block w-0.5 h-4 bg-white/35 animate-pulse ml-1 align-middle rounded-sm" />}
-              {isPaused && !buzzed && (
-                <span className="inline-flex items-center gap-1 ml-2 align-middle px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-[0.14em] bg-amber-500/[0.12] border border-amber-400/25 text-amber-300/80">
-                  <Pause size={8} /> paused
-                </span>
-              )}
-            </p>
+            {voiceMode && hideText && !showResult ? (
+              <div className="flex items-center gap-2 text-white/40">
+                <Volume2 size={14} className={reading && !done && !isPaused ? 'animate-pulse' : ''} />
+                <span className="text-[12px]">Audio only. The text returns with the result.</span>
+                {isPaused && !buzzed && (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-[0.14em] bg-amber-500/[0.12] border border-amber-400/25 text-amber-300/80">
+                    <Pause size={8} /> paused
+                  </span>
+                )}
+              </div>
+            ) : (
+              <p className="text-[15px] leading-relaxed text-white/90 font-light">
+                {revealed}
+                {reading && !done && !isPaused && <span className="inline-block w-0.5 h-4 bg-white/35 animate-pulse ml-1 align-middle rounded-sm" />}
+                {isPaused && !buzzed && (
+                  <span className="inline-flex items-center gap-1 ml-2 align-middle px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-[0.14em] bg-amber-500/[0.12] border border-amber-400/25 text-amber-300/80">
+                    <Pause size={8} /> paused
+                  </span>
+                )}
+              </p>
+            )}
           </div>
         </div>
 
@@ -736,11 +1034,37 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
           )}
           {buzzed && !showResult && (
             <div className="flex gap-2">
-              <input value={answer} onChange={e => setAnswer(e.target.value)} placeholder="Answer…" autoFocus
-                className="flex-1 px-4 py-3 rounded-lg border border-blue-500/40 bg-white/[0.05] text-[14px] text-white placeholder-white/25 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/25 transition-colors" />
-              <button onClick={handleSubmit} disabled={!answer.trim()}
+              <div className="relative flex-1">
+                <input value={answer} onChange={e => setAnswer(e.target.value)}
+                  placeholder={voiceMode && mic.listening ? 'Listening… speak your answer' : 'Answer…'} autoFocus
+                  className={`w-full pl-4 ${voiceMode ? 'pr-10' : 'pr-4'} py-3 rounded-lg border border-blue-500/40 bg-white/[0.05] text-[14px] text-white placeholder-white/25 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/25 transition-colors`} />
+                {voiceMode && (
+                  <button
+                    type="button"
+                    onClick={() => mic.listening ? mic.stop() : startDictation()}
+                    aria-label={mic.listening ? 'Stop dictation' : 'Start dictation'}
+                    title={mic.listening ? 'Stop dictation' : 'Start dictation'}
+                    className={`absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md transition-colors ${mic.listening ? 'text-blue-300 bg-blue-500/15' : 'text-white/35 hover:text-blue-300 hover:bg-blue-500/10'}`}
+                  >
+                    <Mic size={14} className={mic.listening ? 'animate-pulse' : ''} />
+                  </button>
+                )}
+              </div>
+              <button onClick={() => { mic.stop({ finalizeNow: false }); handleSubmit(); }} disabled={!answer.trim()}
                 className="px-5 py-3 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[13px] font-bold disabled:opacity-30 transition-colors">
                 <ArrowRight size={16} />
+              </button>
+            </div>
+          )}
+          {buzzed && !showResult && voiceMode && micError && (
+            <div className="flex items-center justify-center gap-2 text-[10px] text-rose-300/80">
+              <span>{micError}</span>
+              <button
+                type="button"
+                onClick={startDictation}
+                className="inline-flex items-center gap-1 rounded-md border border-rose-400/25 bg-rose-500/10 px-2 py-1 font-semibold text-rose-200 hover:bg-rose-500/15 transition-colors"
+              >
+                <Mic size={10} /> Retry mic
               </button>
             </div>
           )}
@@ -1062,8 +1386,7 @@ function QuizBowlHub({ hubLoading, history, skillProfile, recs, patterns, sm2Due
           <div className="flex items-center gap-1.5 mb-1.5">
             <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Play vs AI</span>
           </div>
-          <p className="text-[14px] font-bold text-white/90 mb-0.5">Compete in a Lobby</p>
-          <p className="text-[11px] text-white/55">Join a lobby of 8 or go 1v1. Buzz against AI opponents with real tournament timing across niche history and more.</p>
+          <p className="text-[14px] font-bold text-white/90">Compete in a Lobby</p>
         </button>
 
         {/* Quick access: head-to-head + custom set + replays + clue analysis */}
@@ -1138,9 +1461,6 @@ function QuizBowlHub({ hubLoading, history, skillProfile, recs, patterns, sm2Due
                     <p className="text-[13px] font-semibold text-white/90">
                       {r.topic || r.category}
                       <span className="text-white/35 font-normal"> · {r.difficulty}</span>
-                    </p>
-                    <p className="text-[11px] text-white/45 truncate">
-                      {r.topic && <span className="text-white/25">{r.category} · </span>}{r.reason}
                     </p>
                   </div>
                 </button>
@@ -1408,32 +1728,11 @@ function BuzzPatterns({ patterns }) {
   const p = patterns;
   if (!p) return null;
 
-  // Insight text based on the data.
-  const insights = [];
-  if (p.early.count > 0 && p.early.accuracy >= 70) {
-    insights.push({ tone: 'emerald', text: `Your early buzzes hit ${p.early.accuracy}% of the time. You read questions well.` });
-  } else if (p.early.count > 0 && p.early.accuracy < 50) {
-    insights.push({ tone: 'amber', text: `Early buzzes only land ${p.early.accuracy}%. Try waiting for one more clue before committing.` });
-  }
-  if (p.timeoutRate > 30) {
-    insights.push({ tone: 'rose', text: `You time out on ${p.timeoutRate}% of questions. Try buzzing even if you're not 100% sure.` });
-  }
-  if (p.trend > 10) {
-    insights.push({ tone: 'emerald', text: `You're buzzing ${p.trend}% earlier in recent sets. Your pattern recognition is improving.` });
-  } else if (p.trend < -10) {
-    insights.push({ tone: 'amber', text: `Recent buzzes are ${Math.abs(p.trend)}% later than your average. Might be tougher categories.` });
-  }
-  if (p.optimalZone) {
-    insights.push({ tone: 'blue', text: `Your sweet spot is ${p.optimalZone.start}-${p.optimalZone.end}% through the question (${p.optimalZone.accuracy}% accuracy there).` });
-  }
-
   return (
     <div className="rounded-lg border border-white/[0.08] bg-white/[0.02] overflow-hidden">
       {/* Header */}
       <div className="px-4 pt-3 pb-2 flex items-center gap-2">
         <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Buzz Patterns</span>
-        <div className="flex-1" />
-        <span className="text-[10px] text-white/30 tabular-nums">{p.totalBuzzes} buzzes</span>
       </div>
 
       {/* Sparkline - recent 20 buzzes as dots on a timeline */}
@@ -1468,9 +1767,9 @@ function BuzzPatterns({ patterns }) {
 
       {/* Timing breakdown: early / mid / late */}
       <div className="grid grid-cols-3 gap-px bg-white/[0.04] mx-4 rounded-lg overflow-hidden mb-3">
-        <TimingCell label="Early" sub="0-33%" count={p.early.count} accuracy={p.early.accuracy} tone="emerald" />
-        <TimingCell label="Mid" sub="33-66%" count={p.mid.count} accuracy={p.mid.accuracy} tone="blue" />
-        <TimingCell label="Late" sub="66-100%" count={p.late.count} accuracy={p.late.accuracy} tone="amber" />
+        <TimingCell label="Early" count={p.early.count} accuracy={p.early.accuracy} tone="emerald" />
+        <TimingCell label="Mid" count={p.mid.count} accuracy={p.mid.accuracy} tone="blue" />
+        <TimingCell label="Late" count={p.late.count} accuracy={p.late.accuracy} tone="amber" />
       </div>
 
       {/* Avg buzz position + timeout rate */}
@@ -1519,38 +1818,20 @@ function BuzzPatterns({ patterns }) {
         </div>
       )}
 
-      {/* AI insights */}
-      {insights.length > 0 && (
-        <div className="px-4 pb-3 space-y-1.5">
-          {insights.map((ins, i) => {
-            const toneCls = ins.tone === 'emerald' ? 'border-emerald-500/25 bg-emerald-500/8 text-emerald-200'
-              : ins.tone === 'amber' ? 'border-amber-500/25 bg-amber-500/8 text-amber-200'
-              : ins.tone === 'rose' ? 'border-rose-500/25 bg-rose-500/8 text-rose-200'
-              : 'border-blue-500/25 bg-blue-500/8 text-blue-200';
-            return (
-              <div key={i} className={`rounded-lg border px-3 py-2 text-[11px] leading-relaxed ${toneCls}`}>
-                {ins.text}
-              </div>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 }
 
-function TimingCell({ label, sub, count, accuracy, tone }) {
+function TimingCell({ label, count, accuracy, tone }) {
   const accentCls = tone === 'emerald' ? 'text-emerald-300'
     : tone === 'blue' ? 'text-blue-300'
     : 'text-amber-300';
   return (
     <div className="bg-white/[0.02] px-3 py-2 text-center">
-      <div className="text-[10px] font-bold text-white/55">{label}</div>
-      <div className="text-[8px] text-white/25 mb-1">{sub}</div>
+      <div className="text-[10px] font-bold text-white/55 mb-1">{label}</div>
       <div className={`text-[14px] font-bold tabular-nums ${count > 0 ? accentCls : 'text-white/25'}`}>
         {count > 0 ? `${accuracy}%` : '--'}
       </div>
-      <div className="text-[8px] text-white/30 tabular-nums">{count} buzz{count !== 1 ? 'es' : ''}</div>
     </div>
   );
 }

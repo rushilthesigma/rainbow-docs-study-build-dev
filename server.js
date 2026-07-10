@@ -17,7 +17,7 @@ const pdfParse = _require('pdf-parse');
 import {
   buildCurriculumPrompt, buildLessonPrompt, buildLessonChatPrompt,
   buildStandaloneLessonPrompt, buildMathTutorPrompt, buildMathProblemSetPrompt,
-  buildStudyModePrompt, buildHumanizePrompt, buildGoalMilestonesPrompt, buildAssessmentPrompt,
+  buildStudyModePrompt, buildHumanizePrompt, buildPromptRefinePrompt, buildGoalMilestonesPrompt, buildAssessmentPrompt,
   buildFlashcardPrompt, buildNodeFlashcardPrompt, buildCueGenerationPrompt, buildSummaryPrompt,
   buildTopicSuggestionsPrompt, buildSlideshowPrompt, buildFlashSlideshowPrompt,
   buildSlideshowCriticPrompt, buildSlideshowReviserPrompt,
@@ -73,6 +73,13 @@ const OPENAI_GPT = 'gpt-5.4';
 // hits a separate model lockout — it only counts against the shared daily
 // message quota (consumeMessage / requireMessageQuota), like Flash Lite.
 const OPENAI_GPT_MINI = 'gpt-5.4-mini';
+// GPT-5.6 family (GA 2026-07-09). One generation, three durable capability
+// tiers: Sol = flagship, Terra = balanced everyday model, Luna = fast + cheap.
+// All three ride the same OpenAI client + Gemini-fallback path as GPT-5.4 and
+// are open to every plan — the per-message credit cost is the only gate.
+const OPENAI_SOL   = 'gpt-5.6-sol';
+const OPENAI_TERRA = 'gpt-5.6-terra';
+const OPENAI_LUNA  = 'gpt-5.6-luna';
 
 // DeepSeek V4 ids. DeepSeek speaks the OpenAI Chat Completions protocol, so it's
 // served through the `openai` SDK pointed at the DeepSeek base URL (no new
@@ -126,6 +133,10 @@ const MODEL_KNOWLEDGE_CUTOFFS = {
   [CLAUDE_SONNET]: '2026-01-31',
   [OPENAI_GPT]: '2026-04-30',
   [OPENAI_GPT_MINI]: '2026-04-30',
+  // OpenAI hasn't published a GPT-5.6 cutoff yet; assume GPT-5.4's until they do.
+  [OPENAI_SOL]: '2026-04-30',
+  [OPENAI_TERRA]: '2026-04-30',
+  [OPENAI_LUNA]: '2026-04-30',
   [DEEPSEEK_FLASH]: '2026-02-28',
   [DEEPSEEK_PRO]: '2026-02-28',
   [GROK]: '2025-11-30',
@@ -252,7 +263,7 @@ const FALLBACK_MODEL = GEMINI_FLASH_LITE;
 // Gemini only (no Anthropic streaming wired), so they call this to coerce a
 // Claude id back to the equivalent-tier Gemini model rather than 404-ing.
 const geminiSiblingOf = (id) => {
-  if (isOpenAIModel(id)) return /mini/i.test(String(id)) ? GEMINI_FLASH_LITE : GEMINI_FLASH; // GPT-5.4 → Flash, mini → Flash Lite
+  if (isOpenAIModel(id)) return /mini|luna/i.test(String(id)) ? GEMINI_FLASH_LITE : GEMINI_FLASH; // GPT-5.4/Sol/Terra → Flash, mini/Luna → Flash Lite
   if (isDeepSeekModel(id)) return /pro/i.test(String(id)) ? GEMINI_FLASH : GEMINI_FLASH_LITE; // V4 Pro → Flash, V4 Flash → Flash Lite
   if (isXaiModel(id)) return GEMINI_FLASH; // Grok 4.3 (pro-tier reasoning) → Flash
   if (!isClaudeModel(id)) return id || DEFAULT_MODEL;
@@ -508,10 +519,13 @@ const MODEL_CREDIT_COST = {
   'flash-lite':     1,   // Gemini Flash Lite — baseline
   'deepseek-flash': 1,   // DeepSeek V4 (free model, floor)
   'grok':           1,   // Grok 4.3 (positioned free; minimal draw)
+  'gpt-5.6-luna':   1,   // GPT-5.6 Luna (fast/cheap tier)
   'flash':          2,   // Gemini Flash — 2× Flash Lite
+  'gpt-5.6-terra':  4,   // GPT-5.6 Terra (balanced tier)
   'gpt-5.4-mini':   5,   // GPT-5.4 mini
   'deepseek-pro':   7,   // DeepSeek V4 Pro (reasoning)
   'haiku':          10,  // Claude Haiku 4.5
+  'gpt-5.6-sol':    15,  // GPT-5.6 Sol (flagship tier)
   'gemini-pro':     20,  // Gemini Pro (scaled lower than raw cost ratio)
   'sonnet':         35,  // Claude Sonnet 4.6
   'gpt-5.4':        40,  // GPT-5.4
@@ -719,6 +733,10 @@ const STUDY_MODELS = {
   'flash-lite':   { id: GEMINI_FLASH_LITE, label: 'Flash Lite',   provider: 'gemini', paidOnly: false, knowledgeCutoff: modelKnowledgeCutoff(GEMINI_FLASH_LITE) },
   'gpt-5.4':      { id: OPENAI_GPT,        label: 'GPT-5.4',      provider: 'openai', paidOnly: true, knowledgeCutoff: modelKnowledgeCutoff(OPENAI_GPT) },
   'gpt-5.4-mini': { id: OPENAI_GPT_MINI,   label: 'GPT-5.4 mini', provider: 'openai', paidOnly: false, knowledgeCutoff: modelKnowledgeCutoff(OPENAI_GPT_MINI) },
+  // GPT-5.6 family: open to every plan, gated by credit cost alone (Sol 15 / Terra 4 / Luna 1).
+  'gpt-5.6-sol':   { id: OPENAI_SOL,   label: 'GPT-5.6 Sol',   provider: 'openai', paidOnly: false, knowledgeCutoff: modelKnowledgeCutoff(OPENAI_SOL) },
+  'gpt-5.6-terra': { id: OPENAI_TERRA, label: 'GPT-5.6 Terra', provider: 'openai', paidOnly: false, knowledgeCutoff: modelKnowledgeCutoff(OPENAI_TERRA) },
+  'gpt-5.6-luna':  { id: OPENAI_LUNA,  label: 'GPT-5.6 Luna',  provider: 'openai', paidOnly: false, knowledgeCutoff: modelKnowledgeCutoff(OPENAI_LUNA) },
   // DeepSeek V4 Flash: free for everyone, no per-model cap (only draws the shared daily quota).
   'deepseek-flash': { id: DEEPSEEK_FLASH, label: 'DeepSeek V4', provider: 'deepseek', paidOnly: false, knowledgeCutoff: modelKnowledgeCutoff(DEEPSEEK_FLASH) },
   // DeepSeek V4 Pro: free for everyone but capped at 12/day for non-paid (own window), unlimited for paid.
@@ -939,8 +957,8 @@ function resolveBestOfStudyModels(bestOf, user, email) {
 // DeepSeek V4 Pro) are skipped once their non-paid daily window is spent or
 // locked, so a reroute never serves a duplicate Flash-Lite stand-in.
 const REROUTE_MODEL_ORDER = [
-  'gpt-5.4', 'gemini-pro', 'flash', 'deepseek-pro', 'grok',
-  'gpt-5.4-mini', 'deepseek-flash', 'flash-lite',
+  'gpt-5.6-sol', 'gpt-5.4', 'gemini-pro', 'gpt-5.6-terra', 'flash', 'deepseek-pro', 'grok',
+  'gpt-5.4-mini', 'gpt-5.6-luna', 'deepseek-flash', 'flash-lite',
 ];
 function resolveRerouteStudyModels(user, email) {
   const plan = getPlan(user, email);
@@ -3059,9 +3077,11 @@ async function callClaude(systemPrompt, messages, model, maxOutputTokens = 4096,
 
 // Non-streaming OpenAI call. Returns the SAME envelope as callGemini/callClaude
 // ({ success, data: { content: [{ type:'text', text }], sources }, model }) so
-// every existing call site works unchanged. Throws on missing key or API error —
-// no Gemini fallback. Uses max_completion_tokens and omits temperature for
-// GPT-5-family compatibility (those models reject max_tokens / non-default temperature).
+// every existing call site works unchanged. Throws on missing key; on API error
+// it degrades to the Gemini sibling (like callClaude/callDeepSeek), so a model
+// the key can't reach yet — e.g. GPT-5.6 pre-access — never breaks the app.
+// Uses max_completion_tokens and omits temperature for GPT-5-family
+// compatibility (those models reject max_tokens / non-default temperature).
 async function callOpenAI(systemPrompt, messages, model, maxOutputTokens = 4096, opts = {}) {
   if (!openai) throw new Error('OPENAI_API_KEY is not configured');
   const resolved = isOpenAIModel(model) ? model : OPENAI_GPT;
@@ -3078,8 +3098,8 @@ async function callOpenAI(systemPrompt, messages, model, maxOutputTokens = 4096,
     const text = resp?.choices?.[0]?.message?.content || '';
     return { success: true, data: { content: [{ type: 'text', text }], sources: [] }, model: resolved };
   } catch (err) {
-    console.error(`OpenAI call (${resolved}) failed: ${err?.message || err}`);
-    throw err;
+    console.warn(`OpenAI call (${resolved}) failed: ${err?.message || err}. Falling back to Gemini.`);
+    return callGemini(systemPrompt, messages, geminiSiblingOf(resolved), maxOutputTokens, opts);
   }
 }
 
@@ -4892,6 +4912,12 @@ async function streamOpenAIResponse(res, sse, systemPrompt, messages, onComplete
     clearTimeout(timeout);
     clearInterval(heartbeat);
     console.error('OpenAI stream error:', e);
+    // Nothing emitted yet → fall back to the Gemini sibling on the same socket
+    // (same discipline as streamDeepSeekResponse), so a model the key can't
+    // reach yet — e.g. GPT-5.6 pre-access — degrades instead of erroring.
+    if (!buffered && !res.writableEnded) {
+      return streamAIResponse(res, systemPrompt, messages, onComplete, geminiSiblingOf(model), opts);
+    }
     if (!res.writableEnded) { sse({ error: e?.message || String(e) }); res.end(); }
   }
 }
@@ -7801,6 +7827,33 @@ app.delete('/api/study/sessions/:sid', authMiddleware, (req, res) => {
     users[email].data.studySessions = (users[email].data.studySessions || []).filter(s => s.id !== req.params.sid);
     saveUsers(users);
     res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Study Mode prompt refine: one cheap Flash Lite call that rewrites a rough
+// draft message into a clearer prompt (composer wand button + auto-refine
+// mode). Uncharged, like the goal-milestones helper: it never answers the
+// question, only rewrites it.
+app.post('/api/study/refine-prompt', authMiddleware, async (req, res) => {
+  try {
+    const prompt = String(req.body?.prompt || '').trim();
+    if (!prompt) return res.status(400).json({ error: 'Prompt required' });
+    if (prompt.length > 4000) return res.status(400).json({ error: 'That message is too long to refine' });
+    const recent = Array.isArray(req.body?.recentMessages)
+      ? req.body.recentMessages.slice(-6).map(m => ({
+          role: m?.role === 'assistant' ? 'assistant' : 'user',
+          content: String(m?.content || '').slice(0, 600),
+        }))
+      : [];
+    const { system, user } = buildPromptRefinePrompt(prompt, recent);
+    const result = await callGemini(system, [{ role: 'user', content: user }], GEMINI_FLASH_LITE, 1024, {
+      jsonMode: true, disableThinking: true, temperature: 0.4,
+    });
+    if (!result.success) return res.status(502).json({ error: 'Refine is unavailable right now' });
+    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
+    const refined = typeof parsed?.refined === 'string' ? parsed.refined.trim() : '';
+    if (!refined) return res.status(502).json({ error: 'Refine is unavailable right now' });
+    res.json({ refined, note: typeof parsed?.note === 'string' ? parsed.note.trim().slice(0, 120) : '' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -13904,6 +13957,57 @@ async function fetchQBReaderTossups({ count = 10, category = 'Mixed', difficulty
   return tossups;
 }
 
+// Team scrimmages pair each tossup with a real three-part bonus. QBReader's
+// random-bonus endpoint uses the same category/difficulty filters as tossups,
+// but returns a different schema: leadin + parallel parts/answers arrays.
+async function fetchQBReaderBonuses({ count = 10, category = 'Mixed', difficulty = 'Medium' } = {}) {
+  const cats = QB_CATEGORY_MAP[category] || [];
+  const diffs = QB_DIFFICULTY_MAP[difficulty] || QB_DIFFICULTY_MAP.Medium;
+  const params = new URLSearchParams({
+    number: String(Math.max(1, Math.min(40, count))),
+    difficulties: diffs.join(','),
+    threePartBonuses: 'true',
+    standardOnly: 'true',
+  });
+  if (cats.length) params.set('categories', cats.join(','));
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  let r;
+  try {
+    r = await fetch(`${QBREADER_BASE}/random-bonus?${params.toString()}`, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'covalent-ai/1.0 (+https://covalent.app)' },
+    });
+  } finally { clearTimeout(timeout); }
+  if (!r.ok) throw new Error(`QBReader bonuses ${r.status} ${r.statusText}`);
+  const data = await r.json();
+  const bonuses = (data?.bonuses || []).map(b => {
+    const parts = Array.isArray(b.parts_sanitized) ? b.parts_sanitized : (b.parts || []).map(qbStripHtml);
+    const formattedAnswers = Array.isArray(b.answers) ? b.answers : [];
+    const sanitizedAnswers = Array.isArray(b.answers_sanitized) ? b.answers_sanitized : [];
+    // Preserve QBReader's underlined canonical answer when available; a
+    // sanitized directive such as "Raul Castro (prompt on Castro)" can be less
+    // precise than the formatted answer line and would reject a valid "Raul".
+    const answers = Array.from({ length: Math.max(formattedAnswers.length, sanitizedAnswers.length) }, (_, i) =>
+      qbExtractCanonical(formattedAnswers[i]) || qbStripHtml(sanitizedAnswers[i])
+    );
+    return {
+      leadin: b.leadin_sanitized || qbStripHtml(b.leadin),
+      parts: parts.slice(0, 3).map(qbStripHtml),
+      answers: answers.slice(0, 3).map(qbStripHtml),
+      values: Array.isArray(b.values) ? b.values.slice(0, 3).map(v => Number(v) || 10) : [10, 10, 10],
+      category: b.category || category,
+      subcategory: b.subcategory || '',
+      source: 'qbreader',
+      setName: b.set?.name || '',
+      year: b.set?.year || '',
+      packet: b.packet?.name || '',
+    };
+  }).filter(b => b.parts.length === 3 && b.answers.length === 3 && b.parts.every(Boolean) && b.answers.every(Boolean));
+  if (!bonuses.length) throw new Error('QBReader returned no usable three-part bonuses');
+  return bonuses;
+}
+
 // ===== QUIZ BOWL HISTORY / RECOMMENDATIONS =====
 //
 // `quizbowlSets` lives on user.data - each completed solo set is saved
@@ -14136,7 +14240,7 @@ app.post('/api/quizbowl/sets', authMiddleware, (req, res) => {
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
     users[email].data = migrateUserData(users[email].data);
-    const { category, difficulty, source, score, points, total, durationMs, perQuestion = [], categoryStats = null } = req.body || {};
+    const { category, difficulty, source, score, points, total, durationMs, perQuestion = [], categoryStats = null, customInstructions, noteTitle } = req.body || {};
     if (!Number.isFinite(total) || total <= 0) return res.status(400).json({ error: 'Invalid set' });
 
     const entry = {
@@ -14144,6 +14248,11 @@ app.post('/api/quizbowl/sets', authMiddleware, (req, res) => {
       category: category || 'Mixed',
       difficulty: difficulty || 'Medium',
       source: source === 'ai' ? 'ai' : 'qbreader',
+      // Generation context for AI sets - lets the client detect "same
+      // request as before" and steer new generations away from answers
+      // the student has already seen.
+      customInstructions: typeof customInstructions === 'string' ? customInstructions.slice(0, 400) : '',
+      noteTitle: typeof noteTitle === 'string' ? noteTitle.slice(0, 200) : '',
       score: Number(score) || 0,
       points: Number.isFinite(points) ? Number(points) : null,
       total: Number(total) || 0,
@@ -14801,6 +14910,80 @@ function newMatchCode() {
 // buzz is forfeited (treated as a wrong/no answer) so nobody can sit on a
 // buzz and look the answer up. Surfaced to every client as a live countdown.
 const QUIZBOWL_BUZZ_ANSWER_MS = 9000;
+const QUIZBOWL_BONUS_PART_MS = 15000;
+const QUIZBOWL_TEAM_IDS = ['A', 'B'];
+
+function safeQuizBowlTeamName(raw, fallback) {
+  const value = String(raw || '').trim().replace(/\s+/g, ' ').slice(0, 28);
+  return value || fallback;
+}
+
+function quizbowlTeamForUser(match, userId) {
+  return match.players.find(p => p.userId === userId)?.team || null;
+}
+
+function addQuizBowlPoints(match, userId, points) {
+  const pts = Number(points) || 0;
+  match.scores[userId] = (match.scores[userId] || 0) + pts;
+  if (match.mode === 'team') {
+    const team = quizbowlTeamForUser(match, userId);
+    if (team && QUIZBOWL_TEAM_IDS.includes(team)) {
+      if (!match.teamScores) match.teamScores = { A: 0, B: 0 };
+      match.teamScores[team] = (match.teamScores[team] || 0) + pts;
+    }
+  }
+}
+
+function quizbowlTeamsAreReady(match) {
+  if (match.mode !== 'team') return match.players.length >= 2;
+  return QUIZBOWL_TEAM_IDS.every(team => match.players.some(p => p.team === team));
+}
+
+// Shared tossup/bonus answer judge. It intentionally accepts a canonical last
+// word (the standard quiz-bowl surname/key-noun convention) and small typos,
+// while rejecting arbitrary substrings and one-letter answers.
+function quizbowlAnswerIsCorrect(given, official) {
+  function norm(s) {
+    return String(s || '')
+      .toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\b(the|a|an)\b/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+  function lev(a, b) {
+    const m = a.length, n = b.length;
+    if (!m) return n; if (!n) return m;
+    const d = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+    for (let i = 0; i <= m; i++) d[i][0] = i;
+    for (let j = 0; j <= n; j++) d[0][j] = j;
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+        if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+          d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+        }
+      }
+    }
+    return d[m][n];
+  }
+  function within(input, target, maxBound) {
+    if (!input || !target) return false;
+    const cap = Math.min(maxBound, Math.max(0, Math.floor(target.length / 6)));
+    return lev(input, target) <= cap;
+  }
+  const a = norm(given);
+  const c = norm(official);
+  if (!a || !c) return false;
+  const cTokens = c.split(/\s+/).filter(t => t.length >= 3);
+  const keyWord = cTokens.length ? cTokens[cTokens.length - 1] : c;
+  return a === c
+    || within(a, c, 2)
+    || (keyWord.length >= 3 && a === keyWord)
+    || (keyWord.length >= 4 && within(a, keyWord, 1));
+}
 
 function pushMatchEvent(match, type, payload) {
   const body = `data: ${JSON.stringify({ type, ...payload })}\n\n`;
@@ -14833,6 +15016,7 @@ function recordBuzzForLog(match, { userId, answer, correct, points }) {
     userId,
     name: player?.name || String(userId).replace(/^bot:[^:]+:/, ''),
     isBot: !!player?.isBot,
+    team: player?.team || null,
     buzzWord,
     totalWords,
     answer: String(answer || '').trim(),
@@ -14854,8 +15038,15 @@ function finalizeQuestionLog(match) {
     powerWordIndex: q.powerWordIndex ?? null,
     totalWords,
     buzzes: Array.isArray(match.currentQuestionBuzzes) ? [...match.currentQuestionBuzzes] : [],
+    bonus: match.currentBonusLog ? {
+      team: match.currentBonusLog.team,
+      leadin: match.currentBonusLog.leadin || '',
+      parts: (match.currentBonusLog.parts || []).map(p => ({ ...p })),
+      points: match.currentBonusLog.points || 0,
+    } : null,
   });
   match.currentQuestionBuzzes = [];
+  match.currentBonusLog = null;
 }
 
 // Compact head-to-head summary sent with `match_end` so the finished screen
@@ -14866,6 +15057,7 @@ function buildMatchComparison(match) {
     userId: p.userId,
     name: p.name,
     isBot: !!p.isBot,
+    team: p.team || null,
     finalScore: match.scores?.[p.userId] || 0,
   }));
   const questions = (match.questionLog || []).map(q => ({
@@ -14880,9 +15072,17 @@ function buildMatchComparison(match) {
       correct: !!b.correct,
       points: typeof b.points === 'number' ? b.points : 0,
       answer: b.answer || '',
+      team: b.team || null,
     })),
+    bonus: q.bonus || null,
   }));
-  return { players, questions };
+  return {
+    mode: match.mode || 'individual',
+    teamNames: match.teamNames || null,
+    teamScores: match.mode === 'team' ? { ...(match.teamScores || { A: 0, B: 0 }) } : null,
+    players,
+    questions,
+  };
 }
 
 // Persist the completed match replay to each real (non-bot) player's data.
@@ -14897,11 +15097,15 @@ function saveMatchReplay(match) {
       category: match.category || 'Mixed',
       difficulty: match.difficulty || 'Medium',
       scoringFormat: match.scoringFormat || 'standard',
+      mode: match.mode || 'individual',
+      teamNames: match.teamNames || null,
+      teamScores: match.mode === 'team' ? { ...(match.teamScores || { A: 0, B: 0 }) } : null,
       finishedAt,
       players: match.players.map(p => ({
         userId: p.userId,
         name: p.name,
         isBot: !!p.isBot,
+        team: p.team || null,
         finalScore: match.scores[p.userId] || 0,
       })),
       questions: match.questionLog.slice(0, 50),
@@ -14926,9 +15130,146 @@ function saveMatchReplay(match) {
   }
 }
 
+function clearQuizBowlBonusTimers(match) {
+  if (match.bonusTimeoutId) { clearTimeout(match.bonusTimeoutId); match.bonusTimeoutId = null; }
+  if (match.bonusAdvanceTimeoutId) { clearTimeout(match.bonusAdvanceTimeoutId); match.bonusAdvanceTimeoutId = null; }
+  if (match.bonusStartTimeoutId) { clearTimeout(match.bonusStartTimeoutId); match.bonusStartTimeoutId = null; }
+}
+
+function publicQuizBowlBonusState(match) {
+  if (!['bonus', 'bonus_reveal'].includes(match.state) || !match.currentBonus) return null;
+  const idx = Math.max(0, Number(match.bonusPartIdx) || 0);
+  return {
+    team: match.bonusTeam,
+    leadin: match.currentBonus.leadin || '',
+    part: match.currentBonus.parts?.[idx] || '',
+    partIndex: idx,
+    totalParts: Math.min(3, match.currentBonus.parts?.length || 0),
+    value: Number(match.currentBonus.values?.[idx]) || 10,
+    startedAt: match.bonusStartedAt || null,
+    deadlineAt: match.state === 'bonus' && match.bonusStartedAt
+      ? match.bonusStartedAt + QUIZBOWL_BONUS_PART_MS
+      : null,
+  };
+}
+
+function scheduleQuizBowlBonusBot(match) {
+  const humans = match.players.filter(p => p.team === match.bonusTeam && !p.isBot);
+  if (humans.length) return;
+  const bots = match.players.filter(p => p.team === match.bonusTeam && p.isBot);
+  if (!bots.length) return;
+  const bot = [...bots].sort((a, b) => (b.accuracy || 0.65) - (a.accuracy || 0.65))[0];
+  const partIdx = match.bonusPartIdx;
+  setTimeout(() => {
+    if (!matches.has(match.code) || match.state !== 'bonus' || match.bonusPartIdx !== partIdx) return;
+    const correct = Math.random() < (bot.accuracy || 0.65);
+    resolveQuizBowlBonusAnswer(match, bot.userId, correct ? match.currentBonus.answers[partIdx] : '[Bot]', { correctOverride: correct });
+  }, Math.max(700, Math.min(2200, bot.thinkMs || 1200)));
+}
+
+function beginQuizBowlBonusPart(match, partIdx) {
+  clearQuizBowlBonusTimers(match);
+  const bonus = match.currentBonus;
+  if (!bonus || partIdx >= Math.min(3, bonus.parts?.length || 0)) {
+    match.currentBonus = null;
+    match.bonusTeam = null;
+    match.bonusPartIdx = 0;
+    advanceMatchToNextQuestion(match);
+    return;
+  }
+  match.state = 'bonus';
+  match.bonusPartIdx = partIdx;
+  match.bonusStartedAt = Date.now();
+  match.lastActivity = Date.now();
+  pushMatchEvent(match, 'bonus_start', { bonus: publicQuizBowlBonusState(match), match: publicMatchState(match) });
+  match.bonusTimeoutId = setTimeout(() => {
+    if (!matches.has(match.code) || match.state !== 'bonus' || match.bonusPartIdx !== partIdx) return;
+    resolveQuizBowlBonusAnswer(match, null, '', { timedOut: true, correctOverride: false });
+  }, QUIZBOWL_BONUS_PART_MS);
+  scheduleQuizBowlBonusBot(match);
+}
+
+function startQuizBowlTeamBonus(match, team) {
+  clearQuizBowlBonusTimers(match);
+  const bonus = match.bonuses?.[match.currentIdx];
+  match.pendingBonusTeam = null;
+  if (!bonus || !QUIZBOWL_TEAM_IDS.includes(team)) {
+    match.state = 'reveal';
+    scheduleAutoAdvance(match, 2500);
+    return;
+  }
+  match.currentBonus = bonus;
+  match.bonusTeam = team;
+  match.currentBonusLog = {
+    team,
+    leadin: bonus.leadin || '',
+    parts: [],
+    points: 0,
+  };
+  beginQuizBowlBonusPart(match, 0);
+}
+
+function scheduleQuizBowlTeamBonus(match, team, delayMs = 2500) {
+  clearQuizBowlBonusTimers(match);
+  match.state = 'reveal';
+  match.pendingBonusTeam = team;
+  match.bonusStartTimeoutId = setTimeout(() => {
+    if (!matches.has(match.code) || match.pendingBonusTeam !== team || match.state !== 'reveal') return;
+    startQuizBowlTeamBonus(match, team);
+  }, delayMs);
+}
+
+function resolveQuizBowlBonusAnswer(match, userId, answer, { timedOut = false, correctOverride } = {}) {
+  if (match.state !== 'bonus' || !match.currentBonus) return false;
+  clearQuizBowlBonusTimers(match);
+  const idx = match.bonusPartIdx || 0;
+  const official = match.currentBonus.answers?.[idx] || '';
+  const correct = typeof correctOverride === 'boolean'
+    ? correctOverride
+    : quizbowlAnswerIsCorrect(answer, official);
+  const value = Number(match.currentBonus.values?.[idx]) || 10;
+  const points = correct ? value : 0;
+  if (points) match.teamScores[match.bonusTeam] = (match.teamScores[match.bonusTeam] || 0) + points;
+  if (!match.currentBonusLog) {
+    match.currentBonusLog = { team: match.bonusTeam, leadin: match.currentBonus.leadin || '', parts: [], points: 0 };
+  }
+  match.currentBonusLog.parts.push({
+    prompt: match.currentBonus.parts?.[idx] || '',
+    officialAnswer: official,
+    submittedAnswer: String(answer || '').trim(),
+    correct,
+    points,
+    timedOut: !!timedOut,
+    answeredBy: userId || null,
+  });
+  match.currentBonusLog.points += points;
+  match.state = 'bonus_reveal';
+  match.lastActivity = Date.now();
+  pushMatchEvent(match, 'bonus_result', {
+    userId: userId || null,
+    team: match.bonusTeam,
+    partIndex: idx,
+    correct,
+    timedOut: !!timedOut,
+    answer: String(answer || '').trim(),
+    correctAnswer: official,
+    points,
+    scores: match.scores,
+    teamScores: match.teamScores,
+    autoAdvanceInMs: 3000,
+    match: publicMatchState(match),
+  });
+  match.bonusAdvanceTimeoutId = setTimeout(() => {
+    if (!matches.has(match.code) || match.state !== 'bonus_reveal' || match.bonusPartIdx !== idx) return;
+    beginQuizBowlBonusPart(match, idx + 1);
+  }, 3000);
+  return true;
+}
+
 // Advance to next question (or end match). Used by host /next endpoint
 // AND by the auto-advance timer that fires 5s after any reveal state.
 function advanceMatchToNextQuestion(match) {
+  clearQuizBowlBonusTimers(match);
   if (match.revealTimeoutId) { clearTimeout(match.revealTimeoutId); match.revealTimeoutId = null; }
   if (match.questionTimeoutId) { clearTimeout(match.questionTimeoutId); match.questionTimeoutId = null; }
   finalizeQuestionLog(match);
@@ -14937,7 +15278,7 @@ function advanceMatchToNextQuestion(match) {
     match.state = 'finished';
     match.lastActivity = Date.now();
     saveMatchReplay(match);
-    pushMatchEvent(match, 'match_end', { scores: match.scores, comparison: buildMatchComparison(match) });
+    pushMatchEvent(match, 'match_end', { scores: match.scores, teamScores: match.teamScores, comparison: buildMatchComparison(match) });
     return;
   }
   match.currentIdx = nextIdx;
@@ -14946,7 +15287,12 @@ function advanceMatchToNextQuestion(match) {
   match.buzzWinner = null;
   match.buzzAt = null;
   match.lockedOutForQ = {};
+  match.lockedOutTeams = {};
   match.activeAnswerReview = null;
+  match.currentBonus = null;
+  match.pendingBonusTeam = null;
+  match.bonusTeam = null;
+  match.bonusPartIdx = 0;
   match.lastActivity = Date.now();
   pushMatchEvent(match, 'question_start', {
     idx: nextIdx,
@@ -14973,18 +15319,25 @@ function scheduleBuzzTimeout(match) {
     // so it shows up in the replay / compare view.
     const negPts = quizbowlScoreForBuzz(match, { correct: false });
     recordBuzzForLog(match, { userId: buzzer, answer: '', correct: false, points: negPts });
-    if (negPts) match.scores[buzzer] = (match.scores[buzzer] || 0) + negPts;
+    if (negPts) addQuizBowlPoints(match, buzzer, negPts);
     match.buzzWinner = null;
     match.buzzAt = null;
     if (!match.lockedOutForQ) match.lockedOutForQ = {};
-    match.lockedOutForQ[buzzer] = true;
+    if (match.mode === 'team') {
+      const team = quizbowlTeamForUser(match, buzzer);
+      if (!match.lockedOutTeams) match.lockedOutTeams = {};
+      if (team) match.lockedOutTeams[team] = true;
+      for (const p of match.players) if (p.team === team) match.lockedOutForQ[p.userId] = true;
+    } else {
+      match.lockedOutForQ[buzzer] = true;
+    }
     match.lastActivity = Date.now();
     const stillPlaying = match.players.filter(p => !match.lockedOutForQ[p.userId]);
     if (stillPlaying.length === 0) {
       match.state = 'reveal';
       pushMatchEvent(match, 'answer_result', {
         userId: buzzer, correct: false, answer: '', timedOut: true,
-        correctAnswer: q?.answer || '', scores: match.scores,
+        correctAnswer: q?.answer || '', scores: match.scores, teamScores: match.teamScores,
         finalMiss: true, autoAdvanceInMs: 5000, ptsGained: negPts,
       });
       scheduleAutoAdvance(match, 5000);
@@ -14994,10 +15347,11 @@ function scheduleBuzzTimeout(match) {
       const pausedMs = Date.now() - buzzAt;
       match.questionStartedAt = (match.questionStartedAt || Date.now()) + pausedMs;
       pushMatchEvent(match, 'wrong_answer', {
-        userId: buzzer, answer: '', correctAnswer: q?.answer || '', timedOut: true,
+        userId: buzzer, answer: '', timedOut: true,
         lockedOut: Object.keys(match.lockedOutForQ),
+        lockedOutTeams: Object.keys(match.lockedOutTeams || {}),
         questionStartedAt: match.questionStartedAt,
-        scores: match.scores, ptsGained: negPts,
+        scores: match.scores, teamScores: match.teamScores, ptsGained: negPts,
       });
       scheduleQuestionTimeout(match);
     }
@@ -15016,7 +15370,8 @@ function scheduleQuestionTimeout(match) {
   const words = (q.text || '').split(/\s+/).filter(Boolean).length || 1;
   const speed = match.revealSpeedMs || 140;
   const graceMs = 5000; // 5s after full read
-  const totalMs = words * speed + graceMs;
+  const deadline = (match.questionStartedAt || Date.now()) + words * speed + graceMs;
+  const totalMs = Math.max(0, deadline - Date.now());
   match.questionTimeoutId = setTimeout(() => {
     if (!matches.has(match.code)) return;
     if (match.state !== 'playing') return; // already in reveal or advanced
@@ -15028,6 +15383,7 @@ function scheduleQuestionTimeout(match) {
       answer: '',
       correctAnswer: q.answer,
       scores: match.scores,
+      teamScores: match.teamScores,
       timeout: true,
       autoAdvanceInMs: 5000,
     });
@@ -15084,9 +15440,10 @@ function scheduleDisconnectAbandon(match, userId, graceMs = 10000) {
   match.disconnectTimers[userId] = setTimeout(() => {
     delete match.disconnectTimers[userId];
     if (!matches.has(match.code)) return;
-    if (!['playing', 'reveal', 'generating'].includes(match.state)) return;
+    if (!['playing', 'reveal', 'bonus', 'bonus_reveal', 'generating'].includes(match.state)) return;
     if (match.questionTimeoutId) { clearTimeout(match.questionTimeoutId); match.questionTimeoutId = null; }
     if (match.revealTimeoutId)   { clearTimeout(match.revealTimeoutId);   match.revealTimeoutId = null; }
+    clearQuizBowlBonusTimers(match);
     finalizeQuestionLog(match);
     match.state = 'finished';
     match.buzzWinner = null;
@@ -15115,7 +15472,14 @@ function publicMatchState(match) {
   return {
     code: match.code,
     state: match.state,
-    players: match.players.map(p => ({ userId: p.userId, name: p.name, score: match.scores[p.userId] || 0, isBot: p.isBot || false })),
+    players: match.players.map(p => ({
+      userId: p.userId,
+      name: p.name,
+      score: match.scores[p.userId] || 0,
+      isBot: p.isBot || false,
+      team: p.team || null,
+      teamId: p.team || null,
+    })),
     currentIdx: match.currentIdx,
     totalQuestions: match.questions.length,
     currentQuestion: match.state === 'playing' && match.questions[match.currentIdx]
@@ -15123,6 +15487,7 @@ function publicMatchState(match) {
       : null,
     buzzWinner: match.buzzWinner,
     buzzAt: match.buzzAt,
+    lockedOutTeams: match.mode === 'team' ? Object.keys(match.lockedOutTeams || {}) : [],
     // Time the buzzer has left to answer, so a client that joins/reconnects
     // mid-buzz can resume the same countdown everyone else is seeing.
     answerWindowMs: QUIZBOWL_BUZZ_ANSWER_MS,
@@ -15134,6 +15499,12 @@ function publicMatchState(match) {
     difficulty: match.difficulty,
     revealSpeedMs: match.revealSpeedMs,
     scoringFormat: match.scoringFormat || 'standard',
+    mode: match.mode || 'individual',
+    teamNames: match.teamNames || { A: 'Blue Team', B: 'Orange Team' },
+    teamScores: match.mode === 'team' ? { ...(match.teamScores || { A: 0, B: 0 }) } : null,
+    bonus: publicQuizBowlBonusState(match),
+    pendingBonusTeam: match.pendingBonusTeam || null,
+    bonusWindowMs: QUIZBOWL_BONUS_PART_MS,
     maxPlayers: QUIZBOWL_MAX_PLAYERS,
     activeAnswerReview: match.activeAnswerReview || null,
     reviewPaused: !!match.reviewPaused,
@@ -15169,6 +15540,12 @@ app.post('/api/quizbowl/match', authMiddleware, (req, res) => {
     if (!email) return res.status(404).json({ error: 'User not found' });
 
     const code = newMatchCode();
+    const mode = req.body?.mode === 'team' ? 'team' : 'individual';
+    const requestedNames = req.body?.teamNames || {};
+    const teamNames = {
+      A: safeQuizBowlTeamName(requestedNames.A, 'Blue Team'),
+      B: safeQuizBowlTeamName(requestedNames.B, 'Orange Team'),
+    };
     const match = {
       code,
       state: 'waiting', // waiting | configuring | generating | playing | reveal | finished
@@ -15177,7 +15554,7 @@ app.post('/api/quizbowl/match', authMiddleware, (req, res) => {
       questionStartedAt: null,
       buzzWinner: null,
       buzzAt: null,
-      players: [{ userId: req.userId, name: users[email].name || email.split('@')[0], stream: null }],
+      players: [{ userId: req.userId, name: users[email].name || email.split('@')[0], stream: null, team: mode === 'team' ? 'A' : null }],
       hostId: req.userId,
       scores: { [req.userId]: 0 },
       questionSource: 'qbreader',
@@ -15185,6 +15562,13 @@ app.post('/api/quizbowl/match', authMiddleware, (req, res) => {
       category: 'Mixed', difficulty: 'Medium', revealSpeedMs: 140,
       customTopic: null,
       scoringFormat: 'standard',
+      mode,
+      teamNames,
+      teamScores: { A: 0, B: 0 },
+      bonuses: [],
+      currentBonus: null,
+      currentBonusLog: null,
+      pendingBonusTeam: null,
       activeAnswerReview: null,
       createdAt: Date.now(),
       lastActivity: Date.now(),
@@ -15296,11 +15680,54 @@ app.post('/api/quizbowl/match/:code/join', authMiddleware, (req, res) => {
   const users = loadUsers();
   const email = findEmailById(users, req.userId);
   if (!email) return res.status(404).json({ error: 'User not found' });
-  match.players.push({ userId: req.userId, name: users[email].name || email.split('@')[0], stream: null });
+  let team = null;
+  if (match.mode === 'team') {
+    const countA = match.players.filter(p => p.team === 'A').length;
+    const countB = match.players.filter(p => p.team === 'B').length;
+    team = countA <= countB ? 'A' : 'B';
+  }
+  match.players.push({ userId: req.userId, name: users[email].name || email.split('@')[0], stream: null, team });
   match.scores[req.userId] = 0;
   match.lastActivity = Date.now();
   pushMatchEvent(match, 'player_joined', { match: publicMatchState(match) });
   res.json({ match: publicMatchState(match) });
+});
+
+// Team scrimmage lobby controls. Players may move themselves; the host may
+// balance anyone and rename both sides. Teams lock as soon as generation starts.
+app.post('/api/quizbowl/match/:code/team', authMiddleware, (req, res) => {
+  const match = matches.get(req.params.code);
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+  if (match.mode !== 'team') return res.status(409).json({ error: 'This is not a team scrimmage' });
+  if (match.state !== 'waiting') return res.status(409).json({ error: 'Teams are locked after the match starts' });
+  const requester = match.players.find(p => p.userId === req.userId);
+  if (!requester) return res.status(403).json({ error: 'Not a player in this match' });
+
+  if (req.body?.teamNames && match.hostId === req.userId) {
+    match.teamNames = {
+      A: safeQuizBowlTeamName(req.body.teamNames.A, match.teamNames?.A || 'Blue Team'),
+      B: safeQuizBowlTeamName(req.body.teamNames.B, match.teamNames?.B || 'Orange Team'),
+    };
+  }
+
+  const requestedTeamValue = req.body?.team ?? req.body?.teamId;
+  if (requestedTeamValue != null) {
+    const team = String(requestedTeamValue).toUpperCase();
+    if (!QUIZBOWL_TEAM_IDS.includes(team)) return res.status(400).json({ error: 'Team must be A or B' });
+    const targetId = req.body.userId || req.userId;
+    if (targetId !== req.userId && match.hostId !== req.userId) return res.status(403).json({ error: 'Only the host can move another player' });
+    const target = match.players.find(p => p.userId === targetId);
+    if (!target) return res.status(404).json({ error: 'Player not found' });
+    if (target.team !== team && match.players.filter(p => p.team === team).length >= 4) {
+      return res.status(409).json({ error: `${match.teamNames?.[team] || 'That team'} is full` });
+    }
+    target.team = team;
+  }
+
+  match.lastActivity = Date.now();
+  const publicState = publicMatchState(match);
+  pushMatchEvent(match, 'team_updated', { match: publicState });
+  res.json({ match: publicState });
 });
 
 // GET /api/quizbowl/match/:code/stream - SSE subscription for state pushes.
@@ -15336,7 +15763,7 @@ app.get('/api/quizbowl/match/:code/stream', authMiddleware, (req, res) => {
     if (player.stream === res) player.stream = null;
     // If the game is live and the player is still a member, schedule a
     // 10s abandon. Cancelled if they reconnect (see stream-open above).
-    if (['playing', 'reveal', 'generating'].includes(match.state) &&
+    if (['playing', 'reveal', 'bonus', 'bonus_reveal', 'generating'].includes(match.state) &&
         match.players.some(p => p.userId === req.userId)) {
       scheduleDisconnectAbandon(match, req.userId);
     }
@@ -15350,9 +15777,7 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
   const match = matches.get(req.params.code);
   if (!match) return res.status(404).json({ error: 'Match not found' });
   if (match.hostId !== req.userId) return res.status(403).json({ error: 'Only the host can start' });
-  if (match.state === 'generating' || match.state === 'playing') {
-    return res.status(409).json({ error: 'Match already starting' });
-  }
+  if (match.state !== 'waiting') return res.status(409).json({ error: 'Match has already started' });
 
   const {
     questionSource: rawQuestionSource = match.questionSource || 'qbreader',
@@ -15364,8 +15789,9 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
     customTopic,
     setInstructions,
     bots,
+    teamNames,
   } = req.body || {};
-  const safeQuestionCount = Math.max(1, Math.min(40, Number(questionCount) || 10));
+  const safeQuestionCount = Math.max(1, Math.min(match.mode === 'team' ? 20 : 40, Number(questionCount) || 10));
   const requestedQuestionSource = rawQuestionSource === 'ai' || rawQuestionSource === 'gemini' ? 'ai' : 'qbreader';
 
   // Custom lobbies: the host types any topic and Gemini writes the tossups on
@@ -15384,12 +15810,36 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
     for (const k of Object.keys(match.scores)) { if (k.startsWith('bot:')) delete match.scores[k]; }
     for (const bot of bots.slice(0, QUIZBOWL_MAX_PLAYERS - realCount)) {
       const botId = `bot:${match.code}:${bot.id}`;
-      match.players.push({ userId: botId, name: bot.name || 'Bot', isBot: true, stream: null });
+      let botTeam = null;
+      if (match.mode === 'team') {
+        const requestedTeam = String(bot.team || '').toUpperCase();
+        if (QUIZBOWL_TEAM_IDS.includes(requestedTeam)) botTeam = requestedTeam;
+        else {
+          const countA = match.players.filter(p => p.team === 'A').length;
+          const countB = match.players.filter(p => p.team === 'B').length;
+          botTeam = countA <= countB ? 'A' : 'B';
+        }
+        if (match.players.filter(p => p.team === botTeam).length >= 4) {
+          const other = botTeam === 'A' ? 'B' : 'A';
+          if (match.players.filter(p => p.team === other).length >= 4) continue;
+          botTeam = other;
+        }
+      }
+      match.players.push({
+        userId: botId,
+        name: bot.name || 'Bot',
+        isBot: true,
+        stream: null,
+        team: botTeam,
+        accuracy: Math.max(0.1, Math.min(0.99, Number(bot.accuracy) || 0.65)),
+        thinkMs: Math.max(120, Math.min(5000, Number(bot.thinkMs) || 1200)),
+      });
       match.scores[botId] = 0;
     }
   }
 
   if (match.players.length < 2) return res.status(409).json({ error: 'Need at least 2 players (add bots or invite a friend)' });
+  if (!quizbowlTeamsAreReady(match)) return res.status(409).json({ error: 'Team scrimmages need at least one player on each team' });
 
   // Generating a Gemini tossup set costs QB_TOSSUP_CREDIT_COST credits (host pays).
   if (useGeminiTossups) {
@@ -15416,8 +15866,17 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
   match.customTopic = isCustomTopic ? customTopicText : null;
   match.difficulty = difficulty;
   match.revealSpeedMs = revealSpeedMs;
-  match.scoringFormat = QUIZBOWL_FORMATS[scoringFormat] ? scoringFormat : 'standard';
+  match.scoringFormat = match.mode === 'team' ? 'standard' : (QUIZBOWL_FORMATS[scoringFormat] ? scoringFormat : 'standard');
+  if (match.mode === 'team') {
+    match.teamNames = {
+      A: safeQuizBowlTeamName(teamNames?.A, match.teamNames?.A || 'Blue Team'),
+      B: safeQuizBowlTeamName(teamNames?.B, match.teamNames?.B || 'Orange Team'),
+    };
+    match.teamScores = { A: 0, B: 0 };
+  }
   match.state = 'generating';
+  const generationId = crypto.randomUUID();
+  match.generationId = generationId;
   match.lastActivity = Date.now();
   pushMatchEvent(match, 'generating', { match: publicMatchState(match) });
 
@@ -15427,18 +15886,32 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
   try {
     const grounded = !!(match.studyContext && match.studyContext.text);
     let generatedQuestions;
+    let generatedBonuses = [];
     if (!useGeminiTossups) {
-      generatedQuestions = await fetchQBReaderTossups({ count: safeQuestionCount, category, difficulty });
+      if (match.mode === 'team') {
+        [generatedQuestions, generatedBonuses] = await Promise.all([
+          fetchQBReaderTossups({ count: safeQuestionCount, category, difficulty }),
+          fetchQBReaderBonuses({ count: safeQuestionCount, category, difficulty }),
+        ]);
+      } else {
+        generatedQuestions = await fetchQBReaderTossups({ count: safeQuestionCount, category, difficulty });
+      }
     } else {
+      const exactFormat = match.mode === 'team'
+        ? `{"questions":[{"text":"Hard clues, (*) easier clues, giveaway.","answer":"Answer"}],"bonuses":[{"leadin":"For 10 points each:","parts":["Part one","Part two","Part three"],"answers":["Answer one","Answer two","Answer three"]}]}`
+        : `{"questions":[{"text":"Hard clues here, more clues, (*) easier clues here, giveaway clue.","answer":"Answer"}]}`;
+      const bonusRule = match.mode === 'team'
+        ? ' Write exactly one three-part bonus for every tossup. Every bonus needs a short lead-in, exactly three independently answerable parts, and exactly three canonical answers. Bonuses must match the requested difficulty and source restrictions.'
+        : '';
       const sys = grounded
-      ? `You are a quiz bowl question writer. Write pyramidal tossup questions based ONLY on the provided study material - never use outside knowledge; every clue and every answer must be checkable against the material text alone. Each question starts with obscure clues and progressively gets easier. Include a NAQT-style power mark "(*)" placed roughly 60-70% of the way through each question (after the hard clues but before the "giveaway" clue) - buzzing before the mark earns +15, after earns +10. Output ONLY valid JSON with no markdown, no code fences, no prose before or after.
+      ? `You are a quiz bowl question writer. Write pyramidal tossup questions based ONLY on the provided study material - never use outside knowledge; every clue and every answer must be checkable against the material text alone. Each question starts with obscure clues and progressively gets easier. Include a NAQT-style power mark "(*)" placed roughly 60-70% of the way through each question (after the hard clues but before the "giveaway" clue) - buzzing before the mark earns +15, after earns +10.${bonusRule} Output ONLY valid JSON with no markdown, no code fences, no prose before or after.
 
 Exact format:
-{"questions":[{"text":"Hard clues here, more clues, (*) easier clues here, giveaway clue.","answer":"Answer"}]}`
-      : `You are a quiz bowl question writer. Write pyramidal tossup questions - each starts with obscure clues and progressively gets easier. Include a NAQT-style power mark "(*)" placed roughly 60-70% of the way through each question (after the hard clues but before the "giveaway" clue) - buzzing before the mark earns +15, after earns +10. Output ONLY valid JSON with no markdown, no code fences, no prose before or after.
+${exactFormat}`
+      : `You are a quiz bowl question writer. Write pyramidal tossup questions - each starts with obscure clues and progressively gets easier. Include a NAQT-style power mark "(*)" placed roughly 60-70% of the way through each question (after the hard clues but before the "giveaway" clue) - buzzing before the mark earns +15, after earns +10.${bonusRule} Output ONLY valid JSON with no markdown, no code fences, no prose before or after.
 
 Exact format:
-{"questions":[{"text":"Hard clues here, more clues, (*) easier clues here, giveaway clue.","answer":"Answer"}]}`;
+${exactFormat}`;
       const userMsg = grounded
         ? `Write ${safeQuestionCount} pyramidal quiz bowl tossup questions at ${difficulty} difficulty using ONLY facts from the study material below. Every answer must be directly supported by the text. Each question MUST contain exactly one (*) power mark.
 
@@ -15460,25 +15933,41 @@ ${setInstructionsText ? `Host set instructions:\n${setInstructionsText}\n\n` : '
         throw new Error('Failed to parse questions');
       }
       generatedQuestions = parsed.questions;
+      generatedBonuses = Array.isArray(parsed.bonuses) ? parsed.bonuses : [];
     }
 
     // Double-check the match still exists - someone may have left during gen.
-    if (!matches.has(match.code)) return;
+    if (!matches.has(match.code) || match.state !== 'generating' || match.generationId !== generationId) return;
     // Strip power marks into structured powerWordIndex so the scorer can
     // award +15 vs +10. Questions without (*) score flat +10 / -5 / 0.
     match.questions = generatedQuestions.map(q => {
       const { text, powerWordIndex } = parseTossupText(q.text || '');
       return { ...q, text, powerWordIndex: powerWordIndex ?? q.powerWordIndex ?? null };
     });
+    match.bonuses = match.mode === 'team'
+      ? generatedBonuses.slice(0, match.questions.length).map(b => ({
+          leadin: String(b.leadin || 'For 10 points each:').trim().slice(0, 500),
+          parts: (Array.isArray(b.parts) ? b.parts : []).slice(0, 3).map(x => String(x || '').trim().slice(0, 1200)),
+          answers: (Array.isArray(b.answers) ? b.answers : []).slice(0, 3).map(x => String(x || '').trim().slice(0, 300)),
+          values: [10, 10, 10],
+          category: b.category || match.category,
+          source: b.source || match.questionSource,
+        })).filter(b => b.parts.length === 3 && b.answers.length === 3 && b.parts.every(Boolean) && b.answers.every(Boolean))
+      : [];
+    if (match.mode === 'team' && match.bonuses.length < match.questions.length) {
+      throw new Error('Could not build a complete three-part bonus set. Please try again.');
+    }
     match.currentIdx = 0;
     match.state = 'playing';
     match.questionStartedAt = Date.now();
     match.buzzWinner = null;
     match.buzzAt = null;
     match.lockedOutForQ = {};
+    match.lockedOutTeams = {};
     match.activeAnswerReview = null;
     match.questionLog = [];
     match.currentQuestionBuzzes = [];
+    match.generationId = null;
     match.lastActivity = Date.now();
     pushMatchEvent(match, 'question_start', {
       idx: 0,
@@ -15489,10 +15978,12 @@ ${setInstructionsText ? `Host set instructions:\n${setInstructionsText}\n\n` : '
     scheduleQuestionTimeout(match);
   } catch (e) {
     console.error('match start/generate failed', e);
+    if (!matches.has(match.code) || match.generationId !== generationId) return;
     // Remove any bots injected this attempt so the lobby doesn't show them.
     match.players = match.players.filter(p => !p.isBot);
     for (const k of Object.keys(match.scores)) { if (k.startsWith('bot:')) delete match.scores[k]; }
     match.state = 'waiting';
+    match.generationId = null;
     match.lastActivity = Date.now();
     pushMatchEvent(match, 'start_failed', { error: e.message, match: publicMatchState(match) });
   }
@@ -15507,6 +15998,10 @@ app.post('/api/quizbowl/match/:code/buzz', authMiddleware, (req, res) => {
   if (match.activeAnswerReview?.status === 'pending') return res.status(409).json({ error: 'Game paused for review' });
   if (match.buzzWinner) return res.status(409).json({ error: 'Already buzzed', winner: match.buzzWinner });
   if (match.lockedOutForQ && match.lockedOutForQ[req.userId]) return res.status(403).json({ error: 'Locked out for this question' });
+  const buzzerTeam = quizbowlTeamForUser(match, req.userId);
+  if (match.mode === 'team' && buzzerTeam && match.lockedOutTeams?.[buzzerTeam]) {
+    return res.status(403).json({ error: 'Your team has already answered this tossup' });
+  }
 
   match.buzzWinner = req.userId;
   match.buzzAt = Date.now();
@@ -15607,21 +16102,32 @@ app.post('/api/quizbowl/match/:code/answer', authMiddleware, (req, res) => {
     // Correct: question ends. Score awarded per scoringFormat. Auto-advance in 5s.
     const pts = quizbowlScoreForBuzz(match, { correct: true });
     recordBuzzForLog(match, { userId: req.userId, answer, correct: true, points: pts });
-    match.scores[req.userId] = (match.scores[req.userId] || 0) + pts;
+    addQuizBowlPoints(match, req.userId, pts);
     match.state = 'reveal';
     match.lastActivity = Date.now();
+    const bonusTeam = match.mode === 'team' ? quizbowlTeamForUser(match, req.userId) : null;
     pushMatchEvent(match, 'answer_result', {
       userId: req.userId, correct: true, answer, correctAnswer,
-      scores: match.scores, autoAdvanceInMs: 5000, ptsGained: pts,
+      scores: match.scores, teamScores: match.teamScores,
+      autoAdvanceInMs: bonusTeam ? 2500 : 5000, ptsGained: pts,
+      bonusPending: !!bonusTeam, bonusTeam,
     });
-    scheduleAutoAdvance(match, 5000);
+    if (bonusTeam) scheduleQuizBowlTeamBonus(match, bonusTeam, 2500);
+    else scheduleAutoAdvance(match, 5000);
   } else {
     // Wrong: apply neg, lock out this player, give the others a chance.
     const negPts = quizbowlScoreForBuzz(match, { correct: false });
     recordBuzzForLog(match, { userId: req.userId, answer, correct: false, points: negPts });
-    if (negPts) match.scores[req.userId] = (match.scores[req.userId] || 0) + negPts;
+    if (negPts) addQuizBowlPoints(match, req.userId, negPts);
     if (!match.lockedOutForQ) match.lockedOutForQ = {};
-    match.lockedOutForQ[req.userId] = true;
+    if (match.mode === 'team') {
+      const team = quizbowlTeamForUser(match, req.userId);
+      if (!match.lockedOutTeams) match.lockedOutTeams = {};
+      if (team) match.lockedOutTeams[team] = true;
+      for (const p of match.players) if (p.team === team) match.lockedOutForQ[p.userId] = true;
+    } else {
+      match.lockedOutForQ[req.userId] = true;
+    }
     const pausedMs = Date.now() - (match.buzzAt || Date.now());
     match.questionStartedAt = (match.questionStartedAt || Date.now()) + pausedMs;
     const stillPlaying = match.players.filter(p => !match.lockedOutForQ[p.userId]);
@@ -15631,7 +16137,7 @@ app.post('/api/quizbowl/match/:code/answer', authMiddleware, (req, res) => {
       match.lastActivity = Date.now();
       pushMatchEvent(match, 'answer_result', {
         userId: req.userId, correct: false, answer, correctAnswer,
-        scores: match.scores, finalMiss: true, autoAdvanceInMs: 5000, ptsGained: negPts,
+        scores: match.scores, teamScores: match.teamScores, finalMiss: true, autoAdvanceInMs: 5000, ptsGained: negPts,
       });
       scheduleAutoAdvance(match, 5000);
     } else {
@@ -15640,16 +16146,37 @@ app.post('/api/quizbowl/match/:code/answer', authMiddleware, (req, res) => {
       match.state = 'playing';
       match.lastActivity = Date.now();
       pushMatchEvent(match, 'wrong_answer', {
-        userId: req.userId, answer, correctAnswer,
+        userId: req.userId, answer,
         lockedOut: Object.keys(match.lockedOutForQ),
+        lockedOutTeams: Object.keys(match.lockedOutTeams || {}),
         questionStartedAt: match.questionStartedAt,
-        scores: match.scores, ptsGained: negPts,
+        scores: match.scores, teamScores: match.teamScores, ptsGained: negPts,
       });
       // Resume the end-of-question timeout for the remaining player(s).
       scheduleQuestionTimeout(match);
     }
   }
   res.json({ ok: true, correct });
+});
+
+// Any member of the team that earned the tossup may submit the bonus answer;
+// the first submission counts. Teams can confer externally while the shared
+// 15-second clock runs. A pass records a zero and moves to the next part.
+app.post('/api/quizbowl/match/:code/bonus-answer', authMiddleware, (req, res) => {
+  const match = matches.get(req.params.code);
+  if (!match) return res.status(404).json({ error: 'Match not found' });
+  if (match.mode !== 'team' || match.state !== 'bonus' || !match.currentBonus) {
+    return res.status(409).json({ error: 'No bonus part is accepting answers' });
+  }
+  const player = match.players.find(p => p.userId === req.userId && !p.isBot);
+  if (!player) return res.status(403).json({ error: 'Not a player in this match' });
+  if (player.team !== match.bonusTeam) return res.status(403).json({ error: 'The other team controls this bonus' });
+  const pass = !!req.body?.pass;
+  const answer = pass ? '' : String(req.body?.answer || '').trim().slice(0, 300);
+  if (!pass && !answer) return res.status(400).json({ error: 'Answer required' });
+  const accepted = resolveQuizBowlBonusAnswer(match, req.userId, answer, { correctOverride: pass ? false : undefined });
+  if (!accepted) return res.status(409).json({ error: 'That bonus part has already been answered' });
+  res.json({ ok: true });
 });
 
 // POST /api/quizbowl/match/:code/review - a player who was marked wrong can
@@ -15750,7 +16277,15 @@ app.post('/api/quizbowl/match/:code/next', authMiddleware, (req, res) => {
   if (!match) return res.status(404).json({ error: 'Match not found' });
   if (match.hostId !== req.userId) return res.status(403).json({ error: 'Only the host can advance' });
   if (match.activeAnswerReview?.status === 'pending') return res.status(409).json({ error: 'Game paused for review' });
-  advanceMatchToNextQuestion(match);
+  if (match.pendingBonusTeam && match.state === 'reveal') {
+    startQuizBowlTeamBonus(match, match.pendingBonusTeam);
+  } else if (match.state === 'bonus') {
+    resolveQuizBowlBonusAnswer(match, null, '', { timedOut: true, correctOverride: false });
+  } else if (match.state === 'bonus_reveal') {
+    beginQuizBowlBonusPart(match, (match.bonusPartIdx || 0) + 1);
+  } else {
+    advanceMatchToNextQuestion(match);
+  }
   res.json({ ok: true, finished: match.state === 'finished' });
 });
 
@@ -15767,6 +16302,7 @@ app.post('/api/quizbowl/match/:code/end', authMiddleware, (req, res) => {
   if (match.questionTimeoutId) { clearTimeout(match.questionTimeoutId); match.questionTimeoutId = null; }
   if (match.revealTimeoutId)   { clearTimeout(match.revealTimeoutId);   match.revealTimeoutId = null; }
   if (match.buzzTimeoutId)     { clearTimeout(match.buzzTimeoutId);     match.buzzTimeoutId = null; }
+  clearQuizBowlBonusTimers(match);
   finalizeQuestionLog(match);
   match.state = 'finished';
   match.buzzWinner = null;
@@ -15775,6 +16311,7 @@ app.post('/api/quizbowl/match/:code/end', authMiddleware, (req, res) => {
   saveMatchReplay(match);
   pushMatchEvent(match, 'match_end', {
     scores: match.scores,
+    teamScores: match.teamScores,
     endedByHost: true,
     comparison: buildMatchComparison(match),
   });
@@ -15800,10 +16337,21 @@ app.post('/api/quizbowl/match/:code/leave', authMiddleware, (req, res) => {
   }
   match.lastActivity = Date.now();
 
-  const wasLive = ['playing', 'reveal', 'generating'].includes(match.state);
+  const wasLive = ['playing', 'reveal', 'bonus', 'bonus_reveal', 'generating'].includes(match.state);
+  const teamStillRepresented = match.mode !== 'team' || QUIZBOWL_TEAM_IDS.every(team => match.players.some(p => p.team === team));
+  if (match.mode === 'team' && wasLive && teamStillRepresented) {
+    clearQuizBowlBonusTimers(match);
+    match.buzzWinner = null;
+    match.buzzAt = null;
+    if (match.state === 'bonus' || match.state === 'bonus_reveal') advanceMatchToNextQuestion(match);
+    pushMatchEvent(match, 'player_left', { userId: req.userId, match: publicMatchState(match) });
+    res.json({ ok: true, continued: true });
+    return;
+  }
   if (wasLive) {
     if (match.questionTimeoutId) { clearTimeout(match.questionTimeoutId); match.questionTimeoutId = null; }
     if (match.revealTimeoutId)   { clearTimeout(match.revealTimeoutId);   match.revealTimeoutId = null; }
+    clearQuizBowlBonusTimers(match);
     finalizeQuestionLog(match);
     match.state = 'finished';
     match.buzzWinner = null;
@@ -15811,6 +16359,7 @@ app.post('/api/quizbowl/match/:code/leave', authMiddleware, (req, res) => {
     saveMatchReplay(match);
     pushMatchEvent(match, 'match_end', {
       scores: match.scores,
+      teamScores: match.teamScores,
       abandoned: true,
       leftBy: req.userId,
       comparison: buildMatchComparison(match),
@@ -15842,6 +16391,8 @@ app.post('/api/quizbowl/match/:code/bot-buzz', authMiddleware, (req, res) => {
   if (!botId || !String(botId).startsWith('bot:')) return res.status(400).json({ error: 'Invalid botId' });
   if (!match.players.some(p => p.userId === botId)) return res.status(404).json({ error: 'Bot not in match' });
   if (match.lockedOutForQ?.[botId]) return res.json({ ok: false, reason: 'locked_out' });
+  const botTeam = quizbowlTeamForUser(match, botId);
+  if (match.mode === 'team' && botTeam && match.lockedOutTeams?.[botTeam]) return res.json({ ok: false, reason: 'team_locked_out' });
 
   match.buzzWinner = botId;
   match.buzzAt = Date.now();
@@ -15873,23 +16424,32 @@ app.post('/api/quizbowl/match/:code/bot-answer', authMiddleware, (req, res) => {
   const q = match.questions[match.currentIdx];
   const correctAnswer = q ? q.answer : '';
   recordBuzzForLog(match, { userId: botId, answer: correct ? correctAnswer : '[Bot]', correct: !!correct, points: pts });
-  match.scores[botId] = (match.scores[botId] || 0) + pts;
+  addQuizBowlPoints(match, botId, pts);
   match.lastActivity = Date.now();
 
   const scores = { ...match.scores };
 
   if (correct) {
     match.state = 'reveal';
+    const bonusTeam = match.mode === 'team' ? quizbowlTeamForUser(match, botId) : null;
     pushMatchEvent(match, 'answer_result', {
       userId: botId, correct: true,
       answer: correctAnswer, correctAnswer,
-      scores, autoAdvanceInMs: 5000, ptsGained: pts,
+      scores, teamScores: match.teamScores, autoAdvanceInMs: bonusTeam ? 2500 : 5000, ptsGained: pts,
+      bonusPending: !!bonusTeam, bonusTeam,
     });
-    scheduleAutoAdvance(match, 5000);
+    if (bonusTeam) scheduleQuizBowlTeamBonus(match, bonusTeam, 2500);
+    else scheduleAutoAdvance(match, 5000);
   } else {
     const negPts = pts; // already negative (or 0)
     if (!match.lockedOutForQ) match.lockedOutForQ = {};
-    match.lockedOutForQ[botId] = true;
+    if (match.mode === 'team') {
+      if (!match.lockedOutTeams) match.lockedOutTeams = {};
+      if (botTeam) match.lockedOutTeams[botTeam] = true;
+      for (const p of match.players) if (p.team === botTeam) match.lockedOutForQ[p.userId] = true;
+    } else {
+      match.lockedOutForQ[botId] = true;
+    }
     const pausedMs = Date.now() - (match.buzzAt || Date.now());
     match.questionStartedAt = (match.questionStartedAt || Date.now()) + pausedMs;
     match.buzzWinner = null;
@@ -15901,15 +16461,16 @@ app.post('/api/quizbowl/match/:code/bot-answer', authMiddleware, (req, res) => {
       pushMatchEvent(match, 'answer_result', {
         userId: botId, correct: false,
         answer: '[Bot]', correctAnswer,
-        scores, finalMiss: true, autoAdvanceInMs: 5000, ptsGained: negPts,
+        scores, teamScores: match.teamScores, finalMiss: true, autoAdvanceInMs: 5000, ptsGained: negPts,
       });
       scheduleAutoAdvance(match, 5000);
     } else {
       pushMatchEvent(match, 'wrong_answer', {
-        userId: botId, answer: '[Bot]', correctAnswer,
+        userId: botId, answer: '[Bot]',
         lockedOut: Object.keys(match.lockedOutForQ),
+        lockedOutTeams: Object.keys(match.lockedOutTeams || {}),
         questionStartedAt: match.questionStartedAt,
-        scores, ptsGained: negPts,
+        scores, teamScores: match.teamScores, ptsGained: negPts,
       });
       scheduleQuestionTimeout(match);
     }

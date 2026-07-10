@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import { Check, X, Copy, Pencil, FileText, ExternalLink, FileText as NoteIcon, Zap, Swords, Brain, ChevronRight, ChevronDown, Volume2, Square, PanelRightOpen, Shuffle, Hammer, Lock } from 'lucide-react';
+import { Check, X, Copy, Pencil, FileText, ExternalLink, FileText as NoteIcon, Zap, Swords, Brain, ChevronRight, ChevronDown, Volume2, Square, PanelRightOpen, Shuffle, Hammer, Lock, Wand2 } from 'lucide-react';
 import MathText from '../shared/MathText';
 import { useWindowManager } from '../../context/WindowManagerContext';
 
@@ -455,6 +455,9 @@ export default function ChatMessage({
   const [speaking, setSpeaking] = useState(false);
   const [quizAnswers, setQuizAnswers] = useState({});
   const [quizSubmitted, setQuizSubmitted] = useState(false);
+  // Auto-refined user messages carry { original, note }; the marker under the
+  // bubble toggles showing the student's original draft.
+  const [showOriginalDraft, setShowOriginalDraft] = useState(false);
   const utterRef = useRef(null);
 
   useEffect(() => () => { window.speechSynthesis?.cancel(); }, []);
@@ -794,6 +797,28 @@ export default function ChatMessage({
               <p className="whitespace-pre-wrap text-[13.5px] text-white leading-relaxed">{userText}</p>
             )}
           </div>
+          {message.refined?.original && (
+            <div className="mt-1 mr-1">
+              <div className="flex items-center gap-1 justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowOriginalDraft(v => !v)}
+                  title={message.refined.note || 'This prompt was auto-refined before sending'}
+                  className="inline-flex items-center gap-1 text-[9.5px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                >
+                  <Wand2 size={9} />
+                  refined
+                  <ChevronDown size={9} className={`transition-transform ${showOriginalDraft ? 'rotate-180' : ''}`} />
+                </button>
+              </div>
+              {showOriginalDraft && (
+                <div className="mt-1 rounded-lg bg-white/[0.04] border border-white/[0.08] px-3 py-2">
+                  <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-gray-400 dark:text-gray-500 mb-1">Your original draft</p>
+                  <p className="whitespace-pre-wrap text-[12px] text-gray-500 dark:text-gray-400 leading-relaxed">{message.refined.original}</p>
+                </div>
+              )}
+            </div>
+          )}
           {!isStreaming && canEdit && (
             <div className="mt-1 mr-1 flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
               {message._edited && <span className="text-[9px] text-gray-400 italic mr-1">edited</span>}

@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Mic2, MicOff, AlertCircle } from 'lucide-react';
 import { useSpeechRecognition, speechRecognitionSupported } from '../../../hooks/useSpeechRecognition';
 
@@ -9,7 +10,7 @@ function readPref(key, fallback) {
 }
 
 const ERR_LABELS = {
-  'network':           'Network error — speech recognition needs an internet connection.',
+  'network':           'You appear to be offline. Speech recognition needs an internet connection.',
   'audio-capture':     'No microphone found.',
   'language-not-supported': 'Dictation language not supported by your browser.',
 };
@@ -35,7 +36,10 @@ async function requestMicPermission() {
   }
 }
 
-const SEND_TRIGGER    = /\bsend\s+send\s*$/i;
+// Tolerant of how speech recognition actually transcribes "send send":
+// "sent send", "send, send", a trailing period. Must match ChatInput's copy
+// (the final-transcript fallback) so both layers agree.
+const SEND_TRIGGER    = /\b(?:send|sent)[\s,.!]+(?:send|sent)[\s,.!?]*$/i;
 const RESTART_TRIGGER = /\brestart\s+restart\s*$/i;
 const DELETE_TRIGGER  = /\bdelete\s+delete\s+(\w+)\s*$/i;
 
@@ -44,7 +48,19 @@ export default function DictationButton({ onStart, onLiveText, onTranscript, onL
   const [srError, setSrError] = useState('');
   const [micBlocked, setMicBlocked] = useState(false);
   const [showBlockedTip, setShowBlockedTip] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const tipTimerRef = useRef(null);
+  const btnRef = useRef(null);
+  // The tip/error bubbles portal to <body> because the composer card has
+  // overflow-hidden and clips anything positioned above the rail. Fixed
+  // position is computed from the button when a bubble becomes visible.
+  const [tipPos, setTipPos] = useState(null);
+
+  useLayoutEffect(() => {
+    if (!showBlockedTip && !srError) return;
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) setTipPos({ left: Math.max(8, r.left), top: r.top - 8 });
+  }, [showBlockedTip, srError]);
 
   // Check permission state on mount; prompt immediately if not yet asked (like Google Meet).
   useEffect(() => {
@@ -110,6 +126,11 @@ export default function DictationButton({ onStart, onLiveText, onTranscript, onL
         setMicBlocked(true);
         setSrError('');
         showTip();
+      } else if (err === 'network' && navigator.onLine !== false) {
+        // Chrome reports 'network' for any speech-service failure. Only blame
+        // the connection when the browser actually says it's offline.
+        setSrError("Speech service didn't respond. Tap the mic to retry.");
+        setTimeout(() => setSrError(''), 5000);
       } else {
         setSrError(ERR_LABELS[err] || `Speech error: ${err}`);
         setTimeout(() => setSrError(''), 5000);
@@ -124,7 +145,28 @@ export default function DictationButton({ onStart, onLiveText, onTranscript, onL
   function showTip() {
     setShowBlockedTip(true);
     clearTimeout(tipTimerRef.current);
-    tipTimerRef.current = setTimeout(() => setShowBlockedTip(false), 5000);
+    tipTimerRef.current = setTimeout(() => setShowBlockedTip(false), 8000);
+  }
+
+  // "Try again" in the blocked tip: re-request access. Succeeds when the
+  // browser will re-prompt ('prompt' state, or the user just unblocked the
+  // site without reloading) — in that case start dictating right away.
+  async function retryMicAccess() {
+    if (retrying) return;
+    setRetrying(true);
+    clearTimeout(tipTimerRef.current);
+    const granted = await requestMicPermission();
+    setRetrying(false);
+    if (granted) {
+      setMicBlocked(false);
+      setShowBlockedTip(false);
+      setSrError('');
+      onStart?.();
+      start();
+    } else {
+      // Still denied — keep the guidance up so the user can follow it.
+      showTip();
+    }
   }
 
   useEffect(() => () => clearTimeout(tipTimerRef.current), []);
@@ -157,6 +199,7 @@ export default function DictationButton({ onStart, onLiveText, onTranscript, onL
   return (
     <div className="relative">
       <button
+        ref={btnRef}
         type="button"
         onClick={toggle}
         disabled={disabled}
@@ -191,18 +234,45 @@ export default function DictationButton({ onStart, onLiveText, onTranscript, onL
         )}
       </button>
 
-      {micBlocked && showBlockedTip && (
-        <div className="absolute bottom-full left-0 mb-2 w-60 z-50 flex items-start gap-1.5 px-2.5 py-2 rounded-lg bg-amber-950/90 border border-amber-500/40 text-[11px] text-amber-200 leading-snug shadow-xl">
-          <AlertCircle size={12} className="mt-px shrink-0 text-amber-400" />
-          Microphone is blocked. Open your browser settings, allow microphone access for this site, then reload the page.
-        </div>
+      {micBlocked && showBlockedTip && tipPos && createPortal(
+        <div
+          style={{ position: 'fixed', left: tipPos.left, top: tipPos.top, transform: 'translateY(-100%)', zIndex: 9999 }}
+          className="w-64 px-2.5 py-2 rounded-lg bg-amber-950/95 border border-amber-500/40 text-[11px] text-amber-200 leading-snug shadow-xl"
+        >
+          <div className="flex items-start gap-1.5">
+            <AlertCircle size={12} className="mt-px shrink-0 text-amber-400" />
+            <span>Microphone is blocked for this site. Click the mic or lock icon in the address bar, allow the microphone, then try again.</span>
+          </div>
+          <div className="flex items-center gap-2 mt-1.5 pl-[18px]">
+            <button
+              type="button"
+              onClick={retryMicAccess}
+              disabled={retrying}
+              className="px-2 py-1 rounded-md bg-amber-500/20 border border-amber-500/40 font-semibold text-amber-100 hover:bg-amber-500/30 disabled:opacity-50 transition-colors"
+            >
+              {retrying ? 'Checking…' : 'Try again'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowBlockedTip(false)}
+              className="text-amber-300/60 hover:text-amber-200 transition-colors"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>,
+        document.body
       )}
 
-      {srError && (
-        <div className="absolute bottom-full left-0 mb-2 w-56 z-50 flex items-start gap-1.5 px-2.5 py-2 rounded-lg bg-rose-900/90 border border-rose-500/40 text-[11px] text-rose-200 leading-snug shadow-xl">
+      {srError && tipPos && createPortal(
+        <div
+          style={{ position: 'fixed', left: tipPos.left, top: tipPos.top, transform: 'translateY(-100%)', zIndex: 9999 }}
+          className="w-56 flex items-start gap-1.5 px-2.5 py-2 rounded-lg bg-rose-900/90 border border-rose-500/40 text-[11px] text-rose-200 leading-snug shadow-xl"
+        >
           <AlertCircle size={12} className="mt-px shrink-0 text-rose-400" />
           {srError}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

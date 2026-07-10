@@ -60,7 +60,7 @@ export default function MobileLanding({ onSignIn }) {
       <section className="relative z-10 px-5 pb-10">
         <div className="rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-white/[0.04] grid grid-cols-2 gap-3 p-4">
           <Stat n="8" label="blocks per lesson" />
-          <Stat n="∞" label="Quiz Bowl tossups" />
+          <Stat n="180k+" label="real tossups" />
           <Stat n="SRS" label="every quiz" />
           <Stat n="2-way" label="multiplayer" />
         </div>
@@ -73,7 +73,7 @@ export default function MobileLanding({ onSignIn }) {
           <h2 className="text-[22px] font-bold tracking-[-0.02em] text-gray-900 dark:text-white">Build → Learn → Master.</h2>
         </div>
         <div className="space-y-3">
-          <Step n="01" title="Build" body="Units, lessons, quizzes, midterm + final - generated in seconds." />
+          <Step n="01" title="Build" body="Units, lessons, quizzes, midterm + final - built from one topic." />
           <Step n="02" title="Learn" body="Each lesson runs 4 readings + 4 quizzes with spaced repetition." />
           <Step n="03" title="Master" body="Quiz Bowl on real packets, math canvas that grades your steps." />
         </div>

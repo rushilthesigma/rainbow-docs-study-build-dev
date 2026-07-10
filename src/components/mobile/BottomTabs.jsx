@@ -1,5 +1,6 @@
 import { Home, BookOpen, Lightbulb, FileText, Settings } from 'lucide-react';
 import { useUIPreference } from '../../context/UIPreferenceContext';
+import { zIndexStyle } from '../../styles/tokens';
 
 // Five primary tabs. `More` is gone - secondary surfaces (Study,
 // Quiz Bowl) are reachable from the Home tiles, and Settings lives
@@ -20,12 +21,12 @@ export default function BottomTabs({ active, onSelect }) {
   const { bottomBarTransparent } = useUIPreference();
   return (
     <nav
-      className={`fixed left-0 right-0 z-30 border-t border-gray-200/70 dark:border-white/[0.06] ${
+      className={`fixed left-0 right-0 border-t border-gray-200/70 dark:border-white/[0.06] ${
         bottomBarTransparent
           ? 'bg-white/85 dark:bg-[#0c0c16]/85 backdrop-blur-xl'
           : 'bg-white dark:bg-[#0c0c16]'
       }`}
-      style={{ bottom: 'calc(32px + env(safe-area-inset-bottom, 0px))' }}
+      style={{ ...zIndexStyle.dock, bottom: 'calc(32px + env(safe-area-inset-bottom, 0px))' }}
     >
       <div className="relative flex items-stretch h-[58px] px-2">
         {TABS.map((tab) => {
@@ -34,10 +35,11 @@ export default function BottomTabs({ active, onSelect }) {
           return (
             <button
               key={tab.id}
+              type="button"
               onClick={() => onSelect(tab.id)}
               aria-label={tab.label}
               aria-current={isActive ? 'page' : undefined}
-              className="group relative flex-1 flex flex-col items-center justify-center gap-0.5 active:scale-[0.94] transition-transform select-none"
+              className="group relative flex-1 flex flex-col items-center justify-center gap-0.5 active:scale-[0.94] motion-reduce:active:scale-100 transition-transform select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/60 rounded-lg"
             >
               {/* Active indicator: thin top accent bar (Apple-style) - instantly
                   legible at a glance and works without a colored background. */}

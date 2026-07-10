@@ -9,6 +9,10 @@ import MobileNotes from './MobileNotes';
 import MobileSettings from './MobileSettings';
 import MobileStudy from './MobileStudy';
 import MobileQuizBowl from './MobileQuizBowl';
+import MobileDebate from './MobileDebate';
+import MobileApps from './MobileApps';
+import { MobileAdmin, MobileMathTutor, MobileQBpedia, MobileWidgets } from './MobileFeatureApps';
+import { zIndexStyle } from '../../styles/tokens';
 // Page registry for the mobile shell.
 //   - `hideHeader`   → suppresses MobileHeader (page renders its own).
 //   - `manageLayout` → page owns its own scrolling + flex layout
@@ -31,6 +35,12 @@ const PAGE_MAP = {
   // Reachable via Home tiles only:
   study:       { title: 'Study',        component: MobileStudy,        hideHeader: true, manageLayout: true },
   quizbowl:    { title: 'Quiz Bowl',    component: MobileQuizBowl,      hideHeader: true },
+  apps:        { title: 'Apps',         component: MobileApps,          hideHeader: true },
+  mathtutor:   { title: 'Math Tutor',   component: MobileMathTutor,     hideHeader: true, manageLayout: true },
+  debate:      { title: 'Debate',       component: MobileDebate,        hideHeader: true, manageLayout: true },
+  qbpedia:     { title: 'QBpedia',      component: MobileQBpedia,       hideHeader: true, manageLayout: true },
+  widgets:     { title: 'Widgets',      component: MobileWidgets,       hideHeader: true, manageLayout: true },
+  admin:       { title: 'Admin',        component: MobileAdmin,         hideHeader: true, manageLayout: true },
 };
 
 const MAIN_TABS = ['home', 'curricula', 'lessons', 'notes', 'settings'];
@@ -109,7 +119,7 @@ const MobileShell = forwardRef(function MobileShell(_props, ref) {
   const PageComponent = page.component;
   const isMain = MAIN_TABS.includes(activePage);
   const onBack = !isMain
-    ? () => navigate(activeTab, activeTab)
+    ? () => (backStack.length ? goBackOne() : navigate(activeTab, activeTab))
     : null;
 
   return (
@@ -140,9 +150,7 @@ const MobileShell = forwardRef(function MobileShell(_props, ref) {
           </div>
         ) : (
           <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
-            {page.isHome
-              ? <PageComponent onNavigate={navigateFromHome} />
-              : <PageComponent />}
+            <PageComponent onNavigate={navigateFromHome} />
           </div>
         )}
       </main>
@@ -173,25 +181,28 @@ export default MobileShell;
 function BrowserControls({ canBack, canForward, onBack, onForward }) {
   return (
     <div
-      className="fixed left-0 right-0 bottom-0 z-30 flex items-center justify-center gap-3 px-3 border-t border-gray-200 dark:border-white/[0.06] bg-white/85 dark:bg-[#0c0c16]/85 backdrop-blur-xl"
+      className="fixed left-0 right-0 bottom-0 flex items-center justify-center gap-3 px-3 border-t border-gray-200 dark:border-white/[0.06] bg-white/85 dark:bg-[#0c0c16]/85 backdrop-blur-xl"
       style={{
+        ...zIndexStyle.dock,
         height: 'calc(32px + env(safe-area-inset-bottom, 0px))',
         paddingBottom: 'env(safe-area-inset-bottom, 0px)',
       }}
     >
       <button
+        type="button"
         onClick={onBack}
         disabled={!canBack}
         aria-label="Back"
-        className="w-8 h-8 rounded-full grid place-items-center text-gray-600 dark:text-gray-300 active:bg-gray-100 dark:active:bg-white/[0.06] disabled:opacity-30 disabled:active:bg-transparent transition-colors"
+        className="w-11 h-8 rounded-full grid place-items-center text-gray-600 dark:text-gray-300 active:bg-gray-100 dark:active:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 disabled:opacity-30 disabled:active:bg-transparent transition-colors"
       >
         <ChevronLeft size={18} />
       </button>
       <button
+        type="button"
         onClick={onForward}
         disabled={!canForward}
         aria-label="Forward"
-        className="w-8 h-8 rounded-full grid place-items-center text-gray-600 dark:text-gray-300 active:bg-gray-100 dark:active:bg-white/[0.06] disabled:opacity-30 disabled:active:bg-transparent transition-colors"
+        className="w-11 h-8 rounded-full grid place-items-center text-gray-600 dark:text-gray-300 active:bg-gray-100 dark:active:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 disabled:opacity-30 disabled:active:bg-transparent transition-colors"
       >
         <ChevronRight size={18} />
       </button>

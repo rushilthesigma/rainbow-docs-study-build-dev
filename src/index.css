@@ -104,6 +104,15 @@ body {
   --web-search-accent-hover: oklch(0.623 0.214 259.815 / 0.12);
   --web-search-accent-ring: oklch(0.707 0.165 254.624 / 0.50);
   --web-search-accent-glow: oklch(0.623 0.214 259.815 / 0.36);
+
+  --refine-accent: oklch(0.623 0.214 160);
+  --refine-accent-text: oklch(0.809 0.105 151.998);
+  --refine-accent-light: oklch(0.809 0.105 151.998);
+  --refine-accent-dark: oklch(0.379 0.146 165.707);
+  --refine-accent-soft: oklch(0.623 0.214 160 / 0.20);
+  --refine-accent-hover: oklch(0.623 0.214 160 / 0.12);
+  --refine-accent-ring: oklch(0.707 0.165 154.809 / 0.50);
+  --refine-accent-glow: oklch(0.623 0.214 160 / 0.36);
 }
 
 .tool-accent-button {

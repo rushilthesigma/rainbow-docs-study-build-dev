@@ -32,10 +32,13 @@ export const STUDY_MODEL_CREDITS = {
   'flash-lite': 1,
   'deepseek-flash': 1,
   'grok': 1,
+  'gpt-5.6-luna': 1,
   'flash': 2,
+  'gpt-5.6-terra': 4,
   'gpt-5.4-mini': 5,
   'deepseek-pro': 7,
   'haiku': 10,
+  'gpt-5.6-sol': 15,
   'gemini-pro': 20,
   'sonnet': 35,
   'gpt-5.4': 40,
@@ -56,7 +59,7 @@ export function studyModelEatsCreditsFast(key) {
 // strongest light model first. Respects per-account visibility and never
 // suggests the model they're already on.
 export const CREDIT_LIGHT_CEILING = 4;
-const CHEAP_MODEL_PREFERENCE = ['grok', 'flash', 'flash-lite', 'deepseek-flash'];
+const CHEAP_MODEL_PREFERENCE = ['gpt-5.6-terra', 'grok', 'flash', 'gpt-5.6-luna', 'flash-lite', 'deepseek-flash'];
 export function recommendedCheapModel(email, excludeKey) {
   const cheap = visibleStudyModels(email).filter(
     (m) => studyModelCredits(m.key) <= CREDIT_LIGHT_CEILING && m.key !== excludeKey
@@ -74,6 +77,9 @@ export const STUDY_MODELS = [
   { key: 'flash-lite',     label: 'Flash Lite',      provider: 'Gemini',   blurb: 'Fastest · everyday study' },
   { key: 'gpt-5.4',        label: 'GPT-5.4',         provider: 'OpenAI',   blurb: 'Versatile + capable' },
   { key: 'gpt-5.4-mini',   label: 'GPT-5.4 mini',    provider: 'OpenAI',   blurb: 'Fast + capable' },
+  { key: 'gpt-5.6-sol',    label: 'GPT-5.6 Sol',     provider: 'OpenAI',   blurb: 'OpenAI flagship' },
+  { key: 'gpt-5.6-terra',  label: 'GPT-5.6 Terra',   provider: 'OpenAI',   blurb: 'Balanced everyday work' },
+  { key: 'gpt-5.6-luna',   label: 'GPT-5.6 Luna',    provider: 'OpenAI',   blurb: 'Fast + affordable' },
   { key: 'deepseek-flash', label: 'DeepSeek V4',     provider: 'DeepSeek', blurb: 'Fast + free' },
   { key: 'deepseek-pro',   label: 'DeepSeek V4 Pro', provider: 'DeepSeek', blurb: 'Step-by-step reasoning' },
   { key: 'grok',           label: 'Grok 4.3',        provider: 'xAI',      blurb: 'Frontier reasoning' },

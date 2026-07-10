@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
-import { Send, Globe, Paperclip, X, FileText, Loader2, Upload, Brain, PenLine, Calculator } from 'lucide-react';
+import { Send, Globe, Paperclip, X, FileText, Loader2, Upload, Brain, PenLine, Calculator, Wand2 } from 'lucide-react';
 import { getToken } from '../../api/client';
 import { InlineProgress } from '../shared/ProgressBar';
 import DictationButton from '../study/voice/DictationButton';
@@ -41,6 +41,7 @@ const TOOL_ACCENTS = {
   voice: toolAccentStyle('voice'),
   humanize: toolAccentStyle('humanize'),
   webSearch: toolAccentStyle('web-search'),
+  refine: toolAccentStyle('refine'),
 };
 
 // When `sourceMode` + `onToggleSource` are passed, a small "Source mode"
@@ -62,6 +63,13 @@ const ChatInput = forwardRef(function ChatInput({
   // humanize:true and the server swaps in a natural prose system prompt.
   humanizeMode = false,
   onToggleHumanize,
+  // Prompt refine (Study Mode). When onRefine is passed, a wand button appears
+  // with two actions: "Refine draft" rewrites the current draft in place (with
+  // Undo), and "Auto-refine before sending" is a mode where every send routes
+  // through the rewrite first. onRefine(draft) resolves to {refined, note}.
+  onRefine = null,
+  autoRefine = false,
+  onToggleAutoRefine,
   // Thinking toggle (Study Mode). showThinking renders the Brain button;
   // thinkingLocked = always-on (Pro), so the button is shown active+disabled.
   showThinking = false,
@@ -93,9 +101,27 @@ const ChatInput = forwardRef(function ChatInput({
   // outgoing message as a fenced quote block.
   const [docs, setDocs] = useState([]);
   const [dragOver, setDragOver] = useState(false);
+  // Prompt refine state. `refining` blocks send while the AI rewrite is in
+  // flight; `refineUndo` keeps the pre-refine draft so the chip can restore it.
+  const [refining, setRefining] = useState(false);
+  const [refineMenuOpen, setRefineMenuOpen] = useState(false);
+  const [refineUndo, setRefineUndo] = useState(null); // { original, note }
+  const [refineError, setRefineError] = useState('');
+  const refineBtnRef = useRef(null);
+  const refinePopRef = useRef(null);
   const inputRef = useRef(null);
   const fileRef = useRef(null);
   const dragDepth = useRef(0);
+
+  useEffect(() => {
+    if (!refineMenuOpen) return;
+    function onDown(e) {
+      if (refinePopRef.current?.contains(e.target) || refineBtnRef.current?.contains(e.target)) return;
+      setRefineMenuOpen(false);
+    }
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [refineMenuOpen]);
 
   // Expose handleFiles so parent containers can programmatically add files
   // (e.g. when a PDF is dropped on the messages area above this form).
@@ -226,24 +252,75 @@ const ChatInput = forwardRef(function ChatInput({
     if (files?.length) await handleFiles(files);
   }
 
-  function doSend(textOverride, opts = {}) {
+  async function doSend(textOverride, opts = {}) {
     const trimmed = (textOverride ?? text).trim();
     const stillExtracting = docs.some(d => d.status === 'extracting');
-    if (stillExtracting || disabled) return;
+    if (stillExtracting || disabled || refining) return;
     if (!trimmed && !images.length && !docs.some(d => d.status === 'ready')) return;
 
     const readyDocs = docs.filter(d => d.status === 'ready' && d.text);
-    let composed = trimmed;
-    if (readyDocs.length) {
-      const blocks = readyDocs.map(d => `--- FILE: ${d.name} ---\n${d.text}`).join('\n\n');
-      composed = `${blocks}\n\n${trimmed || '(see attached file)'}`.trim();
-    }
+    const sentImages = images;
 
-    onSend(composed, images, opts);
+    // Clear the composer up front: with auto-refine the send waits on a short
+    // AI rewrite, and anything typed during that wait must not be clobbered
+    // by a late setText('').
     setText('');
     setImages([]);
     setDocs([]);
+    setRefineUndo(null);
+    setRefineError('');
     if (inputRef.current) inputRef.current.style.height = 'auto';
+
+    let promptText = trimmed;
+    let sendOpts = opts;
+    if (autoRefine && typeof onRefine === 'function' && trimmed) {
+      setRefining(true);
+      try {
+        const r = await onRefine(trimmed);
+        const refined = typeof r?.refined === 'string' ? r.refined.trim() : '';
+        if (refined && refined !== trimmed) {
+          promptText = refined;
+          sendOpts = { ...opts, refined: { original: trimmed, note: r?.note || '' } };
+        }
+      } catch {
+        // Refine is best-effort: on any failure the original draft is sent.
+      }
+      setRefining(false);
+    }
+
+    let composed = promptText;
+    if (readyDocs.length) {
+      const blocks = readyDocs.map(d => `--- FILE: ${d.name} ---\n${d.text}`).join('\n\n');
+      composed = `${blocks}\n\n${promptText || '(see attached file)'}`.trim();
+    }
+
+    onSend(composed, sentImages, sendOpts);
+  }
+
+  // One-shot refine: rewrite the current draft in place, keeping the original
+  // around for Undo. Auto-refine instead rewrites at send time (see doSend).
+  async function refineDraftNow() {
+    const t = text.trim();
+    if (!t || refining || disabled || typeof onRefine !== 'function') return;
+    setRefineMenuOpen(false);
+    setRefineError('');
+    setRefining(true);
+    try {
+      const r = await onRefine(t);
+      const refined = typeof r?.refined === 'string' ? r.refined.trim() : '';
+      if (refined && refined !== t) {
+        setRefineUndo({ original: t, note: r?.note || '' });
+        setText(refined);
+        requestAnimationFrame(() => { inputRef.current?.focus(); growTextarea(); });
+      } else if (refined) {
+        setRefineUndo({ original: t, note: 'Already clear, no changes needed' });
+      } else {
+        setRefineError('Refine is unavailable right now');
+      }
+    } catch (e) {
+      setRefineError(e?.message || 'Refine is unavailable right now');
+    }
+    setRefining(false);
   }
 
   function handleSubmit(e) {
@@ -312,7 +389,10 @@ const ChatInput = forwardRef(function ChatInput({
     requestAnimationFrame(growTextarea);
   }
 
-  const SEND_TRIGGER = /\bsend\s+send\s*$/i;
+  // Tolerant of how speech recognition transcribes "send send" ("sent send",
+  // "send, send", trailing period). Must match DictationButton's copy, which
+  // handles the live-transcript path; this one covers the final transcript.
+  const SEND_TRIGGER = /\b(?:send|sent)[\s,.!]+(?:send|sent)[\s,.!?]*$/i;
 
   function handleDictationFinal(finalText) {
     const base = dictBaseRef.current;
@@ -335,25 +415,29 @@ const ChatInput = forwardRef(function ChatInput({
 
   const stillExtracting = docs.some(d => d.status === 'extracting');
   const readyDocs = docs.filter(d => d.status === 'ready');
-  const canSend = !disabled && !stillExtracting && (text.trim().length > 0 || images.length > 0 || readyDocs.length > 0);
+  const canSend = !disabled && !stillExtracting && !refining && (text.trim().length > 0 || images.length > 0 || readyDocs.length > 0);
   const activeComposerAccent = dictationActive
     ? TOOL_ACCENTS.voice
     : humanizeMode
       ? TOOL_ACCENTS.humanize
       : sourceMode
         ? TOOL_ACCENTS.webSearch
-        : canvasOpen
-          ? TOOL_ACCENTS.canvas
-          : undefined;
+        : autoRefine
+          ? TOOL_ACCENTS.refine
+          : canvasOpen
+            ? TOOL_ACCENTS.canvas
+            : undefined;
   const sendAccent = dictationActive
     ? TOOL_ACCENTS.voice
     : humanizeMode
       ? TOOL_ACCENTS.humanize
       : sourceMode
         ? TOOL_ACCENTS.webSearch
-        : canvasOpen
-          ? TOOL_ACCENTS.canvas
-          : undefined;
+        : autoRefine
+          ? TOOL_ACCENTS.refine
+          : canvasOpen
+            ? TOOL_ACCENTS.canvas
+            : undefined;
 
   // Composer redesign - DELIBERATELY not the ChatGPT rounded-pill input.
   // Layout: a card-style composer with a top "intent" rail (paperclip,
@@ -390,6 +474,41 @@ const ChatInput = forwardRef(function ChatInput({
         </div>
       )}
 
+      {/* Refine menu - anchored to the form, not the composer card, because
+          the card has overflow-hidden and would clip a popover. */}
+      {refineMenuOpen && (
+        <div
+          ref={refinePopRef}
+          style={TOOL_ACCENTS.refine}
+          className="absolute left-4 bottom-full mb-1 z-30 w-72 rounded-xl border border-white/[0.10] bg-white dark:bg-[#16181d] shadow-xl p-1"
+        >
+          <button
+            type="button"
+            onClick={refineDraftNow}
+            disabled={!text.trim() || refining}
+            className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/[0.06] disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
+          >
+            <span className="block text-[12px] font-semibold text-gray-800 dark:text-gray-200">Refine draft</span>
+            <span className="block text-[10.5px] text-gray-400 dark:text-gray-500 mt-0.5">
+              {text.trim() ? 'Rewrite what you typed into a stronger prompt. You can undo.' : 'Type a message first, then refine it.'}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => { onToggleAutoRefine?.(!autoRefine); setRefineMenuOpen(false); }}
+            className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/[0.06] transition-colors flex items-start gap-2"
+          >
+            <span className="flex-1 min-w-0">
+              <span className="block text-[12px] font-semibold text-gray-800 dark:text-gray-200">Auto-refine before sending</span>
+              <span className="block text-[10.5px] text-gray-400 dark:text-gray-500 mt-0.5">Every message you send gets refined on its way to the AI.</span>
+            </span>
+            <span className={`mt-0.5 w-7 h-4 rounded-full relative transition-colors flex-shrink-0 ${autoRefine ? 'bg-[var(--refine-accent)]' : 'bg-gray-300 dark:bg-white/[0.14]'}`}>
+              <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${autoRefine ? 'left-3.5' : 'left-0.5'}`} />
+            </span>
+          </button>
+        </div>
+      )}
+
       {/* Composer card */}
       <div
         data-tour="chat-input"
@@ -401,9 +520,11 @@ const ChatInput = forwardRef(function ChatInput({
               ? 'ring-2 tool-accent-mode'
               : sourceMode
                 ? 'ring-2 tool-accent-mode'
-                : canvasOpen
+                : autoRefine
                   ? 'ring-2 tool-accent-mode'
-                  : 'ring-1 ring-white/20 dark:ring-transparent focus-within:ring-2 focus-within:ring-blue-400/80 dark:focus-within:ring-blue-400/85'
+                  : canvasOpen
+                    ? 'ring-2 tool-accent-mode'
+                    : 'ring-1 ring-white/20 dark:ring-transparent focus-within:ring-2 focus-within:ring-blue-400/80 dark:focus-within:ring-blue-400/85'
         }`}
       >
         {/* TOP RAIL - tools + mode toggle + char count */}
@@ -463,6 +584,23 @@ const ChatInput = forwardRef(function ChatInput({
               <Brain size={13} />
             </button>
           )}
+          {typeof onRefine === 'function' && (
+            <button
+              ref={refineBtnRef}
+              type="button"
+              onClick={() => setRefineMenuOpen(o => !o)}
+              disabled={disabled}
+              title={autoRefine
+                ? 'Auto-refine is on: drafts are rewritten into stronger prompts before sending'
+                : 'Refine prompts with AI: rewrite your draft into a stronger prompt'}
+              style={TOOL_ACCENTS.refine}
+              className={`p-1.5 rounded-lg transition-colors tool-accent-button disabled:opacity-40 ${
+                autoRefine || refining ? 'is-active' : 'text-gray-400 dark:text-blue-200/55'
+              }`}
+            >
+              <Wand2 size={13} />
+            </button>
+          )}
           {composerPrefix}
           {canvasOpen && (
             <div
@@ -493,6 +631,44 @@ const ChatInput = forwardRef(function ChatInput({
             </span>
           )}
         </div>
+
+        {/* REFINE STRIP - in-flight indicator, undo chip, or error. */}
+        {(refining || refineUndo || refineError) && (
+          <div className="flex items-center gap-2 px-3 pt-2" style={TOOL_ACCENTS.refine}>
+            {refining ? (
+              <>
+                <InlineProgress active />
+                <span className="text-[11px] text-gray-500 dark:text-gray-400">Refining your prompt…</span>
+              </>
+            ) : refineError ? (
+              <>
+                <span className="text-[11px] text-rose-500 dark:text-rose-400 truncate">{refineError}</span>
+                <button type="button" onClick={() => setRefineError('')} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 flex-shrink-0" aria-label="Dismiss">
+                  <X size={11} />
+                </button>
+              </>
+            ) : (
+              <>
+                <Wand2 size={11} className="flex-shrink-0" style={{ color: 'var(--refine-accent-text)' }} />
+                <span className="text-[11px] text-gray-500 dark:text-gray-400 truncate">{refineUndo.note || 'Prompt refined'}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setText(refineUndo.original);
+                    setRefineUndo(null);
+                    requestAnimationFrame(() => { inputRef.current?.focus(); growTextarea(); });
+                  }}
+                  className="text-[11px] font-semibold text-gray-600 dark:text-gray-300 hover:underline flex-shrink-0"
+                >
+                  Undo
+                </button>
+                <button type="button" onClick={() => setRefineUndo(null)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 flex-shrink-0" aria-label="Dismiss">
+                  <X size={11} />
+                </button>
+              </>
+            )}
+          </div>
+        )}
 
         {/* IMAGE STRIP */}
         {images.length > 0 && (
@@ -560,7 +736,7 @@ const ChatInput = forwardRef(function ChatInput({
             onChange={e => setText(e.target.value)}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            placeholder={humanizeMode ? 'Paste a prompt or draft and I\'ll make it read naturally…' : sourceMode ? 'Ask anything - I\'ll search and cite…' : placeholder}
+            placeholder={humanizeMode ? 'Paste a prompt or draft and I\'ll make it read naturally…' : sourceMode ? 'Ask anything - I\'ll search and cite…' : autoRefine ? 'Type it rough - your prompt gets refined before sending…' : placeholder}
             disabled={disabled}
             rows={1}
             className="flex-1 resize-none px-3 py-2.5 bg-transparent text-[14px] text-gray-900 dark:text-blue-50 placeholder-gray-400 dark:placeholder-blue-200/35 focus:outline-none max-h-40 overflow-y-auto"

@@ -17,8 +17,9 @@ export const FALLBACK_MULTI_MODEL_DISCOUNT = 0.5;
 // Fallback per-model credit costs (mirror of server MODEL_CREDIT_COST), used
 // when the server doesn't return modelCosts.
 export const FALLBACK_MODEL_COSTS = {
-  'flash-lite': 1, 'deepseek-flash': 1, 'grok': 1, 'flash': 2, 'gpt-5.4-mini': 5,
-  'deepseek-pro': 7, 'haiku': 10, 'gemini-pro': 20, 'sonnet': 35, 'gpt-5.4': 40,
+  'flash-lite': 1, 'deepseek-flash': 1, 'grok': 1, 'gpt-5.6-luna': 1, 'flash': 2,
+  'gpt-5.6-terra': 4, 'gpt-5.4-mini': 5, 'deepseek-pro': 7, 'haiku': 10,
+  'gpt-5.6-sol': 15, 'gemini-pro': 20, 'sonnet': 35, 'gpt-5.4': 40,
 };
 
 // Flat per-feature credit costs (mirror of server featureCosts). Note AI
