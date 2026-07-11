@@ -11,7 +11,7 @@ import MobileStudy from './MobileStudy';
 import MobileQuizBowl from './MobileQuizBowl';
 import MobileDebate from './MobileDebate';
 import MobileApps from './MobileApps';
-import { MobileAdmin, MobileMathTutor, MobileQBpedia, MobileWidgets } from './MobileFeatureApps';
+import { MobileAdmin, MobileQBpedia } from './MobileFeatureApps';
 import { zIndexStyle } from '../../styles/tokens';
 // Page registry for the mobile shell.
 //   - `hideHeader`   → suppresses MobileHeader (page renders its own).
@@ -23,8 +23,8 @@ import { zIndexStyle } from '../../styles/tokens';
 //     `flex flex-col` container directly so the page's `flex-1`
 //     children resolve to the right height.
 //
-// `study` and `quizbowl` are reachable from MobileHome tiles, not
-// from the bottom tab bar. The "More" tab + sheet were dropped per
+// `study`, `quizbowl`, and `qbpedia` are reachable from MobileHome tiles,
+// not from the bottom tab bar. The "More" tab + sheet were dropped per
 // product direction.
 const PAGE_MAP = {
   home:        { title: 'RushilAI',  component: MobileHome,       isHome: true,  hideHeader: false },
@@ -34,12 +34,10 @@ const PAGE_MAP = {
   settings:    { title: 'Settings',  component: MobileSettings,                  hideHeader: true  },
   // Reachable via Home tiles only:
   study:       { title: 'Study',        component: MobileStudy,        hideHeader: true, manageLayout: true },
-  quizbowl:    { title: 'Quiz Bowl',    component: MobileQuizBowl,      hideHeader: true },
+  quizbowl:    { title: 'Quiz Bowl',    component: MobileQuizBowl,      hideHeader: true, manageLayout: true },
   apps:        { title: 'Apps',         component: MobileApps,          hideHeader: true },
-  mathtutor:   { title: 'Math Tutor',   component: MobileMathTutor,     hideHeader: true, manageLayout: true },
   debate:      { title: 'Debate',       component: MobileDebate,        hideHeader: true, manageLayout: true },
   qbpedia:     { title: 'QBpedia',      component: MobileQBpedia,       hideHeader: true, manageLayout: true },
-  widgets:     { title: 'Widgets',      component: MobileWidgets,       hideHeader: true, manageLayout: true },
   admin:       { title: 'Admin',        component: MobileAdmin,         hideHeader: true, manageLayout: true },
 };
 

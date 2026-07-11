@@ -1,8 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { useWindowManager } from '../../context/WindowManagerContext';
-import { Zap, Trophy, X, Check, AlertCircle, ChevronRight, Users, Swords, ArrowRight } from 'lucide-react';
+import { isQuizBowlAnswerAccepted } from '../../lib/qbAnswerChecker';
+import { Zap, Trophy, X, Check, AlertCircle, ChevronRight, Users, Swords, ArrowRight, Mic } from 'lucide-react';
 import Button from '../shared/Button';
 import { buzzToQuality } from '../../utils/sm2';
+import { useQbVoicePref, useSpokenReveal, QbVoiceToggle, speakLine, spokenAnswer } from '../shared/qbVoice';
+import { speechSynthesisSupported } from '../../hooks/useSpeechSynthesis';
+import { useSpeechRecognition, speechRecognitionSupported } from '../../hooks/useSpeechRecognition';
 
 // ── All possible AI bots ──────────────────────────────────────────────────
 const ALL_BOTS = [
@@ -31,7 +35,7 @@ function BotCard({ bot, buzzedAt, correct, isThinking, score, maxScore, displayN
   const status = buzzedAt != null ? (correct ? 'correct' : 'neg') : isThinking ? 'thinking' : 'waiting';
   const pct = maxScore > 0 ? Math.min(100, ((score || 0) / maxScore) * 100) : 0;
   return (
-    <div className={`rounded-xl border p-2.5 ${c.bg} ${c.border}`}>
+    <div className={`rounded-lg border p-2.5 ${c.bg} ${c.border}`}>
       <div className="flex items-center gap-1.5 mb-1">
         <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
           status === 'correct' ? 'bg-emerald-400' :
@@ -102,17 +106,8 @@ function scoreForBuzz({ correct, ratio, format }) {
 }
 
 // ── Answer checker ────────────────────────────────────────────────────────
-function normalize(str) {
-  return str.toLowerCase().replace(/^(the|a|an)\s+/i, '').replace(/[^a-z0-9\s]/g, '').trim();
-}
-function checkAnswer(userAns, correctAns) {
-  const u = normalize(userAns), c = normalize(correctAns);
-  if (!u || !c) return false;
-  if (u === c) return true;
-  if (c.includes(u) && u.length >= c.length * 0.5) return true;
-  if (u.includes(c)) return true;
-  const cWords = c.split(/\s+/), uWords = u.split(/\s+/);
-  return cWords.filter(w => uWords.includes(w)).length / cWords.length >= 0.5;
+function checkAnswer(userAns, answerline) {
+  return isQuizBowlAnswerAccepted(answerline, userAns);
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────
@@ -197,6 +192,101 @@ export default function TrialSession({
   const botTotal   = botStates.reduce((s, b) => s + (b.score || 0), 0);
   const userPct    = maxScore > 0 ? Math.min(100, (userScore / maxScore) * 100) : 0;
 
+  // ── Read-aloud (shared Quiz Bowl audio option) ────────────────────────
+  // TTS reads the tossup and drives the on-screen reveal so buzz points
+  // stay honest; bots buzz at word thresholds instead of wall-clock times.
+  // After a buzz the mic takes the answer, same as solo play.
+  const [voiceMode, toggleVoicePref] = useQbVoicePref();
+  const voiceOn = voiceMode && speechSynthesisSupported;
+  const voiceOnRef = useRef(voiceOn); voiceOnRef.current = voiceOn;
+  const botPlansRef = useRef([]);
+  const verdictSpokenRef = useRef(false);
+  const [micError, setMicError] = useState('');
+
+  const botGotIt = !!(buzzedBy && buzzedBy !== 'user' && botStates.find(s => s.id === buzzedBy)?.correct === true);
+  const spoken = useSpokenReveal(
+    q?.question || '',
+    voiceOn && !!q && (phase === 'reading' || phase === 'buzzed') && !botGotIt && !matchWinner,
+    phase === 'buzzed'
+  );
+  useEffect(() => {
+    if (!voiceOnRef.current) return;
+    setRevealedCount(prev => Math.max(prev, Math.min(spoken.wordIndex + 1, words.current.length)));
+  }, [spoken.wordIndex]); // eslint-disable-line
+
+  // Word-threshold bot trigger for read-aloud mode: fires each bot the
+  // moment the spoken reveal crosses its buzz point. `triggered` dedupes
+  // against the wall-clock schedule if the mode flips mid-question.
+  useEffect(() => {
+    if (!voiceOnRef.current) return;
+    const total = words.current.length;
+    if (!total) return;
+    for (const plan of botPlansRef.current) {
+      if (!plan.triggered && revealedCount >= Math.max(1, Math.round(plan.ratio * total))) triggerBot(plan);
+    }
+  }, [revealedCount]); // eslint-disable-line
+
+  // Answer leg: the same push-to-talk dictation shape solo play uses.
+  const mic = useSpeechRecognition({
+    continuous: true,
+    interimResults: true,
+    silenceMs: 0,
+    onResult: (t) => setAnswer(t),
+    onFinal: (t) => { const text = t.trim(); if (text) setAnswer(text); },
+    onError: (err) => {
+      if (!err) return;
+      if (err === 'network' && navigator.onLine !== false) {
+        setMicError("Speech service didn't respond. Retry the mic or type your answer.");
+        return;
+      }
+      setMicError('Dictation stopped. Retry the microphone or type your answer.');
+    },
+  });
+  const micRef = useRef(mic); micRef.current = mic;
+
+  async function startDictation() {
+    setMicError('');
+    try {
+      const stream = await navigator.mediaDevices?.getUserMedia({ audio: true });
+      stream?.getTracks().forEach(t => t.stop());
+    } catch {
+      setMicError('Microphone access is blocked. Allow it in your browser settings, then retry.');
+      return;
+    }
+    micRef.current.start();
+  }
+
+  // Keep recognition alive only while the user is actually answering.
+  useEffect(() => {
+    if (!(voiceOn && phase === 'buzzed' && buzzedBy === 'user')) micRef.current.abort();
+  }, [voiceOn, phase, buzzedBy]);
+
+  // Read the verdict back once per question, like solo play does.
+  useEffect(() => {
+    if (!voiceOnRef.current || verdictSpokenRef.current || !q) return;
+    if (phase === 'result') {
+      verdictSpokenRef.current = true;
+      speakLine(answerResult?.correct ? 'Correct.' : `The answer was ${spokenAnswer(q.answer)}.`);
+    } else if (botGotIt) {
+      verdictSpokenRef.current = true;
+      speakLine(`The answer was ${spokenAnswer(q.answer)}.`);
+    }
+  }, [phase, botGotIt]); // eslint-disable-line
+
+  // Mid-question toggle only swaps the reveal driver; bots already armed on
+  // wall-clock timers keep their schedule (`triggered` prevents doubles).
+  function handleVoiceToggle() {
+    const next = !voiceMode && speechSynthesisSupported;
+    toggleVoicePref();
+    voiceOnRef.current = next;
+    if (phaseRef.current !== 'reading') return;
+    if (next) {
+      if (revealTimer.current) clearInterval(revealTimer.current);
+    } else if (revealedCntRef.current < words.current.length) {
+      startReveal();
+    }
+  }
+
   // ── Question setup ────────────────────────────────────────────────────
   useEffect(() => {
     if (!q) return;
@@ -217,7 +307,15 @@ export default function TrialSession({
       return { id: b.id, buzzedAt: null, correct: null, isThinking: false, score: ex?.score || 0 };
     }));
     clearAllTimers();
-    startReveal();
+    verdictSpokenRef.current = false;
+    setMicError('');
+    // Buzz plans are fixed per question (jitter rolled once) so the timed
+    // schedule and the read-aloud threshold watcher agree on buzz points.
+    botPlansRef.current = ACTIVE_BOTS.map((bot, idx) => {
+      const jitter = (Math.random() - 0.5) * 0.2;
+      return { bot, idx, ratio: Math.max(0.1, Math.min(0.95, bot.buzzAt + jitter)), triggered: false };
+    });
+    if (!voiceOnRef.current) startReveal();
     scheduleBots();
   }, [qIdx]); // eslint-disable-line
 
@@ -230,6 +328,7 @@ export default function TrialSession({
   }
 
   function startReveal() {
+    if (voiceOnRef.current) return; // read-aloud drives the reveal; pause/resume handles freezes
     if (revealTimer.current) clearInterval(revealTimer.current);
     revealTimer.current = setInterval(() => {
       setRevealedCount(c => {
@@ -241,88 +340,94 @@ export default function TrialSession({
   }
 
   function scheduleBots() {
+    if (voiceOnRef.current) return; // read-aloud: the reveal-threshold watcher triggers bots
     const dur = words.current.length * revealSpeed;
-    ACTIVE_BOTS.forEach((bot, idx) => {
-      const jitter = (Math.random() - 0.5) * 0.2;
-      const ratio  = Math.max(0.1, Math.min(0.95, bot.buzzAt + jitter));
+    for (const plan of botPlansRef.current) {
+      const t = setTimeout(() => triggerBot(plan), dur * plan.ratio);
+      botTimers.current.push(t);
+    }
+  }
 
-      // Stage 1 - mark bot as "thinking" at the buzz point in the question
-      const t = setTimeout(() => {
-        // Race guard: if anyone (user or another bot) has already
-        // claimed the buzz on this question, this bot must not score
-        // or even show a thinking indicator.
-        if (claimedRef.current != null) return;
-        setBotStates(prev => {
-          if (prev[idx]?.buzzedAt != null) return prev;
-          const u = [...prev];
-          u[idx] = { ...u[idx], isThinking: true };
+  // Stage 1+2 of a bot buzz, shared by the wall-clock schedule (timed reveal)
+  // and the word-threshold watcher (read-aloud) so bots behave identically in
+  // both modes.
+  function triggerBot(plan) {
+    if (plan.triggered) return;
+    plan.triggered = true;
+    const { bot, idx, ratio } = plan;
+
+    // Stage 1 - mark bot as "thinking" at the buzz point in the question.
+    // Race guard: if anyone (user or another bot) has already
+    // claimed the buzz on this question, this bot must not score
+    // or even show a thinking indicator.
+    if (claimedRef.current != null) return;
+    setBotStates(prev => {
+      if (prev[idx]?.buzzedAt != null) return prev;
+      const u = [...prev];
+      u[idx] = { ...u[idx], isThinking: true };
+      return u;
+    });
+
+    // Stage 2 - after processing delay, atomically claim the buzz
+    // and award points. claimedRef is a synchronous lock: only the
+    // first stage-2 callback to read it as null wins; concurrent
+    // ones abort. This is what makes "one buzz = one scorer" hold
+    // even when several bots' timers fire in the same tick.
+    const tt = setTimeout(() => {
+      if (claimedRef.current != null) {
+        // Someone else already won - clear our thinking flag so the
+        // UI doesn't get stuck showing this bot mid-thought.
+        setBotStates(s => {
+          const u = [...s];
+          u[idx] = { ...u[idx], isThinking: false };
           return u;
         });
+        return;
+      }
+      claimedRef.current = bot.id;
 
-        // Stage 2 - after processing delay, atomically claim the buzz
-        // and award points. claimedRef is a synchronous lock: only the
-        // first stage-2 callback to read it as null wins; concurrent
-        // ones abort. This is what makes "one buzz = one scorer" hold
-        // even when several bots' timers fire in the same tick.
-        const tt = setTimeout(() => {
-          if (claimedRef.current != null) {
-            // Someone else already won - clear our thinking flag so the
-            // UI doesn't get stuck showing this bot mid-thought.
-            setBotStates(s => {
-              const u = [...s];
-              u[idx] = { ...u[idx], isThinking: false };
-              return u;
-            });
-            return;
-          }
-          claimedRef.current = bot.id;
+      const correct = Math.random() < bot.accuracy;
+      // Bots use the same scoring format as the player so the
+      // scoreboard stays consistent. On a wrong bot buzz we award 0
+      // rather than a neg - bots aren't penalized to keep the game
+      // flowing.
+      const pts     = correct ? scoreForBuzz({ correct: true, ratio, format: FORMAT }) : 0;
 
-          const correct = Math.random() < bot.accuracy;
-          // Bots use the same scoring format as the player so the
-          // scoreboard stays consistent. On a wrong bot buzz we award 0
-          // rather than a neg - bots aren't penalized to keep the game
-          // flowing.
-          const pts     = correct ? scoreForBuzz({ correct: true, ratio, format: FORMAT }) : 0;
+      currentBuzzesRef.current.push({
+        userId: bot.id,
+        name: botNames?.[bot.id] || bot.name,
+        isBot: true,
+        buzzWord: Math.min(Math.max(0, words.current.length - 1), Math.floor(ratio * words.current.length)),
+        totalWords: words.current.length,
+        answer: '',
+        correct,
+        points: pts,
+      });
 
-          currentBuzzesRef.current.push({
-            userId: bot.id,
-            name: botNames?.[bot.id] || bot.name,
-            isBot: true,
-            buzzWord: Math.min(Math.max(0, words.current.length - 1), Math.floor(ratio * words.current.length)),
-            totalWords: words.current.length,
-            answer: '',
-            correct,
-            points: pts,
-          });
+      // Freeze the question reveal the moment a bot locks in a correct answer
+      if (correct && revealTimer.current) {
+        clearInterval(revealTimer.current);
+        revealTimer.current = null;
+      }
 
-          // Freeze the question reveal the moment a bot locks in a correct answer
-          if (correct && revealTimer.current) {
-            clearInterval(revealTimer.current);
-            revealTimer.current = null;
-          }
+      // Update bot result first
+      setBotStates(s => {
+        const u = [...s];
+        u[idx] = { ...u[idx], isThinking: false, buzzedAt: ratio, correct,
+                    score: (s[idx]?.score || 0) + pts };
+        return u;
+      });
 
-          // Update bot result first
-          setBotStates(s => {
-            const u = [...s];
-            u[idx] = { ...u[idx], isThinking: false, buzzedAt: ratio, correct,
-                        score: (s[idx]?.score || 0) + pts };
-            return u;
-          });
+      // Reflect the latest valid claimer (claimedRef above already
+      // guarantees only one bot reaches here per claim). Must NOT be
+      // `prev ?? bot.id`: when a second bot negged inside the first
+      // bot's 1200ms wrong-notice window, buzzedBy stayed on bot #1,
+      // so the resolution effect never ran for bot #2 and claimedRef
+      // was left stuck on it — the user's buzz then silently no-op'd.
+      setBuzzedBy(bot.id);
+    }, bot.thinkMs);
 
-          // Reflect the latest valid claimer (claimedRef above already
-          // guarantees only one bot reaches here per claim). Must NOT be
-          // `prev ?? bot.id`: when a second bot negged inside the first
-          // bot's 1200ms wrong-notice window, buzzedBy stayed on bot #1,
-          // so the resolution effect never ran for bot #2 and claimedRef
-          // was left stuck on it — the user's buzz then silently no-op'd.
-          setBuzzedBy(bot.id);
-        }, bot.thinkMs);
-
-        botTimers.current.push(tt);
-      }, dur * ratio);
-
-      botTimers.current.push(t);
-    });
+    botTimers.current.push(tt);
   }
 
   // ── Bot buzz resolution ───────────────────────────────────────────────
@@ -394,13 +499,19 @@ export default function TrialSession({
     setBuzzRatio(revealedCntRef.current / Math.max(1, words.current.length));
     setBuzzedBy('user');
     setPhase('buzzed');
+    // Read-aloud: speech pauses via the hook's `paused` prop; the mic takes
+    // the answer, same as solo play.
+    if (voiceOnRef.current && speechRecognitionSupported) startDictation();
   }
 
   submitAnswerRef.current = submitAnswer;
-  function submitAnswer() {
+  // `spoken` can carry a transcript directly when submission happens in the
+  // same tick as a final recognition result.
+  function submitAnswer(spoken) {
     if (phaseRef.current !== 'buzzed') return;
-    const ans      = answerRef.current;
-    const correct  = checkAnswer(ans, q.answer);
+    if (voiceOnRef.current) micRef.current?.stop({ finalizeNow: false });
+    const ans      = typeof spoken === 'string' ? spoken : answerRef.current;
+    const correct  = checkAnswer(ans, q.answerline || q.answer);
     const quality  = buzzToQuality(correct, buzzRatio);
     const xpGained = correct ? Math.round(10 * (1 + combo * 0.25) * (2 - buzzRatio)) : 0;
     const ptsGained= scoreForBuzz({ correct, ratio: buzzRatio, format: FORMAT });
@@ -559,21 +670,19 @@ export default function TrialSession({
   return (
     <div className="flex flex-col h-full min-h-0 bg-transparent">
 
-      {/* Header */}
-      {matchMode ? (
-        <MatchHeader
-          userScore={userScore} botScore={botTotal}
-          botName={botNames?.[ACTIVE_BOTS[0]?.id] || ACTIVE_BOTS[0]?.name || 'AI'}
-          target={MATCH_TARGET}
-        />
-      ) : (
-        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/[0.04] flex-shrink-0">
-          <Zap size={14} className="text-white/50" />
-          <span className="text-[13px] font-bold text-white tabular-nums">Q{qIdx + 1}/{totalQ}</span>
-          <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-white/[0.08] text-white/50">
-            {lobbyMode ? '8P' : 'Lobby'}
+      {/* Header — same recipe as the solo playing view */}
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/[0.04] flex-shrink-0">
+        <Zap size={14} className="text-white/50" />
+        <span className="text-[13px] font-bold text-white tabular-nums">Q{qIdx + 1}/{totalQ}</span>
+        <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-white/[0.08] text-white/50">
+          {matchMode ? '1v1' : lobbyMode ? '8P' : 'Lobby'}
+        </span>
+        <div className="flex-1" />
+        {matchMode ? (
+          <span className="text-[10px] text-white/50">
+            first to {MATCH_TARGET} · {botNames?.[ACTIVE_BOTS[0]?.id] || ACTIVE_BOTS[0]?.name || 'AI'} {botTotal}
           </span>
-          <div className="flex-1" />
+        ) : (
           <div className="flex items-center gap-1.5">
             <Zap size={12} className="text-yellow-400/70" />
             <span className="text-[12px] font-bold tabular-nums text-yellow-400/80">{xp}</span>
@@ -581,15 +690,18 @@ export default function TrialSession({
               <span className="text-[10px] bg-yellow-400/15 text-yellow-300 px-1.5 rounded-full font-bold">×{combo}</span>
             )}
           </div>
-          <span className={`text-[12px] font-bold tabular-nums ${userScore > 0 ? 'text-emerald-400' : 'text-white/40'}`}>
-            {userScore}
-          </span>
+        )}
+        <span className={`text-[12px] font-bold tabular-nums ${userScore > 0 ? 'text-emerald-400' : 'text-white/40'}`}>
+          {userScore}
+        </span>
+        <QbVoiceToggle on={voiceMode} onToggle={handleVoiceToggle} withMic />
+        {!matchMode && (
           <button onClick={skipQuestion}
             className="text-[10px] font-medium px-2 py-0.5 rounded-full border border-white/[0.10] text-white/55 hover:text-white/80 hover:bg-white/[0.06]">
             Skip
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
       <div className="flex flex-1 min-h-0">
 
@@ -613,7 +725,7 @@ export default function TrialSession({
 
             {/* Neg feedback banner */}
             {userNegged && phase === 'reading' && (
-              <div className="rounded-xl px-3 py-2 bg-rose-500/[0.08] border border-rose-500/[0.20] flex items-center gap-2">
+              <div className="rounded-lg px-3 py-2 bg-rose-500/[0.08] border border-rose-500/[0.20] flex items-center gap-2">
                 <AlertCircle size={12} className="text-rose-400 flex-shrink-0" />
                 <p className="text-[12px] text-rose-300/80">Wrong · question continues</p>
               </div>
@@ -621,7 +733,7 @@ export default function TrialSession({
 
             {/* Bot buzzed (non-result) */}
             {activeBotBuzz && phase !== 'result' && (
-              <div className="rounded-xl px-3 py-2 bg-white/[0.03] border border-white/[0.07] flex items-center gap-2">
+              <div className="rounded-lg px-3 py-2 bg-white/[0.03] border border-white/[0.07] flex items-center gap-2">
                 <AlertCircle size={12} className="text-amber-400 flex-shrink-0" />
                 <p className="text-[12px] text-white/55">
                   <span className="font-semibold text-white/80">{botNames?.[activeBotBuzz.id] || activeBotBuzz.name}</span>
@@ -639,7 +751,7 @@ export default function TrialSession({
             {phase === 'reading' && !botAnsweredCorrectly && !userNegged && (
               <>
                 <button onClick={handleBuzz} data-tour="qb-buzz"
-                  className="w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white text-[15px] font-bold uppercase tracking-[0.15em] active:scale-[0.98] transition-all">
+                  className="w-full py-4 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[15px] font-bold uppercase tracking-[0.15em] active:scale-[0.98] transition-all">
                   BUZZ
                 </button>
                 <p className="text-[10px] text-white/35 text-center">Space to buzz</p>
@@ -648,7 +760,7 @@ export default function TrialSession({
 
             {/* Opponent got it right - reveal the answer */}
             {phase === 'reading' && botAnsweredCorrectly && (
-              <div className="p-4 rounded-2xl text-center border-2 bg-white/[0.04] border-white/[0.12]">
+              <div className="p-4 rounded-lg text-center border bg-white/[0.04] border-white/[0.12]">
                 <p className="text-[15px] font-bold text-white/70">{q.answer}</p>
                 <p className="text-[11px] text-white/30 mt-1">
                   {(botNames?.[activeBotBuzz.id] || activeBotBuzz.name)} got it
@@ -659,22 +771,47 @@ export default function TrialSession({
             {/* Answer input */}
             {phase === 'buzzed' && buzzedBy === 'user' && (
               <div className="flex gap-2">
-                <input
-                  autoFocus value={answer} onChange={e => setAnswer(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && submitAnswer()}
-                  placeholder="Answer…"
-                  className="flex-1 px-4 py-3 rounded-2xl border border-blue-500/40 bg-white/5 text-[14px] text-white placeholder-white/25 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/25 transition-colors"
-                />
-                <button onClick={submitAnswer} disabled={!answer.trim()}
-                  className="px-5 py-3 rounded-2xl bg-blue-500 hover:bg-blue-400 text-white text-[13px] font-bold disabled:opacity-30 transition-colors">
+                <div className="relative flex-1">
+                  <input
+                    autoFocus value={answer} onChange={e => setAnswer(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && submitAnswer()}
+                    placeholder={voiceOn && mic.listening ? 'Listening… speak your answer' : 'Answer…'}
+                    className={`w-full pl-4 ${voiceOn ? 'pr-10' : 'pr-4'} py-3 rounded-lg border border-blue-500/40 bg-white/[0.05] text-[14px] text-white placeholder-white/25 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/25 transition-colors`}
+                  />
+                  {voiceOn && (
+                    <button
+                      type="button"
+                      onClick={() => mic.listening ? mic.stop() : startDictation()}
+                      aria-label={mic.listening ? 'Stop dictation' : 'Start dictation'}
+                      title={mic.listening ? 'Stop dictation' : 'Start dictation'}
+                      className={`absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md transition-colors ${mic.listening ? 'text-blue-300 bg-blue-500/15' : 'text-white/35 hover:text-blue-300 hover:bg-blue-500/10'}`}
+                    >
+                      <Mic size={14} className={mic.listening ? 'animate-pulse' : ''} />
+                    </button>
+                  )}
+                </div>
+                <button onClick={() => submitAnswer()} disabled={!answer.trim()}
+                  className="px-5 py-3 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[13px] font-bold disabled:opacity-30 transition-colors">
                   <ArrowRight size={16} />
+                </button>
+              </div>
+            )}
+            {phase === 'buzzed' && buzzedBy === 'user' && voiceOn && micError && (
+              <div className="flex items-center justify-center gap-2 text-[10px] text-rose-300/80">
+                <span>{micError}</span>
+                <button
+                  type="button"
+                  onClick={startDictation}
+                  className="inline-flex items-center gap-1 rounded-md border border-rose-400/25 bg-rose-500/10 px-2 py-1 font-semibold text-rose-200 hover:bg-rose-500/15 transition-colors"
+                >
+                  <Mic size={10} /> Retry mic
                 </button>
               </div>
             )}
 
             {/* Waiting while a bot answers */}
             {phase === 'buzzed' && buzzedBy !== 'user' && (
-              <div className="py-3 rounded-xl bg-white/[0.03] text-center text-[12px] text-white/30 border border-white/[0.05]">
+              <div className="py-3 rounded-lg bg-white/[0.03] text-center text-[12px] text-white/30 border border-white/[0.05]">
                 {botNames?.[buzzedBy] || 'AI'} is answering…
               </div>
             )}
@@ -722,7 +859,7 @@ export default function TrialSession({
           </div>
 
           {/* You */}
-          <div className="rounded-xl border border-blue-500/30 bg-blue-500/[0.08] p-2.5">
+          <div className="rounded-lg border border-blue-500/30 bg-blue-500/[0.08] p-2.5">
             <div className="flex items-center gap-1.5 mb-1">
               <span className="w-1.5 h-1.5 rounded-full bg-blue-400 flex-shrink-0" />
               <span className="font-semibold text-[11px] text-blue-300 flex-1">You</span>
@@ -791,7 +928,7 @@ function SessionComplete({ xp, userScore, results, onDone }) {
         {/* Per-question breakdown */}
         <div className="space-y-1.5 mb-5">
           {results.map((r, i) => (
-            <div key={i} className={`rounded-2xl px-3.5 py-2.5 border flex items-start gap-2.5 ${
+            <div key={i} className={`rounded-lg px-3.5 py-2.5 border flex items-start gap-2.5 ${
               r.correct ? 'bg-emerald-500/8 border-emerald-500/20' : 'bg-rose-500/8 border-rose-500/20'
             }`}>
               <div className={`mt-0.5 shrink-0 ${r.correct ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -816,7 +953,7 @@ function SessionComplete({ xp, userScore, results, onDone }) {
         </div>
 
         <button onClick={onDone}
-          className="w-full py-3 rounded-2xl bg-white/[0.09] hover:bg-white/[0.13] text-white/70 text-[13px] font-semibold transition-colors">
+          className="w-full py-3 rounded-lg bg-white/[0.09] hover:bg-white/[0.13] text-white/70 text-[13px] font-semibold transition-colors">
           Done
         </button>
       </div>
@@ -824,33 +961,33 @@ function SessionComplete({ xp, userScore, results, onDone }) {
   );
 }
 
-// QBReader-style result panel. Left-aligned, two rows: one for the
-// student's submission, one for the canonical answer line. Heads up at
-// the top with a verb (✓ Correct / ✗ Incorrect / Answer) and a meta
-// footer (+pts / −pts / "Bot answered correctly"). `correct=null` is
-// the spectator / opponent-got-it case.
-export function AnswerResultPanel({ correct, userAnswer, officialAnswer, meta }) {
+// QBReader-style result panel. Incorrect answers stay intentionally compact:
+// show the verdict and one clear answer reveal, without repeating the user's
+// guess or the scoring footer. `correct=null` is the spectator / opponent-
+// got-it case.
+export function AnswerResultPanel({ correct, officialAnswer, meta }) {
   const tone = correct === true
     ? { ring: 'border-emerald-500/40 bg-emerald-500/10', text: 'text-emerald-300', icon: '✓', label: 'Correct' }
     : correct === false
     ? { ring: 'border-rose-500/40 bg-rose-500/10',       text: 'text-rose-300',    icon: '✗', label: 'Incorrect' }
     : { ring: 'border-white/[0.12] bg-white/[0.04]',     text: 'text-white/70',    icon: '·', label: 'Answer' };
   return (
-    <div className={`p-3.5 rounded-2xl border-2 text-left ${tone.ring}`}>
-      <p className={`text-[12px] font-bold uppercase tracking-[0.14em] ${tone.text} mb-2`}>
+    <div className={`p-3.5 rounded-lg border text-left ${tone.ring}`}>
+      <p className={`text-[12px] font-bold uppercase tracking-[0.14em] ${tone.text} ${correct === false ? 'mb-3' : 'mb-2'}`}>
         <span className="mr-1">{tone.icon}</span>{tone.label}
       </p>
-      {correct === false && userAnswer && (
-        <div className="flex items-baseline gap-2 mb-1">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-white/40 w-20 flex-shrink-0">Your answer</span>
-          <span className="text-[13px] text-rose-200/85 line-through decoration-rose-400/50">{userAnswer}</span>
+      {correct === false ? (
+        <div className="w-full rounded-lg border border-rose-300/25 bg-rose-300/[0.10] px-3 py-2.5">
+          <span className="block text-[10px] font-semibold uppercase tracking-wider text-rose-100/55">Correct answer</span>
+          <span className="mt-0.5 block text-[15px] font-semibold text-white">{officialAnswer}</span>
+        </div>
+      ) : (
+        <div className="flex items-baseline gap-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-white/40 w-20 flex-shrink-0">Answer</span>
+          <span className="text-[14px] font-bold text-white">{officialAnswer}</span>
         </div>
       )}
-      <div className="flex items-baseline gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-white/40 w-20 flex-shrink-0">Answer</span>
-        <span className="text-[14px] font-bold text-white">{officialAnswer}</span>
-      </div>
-      {meta && (
+      {correct !== false && meta && (
         <p className="text-[10.5px] text-white/45 mt-2 tabular-nums">{meta}</p>
       )}
     </div>

@@ -20,6 +20,7 @@
 import { AFRICA_GEOGRAPHY_COURSE } from './africaGeography.js';
 import { EUROPE_GEOGRAPHY_COURSE } from './europeGeography.js';
 import { ASIA_GEOGRAPHY_COURSE } from './asiaGeography.js';
+import { HUMAN_GEOGRAPHY_COURSE } from './humanGeography.js';
 
 export const PAUSD_CATALOG = [
   // =====================================================================
@@ -1533,6 +1534,7 @@ export const PAUSD_CATALOG = [
   AFRICA_GEOGRAPHY_COURSE,
   EUROPE_GEOGRAPHY_COURSE,
   ASIA_GEOGRAPHY_COURSE,
+  HUMAN_GEOGRAPHY_COURSE,
 ];
 
 // Helper: get a single template by slug.

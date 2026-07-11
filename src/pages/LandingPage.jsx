@@ -7,6 +7,7 @@ import {
   Lightbulb, Calculator, MessageSquare,
   Scale, Link2,
 } from 'lucide-react';
+import { Breakpoint } from '../styles/tokens';
 
 // Scroll-snap sections over one fixed wallpaper:
 //   hero, how it works, what's inside, note map, quiz bowl,
@@ -46,7 +47,7 @@ function useImageReady(url) {
 // Phone / narrow-viewport gate. Matches the app's MOBILE_BREAKPOINT (768)
 // so the signed-out landing flips to its mobile layout at the same width
 // the signed-in shell flips to MobileShell.
-function useIsMobile(breakpoint = 768) {
+function useIsMobile(breakpoint = Breakpoint.mobile) {
   const [mobile, setMobile] = useState(
     () => typeof window !== 'undefined' && window.innerWidth < breakpoint,
   );
@@ -67,7 +68,13 @@ function useIsMobile(breakpoint = 768) {
 // content runs long. svh = the always-visible height, so nothing hides
 // behind the URL bar.
 function sectionH(isMobile) {
-  return isMobile ? 'min-h-[100svh] py-20' : 'snap-start h-screen';
+  // Keep the content in normal flow on phones. The additional bottom room
+  // keeps the hero cue and sign-in actions clear of Safari's browser chrome
+  // on short viewports, while the smaller gutters leave usable line length on
+  // 320px-wide screens.
+  return isMobile
+    ? 'min-h-[100svh] px-4 py-14 pt-[calc(3.5rem+env(safe-area-inset-top))] pb-[calc(3.5rem+env(safe-area-inset-bottom))]'
+    : 'snap-start h-screen px-6';
 }
 
 export default function LandingPage() {
@@ -195,7 +202,7 @@ export default function LandingPage() {
       <div
         ref={scrollerRef}
         data-scroll-root
-        className={`relative z-10 overflow-y-scroll overflow-x-hidden scrollbar-hide ${isMobile ? 'h-[100dvh]' : 'h-screen snap-y snap-mandatory'}`}
+        className={`relative z-10 overflow-y-auto overflow-x-hidden overscroll-y-contain scrollbar-hide ${isMobile ? 'h-[100dvh]' : 'h-screen snap-y snap-mandatory'}`}
       >
         <HeroSection
           isMobile={isMobile}
@@ -265,12 +272,12 @@ function HeroSection({ isMobile, onSignIn, onTour }) {
   return (
     <section
       data-section="hero"
-      className={`${sectionH(isMobile)} w-full flex flex-col items-center justify-center px-6 relative`}
+      className={`${sectionH(isMobile)} w-full flex flex-col items-center justify-center relative`}
     >
       {/* Subtle scrim so the headline reads against any wallpaper */}
       <div className="absolute inset-0 bg-black/35" />
 
-      <FadeUp className="relative z-10 max-w-4xl text-center">
+      <FadeUp className="relative z-10 w-full max-w-4xl text-center">
         <h1 className="text-[44px] sm:text-[68px] md:text-[88px] leading-[0.95] font-bold tracking-[-0.04em] text-white">
           Type a topic.
           <br />
@@ -323,7 +330,7 @@ function HowItWorksSection({ isMobile }) {
     },
   ];
   return (
-    <section data-section="how" className={`${sectionH(isMobile)} w-full flex flex-col items-center justify-center px-6 relative`}>
+    <section data-section="how" className={`${sectionH(isMobile)} w-full flex flex-col items-center justify-center relative`}>
       <div className="absolute inset-0 bg-black/35" />
       <FadeUp className="relative z-10 w-full max-w-2xl">
         <h2 className="text-[30px] sm:text-[38px] md:text-[44px] leading-[1.08] font-bold tracking-[-0.02em] text-white mb-8">
@@ -380,7 +387,7 @@ function FeaturesSection({ isMobile }) {
     },
   ];
   return (
-    <section data-section="features" className={`${sectionH(isMobile)} w-full flex flex-col items-center justify-center px-6 relative`}>
+    <section data-section="features" className={`${sectionH(isMobile)} w-full flex flex-col items-center justify-center relative`}>
       <div className="absolute inset-0 bg-black/35" />
       <FadeUp className="relative z-10 w-full max-w-4xl">
         <h2 className="text-[30px] sm:text-[38px] md:text-[44px] leading-[1.08] font-bold tracking-[-0.02em] text-white mb-2">
@@ -440,7 +447,7 @@ function NoteMapSection({ isMobile }) {
   ];
 
   return (
-    <section data-section="notemap" className={`${sectionH(isMobile)} w-full flex flex-col items-center justify-center px-6 relative`}>
+    <section data-section="notemap" className={`${sectionH(isMobile)} w-full flex flex-col items-center justify-center relative`}>
       <div className="absolute inset-0 bg-black/35" />
       <FadeUp className="relative z-10 w-full max-w-5xl">
         <h2 className="text-[30px] sm:text-[38px] md:text-[44px] leading-[1.08] font-bold tracking-[-0.02em] text-white mb-2">
@@ -519,7 +526,7 @@ function NoteMapSection({ isMobile }) {
 // ===== Quiz Bowl =====
 function QuizBowlSection({ isMobile }) {
   return (
-    <section data-section="quizbowl" className={`${sectionH(isMobile)} w-full flex flex-col items-center justify-center px-6 relative`}>
+    <section data-section="quizbowl" className={`${sectionH(isMobile)} w-full flex flex-col items-center justify-center relative`}>
       <div className="absolute inset-0 bg-black/35" />
       <FadeUp className="relative z-10 max-w-2xl w-full">
         <h2 className="text-[30px] sm:text-[38px] md:text-[44px] leading-[1.08] font-bold tracking-[-0.02em] text-white mb-2">
@@ -589,7 +596,7 @@ function SignInSection({ isMobile, loading, loginError, googleReady, googleBtnRe
   return (
     <section
       data-section="signin"
-      className={`${isMobile ? 'min-h-[100svh] py-20' : 'snap-start min-h-screen py-16'} w-full flex flex-col items-center justify-center px-6 relative`}
+      className={`${isMobile ? sectionH(isMobile) : 'snap-start min-h-screen px-6 py-16'} w-full flex flex-col items-center justify-center relative`}
     >
       <div className="absolute inset-0 bg-black/35" />
 
@@ -650,7 +657,10 @@ function SignInSection({ isMobile, loading, loginError, googleReady, googleBtnRe
       </FadeUp>
 
       {/* Bottom links */}
-      <div className="absolute bottom-[calc(1.5rem+env(safe-area-inset-bottom))] sm:bottom-8 left-1/2 -translate-x-1/2 z-10 flex items-center gap-5">
+      <div className={`${isMobile
+        ? 'relative z-10 mt-10 flex items-center gap-5'
+        : 'absolute bottom-[calc(1.5rem+env(safe-area-inset-bottom))] sm:bottom-8 left-1/2 -translate-x-1/2 z-10 flex items-center gap-5'
+      }`}>
         <a
           href="https://discord.gg/rRdhczxjgC"
           target="_blank"
@@ -712,7 +722,7 @@ function WhyNotGptSection({ isMobile }) {
   return (
     <section
       data-section="whynotgpt"
-      className={`${isMobile ? 'min-h-[100svh] py-20' : 'snap-start min-h-screen py-16'} w-full flex flex-col items-center justify-center px-6 relative`}
+      className={`${isMobile ? sectionH(isMobile) : 'snap-start min-h-screen px-6 py-16'} w-full flex flex-col items-center justify-center relative`}
     >
       <div className="absolute inset-0 bg-black/40" />
 

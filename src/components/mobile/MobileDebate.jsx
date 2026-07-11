@@ -128,10 +128,10 @@ function ModeMenu({ onPick }) {
   }, []);
 
   const tiles = [
-    { id: 'solo',       title: 'Solo vs AI',  desc: 'Debate an adversarial AI',     icon: Swords,      tone: 'from-indigo-500/20 to-indigo-500/5 border-indigo-400/20' },
-    { id: 'mp',         title: '1v1 Online',  desc: 'Code-based head-to-head',       icon: Users,       tone: 'from-blue-500/20 to-blue-500/5 border-blue-400/20' },
-    { id: 'tournament', title: 'Tournament',  desc: '4 / 8 / 16 single-elim',       icon: Trophy,      tone: 'from-amber-500/20 to-amber-500/5 border-amber-400/20' },
-    { id: 'history',    title: 'History',     desc: 'Past debates & verdicts',      icon: HistoryIcon, tone: 'from-white/10 to-white/0 border-white/10' },
+    { id: 'solo',       title: 'Solo vs AI',  icon: Swords },
+    { id: 'mp',         title: '1v1 Online',  icon: Users },
+    { id: 'tournament', title: 'Tournament',  icon: Trophy },
+    { id: 'history',    title: 'History',     icon: HistoryIcon, tone: 'from-white/10 to-white/0 border-white/10' },
   ];
 
   return (
@@ -140,10 +140,7 @@ function ModeMenu({ onPick }) {
         <div className="w-9 h-9 rounded-xl grid place-items-center bg-indigo-500/15 border border-indigo-400/20">
           <Swords size={18} className="text-indigo-300" />
         </div>
-        <div>
-          <h1 className="text-[17px] font-bold tracking-tight leading-none">Debate</h1>
-          <p className="text-[11px] text-white/35 mt-0.5">Argue. Get graded. Win.</p>
-        </div>
+        <h1 className="text-[17px] font-bold tracking-tight">Debate</h1>
       </div>
 
       {rejoin && (
@@ -167,14 +164,17 @@ function ModeMenu({ onPick }) {
             <button
               key={t.id}
               onClick={() => onPick(t.id)}
-              className={`w-full rounded-2xl border bg-gradient-to-br ${t.tone} p-4 flex items-center gap-3 text-left active:scale-[0.99] transition-transform`}
+              className={`w-full rounded-2xl border p-4 flex items-center gap-3 text-left active:scale-[0.99] transition-transform ${
+                t.id === 'history'
+                  ? `bg-gradient-to-br ${t.tone}`
+                  : 'bg-blue-500 border-blue-500 active:bg-blue-600'
+              }`}
             >
               <div className="w-11 h-11 rounded-xl grid place-items-center bg-white/[0.06] border border-white/[0.08] shrink-0">
                 <Icon size={20} className="text-white/80" />
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-[15px] font-bold tracking-tight">{t.title}</p>
-                <p className="text-[12px] text-white/40 mt-0.5">{t.desc}</p>
               </div>
               <ChevronRight size={18} className="text-white/25 shrink-0" />
             </button>
@@ -309,8 +309,8 @@ function SoloDebate({ onExit }) {
           <div>
             <SectionLabel>Your side</SectionLabel>
             <div className="grid grid-cols-2 gap-2">
-              <SideBtn active={side === 'for'} onClick={() => setSide('for')} label="Argue FOR" tone="emerald" />
-              <SideBtn active={side === 'against'} onClick={() => setSide('against')} label="Argue AGAINST" tone="rose" />
+              <SideBtn active={side === 'for'} onClick={() => setSide('for')} label="Argue FOR" tone="blue" />
+              <SideBtn active={side === 'against'} onClick={() => setSide('against')} label="Argue AGAINST" tone="blue" />
             </div>
           </div>
 
@@ -321,7 +321,7 @@ function SoloDebate({ onExit }) {
               onChange={e => setTopic(e.target.value)}
               placeholder="Type a resolution, or pick a suggestion below…"
               rows={2}
-              className="w-full rounded-2xl bg-white/[0.04] border border-white/[0.08] px-3.5 py-3 text-[14px] text-white placeholder-white/25 outline-none focus:border-indigo-400/40 resize-none"
+              className="w-full rounded-2xl bg-white/[0.04] border border-white/[0.08] px-3.5 py-3 text-[14px] text-white placeholder-white/25 outline-none focus:border-blue-400/40 resize-none"
             />
           </div>
 
@@ -342,7 +342,7 @@ function SoloDebate({ onExit }) {
           <button
             onClick={handleStart}
             disabled={!topic.trim() || starting}
-            className="w-full h-12 rounded-2xl bg-indigo-500 text-white font-bold text-[15px] flex items-center justify-center gap-2 disabled:opacity-40 active:bg-indigo-600"
+            className="w-full h-12 rounded-2xl bg-blue-500 text-white font-bold text-[15px] flex items-center justify-center gap-2 disabled:opacity-40 active:bg-blue-600"
           >
             {starting ? <InlineProgress active /> : <Swords size={17} />} Start debate
           </button>
@@ -384,7 +384,7 @@ function SoloDebate({ onExit }) {
           <VerdictRow label="Summary" body={verdict.summary} />
           <VerdictRow label="Your strongest" body={verdict.studentStrongest} tone="emerald" />
           <VerdictRow label="Your weakest" body={verdict.studentWeakest} tone="rose" />
-          <VerdictRow label="Drill next" body={verdict.improve} tone="indigo" />
+          <VerdictRow label="Drill next" body={verdict.improve} tone="blue" />
           <button onClick={reset} className="w-full h-12 rounded-2xl bg-white/[0.08] border border-white/10 font-semibold text-[14px] active:bg-white/[0.12]">
             New debate
           </button>
@@ -404,7 +404,7 @@ function SoloDebate({ onExit }) {
           <button
             onClick={handleEnd}
             disabled={visible.length < 2 || judging}
-            className="px-3 h-8 rounded-full bg-indigo-500/20 border border-indigo-400/30 text-indigo-200 text-[12px] font-semibold flex items-center gap-1 disabled:opacity-40"
+            className="px-3 h-8 rounded-full bg-blue-500/20 border border-blue-400/30 text-blue-200 text-[12px] font-semibold flex items-center gap-1 disabled:opacity-40"
           >
             {judging ? <InlineProgress active /> : <Flag size={13} />} End
           </button>
@@ -426,12 +426,12 @@ function SoloDebate({ onExit }) {
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
             placeholder="Make your argument…"
             rows={1}
-            className="flex-1 max-h-32 rounded-2xl bg-white/[0.05] border border-white/[0.08] px-3.5 py-2.5 text-[14px] text-white placeholder-white/25 outline-none focus:border-indigo-400/40 resize-none"
+            className="flex-1 max-h-32 rounded-2xl bg-white/[0.05] border border-white/[0.08] px-3.5 py-2.5 text-[14px] text-white placeholder-white/25 outline-none focus:border-blue-400/40 resize-none"
           />
           <button
             onClick={handleSend}
             disabled={!input.trim() || thinking}
-            className="w-11 h-11 shrink-0 rounded-2xl bg-indigo-500 grid place-items-center disabled:opacity-40 active:bg-indigo-600"
+                  className="w-11 h-11 shrink-0 rounded-2xl bg-blue-500 grid place-items-center disabled:opacity-40 active:bg-blue-600"
           >
             <Send size={17} />
           </button>
@@ -618,7 +618,7 @@ function Multiplayer({ onExit, presetCode = null, tournamentCode = null, spectat
           <button
             onClick={handleCreate}
             disabled={busy}
-            className="w-full h-12 rounded-2xl bg-indigo-500 font-bold text-[15px] flex items-center justify-center gap-2 disabled:opacity-40 active:bg-indigo-600"
+            className="w-full h-12 rounded-2xl bg-blue-500 font-bold text-[15px] flex items-center justify-center gap-2 disabled:opacity-40 active:bg-blue-600"
           >
             {busy ? <InlineProgress active /> : <Users size={17} />} Create room
           </button>
@@ -633,7 +633,7 @@ function Multiplayer({ onExit, presetCode = null, tournamentCode = null, spectat
                 onChange={e => setJoinCode(e.target.value.toUpperCase())}
                 placeholder="ABCD"
                 maxLength={8}
-                className="flex-1 rounded-2xl bg-white/[0.05] border border-white/[0.08] px-4 py-3 text-[16px] font-mono tracking-widest text-white placeholder-white/20 outline-none focus:border-indigo-400/40"
+                className="flex-1 rounded-2xl bg-white/[0.05] border border-white/[0.08] px-4 py-3 text-[16px] font-mono tracking-widest text-white placeholder-white/20 outline-none focus:border-blue-400/40"
               />
               <button
                 onClick={handleJoin}
@@ -724,7 +724,7 @@ function Multiplayer({ onExit, presetCode = null, tournamentCode = null, spectat
               <div>
                 <SectionLabel>Topic</SectionLabel>
                 <textarea value={topic} onChange={e => setTopic(e.target.value)} rows={2} placeholder="Resolution to debate…"
-                  className="w-full rounded-2xl bg-white/[0.04] border border-white/[0.08] px-3.5 py-3 text-[14px] text-white placeholder-white/25 outline-none focus:border-indigo-400/40 resize-none" />
+                  className="w-full rounded-2xl bg-white/[0.04] border border-white/[0.08] px-3.5 py-3 text-[14px] text-white placeholder-white/25 outline-none focus:border-blue-400/40 resize-none" />
                 <div className="flex gap-2 overflow-x-auto pb-1 mt-2 -mx-1 px-1">
                   {THEMES.map(th => <Pill key={th.id || 'mix'} active={theme === th.id} onClick={() => setTheme(th.id)}>{th.label}</Pill>)}
                 </div>
@@ -763,7 +763,7 @@ function Multiplayer({ onExit, presetCode = null, tournamentCode = null, spectat
             <button
               onClick={handleStartMatch}
               disabled={busy || !allReady || !topic.trim()}
-              className="w-full h-12 rounded-2xl bg-indigo-500 font-bold text-[15px] flex items-center justify-center gap-2 disabled:opacity-40 active:bg-indigo-600"
+              className="w-full h-12 rounded-2xl bg-blue-500 font-bold text-[15px] flex items-center justify-center gap-2 disabled:opacity-40 active:bg-blue-600"
             >
               {busy ? <InlineProgress active /> : <Swords size={17} />} Start debate
             </button>
@@ -848,12 +848,12 @@ function Multiplayer({ onExit, presetCode = null, tournamentCode = null, spectat
                   onChange={e => setArgument(e.target.value)}
                   placeholder="Your argument (min 20 chars)…"
                   rows={1}
-                  className="flex-1 max-h-32 rounded-2xl bg-white/[0.05] border border-white/[0.08] px-3.5 py-2.5 text-[14px] text-white placeholder-white/25 outline-none focus:border-indigo-400/40 resize-none"
+                  className="flex-1 max-h-32 rounded-2xl bg-white/[0.05] border border-white/[0.08] px-3.5 py-2.5 text-[14px] text-white placeholder-white/25 outline-none focus:border-blue-400/40 resize-none"
                 />
                 <button
                   onClick={() => doSubmit(false)}
                   disabled={submitting || (argument.trim().length < 20 && images.length === 0)}
-                  className="w-11 h-11 shrink-0 rounded-2xl bg-indigo-500 grid place-items-center disabled:opacity-40 active:bg-indigo-600"
+            className="w-11 h-11 shrink-0 rounded-2xl bg-blue-500 grid place-items-center disabled:opacity-40 active:bg-blue-600"
                 >
                   {submitting ? <InlineProgress active /> : <Send size={17} />}
                 </button>
@@ -1002,12 +1002,12 @@ function Tournament({ onExit }) {
           <div>
             <SectionLabel>Name (optional)</SectionLabel>
             <input value={name} onChange={e => setName(e.target.value)} placeholder="Friday Night Debates" maxLength={80}
-              className="w-full rounded-2xl bg-white/[0.05] border border-white/[0.08] px-3.5 py-3 text-[14px] text-white placeholder-white/25 outline-none focus:border-indigo-400/40" />
+              className="w-full rounded-2xl bg-white/[0.05] border border-white/[0.08] px-3.5 py-3 text-[14px] text-white placeholder-white/25 outline-none focus:border-blue-400/40" />
           </div>
           <div>
             <SectionLabel>Topic</SectionLabel>
             <textarea value={topic} onChange={e => setTopic(e.target.value)} rows={2} placeholder="Resolution for the bracket…"
-              className="w-full rounded-2xl bg-white/[0.04] border border-white/[0.08] px-3.5 py-3 text-[14px] text-white placeholder-white/25 outline-none focus:border-indigo-400/40 resize-none" />
+              className="w-full rounded-2xl bg-white/[0.04] border border-white/[0.08] px-3.5 py-3 text-[14px] text-white placeholder-white/25 outline-none focus:border-blue-400/40 resize-none" />
             <div className="flex gap-2 overflow-x-auto pb-1 mt-2 -mx-1 px-1">
               {THEMES.map(th => <Pill key={th.id || 'mix'} active={theme === th.id} onClick={() => setTheme(th.id)}>{th.label}</Pill>)}
             </div>
@@ -1039,7 +1039,7 @@ function Tournament({ onExit }) {
           </div>
           <div className="flex gap-2">
             <input value={joinCode} onChange={e => setJoinCode(e.target.value.toUpperCase())} placeholder="CODE" maxLength={8}
-              className="flex-1 rounded-2xl bg-white/[0.05] border border-white/[0.08] px-4 py-3 text-[16px] font-mono tracking-widest text-white placeholder-white/20 outline-none focus:border-indigo-400/40" />
+              className="flex-1 rounded-2xl bg-white/[0.05] border border-white/[0.08] px-4 py-3 text-[16px] font-mono tracking-widest text-white placeholder-white/20 outline-none focus:border-blue-400/40" />
             <button onClick={handleJoin} disabled={busy || !joinCode.trim()} className="px-5 rounded-2xl bg-white/[0.08] border border-white/10 font-semibold disabled:opacity-40 active:bg-white/[0.12]">Join</button>
           </div>
           {err && <p className="text-[12px] text-rose-300">{err}</p>}
@@ -1147,10 +1147,10 @@ function Tournament({ onExit }) {
         )}
 
         {myMatch && tour.state === 'playing' && (
-          <button onClick={() => openMatch(myMatch)} className="w-full rounded-2xl border border-indigo-400/30 bg-indigo-500/15 p-4 flex items-center gap-3 text-left active:bg-indigo-500/20">
-            <Swords size={20} className="text-indigo-300 shrink-0" />
-            <div className="flex-1"><p className="text-[14px] font-bold text-indigo-100">Your match is ready</p><p className="text-[11px] text-indigo-200/60">Tap to enter the debate</p></div>
-            <ChevronRight size={18} className="text-indigo-300/60" />
+          <button onClick={() => openMatch(myMatch)} className="w-full rounded-2xl border border-blue-400/30 bg-blue-500/15 p-4 flex items-center gap-3 text-left active:bg-blue-500/20">
+            <Swords size={20} className="text-blue-300 shrink-0" />
+            <div className="flex-1"><p className="text-[14px] font-bold text-blue-100">Your match is ready</p><p className="text-[11px] text-blue-200/60">Tap to enter the debate</p></div>
+            <ChevronRight size={18} className="text-blue-300/60" />
           </button>
         )}
 
@@ -1166,7 +1166,7 @@ function Tournament({ onExit }) {
                     key={b.code}
                     onClick={() => (b.players.includes(myId) && b.state === 'playing') ? openMatch(b) : watchable ? openMatch(b) : null}
                     disabled={!(b.state === 'playing')}
-                    className={`w-full rounded-xl border px-3 py-2.5 text-left ${b.state === 'finished' ? 'border-white/[0.06] bg-white/[0.02]' : 'border-indigo-400/20 bg-indigo-500/[0.06] active:bg-indigo-500/10'}`}
+                    className={`w-full rounded-xl border px-3 py-2.5 text-left ${b.state === 'finished' ? 'border-white/[0.06] bg-white/[0.02]' : 'border-blue-400/20 bg-blue-500/[0.06] active:bg-blue-500/10'}`}
                   >
                     {[0, 1].map(side => {
                       const uid = b.players[side];
@@ -1181,7 +1181,7 @@ function Tournament({ onExit }) {
                       );
                     })}
                     <div className="flex items-center gap-2 mt-1">
-                      {b.state === 'playing' && <span className="text-[10px] text-indigo-300 font-semibold uppercase tracking-wide">Live</span>}
+                      {b.state === 'playing' && <span className="text-[10px] text-blue-300 font-semibold uppercase tracking-wide">Live</span>}
                       {b.state === 'finished' && <span className="text-[10px] text-white/30 uppercase tracking-wide">Done</span>}
                       {b.spectatorCount > 0 && <span className="text-[10px] text-white/30">👁 {b.spectatorCount}</span>}
                       {watchable && <span className="text-[10px] text-white/35 ml-auto">Tap to watch →</span>}
@@ -1240,7 +1240,7 @@ function History({ onExit }) {
             <div key={i} className="rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
               <p className="text-[10px] uppercase tracking-wider text-white/30 mb-1">{sideLabel(t.side)}{t.score ? ` · ${t.score.total}/30` : ''}{t.timedOut ? ' · auto' : ''}</p>
               <p className="text-[13px] text-white/75 whitespace-pre-wrap">{t.content}</p>
-              {t.feedback && <p className="text-[11px] text-indigo-300/70 mt-1">{t.feedback}</p>}
+              {t.feedback && <p className="text-[11px] text-blue-300/70 mt-1">{t.feedback}</p>}
             </div>
           ))}
         </div>
@@ -1326,6 +1326,7 @@ function SideBtn({ active, onClick, label, tone }) {
   const tones = {
     emerald: active ? 'bg-emerald-500/20 border-emerald-400/40 text-emerald-200' : 'bg-white/[0.03] border-white/[0.08] text-white/45',
     rose: active ? 'bg-rose-500/20 border-rose-400/40 text-rose-200' : 'bg-white/[0.03] border-white/[0.08] text-white/45',
+    blue: active ? 'bg-blue-500/20 border-blue-400/40 text-blue-100' : 'bg-white/[0.03] border-white/[0.08] text-white/45',
   };
   return (
     <button onClick={onClick} className={`h-12 rounded-2xl border font-bold text-[13px] transition-colors ${tones[tone]}`}>
@@ -1338,12 +1339,12 @@ function Bubble({ msg }) {
   const isUser = msg.role === 'user';
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-      <div className={`max-w-[82%] rounded-2xl px-3.5 py-2.5 ${isUser ? 'bg-indigo-500 text-white' : msg._error ? 'bg-rose-500/15 border border-rose-400/20 text-rose-100' : 'bg-white/[0.06] border border-white/[0.07] text-white/85'}`}>
+      <div className={`max-w-[82%] rounded-2xl px-3.5 py-2.5 ${isUser ? 'bg-blue-500 text-white' : msg._error ? 'bg-rose-500/15 border border-rose-400/20 text-rose-100' : 'bg-white/[0.06] border border-white/[0.07] text-white/85'}`}>
         <p className="text-[14px] leading-relaxed whitespace-pre-wrap">{msg.content}</p>
         {Array.isArray(msg.sources) && msg.sources.length > 0 && (
           <div className="mt-2 pt-2 border-t border-white/10 space-y-1">
             {msg.sources.slice(0, 3).map((s, i) => (
-              <a key={i} href={s.uri || s.url} target="_blank" rel="noreferrer" className="block text-[11px] text-indigo-200/70 underline truncate">
+              <a key={i} href={s.uri || s.url} target="_blank" rel="noreferrer" className="block text-[11px] text-blue-200/70 underline truncate">
                 {s.title || s.uri || s.url}
               </a>
             ))}
@@ -1369,7 +1370,7 @@ function TypingBubble() {
 function TurnCard({ turn, mine }) {
   return (
     <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-      <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 ${mine ? 'bg-indigo-500/90 text-white' : 'bg-white/[0.06] border border-white/[0.07] text-white/85'}`}>
+      <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 ${mine ? 'bg-blue-500/90 text-white' : 'bg-white/[0.06] border border-white/[0.07] text-white/85'}`}>
         <div className="flex items-center gap-2 mb-1">
           <span className="text-[10px] uppercase tracking-wider font-bold opacity-70">{sideLabel(turn.side)}</span>
           {turn.score && <span className="text-[10px] font-mono opacity-60">{turn.score.total}/30</span>}
@@ -1382,7 +1383,7 @@ function TurnCard({ turn, mine }) {
           </div>
         )}
         {turn.feedback && (
-          <p className={`text-[11px] mt-1.5 pt-1.5 border-t ${mine ? 'border-white/20 text-white/70' : 'border-white/10 text-indigo-200/70'}`}>
+          <p className={`text-[11px] mt-1.5 pt-1.5 border-t ${mine ? 'border-white/20 text-white/70' : 'border-white/10 text-blue-200/70'}`}>
             {turn.feedback}
           </p>
         )}
@@ -1394,7 +1395,7 @@ function TurnCard({ turn, mine }) {
 function VerdictRow({ label, body, tone = 'white' }) {
   if (!body) return null;
   const colors = {
-    white: 'text-white/70', emerald: 'text-emerald-300', rose: 'text-rose-300', indigo: 'text-indigo-300',
+    white: 'text-white/70', emerald: 'text-emerald-300', rose: 'text-rose-300', blue: 'text-blue-300',
   };
   return (
     <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] px-3.5 py-3">
@@ -1458,7 +1459,7 @@ function TopicChips({ theme, onPick, exclude = [] }) {
     <div className="mt-2">
       <div className="flex items-center justify-between mb-1.5">
         <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-white/30">Suggestions</p>
-        <button onClick={load} disabled={loading} className="text-[11px] text-indigo-300/70 flex items-center gap-1 disabled:opacity-40">
+        <button onClick={load} disabled={loading} className="text-[11px] text-blue-300/70 flex items-center gap-1 disabled:opacity-40">
           {loading ? <InlineProgress active /> : <RefreshCw size={11} />} New
         </button>
       </div>
@@ -1466,7 +1467,7 @@ function TopicChips({ theme, onPick, exclude = [] }) {
         {topics.map((t, i) => (
           <button key={i} onClick={() => onPick(t)}
             className="text-left rounded-xl bg-white/[0.03] border border-white/[0.06] px-3 py-2 text-[12.5px] text-white/65 active:bg-white/[0.07] flex items-center gap-2">
-            <Sparkles size={12} className="text-indigo-300/50 shrink-0" />
+            <Sparkles size={12} className="text-blue-300/50 shrink-0" />
             <span className="truncate">{t}</span>
           </button>
         ))}

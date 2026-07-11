@@ -551,7 +551,6 @@ export default function TrialPage() {
                         : 'bg-white/[0.02] border-white/[0.06] hover:border-white/[0.13]'
                     }`}>
                     <div className={`text-sm font-semibold ${sel ? 'text-amber-200' : 'text-white'}`}>{f.label}</div>
-                    <div className="text-xs text-white/35 mt-0.5">{f.desc}</div>
                   </button>
                 );
               })}

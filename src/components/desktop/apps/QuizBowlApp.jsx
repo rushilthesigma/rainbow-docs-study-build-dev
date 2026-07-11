@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Zap, Play, Pause, Check, X, Loader2, Lightbulb, Users, BookOpen, Sparkles, Settings, ArrowRight, Target, TrendingDown, TrendingUp, Clock, History, Flame, ChevronRight, ArrowLeft, Trophy, Swords, RefreshCw, Eye, EyeOff, Volume2, VolumeX, Mic } from 'lucide-react';
+import { Zap, Play, Pause, Check, X, Loader2, Lightbulb, Users, BookOpen, Sparkles, Settings, ArrowRight, Target, TrendingDown, TrendingUp, Clock, History, Flame, ChevronRight, ChevronDown, ArrowLeft, Trophy, Swords, RefreshCw, Eye, EyeOff, Volume2, VolumeX, Mic, Search, Pencil, Trash2, Layers, RotateCcw, ListChecks, Save } from 'lucide-react';
 import TrialSession, { AnswerResultPanel } from '../../trial/TrialSession';
 import { apiFetch } from '../../../api/client';
-import { fetchQBReaderTossups, saveQuizBowlSet, fetchQuizBowlHistory, fetchQuizBowlRecommendations, fetchQuizBowlPatterns, fetchQuizBowlSm2Due, fetchQuizBowlMatches, saveAiMatchReplay } from '../../../api/quizMatch';
+import { fetchQBReaderTossups, saveQuizBowlSet, fetchQuizBowlHistory, fetchQuizBowlRecommendations, fetchQuizBowlPatterns, fetchQuizBowlSm2Due, fetchQuizBowlMatches, saveAiMatchReplay, fetchSavedQuizBowlSets, getSavedQuizBowlSet, createSavedQuizBowlSet, deleteSavedQuizBowlSet, renamePlayedQuizBowlSet, deletePlayedQuizBowlSet } from '../../../api/quizMatch';
 import { intervalLabel } from '../../../utils/sm2';
 import { peek, fetchOnce, bustPrefix } from '../../../api/cache';
 import ViewFade from '../../shared/ViewFade';
@@ -12,12 +12,15 @@ import useBrowserBack from '../../../hooks/useBrowserBack';
 import { useAuth } from '../../../context/AuthContext';
 import QuizBowlMatch, { PlayerCard } from './QuizBowlMatch';
 import ClueLabView from './ClueLabView';
+import { useQbVoicePref, QbVoiceToggle, speakLine, spokenAnswer } from '../../shared/qbVoice';
 import ProgressBar, { InlineProgress } from '../../shared/ProgressBar';
 import QbModelPicker from '../../shared/QbModelPicker';
 import { useQbModel } from '../../../hooks/useQbModel';
 import { studyModelLabel } from '../../study/studyModels';
 import { useSpeechRecognition, speechRecognitionSupported } from '../../../hooks/useSpeechRecognition';
 import { speechSynthesisSupported } from '../../../hooks/useSpeechSynthesis';
+import { CountryPracticeBrowser, SavedSetEditor, SavedSetLibrary } from './QuizBowlSetLibrary';
+import { isQuizBowlAnswerAccepted } from '../../../lib/qbAnswerChecker';
 
 // Explicitly open (then immediately release) an audio stream before starting
 // recognition. This is the same permission flow as Study Mode dictation.
@@ -138,8 +141,8 @@ ${source.text}
 
 HARD RULES (these override everything above):
 - Every clue in every question must restate a fact that is stated in the source notes. Use NO outside knowledge — no extra dates, names, works, numbers, or events, even ones you are certain are true.
-- Every answer must be "${source.title}" itself or a person, work, place, event, or term named in the source notes.
-- Vary the answers when the notes name enough distinct entities - a set where every answer is "${source.title}" is guessable after question one.
+- Every answer must be a person, work, place, event, or term named in the source notes. The source title itself is a scope label, not an answer.
+- Vary the answers when the notes name enough distinct entities - a set where every answer is the page topic is invalid.
 - Pyramidal means within the notes: open with the notes' most obscure details, end with the giveaway built from the notes' most famous fact.
 - If the notes cannot support ${count} fully distinct questions, reuse different facts and angles from the notes rather than inventing material.
 ${customInstructions ? `- Additional instructions from the user: ${customInstructions}` : ''}${avoidBlock ? `${avoidBlock}
@@ -281,7 +284,7 @@ function useSpokenReveal(text, active, paused = false) {
   return { revealed, done, wordIndex, totalWords: words.length, stop };
 }
 
-export default function QuizBowlApp({ initialTopic = null, initialDifficulty = null, initialQuestions = null, initialContext = null, autoStart = false } = {}) {
+export default function QuizBowlApp({ initialTopic = null, initialCategory = null, initialDifficulty = null, initialQuestions = null, initialContext = null, autoStart = false } = {}) {
   const { openApp, state } = useWindowManager();
   function openLessonFor(topic) {
     if (!topic) return;
@@ -297,7 +300,14 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   const [aiLobbyInitial, setAiLobbyInitial] = useState('lobby');
   const [replaySet, setReplaySet] = useState(null);
   const [matchReplayRec, setMatchReplayRec] = useState(null);
-  useBrowserBack(view !== 'hub', () => { setView('hub'); setReplaySet(null); setMatchReplayRec(null); });
+  const [savedSets, setSavedSets] = useState([]);
+  const [savedSetsLoading, setSavedSetsLoading] = useState(false);
+  const [editingSavedSet, setEditingSavedSet] = useState(null);
+  // The played set open in the My Sets detail view, and where the solo
+  // replay player should return when it exits (replays list vs detail).
+  const [playedSetFocus, setPlayedSetFocus] = useState(null);
+  const [replayReturnTo, setReplayReturnTo] = useState('replays');
+  useBrowserBack(view !== 'hub', () => { setView('hub'); setReplaySet(null); setMatchReplayRec(null); setPlayedSetFocus(null); });
   const { user } = useAuth();
   // Which AI writes the AI-generated tossups (persisted, plan-gated).
   const { model: qbModel, pick: pickQbModel, available: qbModels } = useQbModel();
@@ -308,7 +318,8 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState(null);
 
-  const [category, setCategory] = useState('Mixed');
+  const startingCategory = CATEGORIES.includes(initialCategory) ? initialCategory : 'Mixed';
+  const [category, setCategory] = useState(startingCategory);
   const [difficulty, setDifficulty] = useState(() => {
     // Study-mode deep link maps lowercase NAQT levels to the picker labels
     // this app uses ("Easy" / "Medium" / "Hard"). Default Medium otherwise.
@@ -345,6 +356,10 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   // saved with the set so future generations of the same request can
   // avoid repeating its answers.
   const playingCtxRef = useRef(null);
+  // When re-playing a set from the My Sets archive, the original set's
+  // source rides along so the new history entry keeps honest attribution
+  // (a replayed QBReader round is still QBReader material, not AI).
+  const playingOriginRef = useRef(null);
 
   // Answers from past AI sets that match this request. The generation
   // prompt bans them so replaying the same topic yields fresh questions.
@@ -395,6 +410,151 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
     } catch {}
   }
 
+  async function loadSavedSets() {
+    setSavedSetsLoading(true);
+    try {
+      const data = await fetchSavedQuizBowlSets();
+      setSavedSets(data.sets || []);
+    } catch (err) { setError(err.message || 'Could not load saved sets.'); }
+    setSavedSetsLoading(false);
+  }
+
+  async function openSavedSet(id) {
+    try {
+      const data = await getSavedQuizBowlSet(id);
+      setEditingSavedSet(data.set);
+      setView('set-editor');
+    } catch (err) { setError(err.message || 'Could not open that set.'); }
+  }
+
+  async function createEmptySavedSet() {
+    try {
+      const data = await createSavedQuizBowlSet({
+        title: 'Untitled set', category: 'Mixed', difficulty: 'Easy', questions: [],
+      });
+      setEditingSavedSet(data.set);
+      setSavedSets(current => [data.set, ...current]);
+      setView('set-editor');
+    } catch (err) { setError(err.message || 'Could not create a saved set.'); }
+  }
+
+  async function deleteSavedSet(id) {
+    if (!window.confirm('Delete this saved Quiz Bowl set?')) return;
+    try {
+      await deleteSavedQuizBowlSet(id);
+      setSavedSets(current => current.filter(set => set.id !== id));
+    } catch (err) { setError(err.message || 'Could not delete that set.'); }
+  }
+
+  function playSavedSet(set) {
+    const playable = (set.questions || []).filter(q => String(q.text || '').trim() && String(q.answer || '').trim());
+    if (!playable.length) { setError('Add a question and answer before playing this set.'); return; }
+    setCategory(set.category || 'Mixed');
+    setDifficulty(set.difficulty || 'Easy');
+    setQuestionSource('saved');
+    setPlayingSource('saved');
+    // Carry the library title into the archived history entry.
+    playingCtxRef.current = { title: set.title || '' };
+    setQuestions(playable.map(q => ({ ...q, ...parseTossupText(q.text || '') })));
+    setCurrentQ(0); setScores([]); setBuzzed(false); setShowResult(false); setReading(true); setIsPaused(false);
+    fetchingMoreRef.current = false;
+    beginNewSet();
+    setView('playing');
+  }
+
+  async function saveCurrentSetForEditing() {
+    try {
+      const data = await createSavedQuizBowlSet({
+        title: `${category} practice`, category, difficulty,
+        questions: questions.map((question, index) => ({
+          id: question.id || `question-${index + 1}`,
+          text: question.text || '', answer: question.answer || '',
+          category: question.category || category, coverageTag: question.coverageTag || '',
+        })),
+      });
+      setEditingSavedSet(data.set);
+      setSavedSets(current => [data.set, ...current]);
+      setView('set-editor');
+    } catch (err) { setError(err.message || 'Could not save this set.'); }
+  }
+
+  // ===== My Sets (played-set archive) actions =====
+  // Re-play an archived set as a fresh scored round using the exact
+  // questions from that game. `onlyMissed` narrows it to the ones the
+  // player got wrong - a quick retry drill.
+  function playPlayedSet(s, { onlyMissed = false } = {}) {
+    const pool = (s.perQuestion || []).filter(q => String(q.text || '').trim() && String(q.correctAnswer || '').trim());
+    const picked = onlyMissed ? pool.filter(q => !q.correct) : pool;
+    if (!picked.length) return;
+    setCategory(s.category || 'Mixed');
+    setDifficulty(s.difficulty || 'Medium');
+    setQuestionSource('replay');
+    setPlayingSource('replay');
+    // Keep the archived set's title + generation context so the re-play
+    // saves under the same name and future generations still avoid its
+    // answers.
+    playingCtxRef.current = {
+      title: playedSetTitle(s),
+      ...(s.source === 'ai' ? { customInstructions: s.customInstructions || '', noteTitle: s.noteTitle || '' } : {}),
+    };
+    setQuestions(picked.map(q => ({
+      text: q.text,
+      answer: q.correctAnswer,
+      category: q.category || s.category || 'Mixed',
+      ...parseTossupText(q.text || ''),
+    })));
+    setCurrentQ(0); setScores([]); setBuzzed(false); setShowResult(false); setReading(true); setIsPaused(false);
+    fetchingMoreRef.current = false;
+    beginNewSet();
+    playingOriginRef.current = s.source || 'ai';
+    setView('playing');
+  }
+
+  // Copy an archived set into the editable personal library so the user
+  // can tweak questions and keep playing it from Save & edit.
+  async function savePlayedSetToEditor(s) {
+    try {
+      const allowed = ['Easy', 'Medium', 'Hard', 'Tournament'];
+      const data = await createSavedQuizBowlSet({
+        title: playedSetTitle(s),
+        category: s.category || 'Mixed',
+        difficulty: allowed.includes(s.difficulty) ? s.difficulty : 'Medium',
+        questions: (s.perQuestion || []).filter(q => String(q.text || '').trim()).map((q, index) => ({
+          id: `played-${s.id}-${index}`,
+          text: q.text,
+          answer: q.correctAnswer || '',
+          category: q.category || s.category || 'Mixed',
+          coverageTag: '',
+        })),
+      });
+      setEditingSavedSet(data.set);
+      setSavedSets(current => [data.set, ...current]);
+      setView('set-editor');
+    } catch (err) { setError(err.message || 'Could not copy this set to the editor.'); }
+  }
+
+  async function deletePlayedSet(id) {
+    if (!window.confirm('Remove this set from your history? Its questions and results go with it.')) return;
+    try {
+      await deletePlayedQuizBowlSet(id);
+      setHistory(h => h ? { ...h, sets: (h.sets || []).filter(s => s.id !== id) } : h);
+      setPlayedSetFocus(focus => (focus?.id === id ? null : focus));
+      bustHubCache();
+      setView('my-sets');
+    } catch (err) { setError(err.message || 'Could not delete that set.'); }
+  }
+
+  async function renamePlayedSet(id, title) {
+    const next = String(title || '').trim();
+    if (!next) return;
+    try {
+      const data = await renamePlayedQuizBowlSet(id, next);
+      setHistory(h => h ? { ...h, sets: (h.sets || []).map(s => (s.id === id ? { ...s, ...data.set } : s)) } : h);
+      setPlayedSetFocus(focus => (focus?.id === id ? { ...focus, ...data.set } : focus));
+      bustHubCache();
+    } catch (err) { setError(err.message || 'Could not rename that set.'); }
+  }
+
   // QBpedia handoff: start the game immediately instead of parking on the
   // setup form. The article rides along as the sole fact source — the
   // tossups are built from the page's text, never from the model's own
@@ -406,7 +566,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
     if (!autoStart || !initialTopic || hasPreloaded || autoStartedRef.current) return;
     autoStartedRef.current = true;
     launchSet({
-      category: 'Mixed',
+      category: startingCategory,
       difficulty,
       source: 'ai',
       customInstructions: sourceNotes ? '' : `Focus on: ${initialTopic}`,
@@ -481,6 +641,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   function beginNewSet() {
     setStartedAtRef.current = Date.now();
     savedSetIdRef.current = null;
+    playingOriginRef.current = null;
   }
 
   // Launch a set with explicit category/difficulty/source - used by the
@@ -631,22 +792,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
   function handleSubmit(spoken) {
     const given = typeof spoken === 'string' ? spoken : answer;
     if (!given.trim()) return;
-    const norm = s => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9\s]/g, '').trim();
-    const a = norm(given); const ca = norm(q.answer);
-    function lev(s1, s2) {
-      const m = s1.length, n = s2.length;
-      if (m === 0) return n; if (n === 0) return m;
-      const d = Array.from({ length: m + 1 }, (_, i) => [i]);
-      for (let j = 1; j <= n; j++) d[0][j] = j;
-      for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++)
-        d[i][j] = Math.min(d[i-1][j] + 1, d[i][j-1] + 1, d[i-1][j-1] + (s1[i-1] !== s2[j-1] ? 1 : 0));
-      return d[m][n];
-    }
-    const dist = lev(a, ca);
-    const threshold = Math.max(1, Math.floor(ca.length * 0.25));
-    const isCorrect = a === ca || ca.includes(a) || a.includes(ca) || dist <= threshold ||
-      ca.split(/[\s,]+/).some(w => w.length > 2 && (a.includes(w) || lev(a, w) <= 1)) ||
-      a.split(/[\s,]+/).some(w => w.length > 2 && (ca.includes(w) || lev(ca, w) <= 1));
+    const isCorrect = isQuizBowlAnswerAccepted(q.answerline || q.answer, given);
     setCorrect(isCorrect); setShowResult(true);
     const points = naqtPointsFor(isCorrect, wordIndex, q.powerWordIndex, totalWords);
     setScores(prev => [...prev, { question: currentQ, correct: isCorrect, buzzWord: wordIndex, totalWords, powerWordIndex: q.powerWordIndex ?? null, points, answer: given.trim(), correctAnswer: q.answer }]);
@@ -700,7 +846,10 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
     savedSetIdRef.current = 'pending';
     saveQuizBowlSet({
       category, difficulty,
-      source: playingSource === 'qbreader' ? 'qbreader' : 'ai',
+      source: playingSource === 'qbreader' || playingOriginRef.current === 'qbreader' ? 'qbreader' : 'ai',
+      // playingCtxRef can hold the previous AI round's context during a
+      // plain QBReader round (same reason the spread below is guarded).
+      title: playingSource === 'qbreader' ? '' : autoPlayedSetTitle(playingCtxRef.current),
       score, points, total, durationMs,
       perQuestion,
       // AI sets carry their generation context so future runs of the
@@ -887,9 +1036,10 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
               </div>
             ))}
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <button onClick={() => { setView('setup'); setQuestions([]); setScores([]); }} className="py-2.5 rounded-lg border border-white/[0.08] bg-white/[0.03] text-[13px] font-semibold text-white/70 hover:bg-white/[0.06]">New set</button>
+          <div className="grid grid-cols-3 gap-2">
+            <button onClick={() => { setView('custom'); setQuestions([]); setScores([]); }} className="py-2.5 rounded-lg border border-white/[0.08] bg-white/[0.03] text-[13px] font-semibold text-white/70 hover:bg-white/[0.06]">New set</button>
             <button onClick={() => { setCurrentQ(0); setBuzzed(false); setShowResult(false); setReading(true); setScores([]); setAnswer(''); setView('playing'); }} className="py-2.5 rounded-lg bg-white/[0.09] hover:bg-white/[0.13] text-white/70 text-[13px] font-semibold">Replay</button>
+            <button onClick={saveCurrentSetForEditing} className="py-2.5 rounded-lg border border-blue-400/30 bg-blue-500/[0.08] text-[13px] font-semibold text-blue-200 hover:bg-blue-500/[0.16]">Save & edit</button>
           </div>
         </div>
       </div>
@@ -938,7 +1088,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
             <button
               onClick={() => setIsPaused(p => !p)}
               aria-label={isPaused ? 'Resume' : 'Pause'}
-              className={`p-1 rounded-lg border transition-colors ${isPaused ? 'border-amber-400/30 bg-amber-500/[0.10] text-amber-300' : 'border-transparent text-white/30 hover:text-white/60 hover:bg-white/5'}`}
+              className={`p-1 rounded-lg border transition-colors ${isPaused ? 'border-blue-400/30 bg-blue-500/[0.10] text-blue-300' : 'border-transparent text-white/30 hover:text-white/60 hover:bg-white/5'}`}
             >
               {isPaused ? <Play size={13} /> : <Pause size={13} />}
             </button>
@@ -1003,7 +1153,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
                 <Volume2 size={14} className={reading && !done && !isPaused ? 'animate-pulse' : ''} />
                 <span className="text-[12px]">Audio only. The text returns with the result.</span>
                 {isPaused && !buzzed && (
-                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-[0.14em] bg-amber-500/[0.12] border border-amber-400/25 text-amber-300/80">
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-[0.14em] bg-blue-500/[0.12] border border-blue-400/25 text-blue-300/80">
                     <Pause size={8} /> paused
                   </span>
                 )}
@@ -1013,7 +1163,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
                 {revealed}
                 {reading && !done && !isPaused && <span className="inline-block w-0.5 h-4 bg-white/35 animate-pulse ml-1 align-middle rounded-sm" />}
                 {isPaused && !buzzed && (
-                  <span className="inline-flex items-center gap-1 ml-2 align-middle px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-[0.14em] bg-amber-500/[0.12] border border-amber-400/25 text-amber-300/80">
+                  <span className="inline-flex items-center gap-1 ml-2 align-middle px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-[0.14em] bg-blue-500/[0.12] border border-blue-400/25 text-blue-300/80">
                     <Pause size={8} /> paused
                   </span>
                 )}
@@ -1123,7 +1273,68 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
     );
   }
 
+  // ===== COUNTRY PRACTICE =====
+  if (view === 'country-practice') {
+    return <ViewFade viewKey="country-practice" className="h-full"><CountryPracticeBrowser
+      onBack={() => setView('hub')}
+      onPractice={(preset) => {
+        setView('hub');
+        return launchSet({
+          category: 'Geography', difficulty: 'Easy', source: 'ai',
+          customInstructions: `Focus exclusively on geography of ${preset.label}.`,
+          notes: { title: preset.title || `Geography of ${preset.label}`, text: preset.source },
+        });
+      }}
+    /></ViewFade>;
+  }
+
+  // ===== SAVED, EDITABLE SETS =====
+  if (view === 'saved-sets') {
+    return <ViewFade viewKey="saved-sets" className="h-full"><SavedSetLibrary
+      sets={savedSets} loading={savedSetsLoading}
+      onBack={() => setView('hub')}
+      onNew={createEmptySavedSet}
+      onEdit={openSavedSet}
+      onPlay={(id) => getSavedQuizBowlSet(id).then(data => playSavedSet(data.set)).catch(err => setError(err.message || 'Could not open that set.'))}
+      onDelete={deleteSavedSet}
+    /></ViewFade>;
+  }
+
+  if (view === 'set-editor' && editingSavedSet) {
+    return <ViewFade viewKey={`set-editor:${editingSavedSet.id}`} className="h-full"><SavedSetEditor
+      initialSet={editingSavedSet}
+      onBack={() => { setEditingSavedSet(null); loadSavedSets(); setView('saved-sets'); }}
+      onPlay={playSavedSet}
+      onChanged={(saved) => {
+        setEditingSavedSet(saved);
+        setSavedSets(current => current.map(set => set.id === saved.id ? { ...set, ...saved, questionCount: saved.questions?.length || 0 } : set));
+      }}
+    /></ViewFade>;
+  }
+
   // ===== CUSTOM SETUP (legacy form - opened from hub) =====
+  if (view === 'my-sets') {
+    return <ViewFade viewKey="my-sets" className="h-full"><MySetsView
+      sets={history?.sets || []}
+      loading={hubLoading && !history}
+      onBack={() => setView('hub')}
+      onOpen={(s) => { setPlayedSetFocus(s); setView('my-set-detail'); }}
+    /></ViewFade>;
+  }
+
+  if (view === 'my-set-detail' && playedSetFocus) {
+    return <ViewFade viewKey={`my-set:${playedSetFocus.id}`} className="h-full"><PlayedSetDetail
+      set={playedSetFocus}
+      onBack={() => { setPlayedSetFocus(null); setView('my-sets'); }}
+      onPlayAgain={() => playPlayedSet(playedSetFocus)}
+      onPracticeMissed={() => playPlayedSet(playedSetFocus, { onlyMissed: true })}
+      onWatchReplay={() => { setReplayReturnTo('my-set-detail'); setReplaySet(playedSetFocus); setView('replay'); }}
+      onSaveToEditor={() => savePlayedSetToEditor(playedSetFocus)}
+      onRename={(title) => renamePlayedSet(playedSetFocus.id, title)}
+      onDelete={() => deletePlayedSet(playedSetFocus.id)}
+    /></ViewFade>;
+  }
+
   if (view === 'custom') {
     return (
       <div className="h-full overflow-y-auto bg-transparent">
@@ -1241,7 +1452,7 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
 
   // ===== REPLAY - watch back a saved solo set question by question =====
   if (view === 'replay' && replaySet) {
-    return <ReplayView set={replaySet} onExit={() => { setReplaySet(null); setView('replays'); }} />;
+    return <ReplayView set={replaySet} onExit={() => { setReplaySet(null); setView(replayReturnTo); setReplayReturnTo('replays'); }} />;
   }
 
   // ===== MATCH REPLAY - watch back a saved multiplayer match =====
@@ -1280,6 +1491,10 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
       onMultiplayer={() => setView('multiplayer')}
       onCustom={() => setView('custom')}
       onClueLab={() => setView('clue-lab')}
+      onCountryPractice={() => setView('country-practice')}
+      onSavedSets={() => { loadSavedSets(); setView('saved-sets'); }}
+      onMySets={() => setView('my-sets')}
+      onOpenPlayedSet={(s) => { setPlayedSetFocus(s); setView('my-set-detail'); }}
       onAILobby={() => { setAiLobbyInitial('lobby'); setView('ai-lobby'); }}
       onReplay={(s) => { setReplaySet(s); setView('replay'); }}
       onReplayMatch={(rec) => { setMatchReplayRec(rec); setView('match-replay'); }}
@@ -1292,9 +1507,10 @@ export default function QuizBowlApp({ initialTopic = null, initialDifficulty = n
 // ============================================================
 // HUB
 // ============================================================
-function QuizBowlHub({ hubLoading, history, skillProfile, recs, patterns, sm2Due = [], matchList = [], error, generating, onLaunch, onMultiplayer, onCustom, onClueLab, onAILobby, onReplay, onReplayMatch, onReplays }) {
+function QuizBowlHub({ hubLoading, history, skillProfile, recs, patterns, sm2Due = [], matchList = [], error, generating, onLaunch, onMultiplayer, onCustom, onClueLab, onAILobby, onCountryPractice, onSavedSets, onMySets, onOpenPlayedSet, onReplay, onReplayMatch, onReplays }) {
   const stats = history?.stats || { sets: 0, accuracy: 0, studyMs: 0, categoryStats: {} };
   const sets = history?.sets || [];
+  const [showBuzzPatterns, setShowBuzzPatterns] = useState(false);
 
   // ML-derived weakness/strength from secretProfile; fall back to raw categoryStats.
   const topWeakness = useMemo(() => {
@@ -1340,8 +1556,36 @@ function QuizBowlHub({ hubLoading, history, skillProfile, recs, patterns, sm2Due
 
         {error && <p className="text-[11px] text-rose-400 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-center">{error}</p>}
 
-        {/* Buzz patterns - shows when there's enough data */}
-        {patterns && <BuzzPatterns patterns={patterns} />}
+        {/* My Sets - the permanent archive of every played set */}
+        <button onClick={onMySets} data-tour="qb-my-sets"
+          className="w-full text-left rounded-lg border border-white/[0.08] bg-white/[0.03] p-4 hover:bg-white/[0.06] hover:border-white/[0.14] transition-all flex items-center gap-3.5">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-blue-400/25 bg-blue-500/10 flex-shrink-0">
+            <Layers size={17} className="text-blue-300" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[14px] font-bold text-white/90">My sets</p>
+          </div>
+          <ChevronRight size={15} className="text-white/25 flex-shrink-0" />
+        </button>
+
+        {/* Buzz patterns - collapsed behind a button, shows when there's enough data */}
+        {patterns && (
+          <>
+            <button onClick={() => setShowBuzzPatterns(v => !v)}
+              className="w-full text-left rounded-lg border border-white/[0.08] bg-white/[0.03] p-4 hover:bg-white/[0.06] hover:border-white/[0.14] transition-all flex items-center gap-3.5">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-violet-400/25 bg-violet-500/10 flex-shrink-0">
+                <Zap size={17} className="text-violet-300" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[14px] font-bold text-white/90">Buzz patterns</p>
+              </div>
+              {showBuzzPatterns
+                ? <ChevronDown size={15} className="text-white/25 flex-shrink-0" />
+                : <ChevronRight size={15} className="text-white/25 flex-shrink-0" />}
+            </button>
+            {showBuzzPatterns && <BuzzPatterns patterns={patterns} />}
+          </>
+        )}
 
         {/* Drill weakness + Hone strength side-by-side */}
         {(topWeakness || topStrength) && (
@@ -1377,15 +1621,25 @@ function QuizBowlHub({ hubLoading, history, skillProfile, recs, patterns, sm2Due
           </div>
         )}
 
+        {/* Preset geography practice + personal editable packets. Country
+            selection goes straight into a grounded Easy-level round. */}
+        <div className="grid grid-cols-2 gap-2">
+          <button onClick={onCountryPractice}
+            className="text-left rounded-lg border border-blue-400/20 bg-blue-500/[0.05] p-3.5 hover:bg-blue-500/[0.10] hover:border-blue-400/35 transition-colors">
+            <p className="text-[13px] font-bold text-white/90">Every country</p>
+          </button>
+          <button onClick={onSavedSets}
+            className="text-left rounded-lg border border-blue-400/20 bg-blue-500/[0.05] p-3.5 hover:bg-blue-500/[0.10] hover:border-blue-400/35 transition-colors">
+            <p className="text-[13px] font-bold text-white">Save & edit</p>
+          </button>
+        </div>
+
         {/* Play vs AI CTA */}
         <button
           onClick={onAILobby}
           data-tour="qb-ai-lobby"
           className="w-full text-left rounded-lg border border-white/[0.08] bg-white/[0.03] p-4 hover:bg-white/[0.06] hover:border-white/[0.14] transition-all"
         >
-          <div className="flex items-center gap-1.5 mb-1.5">
-            <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Play vs AI</span>
-          </div>
           <p className="text-[14px] font-bold text-white/90">Compete in a Lobby</p>
         </button>
 
@@ -1475,7 +1729,7 @@ function QuizBowlHub({ hubLoading, history, skillProfile, recs, patterns, sm2Due
             <div className="flex items-center gap-1.5 mb-1.5">
               <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Past sets</span>
               <span className="text-[10px] text-white/30">· {sets.length}</span>
-              <button onClick={onReplays} className="ml-auto text-[10px] text-white/30 hover:text-white/60 transition-colors">See all →</button>
+              <button onClick={onMySets} className="ml-auto text-[10px] text-white/30 hover:text-white/60 transition-colors">See all →</button>
             </div>
             <div className="space-y-1">
               {sets.slice(0, 10).map((s) => {
@@ -1486,13 +1740,13 @@ function QuizBowlHub({ hubLoading, history, skillProfile, recs, patterns, sm2Due
                   : pct >= 50 ? 'text-white/80 bg-white/[0.06] border-white/[0.12]'
                   : 'text-rose-300 bg-rose-500/10 border-rose-500/25';
                 return (
-                  <div key={s.id} onClick={() => onReplay?.(s)}
+                  <div key={s.id} onClick={() => onOpenPlayedSet?.(s)}
                     className="flex items-center gap-3 px-2 py-2.5 border-b border-white/[0.06] last:border-b-0 cursor-pointer hover:bg-white/[0.03] rounded-md transition-colors group">
                     <div className={`min-w-[44px] px-2 py-1 rounded-md border text-center text-[11px] font-bold tabular-nums ${scoreCls}`}>
                       {hasPoints ? `${s.points} pts` : `${s.score}/${s.total}`}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-[12px] font-medium text-white/85 truncate">{s.category} <span className="text-white/35">· {s.difficulty}</span></p>
+                      <p className="text-[12px] font-medium text-white/85 truncate">{playedSetTitle(s)} <span className="text-white/35">· {s.difficulty}</span></p>
                       <p className="text-[10px] text-white/35">{ago} · {s.source === 'ai' ? 'AI' : 'QBReader'} · {formatDuration(s.durationMs)} · {s.score}/{s.total} correct</p>
                     </div>
                   </div>
@@ -1729,12 +1983,7 @@ function BuzzPatterns({ patterns }) {
   if (!p) return null;
 
   return (
-    <div className="rounded-lg border border-white/[0.08] bg-white/[0.02] overflow-hidden">
-      {/* Header */}
-      <div className="px-4 pt-3 pb-2 flex items-center gap-2">
-        <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Buzz Patterns</span>
-      </div>
-
+    <div className="rounded-lg border border-white/[0.08] bg-white/[0.02] overflow-hidden pt-3">
       {/* Sparkline - recent 20 buzzes as dots on a timeline */}
       {p.recentBuzzes?.length > 3 && (
         <div className="px-4 py-2">
@@ -2009,7 +2258,7 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
   // Reset per-bot overrides when competition level changes
   useEffect(() => { setBotOverrides({}); }, [roomLevel]);
 
-  const diffMap = { easy: 'Easy', medium: 'Medium', hard: 'Hard' };
+  const diffMap = { easy: 'Easy', medium: 'Medium', hard: 'Hard', tournament: 'Tournament' };
 
   // Effective bots that will be passed to TrialSession
   const effectiveLobbyBots = useMemo(() => {
@@ -2415,8 +2664,8 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
 
           <div>
             <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 mb-2">Question difficulty</p>
-            <div className="grid grid-cols-3 gap-1.5">
-              {[['easy', 'Easy'], ['medium', 'Medium'], ['hard', 'Hard']].map(([id, label]) => (
+            <div className="grid grid-cols-4 gap-1.5">
+              {[['easy', 'Easy'], ['medium', 'Medium'], ['hard', 'Hard'], ['tournament', 'Tournament']].map(([id, label]) => (
                 <GlassPill key={id} active={difficulty === id} onClick={() => setDifficulty(id)}>{label}</GlassPill>
               ))}
             </div>
@@ -2435,7 +2684,6 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
                         : 'bg-white/[0.02] border-white/[0.06] hover:border-white/[0.14] hover:bg-white/[0.05]'
                     }`}>
                     <div className={`text-[12px] font-semibold ${sel ? 'text-white' : 'text-white/80'}`}>{f.label}</div>
-                    <div className="text-[10px] text-white/35 mt-0.5">{f.desc}</div>
                   </button>
                 );
               })}
@@ -2631,6 +2879,392 @@ function ReplaysView({ sets, matchList, myUserId, onReplaySolo, onReplayMatch, o
 }
 
 // ============================================================
+// MY SETS — the permanent archive of every solo set the player has
+// finished. Rounds save themselves here automatically with their full
+// question text, so nothing played is ever lost: browse, search, and
+// filter the history, inspect any question with its buzz point and both
+// answers, then re-play the set, drill only the misses, watch the
+// replay, or copy it into the editable library.
+// ============================================================
+
+// Display name for a played set. Newer records carry a stored `title`
+// (renameable); older ones derive a name from their generation context.
+function playedSetTitle(s = {}) {
+  if (s.title) return s.title;
+  if (s.noteTitle) return s.noteTitle;
+  const instr = String(s.customInstructions || '').replace(/^focus on:\s*/i, '').trim();
+  if (instr) return instr.length > 70 ? `${instr.slice(0, 67)}...` : instr;
+  return `${s.category || 'Mixed'} · ${s.difficulty || 'Medium'}`;
+}
+
+// Title stored with a freshly finished round. Only real context makes a
+// title; plain category rounds stay blank and fall back at display time.
+function autoPlayedSetTitle(ctx) {
+  if (!ctx) return '';
+  if (ctx.title) return String(ctx.title).slice(0, 140);
+  if (ctx.noteTitle) return String(ctx.noteTitle).slice(0, 140);
+  return String(ctx.customInstructions || '').replace(/^focus on:\s*/i, '').trim().slice(0, 140);
+}
+
+function timeBucketLabel(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 'Earlier';
+  const now = new Date();
+  const dayStart = (t) => new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime();
+  const days = Math.round((dayStart(now) - dayStart(d)) / 86400000);
+  if (days <= 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return 'This week';
+  if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()) return 'This month';
+  return d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+}
+
+const MY_SETS_SORTS = [
+  { key: 'newest', label: 'Newest first' },
+  { key: 'oldest', label: 'Oldest first' },
+  { key: 'best', label: 'Best score' },
+  { key: 'worst', label: 'Lowest score' },
+];
+
+function MySetsView({ sets, loading, onBack, onOpen }) {
+  const [query, setQuery] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('all');
+  const [catFilter, setCatFilter] = useState('all');
+  const [sort, setSort] = useState('newest');
+
+  const categories = useMemo(() => {
+    const seen = new Set(sets.map(s => s.category || 'Mixed'));
+    return [...seen].sort((a, b) => a.localeCompare(b));
+  }, [sets]);
+
+  const agg = useMemo(() => {
+    const totalQ = sets.reduce((n, s) => n + (s.total || 0), 0);
+    const correct = sets.reduce((n, s) => n + (s.score || 0), 0);
+    const pts = sets.reduce((n, s) => n + (typeof s.points === 'number' ? s.points : 0), 0);
+    const ms = sets.reduce((n, s) => n + (s.durationMs || 0), 0);
+    return {
+      count: sets.length,
+      totalQ,
+      accuracy: totalQ ? Math.round((correct / totalQ) * 100) : 0,
+      pts,
+      ms,
+    };
+  }, [sets]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const list = sets.filter(s => {
+      if (sourceFilter !== 'all' && (s.source || 'qbreader') !== sourceFilter) return false;
+      if (catFilter !== 'all' && (s.category || 'Mixed') !== catFilter) return false;
+      if (!q) return true;
+      // Answers are part of the haystack so "oxaloacetate" finds the set
+      // that asked about it.
+      const hay = [
+        playedSetTitle(s), s.category, s.difficulty, s.noteTitle, s.customInstructions,
+        ...(s.perQuestion || []).map(p => p.correctAnswer),
+      ].filter(Boolean).join(' ').toLowerCase();
+      return hay.includes(q);
+    });
+    const pct = (s) => (s.total ? (s.score || 0) / s.total : 0);
+    const ts = (s) => new Date(s.finishedAt).getTime() || 0;
+    if (sort === 'newest') list.sort((a, b) => ts(b) - ts(a));
+    else if (sort === 'oldest') list.sort((a, b) => ts(a) - ts(b));
+    else if (sort === 'best') list.sort((a, b) => pct(b) - pct(a) || ts(b) - ts(a));
+    else if (sort === 'worst') list.sort((a, b) => pct(a) - pct(b) || ts(b) - ts(a));
+    return list;
+  }, [sets, query, sourceFilter, catFilter, sort]);
+
+  // Chronological browsing gets date shelf labels; score sorts stay flat.
+  const groups = useMemo(() => {
+    if (sort === 'best' || sort === 'worst') return [{ label: null, items: filtered }];
+    const out = [];
+    for (const s of filtered) {
+      const label = timeBucketLabel(s.finishedAt);
+      const last = out[out.length - 1];
+      if (last && last.label === label) last.items.push(s);
+      else out.push({ label, items: [s] });
+    }
+    return out;
+  }, [filtered, sort]);
+
+  const sourceChip = (key, label) => (
+    <button key={key} onClick={() => setSourceFilter(key)}
+      className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold transition-colors ${sourceFilter === key
+        ? 'border-blue-400/40 bg-blue-500/15 text-blue-200'
+        : 'border-white/[0.08] bg-white/[0.03] text-white/50 hover:bg-white/[0.06] hover:text-white/75'}`}>
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="h-full flex flex-col bg-transparent min-h-0">
+      <div className="flex items-center gap-3 px-5 py-3 border-b border-white/[0.06] flex-shrink-0">
+        <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-white/40 hover:text-white/75 transition-colors"><ArrowLeft size={15} /> Hub</button>
+        <div className="min-w-0">
+          <h2 className="text-[15px] font-bold text-white/90">My sets</h2>
+          <p className="text-[10px] text-white/35">Every set you have played, kept automatically</p>
+        </div>
+        <span className="ml-auto text-[11px] text-white/25 tabular-nums">{filtered.length === agg.count ? agg.count : `${filtered.length} of ${agg.count}`}</span>
+      </div>
+
+      <div className="px-5 pt-4 flex-shrink-0 space-y-2.5">
+        {/* Lifetime rollup across the whole archive */}
+        <div className="grid grid-cols-5 gap-2">
+          <HubStat label="Sets" value={agg.count} />
+          <HubStat label="Questions" value={agg.totalQ} />
+          <HubStat label="Accuracy" value={`${agg.accuracy}%`} accent={agg.accuracy >= 75 ? 'emerald' : agg.accuracy >= 50 ? 'amber' : 'rose'} />
+          <HubStat label="Points" value={agg.pts} />
+          <HubStat label="Play time" value={formatDuration(agg.ms)} />
+        </div>
+
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/25" />
+          <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search titles, topics, or answers"
+            className="w-full rounded-lg border border-white/[0.08] bg-white/[0.04] py-2 pl-9 pr-3 text-[13px] text-white/85 placeholder-white/25 outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/15" />
+        </div>
+
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {sourceChip('all', 'All')}
+          {sourceChip('ai', 'AI generated')}
+          {sourceChip('qbreader', 'QBReader')}
+          <select value={catFilter} onChange={e => setCatFilter(e.target.value)}
+            className="ml-auto rounded-lg border border-white/[0.08] bg-[#1b1b1b] px-2 py-1.5 text-[11px] font-medium text-white/70 outline-none focus:border-blue-400/50">
+            <option value="all">All categories</option>
+            {categories.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <select value={sort} onChange={e => setSort(e.target.value)}
+            className="rounded-lg border border-white/[0.08] bg-[#1b1b1b] px-2 py-1.5 text-[11px] font-medium text-white/70 outline-none focus:border-blue-400/50">
+            {MY_SETS_SORTS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
+        {loading ? (
+          <div className="py-12 flex justify-center"><Loader2 size={20} className="animate-spin text-white/35" /></div>
+        ) : agg.count === 0 ? (
+          <div className="rounded-xl border border-dashed border-white/[0.12] bg-white/[0.02] p-8 text-center">
+            <Layers size={22} className="mx-auto mb-2 text-white/25" />
+            <p className="text-[13px] font-semibold text-white/70">Nothing here yet</p>
+            <p className="mt-1 text-[11px] text-white/35">Finish any solo round and it lands here automatically, questions and all.</p>
+          </div>
+        ) : filtered.length === 0 ? (
+          <p className="py-10 text-center text-[12px] text-white/35">No sets match that search.</p>
+        ) : (
+          <div className="space-y-4">
+            {groups.map((group, gi) => (
+              <section key={group.label || `flat-${gi}`}>
+                {group.label && (
+                  <p className="mb-1 px-1 text-[11px] font-bold uppercase tracking-[0.16em] text-white/35">
+                    {group.label} <span className="font-normal text-white/20">· {group.items.length}</span>
+                  </p>
+                )}
+                <div className="space-y-0.5">
+                  {group.items.map(s => <PlayedSetRow key={s.id} set={s} onOpen={() => onOpen(s)} />)}
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PlayedSetRow({ set: s, onOpen }) {
+  const pct = s.total ? Math.round(((s.score || 0) / s.total) * 100) : 0;
+  const ago = formatRelative(Date.now() - new Date(s.finishedAt).getTime());
+  const hasPoints = typeof s.points === 'number';
+  const hasText = (s.perQuestion || []).some(q => q.text);
+  const scoreCls = pct >= 75 ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/25'
+    : pct >= 50 ? 'text-white/80 bg-white/[0.06] border-white/[0.12]'
+    : 'text-rose-300 bg-rose-500/10 border-rose-500/25';
+  return (
+    <button onClick={onOpen}
+      className="w-full flex items-center gap-3 px-2 py-2.5 border-b border-white/[0.06] last:border-b-0 text-left hover:bg-white/[0.03] rounded-md transition-colors group">
+      <div className={`min-w-[52px] px-2 py-1 rounded-md border text-center text-[11px] font-bold tabular-nums ${scoreCls}`}>
+        {hasPoints ? `${s.points} pts` : `${s.score}/${s.total}`}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[12px] font-medium text-white/85 truncate">{playedSetTitle(s)}</p>
+        <p className="text-[10px] text-white/35 truncate">
+          {ago} · {s.source === 'ai' ? 'AI' : 'QBReader'} · {s.category || 'Mixed'} · {s.difficulty || 'Medium'} · {s.score}/{s.total} correct · {formatDuration(s.durationMs)}
+          {!hasText && ' · results only'}
+        </p>
+      </div>
+      <span className={`text-[11px] font-bold tabular-nums ${pct >= 75 ? 'text-emerald-300/80' : pct >= 50 ? 'text-white/40' : 'text-rose-300/80'}`}>{pct}%</span>
+      <ChevronRight size={13} className="text-white/20 group-hover:text-white/55 flex-shrink-0 transition-colors" />
+    </button>
+  );
+}
+
+// Full tossup text with the player's buzz point pinned into the prose.
+// Words inside the power window read slightly brighter.
+function BuzzText({ text, buzzWord, powerWordIndex }) {
+  const words = useMemo(() => String(text || '').split(/\s+/).filter(Boolean), [text]);
+  if (!words.length) return null;
+  return (
+    <p className="text-[12px] leading-relaxed text-white/70">
+      {words.map((w, i) => (
+        <span key={i} className={powerWordIndex != null && i <= powerWordIndex ? 'text-white/85' : undefined}>
+          {w}
+          {i === buzzWord && (
+            <span className="mx-1 inline-flex items-center rounded border border-blue-400/35 bg-blue-500/15 px-1 py-px align-middle text-[8px] font-bold uppercase tracking-wide text-blue-200">Buzz</span>
+          )}
+          {' '}
+        </span>
+      ))}
+    </p>
+  );
+}
+
+function PlayedSetDetail({ set: s, onBack, onPlayAgain, onPracticeMissed, onWatchReplay, onSaveToEditor, onRename, onDelete }) {
+  const [renaming, setRenaming] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  const [openIdx, setOpenIdx] = useState(() => new Set());
+  const [allOpen, setAllOpen] = useState(false);
+
+  const pq = s.perQuestion || [];
+  const playable = pq.filter(q => String(q.text || '').trim() && String(q.correctAnswer || '').trim());
+  const missed = playable.filter(q => !q.correct);
+  const pct = s.total ? Math.round(((s.score || 0) / s.total) * 100) : 0;
+  const hasPoints = typeof s.points === 'number';
+  const powers = pq.filter(q => (q.points || 0) > 10).length;
+  const negs = pq.filter(q => (q.points || 0) < 0).length;
+  const buzzedQs = pq.filter(q => q.buzzWord >= 0 && q.totalWords > 0);
+  const avgHeard = buzzedQs.length
+    ? Math.round((buzzedQs.reduce((n, q) => n + q.buzzWord / q.totalWords, 0) / buzzedQs.length) * 100)
+    : null;
+  const played = new Date(s.finishedAt);
+
+  function toggle(i) {
+    setOpenIdx(prev => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i); else next.add(i);
+      return next;
+    });
+  }
+  function toggleAll() {
+    setAllOpen(v => !v);
+    setOpenIdx(allOpen ? new Set() : new Set(pq.map((_, i) => i)));
+  }
+  function commitRename() {
+    setRenaming(false);
+    const next = titleDraft.trim();
+    if (next && next !== playedSetTitle(s)) onRename(next);
+  }
+
+  const actionBtn = 'inline-flex items-center gap-1.5 rounded-lg border border-white/[0.10] bg-white/[0.03] px-2.5 py-1.5 text-[11px] font-semibold text-white/65 hover:bg-white/[0.08] hover:text-white transition-colors disabled:opacity-40 disabled:pointer-events-none';
+
+  return (
+    <div className="h-full flex flex-col bg-transparent min-h-0">
+      <div className="flex items-center gap-3 px-5 py-3 border-b border-white/[0.06] flex-shrink-0">
+        <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-white/40 hover:text-white/75 transition-colors"><ArrowLeft size={15} /> My sets</button>
+        <button onClick={onDelete} aria-label="Delete this set" className="ml-auto rounded-md p-1.5 text-white/25 hover:bg-rose-500/10 hover:text-rose-300 transition-colors"><Trash2 size={14} /></button>
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
+        <div>
+          {renaming ? (
+            <div className="flex items-center gap-2">
+              <input autoFocus value={titleDraft} onChange={e => setTitleDraft(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setRenaming(false); }}
+                className="min-w-0 flex-1 rounded-lg border border-white/[0.10] bg-white/[0.04] px-3 py-1.5 text-[17px] font-bold text-white/90 outline-none focus:border-blue-400/50" />
+              <button onClick={commitRename} className="rounded-lg bg-blue-500 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-blue-400">Save</button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 min-w-0">
+              <h2 className="text-[19px] font-bold text-white/90 truncate">{playedSetTitle(s)}</h2>
+              <button onClick={() => { setTitleDraft(playedSetTitle(s)); setRenaming(true); }} aria-label="Rename set"
+                className="rounded-md p-1 text-white/25 hover:bg-white/[0.06] hover:text-white/70 transition-colors flex-shrink-0"><Pencil size={13} /></button>
+            </div>
+          )}
+          <p className="mt-1 text-[11px] text-white/40">
+            {played.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })} at {played.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+            {' '}· {s.source === 'ai' ? 'AI generated' : 'QBReader'} · {s.category || 'Mixed'} · {s.difficulty || 'Medium'} · {formatDuration(s.durationMs)}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-4 gap-2">
+          <HubStat label="Score" value={hasPoints ? `${s.points} pts` : `${s.score}/${s.total}`} />
+          <HubStat label="Correct" value={`${s.score}/${s.total}`} accent={pct >= 75 ? 'emerald' : pct >= 50 ? 'amber' : 'rose'} />
+          <HubStat label={hasPoints ? 'Powers / negs' : 'Accuracy'} value={hasPoints ? `${powers} / ${negs}` : `${pct}%`} />
+          <HubStat label="Avg heard" value={avgHeard == null ? 'n/a' : `${avgHeard}%`} />
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={onPlayAgain} disabled={!playable.length}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-blue-500 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-blue-400 transition-colors disabled:opacity-40 disabled:pointer-events-none">
+            <RotateCcw size={13} /> Play again
+          </button>
+          <button onClick={onPracticeMissed} disabled={!missed.length} className={actionBtn}>
+            <ListChecks size={13} /> Practice missed{missed.length ? ` (${missed.length})` : ''}
+          </button>
+          <button onClick={onWatchReplay} disabled={!playable.length} className={actionBtn}>
+            <Eye size={13} /> Watch replay
+          </button>
+          <button onClick={onSaveToEditor} disabled={!pq.some(q => String(q.text || '').trim())} className={actionBtn}>
+            <Save size={13} /> Edit a copy
+          </button>
+        </div>
+        {!playable.length && (
+          <p className="text-[11px] text-white/35">This round was played before full question storage, so only its results are kept.</p>
+        )}
+
+        {pq.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Questions <span className="font-normal tracking-normal text-white/25">· {pq.length}</span></p>
+              <button onClick={toggleAll} className="text-[10px] text-white/30 hover:text-white/60 transition-colors">{allOpen ? 'Collapse all' : 'Expand all'}</button>
+            </div>
+            <div className="space-y-2">
+              {pq.map((q, i) => {
+                const open = openIdx.has(i);
+                const heardPct = q.buzzWord >= 0 && q.totalWords > 0 ? Math.round((q.buzzWord / q.totalWords) * 100) : null;
+                const ptsCls = (q.points || 0) > 10 ? 'text-amber-300 border-amber-400/30 bg-amber-500/10'
+                  : (q.points || 0) > 0 ? 'text-emerald-300 border-emerald-500/25 bg-emerald-500/10'
+                  : (q.points || 0) < 0 ? 'text-rose-300 border-rose-500/25 bg-rose-500/10'
+                  : 'text-white/40 border-white/[0.10] bg-white/[0.04]';
+                return (
+                  <div key={i} className="rounded-xl border border-white/[0.08] bg-white/[0.03]">
+                    <button onClick={() => toggle(i)} className="w-full flex items-center gap-2.5 p-3 text-left">
+                      {q.correct
+                        ? <Check size={14} className="text-emerald-300 flex-shrink-0" />
+                        : <X size={14} className="text-rose-300 flex-shrink-0" />}
+                      <span className="text-[10px] font-bold text-white/35 flex-shrink-0">Q{i + 1}</span>
+                      <span className="min-w-0 flex-1 truncate text-[12px] text-white/70">{q.correctAnswer || q.text || 'Untitled question'}</span>
+                      {typeof q.points === 'number' && (
+                        <span className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold tabular-nums flex-shrink-0 ${ptsCls}`}>{q.points > 0 ? `+${q.points}` : q.points}</span>
+                      )}
+                      <ChevronRight size={13} className={`text-white/25 flex-shrink-0 transition-transform ${open ? 'rotate-90' : ''}`} />
+                    </button>
+                    {open && (
+                      <div className="px-3 pb-3 space-y-2 border-t border-white/[0.06] pt-2.5">
+                        {q.text
+                          ? <BuzzText text={q.text} buzzWord={q.buzzWord} powerWordIndex={q.powerWordIndex} />
+                          : <p className="text-[11px] text-white/35">Question text was not stored for this round.</p>}
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+                          <span className="text-white/45">Answer: <span className="font-semibold text-white/85">{q.correctAnswer || 'unknown'}</span></span>
+                          {q.answer && <span className="text-white/45">You said: <span className={`font-semibold ${q.correct ? 'text-emerald-300' : 'text-rose-300'}`}>{q.answer}</span></span>}
+                          <span className="text-white/30">
+                            {heardPct == null ? 'No buzz' : `Buzzed ${heardPct}% in`}
+                            {q.category ? ` · ${q.category}` : ''}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // MATCH REPLAY VIEW — plays a saved match back through the same layout
 // as the live match screen (PlayingView): word-by-word reveal, the
 // PlayerCard sidebar scoreboard, and an action bar that re-enacts each
@@ -2665,6 +3299,24 @@ function MatchReplayView({ rec, myUserId, onExit }) {
   const winnerIdx = buzzes.findIndex(b => b.correct);
   const winner = winnerIdx >= 0 ? buzzes[winnerIdx] : null;
 
+  // Read-aloud (shared Quiz Bowl audio option): TTS reads the tossup and
+  // drives the reveal; the stage machine still pauses playback at each
+  // recorded buzz, which pauses the speech in place.
+  const [voiceMode, toggleVoiceMode] = useQbVoicePref();
+  const voiceOn = voiceMode && speechSynthesisSupported;
+  const spoken = useSpokenReveal(q?.text || '', voiceOn && words.length > 0 && stage !== 'done', stage !== 'reading');
+  useEffect(() => {
+    if (!voiceOn) return;
+    setRevealedUpTo(prev => Math.max(prev, spoken.wordIndex));
+  }, [spoken.wordIndex, voiceOn]); // eslint-disable-line react-hooks/exhaustive-deps
+  const verdictQRef = useRef(-1);
+  useEffect(() => {
+    if (!voiceOn || stage !== 'done' || !q || verdictQRef.current === qIdx) return;
+    verdictQRef.current = qIdx;
+    const who = winner ? (winner.userId === myUserId ? 'You' : winner.name) : null;
+    speakLine(`${who ? `${who} got it. ` : 'No one got it. '}The answer was ${spokenAnswer(q.answer)}.`);
+  }, [stage, voiceOn]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Reset playback whenever the question changes.
   useEffect(() => {
     setRevealedUpTo(-1);
@@ -2672,14 +3324,14 @@ function MatchReplayView({ rec, myUserId, onExit }) {
     setStage(words.length ? 'reading' : 'done');
   }, [qIdx]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Reveal words while reading.
+  // Reveal words while reading (read-aloud reveals from speech instead).
   useEffect(() => {
-    if (stage !== 'reading' || !words.length) return;
+    if (voiceOn || stage !== 'reading' || !words.length) return;
     const id = setInterval(() => {
       setRevealedUpTo(prev => Math.min(prev + 1, words.length - 1));
     }, REPLAY_WORD_MS);
     return () => clearInterval(id);
-  }, [stage, qIdx, words.length]);
+  }, [stage, qIdx, words.length, voiceOn]);
 
   // Pause when the reveal reaches the next buzz; finish when the text runs
   // out with nobody left to buzz.
@@ -2796,6 +3448,7 @@ function MatchReplayView({ rec, myUserId, onExit }) {
         <span className={`text-[12px] font-bold tabular-nums ${myScore > 0 ? 'text-emerald-400' : 'text-white/40'}`}>
           {myScore}
         </span>
+        <QbVoiceToggle on={voiceMode} onToggle={toggleVoiceMode} />
       </div>
 
       <div className="flex flex-1 min-h-0">
@@ -2949,35 +3602,52 @@ function ReplayView({ set, onExit }) {
   wordsRef.current = words;
   stopAtRef.current = stopAt;
 
+  // Read-aloud (shared Quiz Bowl audio option): TTS reads the question up to
+  // the recorded buzz word and the reveal follows the speech.
+  const [voiceMode, toggleVoiceMode] = useQbVoicePref();
+  const voiceOn = voiceMode && speechSynthesisSupported;
+  const spokenText = useMemo(() => words.slice(0, stopAt + 1).join(' '), [q?.text, stopAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  const spoken = useSpokenReveal(spokenText, voiceOn && !showResult && words.length > 0, false);
+  useEffect(() => {
+    if (!voiceOn) return;
+    setRevealedUpTo(prev => Math.max(prev, Math.min(spoken.wordIndex, stopAtRef.current)));
+  }, [spoken.wordIndex, voiceOn]);
+
+  // Reset playback whenever the question changes.
   useEffect(() => {
     clearInterval(timerRef.current);
     clearTimeout(showResultTimerRef.current);
     setRevealedUpTo(-1);
     setShowResult(false);
+    if (!wordsRef.current.length) setShowResult(true);
+  }, [qIdx]);
 
-    const currentWords = wordsRef.current;
-    const currentStopAt = stopAtRef.current;
-
-    if (!currentWords.length) {
-      setShowResult(true);
-      return;
-    }
-
-    let current = -1;
+  // Timed reveal (read-aloud reveals from speech instead).
+  useEffect(() => {
+    if (voiceOn || showResult || !words.length) return;
     timerRef.current = setInterval(() => {
-      current++;
-      setRevealedUpTo(current);
-      if (current >= currentStopAt) {
-        clearInterval(timerRef.current);
-        showResultTimerRef.current = setTimeout(() => setShowResult(true), 450);
-      }
+      setRevealedUpTo(prev => Math.min(prev + 1, stopAtRef.current));
     }, 120);
+    return () => clearInterval(timerRef.current);
+  }, [qIdx, voiceOn, showResult, words.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    return () => {
-      clearInterval(timerRef.current);
-      clearTimeout(showResultTimerRef.current);
-    };
-  }, [qIdx]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Show the result once the reveal reaches the buzz word, whichever
+  // driver got it there.
+  useEffect(() => {
+    if (showResult || !words.length) return;
+    if (revealedUpTo >= stopAt) {
+      showResultTimerRef.current = setTimeout(() => setShowResult(true), 450);
+      return () => clearTimeout(showResultTimerRef.current);
+    }
+  }, [revealedUpTo, stopAt, showResult, words.length]);
+
+  // Speak the recorded outcome once per question.
+  const verdictQRef = useRef(-1);
+  useEffect(() => {
+    if (!voiceOn || !showResult || !q || verdictQRef.current === qIdx) return;
+    verdictQRef.current = qIdx;
+    speakLine(`${q.correct ? 'You got it. ' : ''}The answer was ${spokenAnswer(q.correctAnswer)}.`);
+  }, [showResult, voiceOn]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function skipToResult() {
     clearInterval(timerRef.current);
@@ -2994,15 +3664,20 @@ function ReplayView({ set, onExit }) {
 
   return (
     <div className="h-full flex flex-col bg-transparent overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-white/[0.04] flex-shrink-0">
+      {/* Header — same shape as the match replay header */}
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/[0.04] flex-shrink-0">
         <button onClick={onExit}
-          className="flex items-center gap-2 text-sm text-white/35 hover:text-white/60 transition-colors">
+          className="flex items-center gap-2 text-sm text-white/35 hover:text-white/60 transition-colors flex-shrink-0">
           <ArrowLeft size={16} /> Back
         </button>
-        <span className="text-[13px] font-bold text-white/80">{set?.category}</span>
-        <span className="text-[11px] text-white/35">· {set?.difficulty}</span>
-        <span className="text-[11px] text-white/35 tabular-nums ml-auto">{qIdx + 1}/{totalQ}</span>
+        <Zap size={14} className="text-white/50 flex-shrink-0" />
+        <span className="text-[13px] font-bold text-white tabular-nums">Q{qIdx + 1}/{totalQ}</span>
+        <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-white/[0.08] text-white/50">
+          Replay
+        </span>
+        <span className="text-[11px] text-white/35 truncate">{set?.category} · {set?.difficulty}</span>
+        <div className="flex-1" />
+        <QbVoiceToggle on={voiceMode} onToggle={toggleVoiceMode} />
       </div>
 
       {/* Summary bar */}
@@ -3015,12 +3690,12 @@ function ReplayView({ set, onExit }) {
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-3">
         {/* Question text with animated reveal */}
         {words.length > 0 ? (
           <div
             onClick={!showResult ? skipToResult : undefined}
-            className={`rounded-lg border border-white/[0.08] bg-white/[0.03] p-4 leading-relaxed ${!showResult ? 'cursor-pointer' : ''}`}
+            className={`rounded-lg border border-white/[0.08] bg-white/[0.03] p-4 leading-relaxed break-words ${!showResult ? 'cursor-pointer' : ''}`}
           >
             {words.map((w, i) => {
               const isRevealed = i <= revealedUpTo;
@@ -3030,7 +3705,7 @@ function ReplayView({ set, onExit }) {
                 <span
                   key={i}
                   className={[
-                    'mr-1 text-[13px] transition-opacity duration-75',
+                    'text-[13px] transition-opacity duration-75',
                     isRevealed ? 'opacity-100' : 'opacity-0',
                     isBuzzWord
                       ? (q.correct
@@ -3041,7 +3716,7 @@ function ReplayView({ set, onExit }) {
                         : 'text-white/80',
                   ].join(' ')}
                 >
-                  {w}
+                  {w}{' '}
                 </span>
               );
             })}

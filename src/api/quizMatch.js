@@ -58,6 +58,24 @@ export const saveQuizBowlSet = (payload) => apiFetch('/api/quizbowl/sets', {
 // Returns { sets, stats: { sets, totalQuestions, totalCorrect, accuracy,
 // studyMs, categoryStats, lastPlayedAt } }
 export const fetchQuizBowlHistory = () => apiFetch('/api/quizbowl/sets');
+export const renamePlayedQuizBowlSet = (id, title) => apiFetch(`/api/quizbowl/sets/${id}`, {
+  method: 'PATCH', body: JSON.stringify({ title }),
+});
+export const deletePlayedQuizBowlSet = (id) => apiFetch(`/api/quizbowl/sets/${id}`, { method: 'DELETE' });
+
+// Country practice catalog and editable personal packet library. These are
+// intentionally separate from completed-set history above.
+export const fetchQuizBowlCountryPresets = () => apiFetch('/api/quizbowl/presets');
+export const fetchQuizBowlCountryPreset = (slug) => apiFetch(`/api/quizbowl/presets/${encodeURIComponent(slug)}`);
+export const fetchSavedQuizBowlSets = () => apiFetch('/api/quizbowl/saved-sets');
+export const getSavedQuizBowlSet = (id) => apiFetch(`/api/quizbowl/saved-sets/${id}`);
+export const createSavedQuizBowlSet = (payload) => apiFetch('/api/quizbowl/saved-sets', {
+  method: 'POST', body: JSON.stringify(payload),
+});
+export const updateSavedQuizBowlSet = (id, payload) => apiFetch(`/api/quizbowl/saved-sets/${id}`, {
+  method: 'PUT', body: JSON.stringify(payload),
+});
+export const deleteSavedQuizBowlSet = (id) => apiFetch(`/api/quizbowl/saved-sets/${id}`, { method: 'DELETE' });
 
 // Returns { recommendations: [{ kind, category, difficulty, reason }] }
 export const fetchQuizBowlRecommendations = () => apiFetch('/api/quizbowl/recommendations');

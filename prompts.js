@@ -717,6 +717,9 @@ Difficulty: ${difficulty}.
 
 Rules:
 - The problems must ESCALATE in difficulty: problem 1 is the most approachable, the last is the hardest.
+- Plan ${count} distinct skills, representations, or solution strategies before writing. Use at most one problem per underlying procedure until all meaningful variants of the topic are covered.
+- Vary the reasoning operation: include an appropriate mix of direct computation, inverse/reconstruction, error analysis, interpretation, contextual application, and multi-step synthesis.
+- Changing only constants, names, or surface context does NOT make a problem distinct. No two problems may share the same setup and solution path.
 - Each problem is self-contained and solvable by hand on a canvas (no calculator-only or research problems).
 - Use KaTeX for ALL math. Inline: $x^2 + 1$. Block: $$\\int_0^1 x\\,dx$$. NEVER use \\( \\) or \\[ \\].
 - Keep each "prompt" to one or two sentences.

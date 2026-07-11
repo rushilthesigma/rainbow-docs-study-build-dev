@@ -63,6 +63,7 @@
     "openai": "^6.44.0",
     "pdf-parse": "^1.1.1",
     "pptxgenjs": "^4.0.1",
+    "qb-answer-checker": "^1.1.9",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",

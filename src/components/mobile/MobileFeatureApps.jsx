@@ -1,9 +1,6 @@
-import MathTutorApp from '../desktop/apps/MathTutorApp';
 import QBpediaApp from '../desktop/apps/QBpediaApp';
-import WidgetsApp from '../desktop/apps/WidgetsApp';
 import AdminApp from '../desktop/apps/AdminApp';
 import ErrorBoundary from '../shared/ErrorBoundary';
-import { WidgetProvider } from '../../context/WidgetContext';
 
 function FeatureSurface({ label, scroll = false, children }) {
   return (
@@ -18,29 +15,11 @@ function FeatureSurface({ label, scroll = false, children }) {
   );
 }
 
-export function MobileMathTutor() {
-  return (
-    <FeatureSurface label="Math Tutor">
-      <MathTutorApp />
-    </FeatureSurface>
-  );
-}
-
 export function MobileQBpedia({ onNavigate }) {
   return (
     <FeatureSurface label="QBpedia">
       <QBpediaApp onOpenApp={(appId) => onNavigate?.(appId)} />
     </FeatureSurface>
-  );
-}
-
-export function MobileWidgets() {
-  return (
-    <WidgetProvider>
-      <FeatureSurface label="Widgets">
-        <WidgetsApp />
-      </FeatureSurface>
-    </WidgetProvider>
   );
 }
 

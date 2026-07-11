@@ -489,9 +489,6 @@ const ChatInput = forwardRef(function ChatInput({
             className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/[0.06] disabled:opacity-40 disabled:hover:bg-transparent transition-colors"
           >
             <span className="block text-[12px] font-semibold text-gray-800 dark:text-gray-200">Refine draft</span>
-            <span className="block text-[10.5px] text-gray-400 dark:text-gray-500 mt-0.5">
-              {text.trim() ? 'Rewrite what you typed into a stronger prompt. You can undo.' : 'Type a message first, then refine it.'}
-            </span>
           </button>
           <button
             type="button"
@@ -500,7 +497,6 @@ const ChatInput = forwardRef(function ChatInput({
           >
             <span className="flex-1 min-w-0">
               <span className="block text-[12px] font-semibold text-gray-800 dark:text-gray-200">Auto-refine before sending</span>
-              <span className="block text-[10.5px] text-gray-400 dark:text-gray-500 mt-0.5">Every message you send gets refined on its way to the AI.</span>
             </span>
             <span className={`mt-0.5 w-7 h-4 rounded-full relative transition-colors flex-shrink-0 ${autoRefine ? 'bg-[var(--refine-accent)]' : 'bg-gray-300 dark:bg-white/[0.14]'}`}>
               <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${autoRefine ? 'left-3.5' : 'left-0.5'}`} />

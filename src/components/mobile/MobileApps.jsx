@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  BookOpen, Calculator, ChevronRight, FileText, Globe, LayoutGrid,
+  BookOpen, ChevronRight, FileText,
   Lightbulb, Scale, Settings, Shield, Zap,
 } from 'lucide-react';
 import { checkAdmin } from '../../api/admin';
@@ -10,20 +10,17 @@ const APP_GROUPS = [
   {
     label: 'Learn',
     apps: [
-      { id: 'curricula', label: 'Courses', description: 'Build and follow structured courses', icon: BookOpen, tone: 'blue' },
-      { id: 'lessons', label: 'Lessons', description: 'Create a focused standalone lesson', icon: Lightbulb, tone: 'amber' },
-      { id: 'mathtutor', label: 'Math Tutor', description: 'Work problems with a canvas and tutor', icon: Calculator, tone: 'indigo' },
-      { id: 'debate', label: 'Debate', description: 'Solo, multiplayer, and tournaments', icon: Scale, tone: 'rose' },
-      { id: 'quizbowl', label: 'Quiz Bowl', description: 'Practice tossups and play matches', icon: Zap, tone: 'orange' },
-      { id: 'qbpedia', label: 'QBpedia', description: 'Search the quiz-bowl knowledge base', icon: Globe, tone: 'violet' },
+      { id: 'curricula', label: 'Courses', icon: BookOpen, tone: 'blue' },
+      { id: 'lessons', label: 'Lessons', icon: Lightbulb, tone: 'amber' },
+      { id: 'debate', label: 'Debate', icon: Scale, tone: 'blue' },
+      { id: 'quizbowl', label: 'Quiz Bowl', icon: Zap, tone: 'orange' },
     ],
   },
   {
     label: 'Organize',
     apps: [
-      { id: 'notes', label: 'Notes', description: 'Write notes and explore note maps', icon: FileText, tone: 'emerald' },
-      { id: 'widgets', label: 'Widgets', description: 'Manage clocks, tasks, timers, and more', icon: LayoutGrid, tone: 'indigo' },
-      { id: 'settings', label: 'Settings', description: 'Appearance, account, and preferences', icon: Settings, tone: 'gray' },
+      { id: 'notes', label: 'Notes', icon: FileText, tone: 'emerald' },
+      { id: 'settings', label: 'Settings', icon: Settings, tone: 'gray' },
     ],
   },
 ];
@@ -52,7 +49,7 @@ export default function MobileApps({ onNavigate }) {
   }, []);
 
   return (
-    <MobilePage title="Apps" subtitle="Everything in RushilAI, in one place.">
+    <MobilePage title="Apps">
       <div className="space-y-6">
         {APP_GROUPS.map((group) => (
           <section key={group.label} aria-labelledby={`mobile-apps-${group.label.toLowerCase()}`}>
@@ -69,7 +66,7 @@ export default function MobileApps({ onNavigate }) {
           <section aria-labelledby="mobile-apps-admin">
             <h2 id="mobile-apps-admin" className="mb-2 px-1 text-[11px] font-bold uppercase tracking-[0.16em] text-gray-400 dark:text-white/35">Administration</h2>
             <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-white/[0.07] dark:bg-[#13131f]">
-              <AppRow app={{ id: 'admin', label: 'Admin', description: 'Users, analytics, reports, and referrals', icon: Shield, tone: 'red' }} onNavigate={onNavigate} />
+              <AppRow app={{ id: 'admin', label: 'Admin', icon: Shield, tone: 'red' }} onNavigate={onNavigate} />
             </div>
           </section>
         )}
@@ -91,7 +88,6 @@ function AppRow({ app, onNavigate }) {
       </span>
       <span className="min-w-0 flex-1">
         <span className="block text-[14px] font-semibold text-gray-900 dark:text-white/90">{app.label}</span>
-        <span className="block truncate text-[11px] text-gray-500 dark:text-white/40">{app.description}</span>
       </span>
       <ChevronRight size={17} className="shrink-0 text-gray-300 dark:text-white/20" />
     </button>

@@ -72,12 +72,12 @@ export default function NotesPage() {
           >
             <Globe size={22} className="text-white/40" />
             <span className="text-[13px] font-semibold text-white/80">Preset</span>
-            <span className="text-[11px] text-white/35">Country geography</span>
+            <span className="text-[11px] text-white/35">Countries + subdivisions</span>
           </button>
         </div>
       </Modal>
 
-      <Modal open={showPresets} onClose={() => setShowPresets(false)} title="Country geography notes" size="lg">
+      <Modal open={showPresets} onClose={() => setShowPresets(false)} title="Geography preset notes" size="lg">
         <PresetNotesBrowser
           notes={notes}
           onOpenNote={(id) => { setShowPresets(false); navigate(`/notes/${id}`); }}

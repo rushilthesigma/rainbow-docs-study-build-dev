@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, Plus, Loader2, BookOpen, ChevronDown, ChevronRight, CheckCircle2, Circle, Lock, ClipboardCheck, PenTool, FileText, Check, X, Trophy, Wand2, Paperclip, Upload, Calculator, GraduationCap, Atom, Sigma, Map as MapIcon, List, ListChecks, Share2, Users, BarChart3 } from 'lucide-react';
+import { ArrowLeft, Plus, Loader2, BookOpen, ChevronDown, ChevronRight, CheckCircle2, Circle, Lock, ClipboardCheck, PenTool, FileText, Check, X, Trophy, Wand2, Paperclip, Upload, Calculator, GraduationCap, Atom, Sigma, Map as MapIcon, List, ListChecks, Share2, Users, BarChart3, Zap } from 'lucide-react';
 import { listCurricula, generateCurriculum, getCurriculum, sendLessonMessage, getLessonHistory, editCurriculumWithAI, extractSourceUrl, extractFiles, refineCurriculum, generateLessonBlocks, generateFinalQuiz, gradeQuizBlock, gradeOpenBlock, completeLessonBlock, getCurriculumGradebook } from '../../../api/curriculum';
 import { getSharedItem, listOutgoing } from '../../../api/share';
 import { useSharing } from '../../../context/SharingContext';
@@ -33,8 +33,59 @@ import { errorChatMessage } from '../../../utils/aiErrors';
 import useBrowserBack from '../../../hooks/useBrowserBack';
 import { InlineProgress } from '../../shared/ProgressBar';
 
-const TYPE_ICONS = { lesson: BookOpen, math_tutor: Calculator, practice: PenTool, problem_set: ListChecks, essay: FileText, unit_test: ClipboardCheck };
-const TYPE_COLORS = { lesson: 'text-white/50', math_tutor: 'text-white/50', practice: 'text-white/50', problem_set: 'text-white/50', essay: 'text-amber-400', unit_test: 'text-rose-400' };
+const TYPE_ICONS = { lesson: BookOpen, math_tutor: Calculator, practice: PenTool, problem_set: ListChecks, essay: FileText, unit_test: ClipboardCheck, quiz_bowl: Zap };
+const TYPE_COLORS = { lesson: 'text-white/50', math_tutor: 'text-white/50', practice: 'text-white/50', problem_set: 'text-white/50', essay: 'text-amber-400', unit_test: 'text-rose-400', quiz_bowl: 'text-amber-400' };
+
+function quizBowlTargetForCurriculum(curriculum) {
+  const title = String(curriculum?.title || '').trim();
+  const topic = String(curriculum?.settings?.topic || title).trim();
+  const searchable = [title, curriculum?.description, curriculum?.settings?.topic, curriculum?.pausdSlug]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  const subject = String(curriculum?.subject || '').toLowerCase();
+
+  const isGeography = subject === 'geography'
+    || curriculum?.category === 'Geography'
+    || /\bgeography\b/.test(searchable)
+    || String(curriculum?.pausdSlug || '').endsWith('-geography');
+  if (isGeography) return { label: 'Geography', topic };
+
+  const isHistory = subject === 'history'
+    || curriculum?.category === 'History'
+    || /\bhistory\b/.test(searchable);
+  return isHistory ? { label: 'History', topic } : null;
+}
+
+function withQuizBowlLessonSwaps(curriculum) {
+  const target = quizBowlTargetForCurriculum(curriculum);
+  if (!target) return curriculum;
+
+  const units = curriculum.units || [];
+  const stride = units.length >= 24 ? 8 : 2;
+  let changed = false;
+  const swappedUnits = units.map((unit, index) => {
+    const shouldSwap = index === units.length - 1 || (index + 1) % stride === 0;
+    if (!shouldSwap || (unit.lessons || []).some(lesson => lesson.type === 'quiz_bowl')) return unit;
+    const essayIndex = (unit.lessons || []).findIndex(lesson => lesson.type === 'essay');
+    if (essayIndex < 0) return unit;
+
+    changed = true;
+    const lessons = [...unit.lessons];
+    const essay = lessons[essayIndex];
+    lessons[essayIndex] = {
+      ...essay,
+      title: `Quiz Bowl: ${unit.title}`,
+      description: `Play a Quiz Bowl game that reviews ${unit.title}.`,
+      type: 'quiz_bowl',
+      quizBowlTopic: `${target.topic}: ${unit.title}`,
+      quizBowlCategory: target.label,
+    };
+    return { ...unit, lessons };
+  });
+
+  return changed ? { ...curriculum, units: swappedUnits } : curriculum;
+}
 
 // Course-grade / score pill color by percentage. Semantic, matching the
 // gradebook: emerald = strong, sky = solid, amber = shaky, rose = failing.
@@ -395,6 +446,19 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
       toast.info('Only standard lessons are available in a shared curriculum for now.');
       return;
     }
+    if (lesson.type === 'quiz_bowl') {
+      const target = quizBowlTargetForCurriculum(selectedCurriculum);
+      if (!target || !wm?.openApp) {
+        toast.error('Quiz Bowl is unavailable for this curriculum.');
+        return;
+      }
+      wm.openApp('quizbowl', 'Quiz Bowl', {
+        initialTopic: lesson.quizBowlTopic || `${target.topic}: ${lesson.title}`,
+        initialCategory: lesson.quizBowlCategory || target.label,
+        autoStart: true,
+      });
+      return;
+    }
     setCurrentLesson({ ...lesson, curriculumId });
     // Unit-test typed lessons go to a real assessment quiz, not the chat tutor.
     if (lesson.type === 'unit_test' || lesson.type === 'essay') {
@@ -673,8 +737,9 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
   // Detail view
   if (view === 'detail' && selectedCurriculum) {
     const c = selectedCurriculum;
-    const totalLessons = (c.units || []).reduce((s, u) => s + (u.lessons || []).length, 0);
-    const completedLessons = (c.units || []).reduce((s, u) => s + (u.lessons || []).filter(l => l.isCompleted).length, 0);
+    const displayCurriculum = withQuizBowlLessonSwaps(c);
+    const totalLessons = (displayCurriculum.units || []).reduce((s, u) => s + (u.lessons || []).length, 0);
+    const completedLessons = (displayCurriculum.units || []).reduce((s, u) => s + (u.lessons || []).filter(l => l.isCompleted).length, 0);
 
     return (
       <ViewFade viewKey={`detail:${selectedCurriculum.id}`}>
@@ -729,7 +794,6 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
         {!trailMode && (
           <div className="w-full">
             <h1 className="text-xl font-bold text-white mb-1">{c.title}</h1>
-            {c.description && <p className="text-sm text-white/45 mb-3 max-w-3xl">{c.description}</p>}
             <div className="flex items-center gap-3 mb-4">
               <ProgressBar value={completedLessons} max={totalLessons} className="flex-1" />
               <span className="text-xs text-white/45 tabular-nums flex-shrink-0">{completedLessons}/{totalLessons}</span>
@@ -749,14 +813,14 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
           </div>
         )}
         {trailMode && isBeta && !activeShare ? (
-          <TrailView curriculum={c} onOpenLesson={(l) => openLesson(l, c.id)} />
+          <TrailView curriculum={displayCurriculum} onOpenLesson={(l) => openLesson(l, c.id)} />
         ) : (
           <>
             {/* Single stacked column of unit cards, stretched full-width so
                 a maximized/fullscreen window doesn't leave the whole right
                 side of the screen empty. */}
             <div className="w-full space-y-3">
-              {(c.units || []).map((unit, i) => (
+              {(displayCurriculum.units || []).map((unit, i) => (
                 <UnitSection
                   key={unit.id}
                   unit={i === 0 ? { ...unit, tourAnchorFirst: true } : unit}
@@ -1711,16 +1775,9 @@ function PausdCatalogView({ catalog, loading, enrollingSlug, onBack, onEnroll })
         <ArrowLeft size={16} /> Back to my curricula
       </button>
 
-      <div className="mb-5">
-        <div className="flex items-center gap-2 mb-1">
-          <GraduationCap size={20} className="text-white/50" />
-          <h2 className="text-lg font-bold text-white">PAUSD Common Core Catalog</h2>
-        </div>
-        <p className="text-xs text-white/45">
-          Pre-built courses tuned to PAUSD rigor - significantly above the standard Common Core label.
-          Lessons are taught one-on-one by the AI tutor with built-in quizzes, progress tracking, and per-unit assessments.
-          Tap a course to enroll.
-        </p>
+      <div className="flex items-center gap-2 mb-5">
+        <GraduationCap size={20} className="text-white/50" />
+        <h2 className="text-lg font-bold text-white">PAUSD Common Core Catalog</h2>
       </div>
 
       {loading && catalog.length === 0 ? (
@@ -1774,12 +1831,6 @@ function PausdCourseCard({ course, enrolling, onEnroll, tourAnchor }) {
       className="text-left flex flex-col h-full p-4 rounded-xl border border-white/[0.08] bg-white/[0.04] backdrop-blur-sm hover:border-white/[0.18] hover:bg-white/[0.07] transition-colors disabled:opacity-60"
     >
       <h4 className="text-sm font-bold text-white leading-snug mb-1.5">{course.title}</h4>
-      <p className="text-[11px] text-white/45 leading-snug line-clamp-3 mb-2 flex-1">{course.description}</p>
-      {course.textbook && (
-        <p className="text-[10px] text-white/35 italic leading-snug line-clamp-1 mb-2">
-          {course.textbook}
-        </p>
-      )}
       <div className="flex items-center justify-between mt-auto">
         <p className="text-[10px] text-white/40 tabular-nums">
           Grade {course.grade} · {course.unitCount}u · {course.lessonCount} lessons

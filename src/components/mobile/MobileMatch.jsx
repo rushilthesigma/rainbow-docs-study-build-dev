@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Zap, Users, Copy, Check, X, Trophy, Play, LogOut, ArrowLeft, Flag, Bot } from 'lucide-react';
+import { Zap, Users, Copy, Check, X, Trophy, Play, LogOut, ArrowLeft, Flag, Bot, Save, Trash2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { InlineProgress } from '../shared/ProgressBar';
 import { AnswerResultPanel } from '../trial/TrialSession';
@@ -11,6 +11,17 @@ import MatchComparison from '../shared/MatchComparison';
 
 // Mirrors the server's QUIZBOWL_BUZZ_ANSWER_MS; only scales the countdown bar.
 const BUZZ_WINDOW_MS = 9000;
+
+// Saved room setups ("presets"). Same idea as the desktop AI-lobby presets,
+// but scoped to the mobile room config: game type, questions, and bot fill.
+const QB_MATCH_PRESETS_KEY = 'qb-match-presets-v1';
+function loadMatchPresets() {
+  try { return JSON.parse(localStorage.getItem(QB_MATCH_PRESETS_KEY)) || []; }
+  catch { return []; }
+}
+function saveMatchPresets(list) {
+  try { localStorage.setItem(QB_MATCH_PRESETS_KEY, JSON.stringify(list)); } catch {}
+}
 
 const BOT_ROSTER = [
   { id: 'biscuit', name: 'Player 2', buzzAt: 0.90, accuracy: 0.40, thinkMs: 3000 },
@@ -78,11 +89,16 @@ function useWordReveal(text, startedAt, speedMs, frozen, frozenAt) {
   };
 }
 
-export default function MobileMatch() {
+// Props (all optional so the component still works standalone):
+//   initialView        - 'menu' (create/join) or 'setup' (jump straight into
+//                        configuring a room, used by the "Vs AI bots" entry)
+//   initialFillWithBots - pre-enable the bot fill toggle
+//   onExit             - back out of the multiplayer surface entirely
+export default function MobileMatch({ initialView = 'menu', initialFillWithBots = false, onExit } = {}) {
   const { user } = useAuth();
   const myId = user?.id;
 
-  const [view, setView] = useState('menu');
+  const [view, setView] = useState(initialView);
   const [code, setCode] = useState('');
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [matchMode, setMatchMode] = useState('individual');
@@ -95,8 +111,12 @@ export default function MobileMatch() {
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false);
   const [match, setMatch] = useState(null);
-  const [fillWithBots, setFillWithBots] = useState(false);
+  const [fillWithBots, setFillWithBots] = useState(initialFillWithBots);
   const [botLevel, setBotLevel] = useState('varsity');
+
+  const [presets, setPresets] = useState(() => loadMatchPresets());
+  const [savingPreset, setSavingPreset] = useState(false);
+  const [presetName, setPresetName] = useState('');
 
   const [question, setQuestion] = useState(null);
   const [buzz, setBuzz] = useState(null);
@@ -303,6 +323,32 @@ export default function MobileMatch() {
     return () => { try { abort(); } catch {} };
   }, [code]);
 
+  function handleSavePreset() {
+    const name = presetName.trim() || `Preset ${presets.length + 1}`;
+    const p = {
+      id: Date.now().toString(), name,
+      matchMode, category, customTopic, difficulty, questionCount,
+      revealSpeedMs, fillWithBots, botLevel,
+    };
+    const next = [p, ...presets].slice(0, 12);
+    setPresets(next); saveMatchPresets(next);
+    setPresetName(''); setSavingPreset(false);
+  }
+  function handleLoadPreset(p) {
+    setMatchMode(p.matchMode === 'team' ? 'team' : 'individual');
+    setCategory(p.category || 'Mixed');
+    setCustomTopic(p.customTopic || '');
+    setDifficulty(p.difficulty || 'Medium');
+    setQuestionCount(p.questionCount || 10);
+    setRevealSpeedMs(p.revealSpeedMs || 140);
+    setFillWithBots(!!p.fillWithBots);
+    if (p.botLevel) setBotLevel(p.botLevel);
+  }
+  function handleDeletePreset(id) {
+    const next = presets.filter(p => p.id !== id);
+    setPresets(next); saveMatchPresets(next);
+  }
+
   async function handleCreate() {
     if (busy) return;
     setBusy(true); setError(null);
@@ -418,12 +464,17 @@ export default function MobileMatch() {
     return (
       <div className="flex-1 min-h-0 flex flex-col bg-[#0a0a14] text-white">
         <div className="shrink-0 flex items-center gap-2 px-3 h-12 border-b border-white/[0.06]">
+          {onExit && (
+            <button onClick={onExit} className="w-9 h-9 -ml-1 rounded-full grid place-items-center active:bg-white/[0.06]" aria-label="Back">
+              <ArrowLeft size={18} className="text-white/70" />
+            </button>
+          )}
           <div className="w-9 h-9 rounded-xl grid place-items-center bg-amber-500/15 border border-amber-400/20">
             <Zap size={18} className="text-amber-300" />
           </div>
           <div>
-            <h1 className="text-[17px] font-bold tracking-tight leading-none">Head to Head</h1>
-            <p className="text-[11px] text-white/35 mt-0.5">Buzz. Answer. Win.</p>
+            <h1 className="text-[17px] font-bold tracking-tight leading-none">Multiplayer</h1>
+            <p className="text-[11px] text-white/35 mt-0.5">Create a room or join with a code</p>
           </div>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-6 pt-4 space-y-4">
@@ -468,7 +519,7 @@ export default function MobileMatch() {
   if (view === 'setup') {
     return (
       <div className="flex-1 min-h-0 flex flex-col bg-[#0a0a14] text-white">
-        <MatchHeader title="New Room" onBack={() => setView('menu')} />
+        <MatchHeader title="New Room" onBack={() => (initialView === 'setup' && onExit ? onExit() : setView('menu'))} />
         <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-6 space-y-4">
           <div>
             <SectionLabel>Game type</SectionLabel>
@@ -546,6 +597,49 @@ export default function MobileMatch() {
                 </div>
               </div>
             )}
+          </div>
+
+          <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold flex items-center gap-1.5 text-white/55">
+                <Save size={13} className="text-white/25" /> Presets
+              </span>
+              {!savingPreset && (
+                <button onClick={() => setSavingPreset(true)} className="text-[11px] font-semibold text-amber-300/80 active:text-amber-200">
+                  Save current
+                </button>
+              )}
+            </div>
+            {savingPreset && (
+              <div className="flex gap-2">
+                <input
+                  autoFocus value={presetName} maxLength={40}
+                  onChange={e => setPresetName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleSavePreset(); if (e.key === 'Escape') setSavingPreset(false); }}
+                  placeholder="Preset name…"
+                  className="flex-1 min-w-0 rounded-xl bg-white/[0.05] border border-white/[0.08] px-3 py-2 text-[12px] text-white placeholder-white/25 outline-none focus:border-amber-400/40"
+                />
+                <button onClick={handleSavePreset} className="px-3 rounded-xl bg-amber-500 text-black text-[12px] font-semibold active:bg-amber-600">Save</button>
+                <button onClick={() => setSavingPreset(false)} className="px-2 rounded-xl text-white/35 active:text-white/60" aria-label="Cancel"><X size={13} /></button>
+              </div>
+            )}
+            {presets.length === 0 && !savingPreset && (
+              <p className="text-[10px] text-white/25">Save this setup to reuse it in one tap.</p>
+            )}
+            {presets.map(p => (
+              <div key={p.id} className="flex items-center gap-2">
+                <button onClick={() => handleLoadPreset(p)} className="flex-1 min-w-0 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-left active:bg-white/[0.06]">
+                  <p className="text-[12px] font-semibold text-white/75 truncate">{p.name}</p>
+                  <p className="text-[10px] text-white/30 truncate">
+                    {p.matchMode === 'team' ? 'Team' : 'Open'} · {p.category === 'Custom' ? (p.customTopic || 'Custom') : p.category} · {p.difficulty} · {p.questionCount} Qs
+                    {p.fillWithBots ? ` · ${(ROOM_LEVELS.find(l => l.id === p.botLevel)?.label || 'Varsity')} bots` : ''}
+                  </p>
+                </button>
+                <button onClick={() => handleDeletePreset(p.id)} aria-label={`Delete ${p.name}`} className="p-2 rounded-xl text-white/25 active:text-rose-300">
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
           </div>
 
           {error && <p className="text-[12px] text-rose-300">{error}</p>}

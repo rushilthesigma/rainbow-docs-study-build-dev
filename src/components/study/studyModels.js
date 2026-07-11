@@ -142,3 +142,54 @@ export function visibleStudyModels(email) {
 export function resolveGeminiOnlyModel(_plan) {
   return 'gemini-pro';
 }
+
+// ===== Best of 3 / Superimpose selection =====
+// Desktop StudyModePanel keeps a local copy of this normalization; keep the
+// fill order and rules in sync if either changes.
+
+export const BEST_OF_DEFAULT_ORDER = [
+  'gpt-5.4-mini',
+  'deepseek-flash',
+  'flash-lite',
+  'gpt-5.6-luna',
+  'deepseek-pro',
+  'gpt-5.6-terra',
+  'flash',
+  'gpt-5.6-sol',
+  'gpt-5.4',
+  'gemini-pro',
+];
+
+export function unlockedStudyModelKeys(email, plan) {
+  return visibleStudyModels(email)
+    .filter((m) => canUseStudyModel(m.key, plan))
+    .map((m) => m.key);
+}
+
+// Normalizes a saved Best of / Superimpose selection: keeps up to 3 valid,
+// distinct response models (never the judge), tops the list up from the
+// default order, and picks a judge from whatever is left when the saved one
+// is unusable.
+export function normalizeBestOfSelection(savedModels, savedJudge, email, plan) {
+  const unlocked = unlockedStudyModelKeys(email, plan);
+  const preferred = [
+    ...BEST_OF_DEFAULT_ORDER.filter((key) => unlocked.includes(key)),
+    ...unlocked.filter((key) => !BEST_OF_DEFAULT_ORDER.includes(key)),
+  ];
+  let judge = unlocked.includes(savedJudge) ? savedJudge : null;
+  const models = [];
+  for (const key of Array.isArray(savedModels) ? savedModels : []) {
+    if (!unlocked.includes(key) || key === judge || models.includes(key)) continue;
+    models.push(key);
+    if (models.length === 3) break;
+  }
+  for (const key of preferred) {
+    if (models.length === 3) break;
+    if (key === judge || models.includes(key)) continue;
+    models.push(key);
+  }
+  if (!judge) {
+    judge = preferred.find((key) => !models.includes(key)) || null;
+  }
+  return { models, judge };
+}

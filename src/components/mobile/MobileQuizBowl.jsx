@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
-import { Zap, Play, Check, X, BookOpen, Sparkles, ArrowRight } from 'lucide-react';
+import { Zap, Play, Check, X, BookOpen, Sparkles, ArrowRight, Users, Bot } from 'lucide-react';
 import { apiFetch } from '../../api/client';
+import MobileMatch from './MobileMatch';
 import { fetchQBReaderTossups } from '../../api/quizMatch';
 import { InlineProgress } from '../shared/ProgressBar';
 import QbModelPicker from '../shared/QbModelPicker';
 import { useQbModel } from '../../hooks/useQbModel';
 import { studyModelLabel } from '../study/studyModels';
+import { isQuizBowlAnswerAccepted } from '../../lib/qbAnswerChecker';
 
 const DIFFICULTIES = ['Easy', 'Medium', 'Hard', 'Tournament'];
 const CATEGORIES = ['Science', 'History', 'Literature', 'Geography', 'Math', 'Art', 'Music', 'Philosophy', 'Pop Culture', 'Mixed'];
@@ -49,6 +51,10 @@ function useWordReveal(text, speed = 140, active = false) {
 
 export default function MobileQuizBowl() {
   const [view, setView] = useState('setup');
+  // Live-room surface (MobileMatch). null = solo flows below;
+  // 'menu' = create/join a multiplayer room; 'bots' = jump straight
+  // into a room setup with bot fill pre-enabled.
+  const [matchScreen, setMatchScreen] = useState(null);
   const [questions, setQuestions] = useState([]);
   const [currentQ, setCurrentQ] = useState(0);
   const [generating, setGenerating] = useState(false);
@@ -106,9 +112,7 @@ export default function MobileQuizBowl() {
   function handleBuzz() { if (buzzed || !reading) return; setBuzzed(true); setReading(false); stop(); }
   function handleSubmit() {
     if (!answer.trim()) return;
-    const norm = (s) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9\s]/g, '').trim();
-    const a = norm(answer); const ca = norm(q.answer);
-    const isCorrect = a === ca || ca.includes(a) || a.includes(ca);
+    const isCorrect = isQuizBowlAnswerAccepted(q.answerline || q.answer, answer);
     setCorrect(isCorrect); setShowResult(true);
     setScores((p) => [...p, { question: currentQ, correct: isCorrect, buzzWord: wordIndex, totalWords, answer: answer.trim(), correctAnswer: q.answer }]);
   }
@@ -140,11 +144,23 @@ export default function MobileQuizBowl() {
   }
   function endRound() { setView('review'); }
 
+  // ===== MULTIPLAYER / VS BOTS (live rooms) =====
+  if (matchScreen) {
+    return (
+      <MobileMatch
+        key={matchScreen}
+        initialView={matchScreen === 'bots' ? 'setup' : 'menu'}
+        initialFillWithBots={matchScreen === 'bots'}
+        onExit={() => setMatchScreen(null)}
+      />
+    );
+  }
+
   // ===== REVIEW =====
   if (view === 'review') {
     const totalCorrect = scores.filter((s) => s.correct).length;
     return (
-      <div className="px-4 pt-6 pb-8 bg-transparent min-h-full">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-6 pb-8 bg-transparent">
         <div className="text-center mb-6">
           <div className="text-[48px] font-bold text-white tabular-nums leading-none">
             {totalCorrect}<span className="text-white/25">/{scores.length}</span>
@@ -182,7 +198,7 @@ export default function MobileQuizBowl() {
   if (view === 'playing' && q) {
     const isInfinite = questionSource === 'qbreader';
     return (
-      <div className="flex flex-col h-full bg-transparent">
+      <div className="flex-1 min-h-0 flex flex-col bg-transparent">
         <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/[0.06] flex-shrink-0">
           <Zap size={14} className="text-amber-500" />
           <span className="text-[13px] font-bold text-white tabular-nums">
@@ -227,11 +243,11 @@ export default function MobileQuizBowl() {
           )}
           {showResult && (
             <>
-              <div className={`p-4 rounded-2xl text-center border-2 ${correct ? 'bg-emerald-500/10 border-emerald-500/40' : 'bg-rose-500/10 border-rose-500/40'}`}>
-                <p className={`text-[16px] font-bold ${correct ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {correct ? '✓' : '✗'} {q.answer}
+              <div className={`p-4 rounded-2xl text-left border ${correct ? 'bg-emerald-500/10 border-emerald-500/40' : 'bg-rose-500/10 border-rose-500/40'}`}>
+                <p className={`text-[12px] font-bold uppercase tracking-[0.14em] ${correct ? 'text-emerald-400' : 'text-rose-400'} ${correct ? 'mb-2' : 'mb-3'}`}>
+                  {correct ? '✓ Correct' : '✗ Incorrect'}
                 </p>
-                {!correct && answer && <p className="text-[11px] text-white/30 mt-1">{answer}</p>}
+                {correct && <p className="text-[15px] font-semibold text-white">{q.answer}</p>}
               </div>
               <button onClick={nextQuestion}
                 className="w-full py-3.5 rounded-2xl bg-white/[0.09] hover:bg-white/[0.13] text-white/70 text-[14px] font-bold">
@@ -246,7 +262,7 @@ export default function MobileQuizBowl() {
 
   // ===== SETUP =====
   return (
-    <div className="px-4 pt-6 pb-8 bg-transparent min-h-full">
+    <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-6 pb-8 bg-transparent">
       {/* Hero */}
       <div className="text-center mb-6">
         <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/20 mb-3">
@@ -257,7 +273,14 @@ export default function MobileQuizBowl() {
 
       {error && <p className="text-[11px] text-rose-400 px-3 py-2 mb-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-center">{error}</p>}
 
+      {/* Play with others */}
+      <div className="grid grid-cols-2 gap-2 mb-4">
+        <MobileTile emphasized icon={<Users size={14} />} label="Multiplayer" sub="Rooms & join codes" onClick={() => setMatchScreen('menu')} />
+        <MobileTile emphasized icon={<Bot size={14} />} label="Vs AI bots" sub="You + up to 7 bots" onClick={() => setMatchScreen('bots')} />
+      </div>
+
       {/* Source */}
+      <p className="text-[10px] text-white/30 uppercase tracking-wider mb-1.5">Solo round</p>
       <div className="grid grid-cols-2 gap-2 mb-4">
         <MobileTile active={questionSource === 'qbreader'} icon={<BookOpen size={14} />} label="Past QB" sub="qbreader.org" onClick={() => setQuestionSource('qbreader')} />
         <MobileTile active={questionSource === 'ai'} icon={<Sparkles size={14} />} label="AI" sub={studyModelLabel(qbModel)} onClick={() => setQuestionSource('ai')} />
@@ -292,15 +315,15 @@ export default function MobileQuizBowl() {
       <div className="mb-5">
         <div className="flex items-center justify-between mb-1.5">
           <span className="text-[10px] text-white/30 uppercase tracking-wider">Speed</span>
-          <span className="text-[11px] font-mono text-white/40">{revealSpeedMs}ms</span>
+          <span className="text-[11px] font-mono text-amber-300">{revealSpeedMs}ms</span>
         </div>
         <input type="range" min="60" max="400" step="10" value={revealSpeedMs}
-          onChange={(e) => setRevealSpeedMs(Number(e.target.value))} className="w-full" />
+          onChange={(e) => setRevealSpeedMs(Number(e.target.value))} className="w-full accent-amber-500" />
       </div>
 
       {/* Start */}
       <button onClick={handleStart} disabled={generating}
-        className="w-full py-4 rounded-2xl bg-white/[0.09] active:bg-white/[0.13] disabled:opacity-50 text-white/70 text-[15px] font-bold inline-flex items-center justify-center gap-2">
+        className="w-full py-4 rounded-2xl bg-amber-500 active:bg-amber-600 disabled:opacity-50 text-black text-[15px] font-bold inline-flex items-center justify-center gap-2">
         {generating
           ? <><InlineProgress active /> {questionSource === 'qbreader' ? 'Loading…' : 'Generating…'}</>
           : <><Play size={16} /> Start</>}
@@ -309,16 +332,18 @@ export default function MobileQuizBowl() {
   );
 }
 
-function MobileTile({ active, icon, label, sub, onClick }) {
+function MobileTile({ active, emphasized = false, icon, label, sub, onClick }) {
   return (
     <button onClick={onClick}
       className={`text-left rounded-2xl border p-3 transition-all backdrop-blur-sm ${
         active
-          ? 'border-white/[0.18] bg-white/[0.07] text-white/75'
-          : 'border-white/[0.06] bg-white/[0.02] text-white/40 active:bg-white/[0.05]'
+          ? 'border-amber-400/50 bg-amber-500/15 text-white/80'
+          : emphasized
+            ? 'border-amber-400/30 bg-amber-500/[0.07] text-white/75 active:bg-amber-500/15'
+            : 'border-white/[0.06] bg-white/[0.02] text-white/40 active:bg-white/[0.05]'
       }`}>
       <div className="flex items-center gap-1.5 mb-0.5">
-        {icon}
+        <span className={active || emphasized ? 'text-amber-300' : undefined}>{icon}</span>
         <p className="text-[12px] font-bold">{label}</p>
       </div>
       {sub && <p className="text-[10px] opacity-40">{sub}</p>}
@@ -331,7 +356,7 @@ function MobilePill({ active, onClick, children }) {
     <button onClick={onClick}
       className={`px-3 py-2 rounded-xl text-[12px] font-semibold tracking-tight whitespace-nowrap transition-colors backdrop-blur-sm ${
         active
-          ? 'bg-white/[0.10] text-white/80 border border-white/[0.18]'
+          ? 'bg-amber-500/15 text-amber-100 border border-amber-400/50'
           : 'bg-white/[0.04] border border-white/[0.05] text-white/35 active:bg-white/[0.08] active:text-white/60'
       }`}>
       {children}

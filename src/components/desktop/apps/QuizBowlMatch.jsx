@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useWindowManager } from '../../../context/WindowManagerContext';
-import { Zap, Users, Copy, Check, X, Trophy, Play, LogOut, ArrowLeft, Flag, Bot, Loader2, BookOpen, Sparkles } from 'lucide-react';
+import { Zap, Users, Copy, Check, X, Trophy, Play, LogOut, ArrowLeft, ArrowRight, Flag, Bot, Loader2, BookOpen, Sparkles } from 'lucide-react';
 import ProgressBar, { InlineProgress } from '../../shared/ProgressBar';
+import { useQbVoicePref, useSpokenFollow, QbVoiceToggle, speakLine, spokenAnswer } from '../../shared/qbVoice';
+import { speechSynthesisSupported } from '../../../hooks/useSpeechSynthesis';
 import {
   createMatch, joinMatch, startMatch, buzzMatch, answerMatch, nextMatchQuestion,
   answerMatchBonus, setMatchTeam, endMatch, leaveMatch, streamMatch, botBuzz, botAnswer, requestAnswerReview, resolveAnswerReview,
@@ -480,7 +482,12 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
 
   async function handleSubmitAnswer() {
     if (!answer.trim()) return;
-    try { await answerMatch(code, answer.trim()); } catch (e) { setError(e.message); }
+    try {
+      const result = await answerMatch(code, answer.trim());
+      if (result.directive === 'prompt') {
+        setError(result.directedPrompt ? `Prompt: ${result.directedPrompt}` : 'Prompt: be more specific.');
+      }
+    } catch (e) { setError(e.message); }
   }
 
   async function handleSubmitBonus(pass = false) {
@@ -683,7 +690,6 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
                     : 'bg-white/[0.02] border-white/[0.06] text-white/75 hover:border-white/[0.14] hover:bg-white/[0.05]'
                 }`}>
                 <div className="text-[12px] font-semibold leading-tight">{f.label}</div>
-                <div className="text-[10px] text-white/35 leading-tight mt-0.5">{f.desc}</div>
               </button>
             ))}
           </div>
@@ -984,7 +990,6 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
                         : 'bg-white/[0.02] border-white/[0.06] text-white/75 hover:border-white/[0.14] hover:bg-white/[0.05]'
                     }`}>
                     <div className="text-[12px] font-semibold leading-tight">{f.label}</div>
-                    <div className="text-[10px] text-white/35 leading-tight mt-0.5">{f.desc}</div>
                   </button>
                 ))}
               </div>
@@ -1166,7 +1171,7 @@ export function PlayerCard({ player, isMe, buzz, lockedOut, answerResult, maxSco
     : 'Listening';
 
   return (
-    <div className={`rounded-xl border p-2.5 ${isMe ? 'bg-blue-500/[0.08] border-blue-500/30' : 'bg-white/[0.04] border-white/[0.08]'}`}>
+    <div className={`rounded-lg border p-2.5 ${isMe ? 'bg-blue-500/[0.08] border-blue-500/30' : 'bg-white/[0.04] border-white/[0.08]'}`}>
       <div className="flex items-center gap-1.5 mb-1">
         <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotClass}`} />
         <span className={`font-semibold text-[11px] flex-1 truncate ${isMe ? 'text-blue-300' : 'text-white/65'}`}>
@@ -1272,6 +1277,22 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, b
     const id = setInterval(() => setNowTick(Date.now()), 100);
     return () => clearInterval(id);
   }, [countingDown, answerDeadline]);
+  // Read-aloud (shared Quiz Bowl audio option). A live match runs on server
+  // timestamps shared by every player, so TTS follows the reveal instead of
+  // driving it — the on-screen text stays authoritative and buzzing is
+  // unaffected. Speech pauses while a buzz or result freezes the reveal.
+  const [voiceMode, toggleVoiceMode] = useQbVoicePref();
+  const voiceOn = voiceMode && speechSynthesisSupported;
+  useSpokenFollow(question?.text || '', voiceOn && !!question?.text, frozen, revealSpeedMs);
+  const verdictKeyRef = useRef(null);
+  useEffect(() => {
+    if (!voiceOn || !answerResult?.correctAnswer) return;
+    const key = `${match?.currentIdx || 0}:${answerResult.correctAnswer}`;
+    if (verdictKeyRef.current === key) return;
+    verdictKeyRef.current = key;
+    speakLine(`The answer was ${spokenAnswer(answerResult.correctAnswer)}.`);
+  }, [voiceOn, answerResult, match?.currentIdx]);
+
   // Clamp to the window so minor client/server clock skew never shows "10s".
   const answerMsLeft = countingDown ? Math.max(0, Math.min(BUZZ_WINDOW_MS, answerDeadline - nowTick)) : null;
   const answerSecs = answerMsLeft != null ? Math.ceil(answerMsLeft / 1000) : null;
@@ -1327,6 +1348,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, b
         {match.mode === 'team' ? (
           <span className="text-[11px] font-bold tabular-nums text-white/60">{match.teamNames?.[myTeam] || 'Your team'} · {teamScores[myTeam] || 0}</span>
         ) : <span className={`text-[12px] font-bold tabular-nums ${myScore > 0 ? 'text-emerald-400' : 'text-white/40'}`}>{myScore}</span>}
+        <QbVoiceToggle on={voiceMode} onToggle={toggleVoiceMode} />
         {isHost && (
           <button onClick={onEndMatch} title="End match early"
             className="inline-flex items-center gap-1 text-[10px] font-semibold text-rose-400/70 hover:text-rose-300 px-2 py-1 rounded-md border border-rose-500/20 hover:border-rose-500/40 bg-rose-500/[0.05] transition-colors">
@@ -1353,7 +1375,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, b
           {/* Action bar */}
           <div className="px-4 py-3 border-t border-white/[0.04] flex-shrink-0 space-y-2">
             {wrongFlash && !buzz && !answerResult && (
-              <div className="px-3 py-2 rounded-2xl bg-rose-500/[0.08] border border-rose-500/15 text-[11px] text-rose-400/70 text-center space-y-1.5">
+              <div className="px-3 py-2 rounded-lg bg-rose-500/[0.08] border border-rose-500/15 text-[11px] text-rose-400/70 text-center space-y-1.5">
                 <p>
                   {wrongFlash.userId === myId ? 'Wrong' : `${wrongName} was wrong`}
                   {wrongFlash.timedOut ? ' — ran out of time' : wrongFlash.answer ? ` — "${wrongFlash.answer}"` : ''} · continues
@@ -1369,31 +1391,31 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, b
               <AnswerReviewPanel review={answerReview} busy={reviewBusy} onResolve={onResolveReview} />
             )}
             {reviewForMe && (
-              <div className="rounded-2xl border border-amber-400/20 bg-amber-400/[0.07] px-3 py-2 text-center text-[11px] text-amber-100/75">
+              <div className="rounded-lg border border-amber-400/20 bg-amber-400/[0.07] px-3 py-2 text-center text-[11px] text-amber-100/75">
                 Protest sent to {answerReview.verifierName}. Game paused while they verify.
               </div>
             )}
             {reviewPending && !reviewForMe && !reviewForOpponent && (
-              <div className="rounded-2xl border border-amber-400/15 bg-amber-400/[0.05] px-3 py-2 text-center text-[11px] text-amber-100/60">
+              <div className="rounded-lg border border-amber-400/15 bg-amber-400/[0.05] px-3 py-2 text-center text-[11px] text-amber-100/60">
                 Game paused for an answer review.
               </div>
             )}
             {reviewStatus && !reviewPending && answerReview?.requesterId === myId && (
-              <div className={`rounded-2xl border px-3 py-2 text-center text-[11px] ${reviewStatus === 'accepted' ? 'border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-200/80' : 'border-white/[0.08] bg-white/[0.03] text-white/45'}`}>
+              <div className={`rounded-lg border px-3 py-2 text-center text-[11px] ${reviewStatus === 'accepted' ? 'border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-200/80' : 'border-white/[0.08] bg-white/[0.03] text-white/45'}`}>
                 Review {reviewStatus}. {reviewStatus === 'accepted' ? 'Score corrected.' : 'Ruling stands.'}
               </div>
             )}
             {!buzz && !answerResult && !iAmLocked && !reviewPending && (
               <>
                 <button onClick={onBuzz}
-                  className="w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white text-[15px] font-bold uppercase tracking-[0.15em] active:scale-[0.98] transition-all">
+                  className="w-full py-4 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[15px] font-bold uppercase tracking-[0.15em] active:scale-[0.98] transition-all">
                   BUZZ
                 </button>
                 <p className="text-[10px] text-white/35 text-center">Space to buzz</p>
               </>
             )}
             {!buzz && !answerResult && iAmLocked && (
-              <div className="w-full rounded-2xl border border-white/[0.05] bg-white/[0.02] px-3 py-3 text-center text-[11px] text-white/30 space-y-2">
+              <div className="w-full rounded-lg border border-white/[0.05] bg-white/[0.02] px-3 py-3 text-center text-[11px] text-white/30 space-y-2">
                 <p>Locked out · wait for next question</p>
                 {canRequestReview && (
                   <button onClick={onRequestReview} disabled={reviewBusy}
@@ -1420,17 +1442,17 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, b
                     onKeyDown={e => e.key === 'Enter' && answer.trim() && !timeUp && onSubmitAnswer()}
                     placeholder={timeUp ? "Time's up…" : 'Answer…'}
                     disabled={timeUp}
-                    className="flex-1 px-4 py-3 rounded-2xl border border-blue-500/40 bg-white/[0.04] text-[14px] text-white/85 placeholder-white/20 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/25 transition-colors disabled:opacity-50"
+                    className="flex-1 px-4 py-3 rounded-lg border border-blue-500/40 bg-white/[0.05] text-[14px] text-white placeholder-white/25 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/25 transition-colors disabled:opacity-50"
                   />
                   <button onClick={onSubmitAnswer} disabled={!answer.trim() || timeUp}
-                    className="px-5 py-3 rounded-2xl bg-blue-500 hover:bg-blue-400 text-white text-[13px] font-semibold disabled:opacity-30 transition-colors">
-                    →
+                    className="px-5 py-3 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[13px] font-bold disabled:opacity-30 transition-colors">
+                    <ArrowRight size={16} />
                   </button>
                 </div>
               </div>
             )}
             {buzz && !answerResult && !iBuzzed && (
-              <div className="w-full py-3 rounded-2xl border border-white/[0.05] bg-white/[0.02] text-center text-[11px] text-white/30 inline-flex items-center justify-center gap-2">
+              <div className="w-full py-3 rounded-lg border border-white/[0.05] bg-white/[0.02] text-center text-[11px] text-white/30 inline-flex items-center justify-center gap-2">
                 <span className="relative flex h-2 w-2">
                   <span className="absolute inline-flex h-full w-full rounded-full bg-amber-400/50 animate-ping" />
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500/50" />
@@ -1450,7 +1472,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, b
                 />
                 {canRequestReview && (
                   <button onClick={onRequestReview} disabled={reviewBusy}
-                    className="w-full py-2 rounded-2xl border border-amber-400/25 bg-amber-400/[0.08] text-[12px] font-semibold text-amber-100/80 hover:border-amber-300/45 disabled:opacity-40 transition-colors">
+                    className="w-full py-2 rounded-lg border border-amber-400/25 bg-amber-400/[0.08] text-[12px] font-semibold text-amber-100/80 hover:border-amber-300/45 disabled:opacity-40 transition-colors">
                     {reviewBusy ? 'Sending review…' : 'I was right'}
                   </button>
                 )}
@@ -1500,33 +1522,33 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, b
 
 function AnswerReviewPanel({ review, busy, onResolve }) {
   return (
-    <div className="rounded-2xl border border-amber-400/25 bg-amber-400/[0.07] p-3 text-left">
+    <div className="rounded-lg border border-amber-400/25 bg-amber-400/[0.07] p-3 text-left">
       <div className="flex items-start justify-between gap-3 mb-2">
         <div>
           <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-amber-200/70">Verify answer</p>
           <p className="text-[12px] text-white/55">{review.requesterName} says they were right.</p>
         </div>
       </div>
-      <p className="max-h-24 overflow-y-auto rounded-xl border border-white/[0.06] bg-black/15 p-2 text-[12px] leading-relaxed text-white/75">
+      <p className="max-h-24 overflow-y-auto rounded-lg border border-white/[0.06] bg-black/15 p-2 text-[12px] leading-relaxed text-white/75">
         {review.questionText}
       </p>
       <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
-        <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-2">
+        <div className="rounded-lg border border-white/[0.06] bg-white/[0.03] p-2">
           <p className="text-white/30">Submitted</p>
           <p className="font-semibold text-white/75">{review.submittedAnswer || 'No answer'}</p>
         </div>
-        <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-2">
+        <div className="rounded-lg border border-white/[0.06] bg-white/[0.03] p-2">
           <p className="text-white/30">Official</p>
           <p className="font-semibold text-white/75">{review.correctAnswer}</p>
         </div>
       </div>
       <div className="mt-2 grid grid-cols-2 gap-2">
         <button onClick={() => onResolve(review.id, false)} disabled={busy}
-          className="rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-[12px] font-semibold text-white/55 hover:bg-white/[0.07] disabled:opacity-40">
+          className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-[12px] font-semibold text-white/55 hover:bg-white/[0.07] disabled:opacity-40">
           Keep wrong
         </button>
         <button onClick={() => onResolve(review.id, true)} disabled={busy}
-          className="rounded-xl border border-emerald-400/30 bg-emerald-400/[0.12] px-3 py-2 text-[12px] font-semibold text-emerald-100 hover:bg-emerald-400/[0.18] disabled:opacity-40">
+          className="rounded-lg border border-emerald-400/30 bg-emerald-400/[0.12] px-3 py-2 text-[12px] font-semibold text-emerald-100 hover:bg-emerald-400/[0.18] disabled:opacity-40">
           Mark right
         </button>
       </div>
@@ -1543,7 +1565,7 @@ function AutoAdvanceCountdown({ deadline, isHost, onNext }) {
   }, [deadline]);
   if (!deadline) {
     return isHost
-      ? <button onClick={onNext} className="w-full py-2.5 rounded-2xl border border-white/[0.06] bg-white/[0.03] text-[12px] font-semibold text-white/50 hover:text-white/70 transition-colors">Next →</button>
+      ? <button onClick={onNext} className="w-full py-2.5 rounded-lg border border-white/[0.06] bg-white/[0.03] text-[12px] font-semibold text-white/50 hover:text-white/70 transition-colors">Next →</button>
       : <p className="text-[11px] text-center text-white/25">Waiting for host…</p>;
   }
   const msLeft = Math.max(0, deadline - now);

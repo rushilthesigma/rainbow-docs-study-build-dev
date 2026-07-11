@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  AlertCircle, BookOpen, ChevronRight, Grid3X3, Lightbulb, MessageSquare, Zap, FileText, Users,
+  AlertCircle, BookOpen, FileText, Globe, Lightbulb, MessageSquare,
+  Scale, Settings, Shield, X, Zap,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { checkAdmin } from '../../api/admin';
 import { listCurricula } from '../../api/curriculum';
 import { listLessons } from '../../api/lessons';
 import Skeleton from '../shared/Skeleton';
 
-// Mobile home: greeting + Continue card + a 6-tile quick-actions grid.
+// Mobile home: greeting + Continue card + the complete app tile grid.
 // Stats / recent-lessons sections were intentionally cut - the home
 // screen is meant to be a single decision: "what do I do right now."
 export default function MobileHome({ onNavigate }) {
@@ -16,6 +18,8 @@ export default function MobileHome({ onNavigate }) {
   const [lessons, setLessons] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showDesktopNotice, setShowDesktopNotice] = useState(true);
 
   const loadProgress = useCallback(async (signal) => {
     setLoading(true);
@@ -41,6 +45,14 @@ export default function MobileHome({ onNavigate }) {
     return () => controller.abort();
   }, [loadProgress]);
 
+  useEffect(() => {
+    let active = true;
+    checkAdmin()
+      .then((result) => { if (active) setIsAdmin(!!result.isAdmin); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+
   const firstName = (user?.name || user?.email || 'there').split(/[\s@]/)[0];
   const continueCard = pickContinueCard(curricula, lessons);
 
@@ -54,6 +66,19 @@ export default function MobileHome({ onNavigate }) {
         <h1 className="text-[28px] font-bold tracking-[-0.02em] text-gray-900 dark:text-white leading-tight">
           Hi, {firstName}.
         </h1>
+        {showDesktopNotice && (
+          <div className="mt-3 flex items-center gap-3 rounded-xl bg-red-600 px-3.5 py-3 text-white" role="status">
+            <p className="min-w-0 flex-1 text-[12px] font-semibold leading-snug">RushilAI is much better on desktop.</p>
+            <button
+              type="button"
+              onClick={() => setShowDesktopNotice(false)}
+              className="-mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/90 transition-colors hover:bg-black/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+              aria-label="Dismiss desktop recommendation"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Continue card - only shown when there's actual progress to resume */}
@@ -100,26 +125,14 @@ export default function MobileHome({ onNavigate }) {
       <div className="grid grid-cols-2 gap-3">
         <Action tone="blue"     icon={<BookOpen size={28} />}      title="Build a course" onClick={() => onNavigate('curricula')} />
         <Action tone="amber"    icon={<Lightbulb size={28} />}     title="Quick lesson"   onClick={() => onNavigate('lessons')} />
-        <Action tone="cyan"     icon={<Users size={28} />}         title="Play vs AI"     onClick={() => onNavigate('quizbowl')} />
+        <Action tone="blue"     icon={<Scale size={28} />}          title="Debate"         onClick={() => onNavigate('debate')} />
+        <Action tone="violet"   icon={<Globe size={28} />}          title="QBpedia"        onClick={() => onNavigate('qbpedia')} />
         <Action tone="orange"   icon={<Zap size={28} />}           title="Quiz Bowl"      onClick={() => onNavigate('quizbowl')} />
         <Action tone="sky"      icon={<MessageSquare size={28} />} title="Study chat"     onClick={() => onNavigate('study')} />
         <Action tone="emerald"  icon={<FileText size={28} />}      title="Notes"          onClick={() => onNavigate('notes')} />
+        <Action tone="gray"     icon={<Settings size={28} />}      title="Settings"       onClick={() => onNavigate('settings')} />
+        {isAdmin && <Action tone="red" icon={<Shield size={28} />} title="Admin" onClick={() => onNavigate('admin')} />}
       </div>
-
-      <button
-        type="button"
-        onClick={() => onNavigate('apps')}
-        className="mt-3 w-full min-h-14 rounded-2xl border border-gray-200 dark:border-white/[0.06] bg-white dark:bg-[#13131f] px-4 flex items-center gap-3 text-left active:scale-[0.99] motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 transition-transform"
-      >
-        <span className="w-9 h-9 rounded-xl grid place-items-center bg-violet-100/80 text-violet-600 dark:bg-violet-500/15 dark:text-violet-300">
-          <Grid3X3 size={18} />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-[14px] font-bold text-gray-900 dark:text-white">All apps</span>
-          <span className="block text-[11px] text-gray-500 dark:text-white/40">Math Tutor, Debate, QBpedia, Widgets, and more</span>
-        </span>
-        <ChevronRight size={17} className="text-gray-300 dark:text-white/25" />
-      </button>
     </div>
   );
 }
@@ -168,7 +181,10 @@ const TONE = {
   emerald: 'text-emerald-500 bg-emerald-100/70 dark:bg-emerald-500/15',
   sky:     'text-sky-500     bg-sky-100/70 dark:bg-sky-500/15',
   violet:  'text-violet-500  bg-violet-100/70 dark:bg-violet-500/15',
+  indigo:  'text-indigo-500  bg-indigo-100/70 dark:bg-indigo-500/15',
+  rose:    'text-rose-500    bg-rose-100/70 dark:bg-rose-500/15',
   gray:    'text-gray-500    bg-gray-200/70 dark:bg-white/[0.06]',
+  red:     'text-red-500     bg-red-100/70 dark:bg-red-500/15',
 };
 
 function Action({ tone, icon, title, onClick }) {
