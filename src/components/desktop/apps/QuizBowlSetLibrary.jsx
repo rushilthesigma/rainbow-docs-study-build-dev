@@ -67,7 +67,7 @@ export function CountryPracticeBrowser({ onBack, onPractice }) {
               active
               duration={4000}
               label="Set is loading…"
-              hint={`${loadingCountry?.label || 'Country'} will use this definitive preset on future plays.`}
+              hint={`Building ${loadingCountry?.label || 'country'} from the maintained source notes.`}
             />
           </div>
         </div>

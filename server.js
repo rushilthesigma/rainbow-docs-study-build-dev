@@ -13637,9 +13637,8 @@ function quizBowlCountryPresetCatalog() {
   return [...geography, ...history];
 }
 
-// Country preset tossups are generated lazily. Once a set exists it becomes
-// the shared, definitive version for every player, so replaying it never
-// calls /api/chat and never spends the player's credits.
+// Country preset tossups are generated lazily and then shared by every
+// player, so replaying a set never calls /api/chat or spends player credits.
 const QUIZBOWL_PRESET_SETS_FILE = join(DATA_DIR, 'quizbowlPresetSets.json');
 const quizBowlPresetGenerationLocks = new Map();
 
@@ -13659,7 +13658,7 @@ function saveQuizBowlPresetSets(sets) {
 }
 
 const QUIZBOWL_PRESET_SYSTEM = `You are an elite ACF/NAQT packet editor writing rigorously pyramidal quiz bowl tossups from source notes.
-Write exactly 10 tossups. Each should be one coherent 7-10 sentence paragraph with extremely obscure source-supported clues first, hard connecting clues in the middle, and accessible giveaway clues last. Include exactly one NAQT-style power mark "(*)" 65-75% through each question. Never invent facts or state the answer in the question. Every answer must be supported by the notes. Output ONLY valid JSON with no markdown.
+Write exactly 10 tossups. Each should be one coherent 7-10 sentence paragraph with extremely obscure source-supported clues first, hard connecting clues in the middle, and accessible giveaway clues last. Include exactly one NAQT-style power mark "(*)" 65-75% through each question. Never invent facts or state the answer in the question. Every answer must be supported by the notes. The country being studied must NEVER be the answer line; use a specific person, place, feature, event, work, group, or other entity instead. The country's name may appear in clues, but the canonical answer must not be the country itself. Output ONLY valid JSON with no markdown.
 Format: {"questions":[{"text":"... (*) ... For 10 points, name this answer.","answer":"Canonical answer","accept":[],"prompt":[]}]}`;
 
 function quizBowlPresetSource(preset) {
@@ -13681,53 +13680,87 @@ function quizBowlPresetDefinition(slug) {
   };
 }
 
+function normalizedPresetAnswer(value = '') {
+  return String(value)
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/^the\s+/, '');
+}
+
+function isCountryPresetAnswer(answer, country) {
+  const normalizedAnswer = normalizedPresetAnswer(answer);
+  const normalizedCountry = normalizedPresetAnswer(country);
+  return Boolean(normalizedAnswer && normalizedCountry && normalizedAnswer === normalizedCountry);
+}
+
+function presetSetUsesCountryAnswer(set, country) {
+  return (set?.questions || []).some(question => isCountryPresetAnswer(question?.answer, country));
+}
+
 async function getOrGenerateQuizBowlPresetSet(slug) {
   const definition = quizBowlPresetDefinition(slug);
   if (!definition) return null;
   const existing = loadQuizBowlPresetSets()[slug];
-  if (existing?.questions?.length) return { set: existing, cached: true };
+  if (existing?.questions?.length && !presetSetUsesCountryAnswer(existing, definition.label)) {
+    return { set: existing, cached: true };
+  }
   if (quizBowlPresetGenerationLocks.has(slug)) return quizBowlPresetGenerationLocks.get(slug);
 
   const generation = (async () => {
     const latest = loadQuizBowlPresetSets()[slug];
-    if (latest?.questions?.length) return { set: latest, cached: true };
-    const prompt = `Generate the definitive country ${definition.category.toLowerCase()} preset set for ${definition.label}. Use ONLY the source notes below. Return exactly 10 questions in the requested JSON format.\n\nSOURCE NOTES for "${definition.title}":\n${definition.source}`;
-    const result = await callGemini(
-      QUIZBOWL_PRESET_SYSTEM,
-      [{ role: 'user', content: prompt }],
-      GEMINI_FLASH,
-      8192,
-      { jsonMode: true, temperature: 0.7 },
-    );
-    if (!result.success) throw new Error(result.error || 'Preset generation failed');
-    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
-    const questions = (Array.isArray(parsed?.questions) ? parsed.questions : [])
-      .map((question, index) => ({
-        id: `preset-${slug}-${index + 1}`,
-        text: String(question?.text || '').trim(),
-        answer: String(question?.answer || '').trim(),
-        accept: Array.isArray(question?.accept) ? question.accept.slice(0, 20) : [],
-        prompt: Array.isArray(question?.prompt) ? question.prompt.slice(0, 20) : [],
+    if (latest?.questions?.length && !presetSetUsesCountryAnswer(latest, definition.label)) {
+      return { set: latest, cached: true };
+    }
+
+    const basePrompt = `Generate a country ${definition.category.toLowerCase()} preset set for ${definition.label}. Use ONLY the source notes below. Return exactly 10 questions in the requested JSON format. The canonical answer for every question must be a specific entity from the clues, never ${definition.label} itself.\n\nSOURCE NOTES for "${definition.title}":\n${definition.source}`;
+    let lastQuestionCount = 0;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const prompt = attempt === 0
+        ? basePrompt
+        : `${basePrompt}\n\nREPAIR: The previous draft used the country as an answer line or returned fewer than 10 valid questions. Replace those questions with specific non-country answers and return all 10 questions.`;
+      const result = await callGemini(
+        QUIZBOWL_PRESET_SYSTEM,
+        [{ role: 'user', content: prompt }],
+        GEMINI_FLASH,
+        8192,
+        { jsonMode: true, temperature: 0.7 },
+      );
+      if (!result.success) throw new Error(result.error || 'Preset generation failed');
+      const parsed = parseAIJson(result.data.content?.[0]?.text || '');
+      const questions = (Array.isArray(parsed?.questions) ? parsed.questions : [])
+        .map((question, index) => ({
+          id: `preset-${slug}-${index + 1}`,
+          text: String(question?.text || '').trim(),
+          answer: String(question?.answer || '').trim(),
+          accept: Array.isArray(question?.accept) ? question.accept.slice(0, 20) : [],
+          prompt: Array.isArray(question?.prompt) ? question.prompt.slice(0, 20) : [],
+          category: definition.category,
+        }))
+        .filter(question => question.text && question.answer && !isCountryPresetAnswer(question.answer, definition.label))
+        .slice(0, 10);
+      lastQuestionCount = questions.length;
+      if (questions.length < 10) continue;
+
+      const set = {
+        id: `preset:${slug}`,
+        title: definition.title,
         category: definition.category,
-      }))
-      .filter(question => question.text && question.answer)
-      .slice(0, 10);
-    if (questions.length < 10) throw new Error('Preset generation returned an incomplete set');
-    const set = {
-      id: `preset:${slug}`,
-      title: definition.title,
-      category: definition.category,
-      difficulty: definition.difficulty,
-      source: 'preset',
-      presetSlug: slug,
-      author: 'Covalent Library',
-      generatedAt: new Date().toISOString(),
-      questions,
-    };
-    const sets = loadQuizBowlPresetSets();
-    sets[slug] = set;
-    saveQuizBowlPresetSets(sets);
-    return { set, cached: false };
+        difficulty: definition.difficulty,
+        source: 'preset',
+        presetSlug: slug,
+        author: 'Covalent Library',
+        generatedAt: new Date().toISOString(),
+        questions,
+      };
+      const sets = loadQuizBowlPresetSets();
+      sets[slug] = set;
+      saveQuizBowlPresetSets(sets);
+      return { set, cached: false };
+    }
+    throw new Error(`Preset generation returned only ${lastQuestionCount} valid non-country questions after 3 attempts`);
   })();
   quizBowlPresetGenerationLocks.set(slug, generation);
   try { return await generation; }
