@@ -109,8 +109,8 @@ export default function MobileLessons() {
                 onClick={() => setDifficulty(d)}
                 className={`px-3 py-2 rounded-xl text-[12px] font-semibold tracking-tight capitalize transition-colors ${
                   difficulty === d
-                    ? 'bg-white/[0.14] text-white/90 border border-white/[0.20]'
-                    : 'bg-white/[0.04] border border-white/[0.06] text-white/40'
+                    ? 'bg-blue-500/20 text-blue-100 border border-blue-400/50'
+                    : 'bg-white/[0.04] border border-white/[0.06] text-white/40 active:bg-blue-500/[0.08]'
                 }`}
               >
                 {d}
@@ -122,7 +122,7 @@ export default function MobileLessons() {
         <button
           onClick={handleCreate}
           disabled={!topic.trim() || creating}
-          className="mt-5 w-full py-3.5 rounded-2xl bg-white/[0.10] border border-white/[0.16] disabled:opacity-40 text-white/80 text-[14.5px] font-bold inline-flex items-center justify-center gap-2 transition-colors hover:bg-white/[0.14] backdrop-blur-sm"
+          className="mt-5 w-full py-3.5 rounded-2xl bg-blue-500 border border-blue-400/30 disabled:opacity-40 text-white text-[14.5px] font-bold inline-flex items-center justify-center gap-2 transition-colors hover:bg-blue-400 active:bg-blue-600"
         >
           {creating ? <><InlineProgress active /> Building lesson…</> : <><Lightbulb size={15} /> Start lesson</>}
         </button>
@@ -133,20 +133,18 @@ export default function MobileLessons() {
   // ===== LIST =====
   return (
     <MobilePage
-      eyebrow="Quick lessons"
       title="My Lessons"
-      subtitle={loading ? 'Loading…' : `${lessons.length} ${lessons.length === 1 ? 'lesson' : 'lessons'}`}
     >
       <button
         onClick={() => { setTopic(''); setCreateError(null); setView('new'); }}
-        className="w-full rounded-2xl bg-white/[0.13] border border-white/[0.24] p-4 mb-4 active:scale-[0.99] transition-transform text-left backdrop-blur-sm"
+        className="w-full rounded-2xl bg-blue-500 border border-blue-400/30 p-4 mb-4 active:scale-[0.99] transition-transform text-left"
       >
         <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-xl bg-white/[0.15] grid place-items-center shrink-0">
+          <div className="w-11 h-11 rounded-xl bg-blue-400/30 grid place-items-center shrink-0">
             <Plus size={20} className="text-white/85" />
           </div>
           <p className="flex-1 text-[15px] font-bold tracking-tight text-white/90">New lesson</p>
-          <ChevronRight size={16} className="text-white/55" />
+          <ChevronRight size={16} className="text-white/80" />
         </div>
       </button>
 
@@ -186,7 +184,7 @@ export default function MobileLessons() {
               {!completed && total > 0 && (
                 <div className="h-1 rounded-full bg-white/[0.06] overflow-hidden">
                   <div
-                    className="h-full bg-white/25 rounded-full transition-all"
+                    className="h-full bg-blue-400 rounded-full transition-all"
                     style={{ width: `${pct}%` }}
                   />
                 </div>

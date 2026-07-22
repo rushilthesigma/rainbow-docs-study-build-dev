@@ -407,7 +407,12 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
 
   async function handleSubmitAnswer() {
     if (!answer.trim()) return;
-    try { await answerMatch(code, answer.trim()); } catch (e) { setError(e.message); }
+    try {
+      const result = await answerMatch(code, answer.trim());
+      if (result.directive === 'prompt') {
+        setError(result.directedPrompt ? `Prompt: ${result.directedPrompt}` : 'Prompt: be more specific.');
+      }
+    } catch (e) { setError(e.message); }
   }
 
   async function handleSubmitBonus(pass = false) {
@@ -431,9 +436,22 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
     try {
       const res = await requestAnswerReview(code);
       setAnswerReview(res.review);
-      setReviewStatus('pending');
-      setAutoAdvanceDeadline(null);
-      setAnswerDeadline(null);
+      if (res.autoAccepted) {
+        setReviewStatus(res.accepted ? 'accepted' : 'rejected');
+        setAutoAdvanceDeadline(res.autoAdvanceInMs != null ? Date.now() + res.autoAdvanceInMs : null);
+        setAnswerDeadline(null);
+        if (res.scores) {
+          setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: res.scores[p.userId] || 0 })) } : prev);
+        }
+        if (res.accepted && res.review?.requesterId) {
+          setLockedOut(prev => prev.filter(id => id !== res.review.requesterId));
+        }
+        setLastReviewableWrong(null);
+      } else {
+        setReviewStatus('pending');
+        setAutoAdvanceDeadline(null);
+        setAnswerDeadline(null);
+      }
     } catch (e) {
       setError(e.message || 'Could not request review');
     }
@@ -469,8 +487,8 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
               <ArrowLeft size={18} className="text-white/70" />
             </button>
           )}
-          <div className="w-9 h-9 rounded-xl grid place-items-center bg-amber-500/15 border border-amber-400/20">
-            <Zap size={18} className="text-amber-300" />
+          <div className="w-9 h-9 rounded-xl grid place-items-center bg-blue-500/15 border border-blue-400/20">
+            <Zap size={18} className="text-blue-300" />
           </div>
           <div>
             <h1 className="text-[17px] font-bold tracking-tight leading-none">Multiplayer</h1>
@@ -480,7 +498,7 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
         <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-6 pt-4 space-y-4">
           <button
             onClick={() => setView('setup')}
-            className="w-full h-12 rounded-2xl bg-amber-500 text-black font-bold text-[15px] flex items-center justify-center gap-2 active:bg-amber-600"
+            className="w-full h-12 rounded-2xl bg-blue-500 text-white font-bold text-[15px] flex items-center justify-center gap-2 active:bg-blue-600"
           >
             <Zap size={17} /> Create room
           </button>
@@ -497,12 +515,12 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
                 onChange={e => setJoinCodeInput(e.target.value.toUpperCase().slice(0, 6))}
                 onKeyDown={e => { if (e.key === 'Enter') handleJoin(); }}
                 placeholder="CODE"
-                className="flex-1 rounded-2xl bg-white/[0.05] border border-white/[0.08] px-4 py-3 text-[16px] font-mono tracking-widest text-white placeholder-white/20 outline-none focus:border-amber-400/40"
+                className="flex-1 rounded-2xl bg-white/[0.05] border border-white/[0.08] px-4 py-3 text-[16px] font-mono tracking-widest text-white placeholder-white/20 outline-none focus:border-blue-400/40"
               />
               <button
                 onClick={handleJoin}
                 disabled={busy || joinCodeInput.trim().length < 4}
-                className="px-5 rounded-2xl bg-white/[0.08] border border-white/10 font-semibold disabled:opacity-40 active:bg-white/[0.12]"
+                className="px-5 rounded-2xl bg-blue-500/15 border border-blue-400/30 text-blue-100 font-semibold disabled:opacity-40 active:bg-blue-500/25"
               >
                 {busy ? <InlineProgress active /> : 'Join'}
               </button>
@@ -524,8 +542,8 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
           <div>
             <SectionLabel>Game type</SectionLabel>
             <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => setMatchMode('individual')} className={`rounded-2xl border p-3 text-left ${matchMode === 'individual' ? 'border-amber-400/50 bg-amber-500/15' : 'border-white/[0.08] bg-white/[0.03]'}`}><Zap size={14} className="text-amber-300 mb-1" /><p className="text-[12px] font-bold">Open match</p><p className="text-[10px] text-white/35">Individual scoring</p></button>
-              <button onClick={() => setMatchMode('team')} className={`rounded-2xl border p-3 text-left ${matchMode === 'team' ? 'border-amber-400/50 bg-amber-500/15' : 'border-white/[0.08] bg-white/[0.03]'}`}><Users size={14} className="text-amber-300 mb-1" /><p className="text-[12px] font-bold">Team scrimmage</p><p className="text-[10px] text-white/35">Tossups + bonuses</p></button>
+              <button onClick={() => setMatchMode('individual')} className={`rounded-2xl border p-3 text-left ${matchMode === 'individual' ? 'border-blue-400/50 bg-blue-500/15' : 'border-white/[0.08] bg-white/[0.03]'}`}><Zap size={14} className="text-blue-300 mb-1" /><p className="text-[12px] font-bold">Open match</p><p className="text-[10px] text-white/35">Individual scoring</p></button>
+              <button onClick={() => setMatchMode('team')} className={`rounded-2xl border p-3 text-left ${matchMode === 'team' ? 'border-blue-400/50 bg-blue-500/15' : 'border-white/[0.08] bg-white/[0.03]'}`}><Users size={14} className="text-blue-300 mb-1" /><p className="text-[12px] font-bold">Team scrimmage</p><p className="text-[10px] text-white/35">Tossups + bonuses</p></button>
             </div>
           </div>
           <div>
@@ -540,7 +558,7 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
                 type="text" value={customTopic} maxLength={200}
                 onChange={e => setCustomTopic(e.target.value)}
                 placeholder="Any topic - the AI writes the tossups on it"
-                className="mt-2 w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.1] text-[13px] text-white placeholder:text-white/25 focus:outline-none focus:border-amber-400/50 transition-colors"
+                className="mt-2 w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.1] text-[13px] text-white placeholder:text-white/25 focus:outline-none focus:border-blue-400/50 transition-colors"
               />
             )}
           </div>
@@ -556,41 +574,41 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
             <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-white/30">Questions</span>
-                <span className="text-[11px] font-mono font-bold text-amber-300">{questionCount}</span>
+                <span className="text-[11px] font-mono font-bold text-blue-300">{questionCount}</span>
               </div>
               <input type="range" min="5" max="20" step="5" value={questionCount}
-                onChange={e => setQuestionCount(Number(e.target.value))} className="w-full accent-amber-500" />
+                onChange={e => setQuestionCount(Number(e.target.value))} className="w-full accent-blue-500" />
             </div>
             <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-white/30">Speed</span>
-                <span className="text-[11px] font-mono font-bold text-amber-300">{revealSpeedMs}ms</span>
+                <span className="text-[11px] font-mono font-bold text-blue-300">{revealSpeedMs}ms</span>
               </div>
               <input type="range" min="60" max="300" step="10" value={revealSpeedMs}
-                onChange={e => setRevealSpeedMs(Number(e.target.value))} className="w-full accent-amber-500" />
+                onChange={e => setRevealSpeedMs(Number(e.target.value))} className="w-full accent-blue-500" />
             </div>
           </div>
 
-          <div className={`rounded-2xl border p-3 transition-all ${fillWithBots ? 'border-amber-500/40 bg-amber-500/[0.07]' : 'border-white/[0.08] bg-white/[0.02]'}`}>
+          <div className={`rounded-2xl border p-3 transition-all ${fillWithBots ? 'border-blue-500/40 bg-blue-500/[0.07]' : 'border-white/[0.08] bg-white/[0.02]'}`}>
             <div className="flex items-center justify-between">
-              <span className={`text-[11px] font-bold flex items-center gap-1.5 ${fillWithBots ? 'text-amber-200' : 'text-white/55'}`}>
-                <Bot size={13} className={fillWithBots ? 'text-amber-400' : 'text-white/25'} />
+              <span className={`text-[11px] font-bold flex items-center gap-1.5 ${fillWithBots ? 'text-blue-200' : 'text-white/55'}`}>
+                <Bot size={13} className={fillWithBots ? 'text-blue-300' : 'text-white/25'} />
                 Fill with AI bots
               </span>
               <button
                 onClick={() => setFillWithBots(v => !v)}
-                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${fillWithBots ? 'bg-amber-500' : 'bg-white/[0.12]'}`}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${fillWithBots ? 'bg-blue-500' : 'bg-white/[0.12]'}`}
               >
                 <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${fillWithBots ? 'translate-x-[18px]' : 'translate-x-[2px]'}`} />
               </button>
             </div>
             {fillWithBots && (
               <div className="mt-2.5">
-                <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-amber-400/60 mb-1.5">Bot difficulty</p>
+                <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-blue-300/70 mb-1.5">Bot difficulty</p>
                 <div className="flex gap-1.5">
                   {ROOM_LEVELS.map(l => (
                     <button key={l.id} onClick={() => setBotLevel(l.id)}
-                      className={`flex-1 py-1.5 rounded-lg text-[11px] font-semibold border transition-all ${botLevel === l.id ? 'bg-amber-500/25 text-amber-100 border-amber-400/60' : 'bg-white/[0.03] text-white/45 border-white/[0.08] active:text-white/70'}`}>
+                      className={`flex-1 py-1.5 rounded-lg text-[11px] font-semibold border transition-all ${botLevel === l.id ? 'bg-blue-500/25 text-blue-100 border-blue-400/60' : 'bg-white/[0.03] text-white/45 border-white/[0.08] active:text-white/70'}`}>
                       {l.label}
                     </button>
                   ))}
@@ -605,7 +623,7 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
                 <Save size={13} className="text-white/25" /> Presets
               </span>
               {!savingPreset && (
-                <button onClick={() => setSavingPreset(true)} className="text-[11px] font-semibold text-amber-300/80 active:text-amber-200">
+                <button onClick={() => setSavingPreset(true)} className="text-[11px] font-semibold text-blue-300/80 active:text-blue-200">
                   Save current
                 </button>
               )}
@@ -617,9 +635,9 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
                   onChange={e => setPresetName(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') handleSavePreset(); if (e.key === 'Escape') setSavingPreset(false); }}
                   placeholder="Preset name…"
-                  className="flex-1 min-w-0 rounded-xl bg-white/[0.05] border border-white/[0.08] px-3 py-2 text-[12px] text-white placeholder-white/25 outline-none focus:border-amber-400/40"
+                  className="flex-1 min-w-0 rounded-xl bg-white/[0.05] border border-white/[0.08] px-3 py-2 text-[12px] text-white placeholder-white/25 outline-none focus:border-blue-400/40"
                 />
-                <button onClick={handleSavePreset} className="px-3 rounded-xl bg-amber-500 text-black text-[12px] font-semibold active:bg-amber-600">Save</button>
+                <button onClick={handleSavePreset} className="px-3 rounded-xl bg-blue-500 text-white text-[12px] font-semibold active:bg-blue-600">Save</button>
                 <button onClick={() => setSavingPreset(false)} className="px-2 rounded-xl text-white/35 active:text-white/60" aria-label="Cancel"><X size={13} /></button>
               </div>
             )}
@@ -648,7 +666,7 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
           <button
             onClick={handleCreate}
             disabled={busy || (category === 'Custom' && !customTopic.trim())}
-            className="w-full h-12 rounded-2xl bg-amber-500 text-black font-bold text-[15px] flex items-center justify-center gap-2 disabled:opacity-40 active:bg-amber-600"
+            className="w-full h-12 rounded-2xl bg-blue-500 text-white font-bold text-[15px] flex items-center justify-center gap-2 disabled:opacity-40 active:bg-blue-600"
           >
             {busy ? <InlineProgress active /> : <Zap size={17} />} Create Room
           </button>
@@ -673,7 +691,7 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
               onClick={() => { try { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {} }}
               className="inline-flex items-center gap-2 text-[28px] font-bold font-mono tracking-[0.2em] text-white"
             >
-              {code} {copied ? <Check size={18} className="text-amber-300" /> : <Copy size={16} className="text-white/40" />}
+              {code} {copied ? <Check size={18} className="text-blue-300" /> : <Copy size={16} className="text-white/40" />}
             </button>
           </div>
 
@@ -684,22 +702,22 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
                 <div key={team} className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-3">
                   <div className="flex items-center gap-2 mb-2"><span className={`w-2 h-2 rounded-full ${team === 'A' ? 'bg-blue-400' : 'bg-amber-400'}`} /><span className="text-[12px] font-bold">{match.teamNames?.[team] || `Team ${team}`}</span><span className="ml-auto text-[10px] text-white/30">{(match.players || []).filter(p => p.team === team).length}/4</span></div>
                   {(match.players || []).filter(p => p.team === team).map(p => <div key={p.userId} className="flex items-center gap-2 py-1"><span className="w-6 h-6 rounded-full grid place-items-center bg-white/[0.06] text-[10px]">{p.isBot ? <Bot size={11} /> : (p.name || '?')[0]?.toUpperCase()}</span><span className="flex-1 text-[13px] text-white/75 truncate">{p.name}</span>{p.userId === myId && <span className="text-[9px] text-white/30">you</span>}</div>)}
-                  {!match.players?.find(p => p.userId === myId)?.isBot && <button onClick={() => handleSelectTeam(team)} className="mt-2 w-full rounded-xl border border-white/[0.08] py-2 text-[11px] font-semibold text-white/50 active:bg-white/[0.06]">Join {match.teamNames?.[team] || `Team ${team}`}</button>}
+                  {!match.players?.find(p => p.userId === myId)?.isBot && <button onClick={() => handleSelectTeam(team)} className="mt-2 w-full rounded-xl border border-blue-400/25 bg-blue-500/10 py-2 text-[11px] font-semibold text-blue-100/80 active:bg-blue-500/20">Join {match.teamNames?.[team] || `Team ${team}`}</button>}
                 </div>
               )) : (match?.players || []).map(p => (
                 <div key={p.userId} className="flex items-center gap-2 rounded-xl bg-white/[0.03] border border-white/[0.06] px-3 py-2">
-                  <div className={`w-6 h-6 rounded-full grid place-items-center text-[10px] font-bold ${p.isBot ? 'bg-white/[0.06] text-white/30' : 'bg-amber-500/15 text-amber-300'}`}>
+                  <div className={`w-6 h-6 rounded-full grid place-items-center text-[10px] font-bold ${p.isBot ? 'bg-white/[0.06] text-white/30' : 'bg-blue-500/15 text-blue-300'}`}>
                     {p.isBot ? <Bot size={11} /> : (p.name || '?')[0]?.toUpperCase()}
                   </div>
                   <span className="flex-1 text-[13px] text-white/80 truncate">{p.name}</span>
                   {p.isBot && <span className="text-[9px] uppercase tracking-wider text-white/25">bot</span>}
-                  {p.userId === match?.hostId && !p.isBot && <span className="text-[9px] text-amber-400/70 font-semibold flex items-center gap-0.5"><Trophy size={9} /> host</span>}
+                  {p.userId === match?.hostId && !p.isBot && <span className="text-[9px] text-blue-300/80 font-semibold flex items-center gap-0.5"><Trophy size={9} /> host</span>}
                   {p.userId === myId && <span className="text-[9px] text-white/30">you</span>}
                 </div>
               ))}
               {waiting && !fillWithBots && (
                 <div className="flex items-center gap-2 text-white/30 text-[12px] italic px-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
                   Waiting for at least one more…
                 </div>
               )}
@@ -707,26 +725,26 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
           </div>
 
           {isHost && (
-            <div className={`rounded-2xl border p-3 ${fillWithBots ? 'border-amber-500/40 bg-amber-500/[0.07]' : 'border-white/[0.08] bg-white/[0.02]'}`}>
+            <div className={`rounded-2xl border p-3 ${fillWithBots ? 'border-blue-500/40 bg-blue-500/[0.07]' : 'border-white/[0.08] bg-white/[0.02]'}`}>
               <div className="flex items-center justify-between">
-                <span className={`text-[11px] font-bold flex items-center gap-1.5 ${fillWithBots ? 'text-amber-200' : 'text-white/55'}`}>
-                  <Bot size={13} className={fillWithBots ? 'text-amber-400' : 'text-white/25'} />
+                <span className={`text-[11px] font-bold flex items-center gap-1.5 ${fillWithBots ? 'text-blue-200' : 'text-white/55'}`}>
+                  <Bot size={13} className={fillWithBots ? 'text-blue-300' : 'text-white/25'} />
                   Fill empty slots with bots
                 </span>
                 <button
                   onClick={() => setFillWithBots(v => !v)}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${fillWithBots ? 'bg-amber-500' : 'bg-white/[0.12]'}`}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${fillWithBots ? 'bg-blue-500' : 'bg-white/[0.12]'}`}
                 >
                   <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${fillWithBots ? 'translate-x-[18px]' : 'translate-x-[2px]'}`} />
                 </button>
               </div>
               {fillWithBots && (
                 <div className="mt-2.5">
-                  <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-amber-400/60 mb-1.5">Bot difficulty</p>
+                  <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-blue-300/70 mb-1.5">Bot difficulty</p>
                   <div className="flex gap-1.5">
                     {ROOM_LEVELS.map(l => (
                       <button key={l.id} onClick={() => setBotLevel(l.id)}
-                        className={`flex-1 py-1.5 rounded-lg text-[11px] font-semibold border transition-all ${botLevel === l.id ? 'bg-amber-500/25 text-amber-100 border-amber-400/60' : 'bg-white/[0.03] text-white/45 border-white/[0.08]'}`}>
+                        className={`flex-1 py-1.5 rounded-lg text-[11px] font-semibold border transition-all ${botLevel === l.id ? 'bg-blue-500/25 text-blue-100 border-blue-400/60' : 'bg-white/[0.03] text-white/45 border-white/[0.08]'}`}>
                         {l.label}
                       </button>
                     ))}
@@ -744,7 +762,7 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
             <button
               onClick={handleStart}
               disabled={(waiting && !fillWithBots) || (match?.mode === 'team' && !teamReady) || (category === 'Custom' && !customTopic.trim())}
-              className="w-full h-12 rounded-2xl bg-amber-500 text-black font-bold text-[15px] flex items-center justify-center gap-2 disabled:opacity-40 active:bg-amber-600"
+              className="w-full h-12 rounded-2xl bg-blue-500 text-white font-bold text-[15px] flex items-center justify-center gap-2 disabled:opacity-40 active:bg-blue-600"
             >
               <Play size={17} />
               {match?.mode === 'team' && !teamReady
@@ -1012,7 +1030,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
                 className="flex-1 px-4 py-3 rounded-2xl border border-white/[0.08] bg-white/[0.04] text-[14px] text-white/85 placeholder-white/20 outline-none focus:border-white/15 disabled:opacity-50"
               />
               <button onClick={onSubmitAnswer} disabled={!answer.trim() || timeUp}
-                className="px-5 py-3 rounded-2xl bg-white/[0.07] active:bg-white/[0.11] border border-white/[0.08] text-white/60 text-[13px] font-semibold disabled:opacity-30">
+                className="px-5 py-3 rounded-2xl bg-blue-500 active:bg-blue-600 border border-blue-400/30 text-white text-[13px] font-semibold disabled:opacity-30">
                 →
               </button>
             </div>
@@ -1058,7 +1076,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
               </div>
             ) : !reviewPending ? (
               isHost
-                ? <button onClick={onNext} className="w-full py-2.5 rounded-2xl border border-white/[0.06] bg-white/[0.03] text-[12px] font-semibold text-white/50 active:text-white/70">Next →</button>
+                ? <button onClick={onNext} className="w-full py-2.5 rounded-2xl border border-blue-400/25 bg-blue-500/10 text-[12px] font-semibold text-blue-100/80 active:bg-blue-500/20">Next →</button>
                 : <p className="text-[11px] text-center text-white/25">Waiting for host…</p>
             ) : null}
           </>
@@ -1118,7 +1136,7 @@ function SectionLabel({ children }) {
 function Chip({ active, onClick, children }) {
   return (
     <button onClick={onClick}
-      className={`px-3 py-1.5 rounded-xl text-[12px] font-semibold whitespace-nowrap transition-colors ${active ? 'bg-amber-500/20 text-amber-100 border border-amber-500/50' : 'bg-white/[0.04] border border-white/[0.06] text-white/45 active:bg-white/[0.08]'}`}>
+      className={`px-3 py-1.5 rounded-xl text-[12px] font-semibold whitespace-nowrap transition-colors ${active ? 'bg-blue-500/20 text-blue-100 border border-blue-400/50' : 'bg-white/[0.04] border border-white/[0.06] text-white/45 active:bg-blue-500/[0.08]'}`}>
       {children}
     </button>
   );

@@ -121,7 +121,7 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
   const [difficulty, setDifficulty] = useState('Medium');
   const [questionCount, setQuestionCount] = useState(10);
   const [revealSpeedMs, setRevealSpeedMs] = useState(140);
-  const [scoringFormat, setScoringFormat] = useState('standard');
+  const [scoringFormat, setScoringFormat] = useState('iac-prelim');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false);
@@ -291,7 +291,15 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
         setAnswer('');
         setAnswerDeadline(null);
         setLockedOut(lock || []);
-        if (newStart && question) setQuestion(q => q ? { ...q, startedAt: newStart } : q);
+        // The SSE subscription is intentionally long-lived and therefore its
+        // callback does not capture the latest `question` state. The server
+        // shifts startedAt by the time spent answering so the remaining
+        // players resume at the same clue; keep that corrected clock on the
+        // current question or the reveal jumps ahead after a neg.
+        if (newStart) {
+          if (questionRef.current) questionRef.current = { ...questionRef.current, startedAt: newStart };
+          setQuestion(q => q ? { ...q, startedAt: newStart } : q);
+        }
         setWrongFlash({ userId, answer: wrongAns, timedOut });
         if (userId === myId && wrongAns && !timedOut) {
           setLastReviewableWrong({ userId, answer: wrongAns, timedOut });
@@ -515,9 +523,22 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
     try {
       const res = await requestAnswerReview(code);
       setAnswerReview(res.review);
-      setReviewStatus('pending');
-      setAutoAdvanceDeadline(null);
-      setAnswerDeadline(null);
+      if (res.autoAccepted) {
+        setReviewStatus(res.accepted ? 'accepted' : 'rejected');
+        setAutoAdvanceDeadline(res.autoAdvanceInMs != null ? Date.now() + res.autoAdvanceInMs : null);
+        setAnswerDeadline(null);
+        if (res.scores) {
+          setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: res.scores[p.userId] || 0 })) } : prev);
+        }
+        if (res.accepted && res.review?.requesterId) {
+          setLockedOut(prev => prev.filter(id => id !== res.review.requesterId));
+        }
+        setLastReviewableWrong(null);
+      } else {
+        setReviewStatus('pending');
+        setAutoAdvanceDeadline(null);
+        setAnswerDeadline(null);
+      }
     } catch (e) {
       setError(e.message || 'Could not request review');
     }
@@ -641,7 +662,7 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
 
           <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Game type</p>
           <div className="grid grid-cols-2 gap-2">
-            <SetupTile active={matchMode === 'individual'} icon={<Zap size={14} />} label="Open match" sub="Individual scoring" onClick={() => setMatchMode('individual')} />
+            <SetupTile active={matchMode === 'individual'} icon={<Zap size={14} />} label="Open match" sub="Individual scoring" onClick={() => { setMatchMode('individual'); setScoringFormat('iac-prelim'); }} />
             <SetupTile active={matchMode === 'team'} icon={<Users size={14} />} label="Team scrimmage" sub="Tossups + 3-part bonuses" onClick={() => { setMatchMode('team'); setScoringFormat('standard'); }} />
           </div>
 

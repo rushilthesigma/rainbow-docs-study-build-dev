@@ -121,7 +121,9 @@ export default function TrialPage() {
   const [mode,           setMode]          = useState(MODES[0]);
   const [topic,          setTopic]         = useState('World History');
   const [difficulty,     setDifficulty]    = useState('medium');
-  const [scoringFormat,  setScoringFormat] = useState(SCORING_FORMATS[0]);
+  const [scoringFormat,  setScoringFormat] = useState(
+    () => SCORING_FORMATS.find((format) => format.id === 'iac-prelim') || SCORING_FORMATS[0]
+  );
   const [source,         setSource]        = useState('qbreader'); // default: real QB questions
   const [selectedBot,    setSelectedBot]   = useState(BOT_ROSTER[2]); // Player 4 for 1v1
   const [practiceBotIds, setPracticeBotIds]= useState(['biscuit', 'alex', 'sam']);

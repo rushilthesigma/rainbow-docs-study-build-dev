@@ -1,5 +1,5 @@
 import {
-  BookOpen, Calculator, PenTool, FileText, ClipboardCheck, Lock, Check, Trophy,
+  BookOpen, Calculator, PenTool, FileText, ClipboardCheck, Lock, Check, Trophy, Zap,
 } from 'lucide-react';
 
 // =========================================================
@@ -16,6 +16,7 @@ const TYPE_ICON = {
   practice: PenTool,
   essay: FileText,
   unit_test: ClipboardCheck,
+  quiz_bowl: Zap,
 };
 const TYPE_LABEL = {
   lesson: 'Lesson',
@@ -23,6 +24,7 @@ const TYPE_LABEL = {
   practice: 'Practice',
   essay: 'Essay',
   unit_test: 'Assessment',
+  quiz_bowl: 'Quiz Bowl',
 };
 
 // Zig-zag horizontal offset per node - alternates left / center / right.

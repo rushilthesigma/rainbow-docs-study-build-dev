@@ -55,6 +55,7 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(async () => {
     await apiLogout();
+    import('../native/googleAuth').then(({ signOutNativeGoogle }) => signOutNativeGoogle()).catch(() => {});
     setUser(null);
   }, []);
 

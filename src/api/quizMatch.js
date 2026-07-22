@@ -1,4 +1,4 @@
-import { apiFetch, getToken } from './client';
+import { apiFetch, apiUrl, getToken } from './client';
 
 export const createMatch = (opts) => apiFetch('/api/quizbowl/match', {
   method: 'POST',
@@ -67,15 +67,38 @@ export const deletePlayedQuizBowlSet = (id) => apiFetch(`/api/quizbowl/sets/${id
 // intentionally separate from completed-set history above.
 export const fetchQuizBowlCountryPresets = () => apiFetch('/api/quizbowl/presets');
 export const fetchQuizBowlCountryPreset = (slug) => apiFetch(`/api/quizbowl/presets/${encodeURIComponent(slug)}`);
+export const fetchQuizBowlPresetSet = (slug) => apiFetch(`/api/quizbowl/presets/${encodeURIComponent(slug)}/set`, { method: 'POST' });
 export const fetchSavedQuizBowlSets = () => apiFetch('/api/quizbowl/saved-sets');
 export const getSavedQuizBowlSet = (id) => apiFetch(`/api/quizbowl/saved-sets/${id}`);
 export const createSavedQuizBowlSet = (payload) => apiFetch('/api/quizbowl/saved-sets', {
   method: 'POST', body: JSON.stringify(payload),
 });
+export async function importSavedQuizBowlPacket(file) {
+  const body = new FormData();
+  body.append('file', file);
+  const token = getToken();
+  const response = await fetch(apiUrl('/api/quizbowl/saved-sets/import'), {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(data.error || `Import failed: ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+}
 export const updateSavedQuizBowlSet = (id, payload) => apiFetch(`/api/quizbowl/saved-sets/${id}`, {
   method: 'PUT', body: JSON.stringify(payload),
 });
 export const deleteSavedQuizBowlSet = (id) => apiFetch(`/api/quizbowl/saved-sets/${id}`, { method: 'DELETE' });
+
+// Public, already-written packet collection. Publishing a personal packet
+// makes it visible here; playing a listing never copies or regenerates it.
+export const fetchQuizBowlCollection = () => apiFetch('/api/quizbowl/collection');
+export const getQuizBowlCollectionSet = (listingId) => apiFetch(`/api/quizbowl/collection/${encodeURIComponent(listingId)}`);
 
 // Returns { recommendations: [{ kind, category, difficulty, reason }] }
 export const fetchQuizBowlRecommendations = () => apiFetch('/api/quizbowl/recommendations');

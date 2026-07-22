@@ -15,7 +15,7 @@ import {
   TOOL_ACCENT_DEFAULTS, accentColorForHue, useUIPreference,
 } from '../context/UIPreferenceContext';
 import { WALLPAPER_LIST } from '../components/desktop/DesktopBackground';
-import { openBillingPortal, createCheckoutSession, getTiers, getMyUsage } from '../api/billing';
+import { openBillingPortal, createCheckoutSession, getTiers, getMyUsage, resetWeeklyCredits } from '../api/billing';
 import { planFromUser } from '../components/billing/modelAccess';
 import FALLBACK_TIERS, { FALLBACK_MODEL_COSTS, FALLBACK_FEATURE_COSTS, FALLBACK_MULTI_MODEL_DISCOUNT, mergeTiers, fmtCap, fmtCredits } from '../components/billing/tiersCatalog';
 import { useToast } from '../components/shared/Toast';
@@ -577,10 +577,10 @@ const TABS = [
 ];
 
 // ─── Plans tab ────────────────────────────────────────────────────────────────
-// Daily credit balance, plan comparison, and per-model credit costs — rendered
+// Weekly credit balance, banked resets, plan comparison, and per-model costs — rendered
 // as flat Settings sections (no boxed card).
 const MODEL_LABELS = {
-  'flash-lite': 'Flash Lite', 'deepseek-flash': 'DeepSeek V4', 'grok': 'Grok 4.3', 'flash': 'Flash',
+  'flash-lite': 'Gemini 3.5 Flash-Lite', 'deepseek-flash': 'DeepSeek V4', 'grok': 'Grok 4.3', 'flash': 'Gemini 3.6 Flash',
   'gpt-5.4-mini': 'GPT-5.4 mini', 'deepseek-pro': 'DeepSeek Pro', 'haiku': 'Haiku 4.5',
   'gemini-pro': 'Gemini Pro', 'sonnet': 'Sonnet 4.6', 'gpt-5.4': 'GPT-5.4',
   'gpt-5.6-sol': 'GPT-5.6 Sol', 'gpt-5.6-terra': 'GPT-5.6 Terra', 'gpt-5.6-luna': 'GPT-5.6 Luna',
@@ -601,6 +601,7 @@ function PlansTab({ user }) {
   const [tiers, setTiers] = useState(FALLBACK_TIERS);
   const [usage, setUsage] = useState(null);
   const [buyBusy, setBuyBusy] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
 
   useEffect(() => {
     getTiers().then(d => setTiers(mergeTiers(FALLBACK_TIERS, d.tiers))).catch(() => {});
@@ -623,14 +624,29 @@ function PlansTab({ user }) {
     setBuyBusy(false);
   }
 
+  async function useCreditReset() {
+    if (resetBusy || !window.confirm('Use one banked reset to refill this week’s credits?')) return;
+    setResetBusy(true);
+    try {
+      const next = await resetWeeklyCredits();
+      setUsage(current => ({ ...current, ...next }));
+      toast.success(`Credits refilled. ${next.creditResets?.available ?? 0} resets remain.`);
+    } catch (e) {
+      toast.error(e?.data?.message || e?.message || 'Could not reset credits.');
+    }
+    setResetBusy(false);
+  }
+
   // Weekly credit gauge.
   const unlimited = !credits || credits.unlimited || credits.allowance == null;
-  const allowance = credits?.allowance ?? (tiers?.[plan]?.dailyCredits ?? tiers?.[plan]?.limits?.dailyCredits ?? 995);
+  const allowance = credits?.allowance ?? (tiers?.[plan]?.dailyCredits ?? tiers?.[plan]?.limits?.dailyCredits ?? 500);
   const multiModelDiscount = usage?.multiModelDiscount ?? FALLBACK_MULTI_MODEL_DISCOUNT;
   const used = credits?.used ?? 0;
   const remaining = unlimited ? null : (credits?.remaining ?? Math.max(0, allowance - used));
   const pct = unlimited ? 10 : Math.min(100, Math.round((used / Math.max(1, allowance)) * 100));
   const tone = unlimited ? 'bg-white/20' : pct >= 100 ? 'bg-rose-400' : pct >= 85 ? 'bg-amber-400' : 'bg-blue-400';
+  const resetsAvailable = usage?.creditResets?.available ?? 0;
+  const canReset = resetsAvailable > 0 && used > 0 && !unlimited;
 
   const costEntries = Object.entries(modelCosts || {}).sort((a, b) => a[1] - b[1]);
   // Server featureCosts merged over the fallback so note costs show even on an
@@ -642,7 +658,7 @@ function PlansTab({ user }) {
 
   return (
     <div>
-      <Block label="Credits this week" hint="Resets on a rolling 7-day window">
+      <Block label="Credits this week" hint="Usage ages out over a rolling 7-day window. A banked reset refills it immediately.">
         <div className="text-[15px] font-semibold text-white tabular-nums leading-none">
           {unlimited
             ? 'Unlimited'
@@ -650,6 +666,17 @@ function PlansTab({ user }) {
         </div>
         <div className="mt-2 h-1 rounded-full bg-white/[0.07]">
           <div className={`h-full rounded-full ${tone}`} style={{ width: `${unlimited ? 100 : Math.max(2, 100 - pct)}%` }} />
+        </div>
+        <div className="mt-3 flex items-center justify-between gap-4 rounded-lg border border-white/[0.07] bg-white/[0.025] px-3 py-2.5">
+          <div>
+            <div className="text-[11px] font-medium text-white/70">Banked resets</div>
+            <div className="text-[10.5px] text-white/35">
+              {resetsAvailable} available · earn one each time a friend joins with your code
+            </div>
+          </div>
+          <Button size="sm" variant="secondary" onClick={useCreditReset} loading={resetBusy} disabled={!canReset}>
+            <RotateCcw size={12} /> {resetBusy ? 'Resetting…' : 'Use reset'}
+          </Button>
         </div>
       </Block>
 

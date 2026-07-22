@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useCallback } from 'react';
 
 const WidgetContext = createContext(null);
 const KEY = 'cov-widgets-v5'; // v5: no default widgets (clean desktop after onboarding)
+const REMOVED_WIDGET_TYPES = new Set(['daily_task']);
 
 // Mirror of the grid constants in DesktopWidgets.jsx - kept in sync manually.
 // STEP_X = GRID_CELL_W(190) + GRID_GAP_X(10), STEP_Y = GRID_CELL_H(160) + GRID_GAP_Y(10)
@@ -51,6 +52,7 @@ function load() {
   try {
     const stored = localStorage.getItem(KEY);
     const parsed = (stored ? JSON.parse(stored) : getDefaults())
+      .filter(widget => !REMOVED_WIDGET_TYPES.has(widget.type))
       .map(w => ({ cols: 1, rows: 1, radius: 'normal', ...w }));
     return parsed;
   }

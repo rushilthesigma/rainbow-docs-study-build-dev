@@ -210,7 +210,7 @@ function formatRelative(isoDate) {
 }
 
 // ─── Main App ──────────────────────────────────────────────────────────────
-export default function QBpediaApp({ onOpenApp } = {}) {
+export default function QBpediaApp({ onOpenApp, mobile = false } = {}) {
   const [view, setView] = useState('hub'); // hub | article | report | edit | why | reports
   const [currentSlug, setCurrentSlug] = useState(null);
   const [currentPage, setCurrentPage] = useState(null);
@@ -351,7 +351,7 @@ export default function QBpediaApp({ onOpenApp } = {}) {
   if (view === 'report' && currentPage) {
     return (
       <ViewFade viewKey="report" className="h-full">
-        <ReportView page={currentPage} onBack={() => setView('article')} />
+        <ReportView page={currentPage} mobile={mobile} onBack={() => setView('article')} />
       </ViewFade>
     );
   }
@@ -361,6 +361,7 @@ export default function QBpediaApp({ onOpenApp } = {}) {
       <ViewFade viewKey="edit" className="h-full">
         <EditView
           page={currentPage}
+          mobile={mobile}
           onBack={() => setView('article')}
           onSaved={(updated) => {
             setCurrentPage(updated);
@@ -375,7 +376,7 @@ export default function QBpediaApp({ onOpenApp } = {}) {
   if (view === 'why') {
     return (
       <ViewFade viewKey="why" className="h-full">
-        <WhyView onBack={goHub} onNavigate={openPage} />
+        <WhyView mobile={mobile} onBack={goHub} onNavigate={openPage} />
       </ViewFade>
     );
   }
@@ -394,6 +395,7 @@ export default function QBpediaApp({ onOpenApp } = {}) {
         <ArticleView
           slug={currentSlug}
           page={currentPage}
+          mobile={mobile}
           loading={loading}
           generating={generating}
           refreshing={refreshing}
@@ -421,13 +423,14 @@ export default function QBpediaApp({ onOpenApp } = {}) {
         isAdmin={isAdmin}
         reportCount={reportCount}
         onReports={() => setView('reports')}
+        mobile={mobile}
       />
     </ViewFade>
   );
 }
 
 // ─── Hub ──────────────────────────────────────────────────────────────────
-function HubView({ searchResults, setSearchResults, onNavigate, onWhy, isAdmin, reportCount, onReports }) {
+function HubView({ searchResults, setSearchResults, onNavigate, onWhy, isAdmin, reportCount, onReports, mobile = false }) {
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const debounceRef = useRef(null);
@@ -487,14 +490,17 @@ function HubView({ searchResults, setSearchResults, onNavigate, onWhy, isAdmin, 
   return (
     <div className="h-full min-h-0 flex flex-col">
       {/* Header — notes-style: plain bold title, quiet actions on the right */}
-      <div className="flex items-center justify-between mb-5 flex-shrink-0">
-        <h2 className="text-lg font-bold text-white/90">QBpedia</h2>
-        <div className="flex items-center gap-3">
+      <div className={`flex items-center justify-between ${mobile ? 'mb-4' : 'mb-5'} flex-shrink-0`}>
+        <div>
+          <h2 className={mobile ? 'text-[22px] font-bold tracking-tight text-white/95' : 'text-lg font-bold text-white/90'}>QBpedia</h2>
+          {mobile && <p className="mt-0.5 text-[11px] text-white/40">Quiz Bowl’s focused encyclopedia</p>}
+        </div>
+        <div className={`flex items-center ${mobile ? 'gap-1' : 'gap-3'}`}>
           {isAdmin && (
             <button
               onClick={onReports}
               title="Review error reports filed by readers"
-              className="inline-flex items-center gap-1.5 text-xs text-white/40 hover:text-white/70 transition-colors"
+              className={`inline-flex items-center gap-1.5 text-xs text-white/40 hover:text-white/70 transition-colors ${mobile ? 'min-h-11 px-2' : ''}`}
             >
               <AlertTriangle size={12} className={reportCount > 0 ? 'text-amber-300/80' : ''} />
               Reports
@@ -507,7 +513,7 @@ function HubView({ searchResults, setSearchResults, onNavigate, onWhy, isAdmin, 
           )}
           <button
             onClick={onWhy}
-            className="text-xs text-white/40 hover:text-white/70 transition-colors"
+            className={`text-xs text-white/40 hover:text-white/70 transition-colors ${mobile ? 'min-h-11 px-2' : ''}`}
           >
             Why not Wikipedia?
           </button>
@@ -522,12 +528,14 @@ function HubView({ searchResults, setSearchResults, onNavigate, onWhy, isAdmin, 
           onChange={e => handleSearch(e.target.value)}
           onKeyDown={handleEnter}
           placeholder="Search or enter any topic to generate a page…"
-          className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-white/[0.10] bg-white/[0.04] text-sm text-white/90 placeholder-white/30 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500 transition-colors"
+          inputMode="search"
+          enterKeyHint="search"
+          className={`w-full pl-9 pr-3 ${mobile ? 'py-3 text-[15px]' : 'py-2.5 text-sm'} rounded-lg border border-white/[0.10] bg-white/[0.04] text-white/90 placeholder-white/30 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500 transition-colors`}
         />
         {searching && <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 animate-spin" />}
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto pb-2">
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pb-2">
 
         {/* Search results */}
         {searchResults !== null && (
@@ -535,7 +543,14 @@ function HubView({ searchResults, setSearchResults, onNavigate, onWhy, isAdmin, 
             {searchResults.length === 0 ? (
               <div className="text-center py-8">
                 <p className="text-sm text-white/55 mb-1">No cached pages match.</p>
-                <p className="text-xs text-white/35">Press Enter to generate a new page for <span className="text-blue-300/80">"{query}"</span></p>
+                <p className="text-xs text-white/35 mb-3">Create a focused page for <span className="text-blue-300/80">"{query}"</span>.</p>
+                <button
+                  type="button"
+                  onClick={() => onNavigate(slugify(query))}
+                  className="min-h-11 inline-flex items-center gap-2 rounded-lg bg-blue-500 px-3 text-[13px] font-medium text-white transition-colors hover:bg-blue-400"
+                >
+                  <Plus size={14} /> Generate page
+                </button>
               </div>
             ) : (
               <>
@@ -549,7 +564,7 @@ function HubView({ searchResults, setSearchResults, onNavigate, onWhy, isAdmin, 
                 </div>
                 <button
                   onClick={() => onNavigate(slugify(query))}
-                  className="w-full text-left flex items-center gap-3 px-2 py-2.5 rounded-md hover:bg-white/[0.03] text-sm text-white/45 hover:text-white/75 transition-colors"
+                  className="w-full min-h-11 text-left flex items-center gap-3 px-2 py-2.5 rounded-md hover:bg-white/[0.03] text-sm text-white/45 hover:text-white/75 transition-colors"
                 >
                   <Plus size={13} className="flex-shrink-0 text-white/35" />
                   <span>Generate a new page for <span className="text-blue-300/80 font-medium">"{query}"</span></span>
@@ -566,12 +581,12 @@ function HubView({ searchResults, setSearchResults, onNavigate, onWhy, isAdmin, 
               <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 mb-2">
                 Quick start
               </h3>
-              <div className="flex flex-wrap gap-1.5">
+              <div className={mobile ? 'scrollbar-hide flex gap-2 overflow-x-auto pb-1 -mx-1 px-1' : 'flex flex-wrap gap-1.5'}>
                 {POPULAR_TOPICS.map(topic => (
                   <button
                     key={topic}
                     onClick={() => onNavigate(slugify(topic))}
-                    className="text-[12px] px-2.5 py-1 rounded-lg bg-blue-500 text-white font-medium hover:bg-blue-400 transition-colors"
+                    className={`shrink-0 text-[12px] ${mobile ? 'min-h-11 px-3' : 'px-2.5 py-1'} rounded-lg bg-blue-500 text-white font-medium hover:bg-blue-400 transition-colors`}
                   >
                     {topic}
                   </button>
@@ -584,12 +599,12 @@ function HubView({ searchResults, setSearchResults, onNavigate, onWhy, isAdmin, 
               <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 mb-2">
                 Recommended
               </h3>
-              <div className="space-y-0.5">
+              <div className={mobile ? 'space-y-1' : 'space-y-0.5'}>
                 {RECOMMENDED_TOPICS.map(({ label, cat }) => (
                   <button
                     key={label}
                     onClick={() => onNavigate(slugify(label))}
-                    className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-left hover:bg-white/[0.04] transition-colors group"
+                    className={`w-full flex items-center gap-2.5 px-2 rounded-md text-left hover:bg-white/[0.04] transition-colors group ${mobile ? 'min-h-11 py-2' : 'py-1.5'}`}
                   >
                     <span className="text-[10px] font-semibold uppercase tracking-wide text-white/25 w-16 shrink-0 group-hover:text-white/40 transition-colors">{cat}</span>
                     <span className="text-[13px] text-white/65 group-hover:text-white/90 transition-colors">{label}</span>
@@ -608,7 +623,7 @@ function PageRow({ page, onClick }) {
   return (
     <button
       onClick={onClick}
-      className="w-full text-left flex items-center gap-3 px-2 py-2.5 border-b border-white/[0.06] last:border-b-0 hover:bg-white/[0.03] rounded-md transition-colors"
+      className="w-full min-h-12 text-left flex items-center gap-3 px-2 py-2.5 border-b border-white/[0.06] last:border-b-0 hover:bg-white/[0.03] rounded-md transition-colors"
     >
       <Globe size={13} className="text-white/35 flex-shrink-0" />
       <div className="flex-1 min-w-0">
@@ -627,7 +642,7 @@ function PageRow({ page, onClick }) {
 }
 
 // ─── Article ──────────────────────────────────────────────────────────────
-function ArticleView({ slug, page, loading, generating, refreshing, error, onBack, onNavigate, onRetry, onReport, isAdmin, onEdit, titles, onOpenApp }) {
+function ArticleView({ slug, page, loading, generating, refreshing, error, onBack, onNavigate, onRetry, onReport, isAdmin, onEdit, titles, onOpenApp, mobile = false }) {
   const [tocOpen, setTocOpen] = useState(false);
   const [readPct, setReadPct] = useState(0);
   // Wikipedia-style right rail (actions + contents + related + page notes),
@@ -639,7 +654,7 @@ function ArticleView({ slug, page, loading, generating, refreshing, error, onBac
   // Height too: the sticky rail must cap at the window height and scroll
   // internally, or anything below the fold in it would never be reachable.
   const [bodyH, setBodyH] = useState(0);
-  const layout = bodyW >= 900 ? 'full' : bodyW >= 560 ? 'compact' : 'stack';
+  const layout = mobile ? 'stack' : bodyW >= 900 ? 'full' : bodyW >= 560 ? 'compact' : 'stack';
   const rail = layout !== 'stack';
   const full = layout === 'full';
   const scrollRef = useRef(null);
@@ -766,26 +781,26 @@ function ArticleView({ slug, page, loading, generating, refreshing, error, onBac
   // One markup for every layout: a chip row above the article when stacked,
   // stacked full-width buttons in the rail otherwise (smaller in the compact rail).
   // Notes-style surfaces: neutral button, the app's identity lives in the icon color.
-  const btnSize = rail && !full ? 'px-2 py-1.5 text-[11px]' : 'px-2.5 py-1.5 text-[12px]';
+  const btnSize = mobile ? 'min-h-11 px-3 py-2.5 text-[13px]' : rail && !full ? 'px-2 py-1.5 text-[11px]' : 'px-2.5 py-1.5 text-[12px]';
   const studyBtn = 'inline-flex items-center gap-1.5 rounded-lg font-medium border border-white/[0.06] bg-white/[0.03] text-white/65 hover:text-white/90 hover:bg-white/[0.06] hover:border-white/[0.12] transition-colors';
   const studyActions = (
-    <div className={rail ? 'flex flex-col gap-1.5' : 'flex flex-wrap items-center gap-1.5 mb-4'}>
+    <div className={rail ? 'flex flex-col gap-1.5' : mobile ? 'flex flex-col gap-2 mb-5' : 'flex flex-wrap items-center gap-1.5 mb-4'}>
       <button
         onClick={() => openApp('quizbowl', 'Quiz Bowl', { initialTopic: stripCites(page.title), initialContext: articleFacts(page), autoStart: true })}
-        className={`${studyBtn} ${btnSize} ${rail ? 'w-full' : ''}`}
+        className={`${studyBtn} ${btnSize} ${rail || mobile ? 'w-full' : ''}`}
       >
         <Zap size={12} className="flex-shrink-0 text-amber-300" /> {rail ? 'Start a Quiz Bowl game' : 'Start a Quiz Bowl game on this'}
       </button>
       <button
         onClick={handleTakeNotes}
         disabled={noteBusy}
-        className={`${studyBtn} ${btnSize} disabled:opacity-50 ${rail ? 'w-full' : ''}`}
+        className={`${studyBtn} ${btnSize} disabled:opacity-50 ${rail || mobile ? 'w-full' : ''}`}
       >
         {noteBusy ? <Loader2 size={12} className="animate-spin flex-shrink-0 text-emerald-300" /> : <FileText size={12} className="flex-shrink-0 text-emerald-300" />} Take notes
       </button>
       <button
         onClick={() => openApp('debate', 'Debate', { initialTopic: stripCites(page.title), initialContext: articleFacts(page) })}
-        className={`${studyBtn} ${btnSize} ${rail ? 'w-full' : ''}`}
+        className={`${studyBtn} ${btnSize} ${rail || mobile ? 'w-full' : ''}`}
       >
         <Scale size={12} className="flex-shrink-0 text-rose-300" /> Debate it
       </button>
@@ -818,7 +833,7 @@ function ArticleView({ slug, page, loading, generating, refreshing, error, onBac
     <div className="h-full flex flex-col">
       {/* Header — notes-style inline back button + quiet icon actions */}
       <div className="flex items-center justify-between gap-2 mb-2 flex-shrink-0">
-        <button onClick={onBack} className="flex items-center gap-2 text-sm text-white/35 hover:text-white/60 transition-colors">
+        <button onClick={onBack} className={`flex items-center gap-2 text-sm text-white/35 hover:text-white/60 transition-colors ${mobile ? 'min-h-11 px-2 -ml-2' : ''}`}>
           <ArrowLeft size={16} /> QBpedia
         </button>
         <div className="flex items-center gap-1">
@@ -826,7 +841,8 @@ function ArticleView({ slug, page, loading, generating, refreshing, error, onBac
             <button
               onClick={() => setTocOpen(o => !o)}
               title="Table of contents"
-              className={`p-1.5 rounded-md transition-colors ${tocOpen ? 'bg-white/[0.08] text-white/70' : 'text-white/35 hover:text-white/70 hover:bg-white/[0.05]'}`}
+              aria-label="Table of contents"
+              className={`min-w-11 min-h-11 grid place-items-center rounded-md transition-colors ${tocOpen ? 'bg-white/[0.08] text-white/70' : 'text-white/35 hover:text-white/70 hover:bg-white/[0.05]'}`}
             >
               <List size={14} />
             </button>
@@ -859,9 +875,9 @@ function ArticleView({ slug, page, loading, generating, refreshing, error, onBac
         <div className="mb-3 pb-2.5 border-b border-white/[0.06] flex-shrink-0">
           <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 flex items-center gap-1.5 mb-1.5"><List size={12} /> Contents</h3>
           <div className="flex flex-col gap-0.5">
-            <button onClick={() => { setTocOpen(false); scrollToSection(-1); }} className="text-left text-[11px] text-white/55 hover:text-white/80 py-0.5">Lead</button>
+            <button onClick={() => { setTocOpen(false); scrollToSection(-1); }} className={`text-left text-[11px] text-white/55 hover:text-white/80 ${mobile ? 'min-h-11 py-2' : 'py-0.5'}`}>Lead</button>
             {page.sections.map((s, i) => (
-              <button key={i} onClick={() => { setTocOpen(false); scrollToSection(i); }} className="text-left text-[11px] text-white/55 hover:text-white/80 py-0.5">
+              <button key={i} onClick={() => { setTocOpen(false); scrollToSection(i); }} className={`text-left text-[11px] text-white/55 hover:text-white/80 ${mobile ? 'min-h-11 py-2' : 'py-0.5'}`}>
                 {i + 1}. {stripCites(s.title)}
               </button>
             ))}
@@ -871,11 +887,11 @@ function ArticleView({ slug, page, loading, generating, refreshing, error, onBac
 
       {/* Article body */}
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden" ref={scrollRef} onScroll={updateReadPct}>
-        <div className={rail ? (full ? 'pt-1 pb-12 max-w-5xl mx-auto flex items-start gap-10' : 'pt-1 pb-10 flex items-start gap-6') : 'pt-1 pb-10 max-w-2xl mx-auto'}>
+        <div className={rail ? (full ? 'pt-1 pb-12 max-w-5xl mx-auto flex items-start gap-10' : 'pt-1 pb-10 flex items-start gap-6') : `${mobile ? 'px-1 ' : ''}pt-1 pb-10 max-w-2xl mx-auto`}>
         <div className={rail ? 'flex-1 min-w-0 max-w-[44rem]' : ''}>
           {/* Title */}
-          <h1 className={`${full ? 'text-2xl' : 'text-xl'} font-bold text-white/95 leading-tight mb-1`}>{page.title}</h1>
-          <div className={`flex items-center gap-2 ${rail ? 'pb-3 mb-4 border-b border-white/[0.08]' : 'mb-4'}`}>
+          <h1 className={`${mobile ? 'text-2xl' : full ? 'text-2xl' : 'text-xl'} font-bold text-white/95 leading-tight mb-1`}>{page.title}</h1>
+          <div className={`flex items-center gap-2 ${mobile ? 'flex-wrap' : ''} ${rail ? 'pb-3 mb-4 border-b border-white/[0.08]' : 'mb-4'}`}>
             <span className="text-[10px] text-white/30 uppercase tracking-wider font-semibold">QBpedia</span>
             <span className="w-1 h-1 rounded-full bg-white/20" />
             <span className="text-[10px] text-white/25">{formatRelative(page.generatedAt)}</span>
@@ -919,12 +935,12 @@ function ArticleView({ slug, page, loading, generating, refreshing, error, onBac
           {!rail && page.relatedTopics?.length > 0 && (
             <div className="mt-6 pt-4 border-t border-white/[0.06]">
               <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 mb-2">Related topics</p>
-              <div className="flex flex-wrap gap-1.5">
+              <div className={mobile ? 'scrollbar-hide flex gap-2 overflow-x-auto pb-1 -mx-1 px-1' : 'flex flex-wrap gap-1.5'}>
                 {page.relatedTopics.map(topic => (
                   <button
                     key={topic}
                     onClick={() => onNavigate(slugify(topic))}
-                    className="text-[12px] px-2.5 py-1 rounded-lg border bg-white/[0.03] border-white/[0.06] text-white/55 hover:text-white/80 hover:bg-white/[0.06] transition-colors"
+                    className={`shrink-0 text-[12px] ${mobile ? 'min-h-11 px-3' : 'px-2.5 py-1'} rounded-lg border bg-white/[0.03] border-white/[0.06] text-white/55 hover:text-white/80 hover:bg-white/[0.06] transition-colors`}
                   >
                     {topic}
                   </button>
@@ -945,7 +961,7 @@ function ArticleView({ slug, page, loading, generating, refreshing, error, onBac
                       href={s.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="text-white/55 hover:text-blue-300 underline decoration-white/15 underline-offset-2 truncate transition-colors"
+                      className={`text-white/55 hover:text-blue-300 underline decoration-white/15 underline-offset-2 truncate transition-colors ${mobile ? 'min-h-11 inline-flex items-center' : ''}`}
                     >
                       {s.title || s.url}
                     </a>
@@ -1203,7 +1219,7 @@ function EditView({ page, onBack, onSaved }) {
 }
 
 // ─── Report ────────────────────────────────────────────────────────────────
-function ReportView({ page, onBack }) {
+function ReportView({ page, onBack, mobile = false }) {
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -1237,7 +1253,7 @@ function ReportView({ page, onBack }) {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="pb-10 max-w-lg mx-auto">
+      <div className={`${mobile ? 'px-1 ' : ''}pb-10 max-w-lg mx-auto`}>
         <div className="flex items-center justify-between mb-5 gap-2">
           <button onClick={onBack} className="flex items-center gap-2 text-sm text-white/35 hover:text-white/60 transition-colors">
             <ArrowLeft size={16} /> Article
@@ -1266,8 +1282,8 @@ function ReportView({ page, onBack }) {
           {err && <p className="text-xs text-rose-400">{err}</p>}
 
           <div className="flex justify-end gap-2">
-            <Button size="sm" variant="ghost" onClick={onBack} disabled={submitting}>Cancel</Button>
-            <Button size="sm" onClick={handleSubmit} disabled={!reason.trim() || submitting}>
+            <Button size="sm" variant="ghost" className={mobile ? 'min-h-11' : ''} onClick={onBack} disabled={submitting}>Cancel</Button>
+            <Button size="sm" className={mobile ? 'min-h-11' : ''} onClick={handleSubmit} disabled={!reason.trim() || submitting}>
               {submitting ? <><InlineProgress active /> Submitting…</> : 'Submit report'}
             </Button>
           </div>
@@ -1287,7 +1303,7 @@ function WhySection({ title, children }) {
   );
 }
 
-function WhyView({ onBack, onNavigate }) {
+function WhyView({ onBack, onNavigate, mobile = false }) {
   const TRY_TOPICS = ['Marie Curie', 'Napoleon Bonaparte', 'Treaty of Westphalia'];
 
   return (
@@ -1299,7 +1315,7 @@ function WhyView({ onBack, onNavigate }) {
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto">
-        <div className="pt-1 pb-10 max-w-2xl mx-auto">
+        <div className={`${mobile ? 'px-1 ' : ''}pt-1 pb-10 max-w-2xl mx-auto`}>
           <h1 className="text-xl font-bold text-white/95 leading-tight mb-1">Why not Wikipedia?</h1>
           <div className="flex items-center gap-2 mb-5">
             <span className="text-[10px] text-white/30 uppercase tracking-wider font-semibold">QBpedia</span>

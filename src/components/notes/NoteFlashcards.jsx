@@ -3,6 +3,7 @@ import { ArrowLeft, Layers, Plus, Loader2, X, Trash2, RotateCcw } from 'lucide-r
 import { getNoteFlashcards, generateNoteFlashcards, reviewNoteCard, deleteNoteCard } from '../../api/notes';
 import Button from '../shared/Button';
 import LoadingSpinner from '../shared/LoadingSpinner';
+import { intervalLabel, sm2NextInterval } from '../../utils/sm2';
 
 // Anki-style grading → SM-2 quality (mirrors NoteMapReview): Again resets,
 // Hard/Good/Easy pass with growing intervals.
@@ -153,8 +154,9 @@ export default function NoteFlashcards({ noteId, noteTitle, onBack }) {
             ) : (
               <div className="grid grid-cols-4 gap-2">
                 {GRADES.map(g => (
-                  <button key={g.q} onClick={() => handleGrade(g.q)} disabled={grading} className={`flex items-center justify-center px-2 py-3 rounded-xl border text-[13px] font-semibold disabled:opacity-50 transition-colors ${g.cls}`}>
-                    {g.label}
+                  <button key={g.q} onClick={() => handleGrade(g.q)} disabled={grading} className={`flex flex-col items-center justify-center px-2 py-2.5 rounded-xl border disabled:opacity-50 transition-colors ${g.cls}`}>
+                    <span className="text-[13px] font-semibold">{g.label}</span>
+                    <span className="mt-0.5 font-mono text-[10px] font-normal opacity-65">{intervalLabel(sm2NextInterval(current, g.q))}</span>
                   </button>
                 ))}
               </div>

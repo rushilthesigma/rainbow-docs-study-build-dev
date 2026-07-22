@@ -586,15 +586,26 @@ const ChatInput = forwardRef(function ChatInput({
               type="button"
               onClick={() => setRefineMenuOpen(o => !o)}
               disabled={disabled}
-              title={autoRefine
-                ? 'Auto-refine is on: drafts are rewritten into stronger prompts before sending'
-                : 'Refine prompts with AI: rewrite your draft into a stronger prompt'}
+              aria-busy={refining}
+              title={refining
+                ? 'AI is refining your prompt'
+                : autoRefine
+                  ? 'Auto-refine is on: drafts are rewritten into stronger prompts before sending'
+                  : 'Refine prompts with AI: rewrite your draft into a stronger prompt'}
               style={TOOL_ACCENTS.refine}
-              className={`p-1.5 rounded-lg transition-colors tool-accent-button disabled:opacity-40 ${
+              className={`relative overflow-hidden p-1.5 rounded-lg transition-colors tool-accent-button disabled:opacity-40 ${
                 autoRefine || refining ? 'is-active' : 'text-gray-400 dark:text-blue-200/55'
               }`}
             >
               <Wand2 size={13} />
+              {refining && (
+                <span
+                  className="absolute inset-x-1 bottom-0.5 h-0.5 overflow-hidden rounded-full bg-emerald-500/20"
+                  aria-hidden="true"
+                >
+                  <span className="block h-full w-1/2 rounded-full bg-emerald-400 animate-indeterminate-progress" />
+                </span>
+              )}
             </button>
           )}
           {composerPrefix}
@@ -627,44 +638,6 @@ const ChatInput = forwardRef(function ChatInput({
             </span>
           )}
         </div>
-
-        {/* REFINE STRIP - in-flight indicator, undo chip, or error. */}
-        {(refining || refineUndo || refineError) && (
-          <div className="flex items-center gap-2 px-3 pt-2" style={TOOL_ACCENTS.refine}>
-            {refining ? (
-              <>
-                <InlineProgress active />
-                <span className="text-[11px] text-gray-500 dark:text-gray-400">Refining your prompt…</span>
-              </>
-            ) : refineError ? (
-              <>
-                <span className="text-[11px] text-rose-500 dark:text-rose-400 truncate">{refineError}</span>
-                <button type="button" onClick={() => setRefineError('')} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 flex-shrink-0" aria-label="Dismiss">
-                  <X size={11} />
-                </button>
-              </>
-            ) : (
-              <>
-                <Wand2 size={11} className="flex-shrink-0" style={{ color: 'var(--refine-accent-text)' }} />
-                <span className="text-[11px] text-gray-500 dark:text-gray-400 truncate">{refineUndo.note || 'Prompt refined'}</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setText(refineUndo.original);
-                    setRefineUndo(null);
-                    requestAnimationFrame(() => { inputRef.current?.focus(); growTextarea(); });
-                  }}
-                  className="text-[11px] font-semibold text-gray-600 dark:text-gray-300 hover:underline flex-shrink-0"
-                >
-                  Undo
-                </button>
-                <button type="button" onClick={() => setRefineUndo(null)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 flex-shrink-0" aria-label="Dismiss">
-                  <X size={11} />
-                </button>
-              </>
-            )}
-          </div>
-        )}
 
         {/* IMAGE STRIP */}
         {images.length > 0 && (
@@ -739,6 +712,44 @@ const ChatInput = forwardRef(function ChatInput({
             style={{ minHeight: '44px', border: 'none', boxShadow: 'none' }}
             onInput={e => { e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 160) + 'px'; }}
           />
+          {/* Refine status stays with the actions instead of interrupting the
+              tool rail -> textarea flow. */}
+          {(refining || refineUndo || refineError) && (
+            <div className="mb-4 flex max-w-[48%] min-w-0 items-center gap-1.5 pl-1" style={TOOL_ACCENTS.refine}>
+              {refining ? (
+                <>
+                  <InlineProgress active />
+                  <span className="truncate text-[11px] text-gray-500 dark:text-gray-400">Refining your prompt…</span>
+                </>
+              ) : refineError ? (
+                <>
+                  <span className="truncate text-[11px] text-rose-500 dark:text-rose-400">{refineError}</span>
+                  <button type="button" onClick={() => setRefineError('')} className="flex-shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" aria-label="Dismiss">
+                    <X size={11} />
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Wand2 size={11} className="flex-shrink-0" style={{ color: 'var(--refine-accent-text)' }} />
+                  <span className="truncate text-[11px] text-gray-500 dark:text-gray-400">{refineUndo.note || 'Prompt refined'}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setText(refineUndo.original);
+                      setRefineUndo(null);
+                      requestAnimationFrame(() => { inputRef.current?.focus(); growTextarea(); });
+                    }}
+                    className="flex-shrink-0 text-[11px] font-semibold text-gray-600 hover:underline dark:text-gray-300"
+                  >
+                    Undo
+                  </button>
+                  <button type="button" onClick={() => setRefineUndo(null)} className="flex-shrink-0 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" aria-label="Dismiss">
+                    <X size={11} />
+                  </button>
+                </>
+              )}
+            </div>
+          )}
           {/* Flat, modern send button */}
           <button
             type="submit"

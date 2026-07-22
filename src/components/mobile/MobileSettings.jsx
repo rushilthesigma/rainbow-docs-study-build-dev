@@ -1,21 +1,11 @@
-import { useState } from 'react';
-import { LogOut, ChevronRight, Shield, Sparkles, X, Check, Lock, User as UserIcon, PanelBottom, Users } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { LogOut, ChevronRight, Shield, GraduationCap, PanelBottom, Users, Coins, Gift, RotateCcw, TicketCheck } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useUIPreference } from '../../context/UIPreferenceContext';
 import { syncData } from '../../api/auth';
-import { planFromUser, canUseModel, requiredPlanFor, resolveModelTier } from '../billing/modelAccess';
+import { getMyUsage, resetWeeklyCredits } from '../../api/billing';
+import { getMyReferralCode, redeemReferralCode } from '../../api/referral';
 import MobilePage from './MobilePage';
-import { Z } from '../../styles/tokens';
-
-// Mobile-native settings - plan banner removed (it's not actionable
-// from this screen anyway). Model preference is now a real picker
-// sheet. Theme toggle stays inline.
-// Each tier spans a Gemini + Claude model; the server auto-picks per request.
-const MODEL_OPTIONS = [
-  { value: 'pro',      label: 'Pro',      description: 'Advanced math & code · deepest reasoning' },
-  { value: 'balanced', label: 'Balanced', description: 'All-around help · solid for most lessons' },
-  { value: 'speed',    label: 'Speed',    description: 'Fastest answers · light tasks' },
-];
 
 export default function MobileSettings() {
   const { user, fetchUser, logout } = useAuth();
@@ -30,30 +20,88 @@ export default function MobileSettings() {
     window.location.reload();
   }
   const { bottomBarTransparent, setBottomBarTransparent } = useUIPreference();
-  const plan = planFromUser(user);
-  const [modelTier, setModelTier] = useState(() => user?.data?.preferences?.modelTier || 'pro');
-  const [pickerOpen, setPickerOpen] = useState(null); // null | 'model'
+  const [restartingOnboarding, setRestartingOnboarding] = useState(false);
+  const [restartError, setRestartError] = useState('');
+  const [usage, setUsage] = useState(null);
+  const [referral, setReferral] = useState(null);
+  const [creditBusy, setCreditBusy] = useState(false);
+  const [creditMessage, setCreditMessage] = useState('');
+  const [creditError, setCreditError] = useState('');
 
-  async function handlePickModel(v) {
-    if (!canUseModel(v, plan)) return; // locked tiers aren't selectable
-    setModelTier(v);
-    setPickerOpen(null);
+  useEffect(() => {
+    getMyUsage().then(setUsage).catch(() => setCreditError('Could not load credit usage.'));
+    getMyReferralCode().then(setReferral).catch(() => {});
+  }, []);
+
+  async function handleCreditReset() {
+    if (creditBusy || !window.confirm('Use one banked reset to refill this week’s credits?')) return;
+    setCreditBusy(true);
+    setCreditMessage('');
+    setCreditError('');
     try {
-      const merged = { ...(user?.data?.preferences || {}), modelTier: v };
-      await syncData({ preferences: merged });
-      await fetchUser();
-    } catch (err) { console.error('save modelTier failed:', err); }
+      const next = await resetWeeklyCredits();
+      setUsage(current => ({ ...current, ...next }));
+      setReferral(current => current ? ({ ...current, creditResets: next.creditResets }) : current);
+      setCreditMessage(`Credits refilled. ${next.creditResets?.available ?? 0} resets remain.`);
+    } catch (err) {
+      setCreditError(err?.data?.message || err?.message || 'Could not reset credits.');
+    } finally {
+      setCreditBusy(false);
+    }
   }
 
-  // Reflect the tier the user will actually be served, not an unusable pick.
-  const effectiveTier = resolveModelTier(modelTier, plan);
-  const modelLabel = MODEL_OPTIONS.find((m) => m.value === effectiveTier)?.label || 'Auto';
+  async function handleCopyReferral() {
+    if (!referral?.code) return;
+    try {
+      await navigator.clipboard.writeText(referral.code);
+      setCreditError('');
+      setCreditMessage('Referral code copied.');
+    } catch {
+      setCreditError('Could not copy the referral code.');
+    }
+  }
+
+  async function handleRedeemReferral() {
+    const code = window.prompt('Enter an 8-character referral code:')?.toUpperCase().trim();
+    if (!code) return;
+    setCreditMessage('');
+    setCreditError('');
+    try {
+      await redeemReferralCode(code);
+      setReferral(await getMyReferralCode());
+      setCreditMessage('Code redeemed. Your friend banked one credit reset.');
+    } catch (err) {
+      setCreditError(err?.data?.message || err?.message || 'Could not redeem that code.');
+    }
+  }
+
+  async function handleRestartOnboarding() {
+    if (!window.confirm('Replay the welcome flow from the beginning?')) return;
+    setRestartingOnboarding(true);
+    setRestartError('');
+    try {
+      await syncData({
+        preferences: {
+          ...(user?.data?.preferences || {}),
+          onboarded: false,
+          tourStep: null,
+        },
+      });
+      try {
+        localStorage.removeItem('covalent-onboarded');
+        localStorage.removeItem('cov-launch-app');
+      } catch {}
+      await fetchUser();
+    } catch (err) {
+      console.error('restart mobile onboarding failed:', err);
+      setRestartError('Could not restart onboarding right now. Please try again.');
+      setRestartingOnboarding(false);
+    }
+  }
 
   return (
     <MobilePage
-      eyebrow="Settings"
       title={user?.name || 'Settings'}
-      subtitle={user?.email}
     >
       {/* Profile card */}
       <div className="rounded-2xl border border-gray-200 dark:border-white/[0.06] bg-white dark:bg-[#13131f] p-4 mb-4 flex items-center gap-3">
@@ -92,15 +140,71 @@ export default function MobileSettings() {
 
       <SectionLabel>Account</SectionLabel>
       <Group>
-        <Row
-          icon={<Sparkles size={17} />}
-          tone="violet"
-          title="Model preference"
-          value={modelLabel}
-          onClick={() => setPickerOpen('model')}
-        />
         <Row icon={<Shield size={17} />} tone="blue" title="Privacy" />
       </Group>
+
+      <SectionLabel>Credits &amp; referrals</SectionLabel>
+      <Group>
+        <Row
+          icon={<Coins size={17} />}
+          tone="blue"
+          title="Weekly credits"
+          value={usage?.credits ? `${usage.credits.remaining} / ${usage.credits.allowance}` : 'Loading…'}
+        />
+        <Row
+          icon={<RotateCcw size={17} />}
+          tone="violet"
+          title="Banked resets"
+          value={creditBusy ? 'Resetting…' : `${usage?.creditResets?.available ?? referral?.creditResets?.available ?? 0} available`}
+          onClick={(usage?.creditResets?.available ?? referral?.creditResets?.available ?? 0) > 0 && (usage?.credits?.used ?? 0) > 0 ? handleCreditReset : undefined}
+          disabled={creditBusy}
+        />
+        <Row
+          icon={<Gift size={17} />}
+          tone="indigo"
+          title="Referral code"
+          value={referral?.code || 'Loading…'}
+          onClick={referral?.code ? handleCopyReferral : undefined}
+        />
+        {!referral?.redeemedCode && (
+          <Row
+            icon={<TicketCheck size={17} />}
+            tone="blue"
+            title="Redeem a code"
+            onClick={handleRedeemReferral}
+          />
+        )}
+      </Group>
+      <p className="mt-2 px-1 text-[10.5px] leading-relaxed text-gray-500 dark:text-gray-400">
+        Each friend who joins with your code banks one reset. Banked resets do not expire.
+      </p>
+      {creditMessage && (
+        <p role="status" className="mt-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11.5px] text-emerald-700 dark:border-emerald-400/20 dark:bg-emerald-500/10 dark:text-emerald-300">
+          {creditMessage}
+        </p>
+      )}
+      {creditError && (
+        <p role="alert" className="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11.5px] text-rose-700 dark:border-rose-400/20 dark:bg-rose-500/10 dark:text-rose-300">
+          {creditError}
+        </p>
+      )}
+
+      <SectionLabel>Tutorial</SectionLabel>
+      <Group>
+        <Row
+          icon={<GraduationCap size={17} />}
+          tone="violet"
+          title="Restart onboarding"
+          value={restartingOnboarding ? 'Starting…' : undefined}
+          onClick={handleRestartOnboarding}
+          disabled={restartingOnboarding}
+        />
+      </Group>
+      {restartError && (
+        <p role="alert" className="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11.5px] text-rose-700 dark:border-rose-400/20 dark:bg-rose-500/10 dark:text-rose-300">
+          {restartError}
+        </p>
+      )}
 
       <SectionLabel>Session</SectionLabel>
       <Group>
@@ -123,26 +227,6 @@ export default function MobileSettings() {
       </Group>
 
       <p className="text-center text-[10px] text-gray-400 dark:text-gray-500 mt-6">RushilAI · v0.1</p>
-
-      {/* Model preference picker */}
-      {pickerOpen === 'model' && (
-        <PickerSheet title="Model preference" onClose={() => setPickerOpen(null)}>
-          {MODEL_OPTIONS.map((m) => {
-            const locked = !canUseModel(m.value, plan);
-            return (
-              <PickerRow
-                key={m.value}
-                active={!locked && effectiveTier === m.value}
-                title={m.label}
-                sub={m.description}
-                locked={locked}
-                lockLabel={locked ? requiredPlanFor(m.value)?.label : undefined}
-                onClick={() => handlePickModel(m.value)}
-              />
-            );
-          })}
-        </PickerSheet>
-      )}
     </MobilePage>
   );
 }
@@ -164,74 +248,26 @@ function Group({ children }) {
 }
 
 const TONE = {
-  indigo: 'text-indigo-500 bg-indigo-100/70 dark:bg-indigo-500/15',
-  rose:   'text-rose-500   bg-rose-100/70   dark:bg-rose-500/15',
-  violet: 'text-violet-500 bg-violet-100/70 dark:bg-violet-500/15',
-  blue:   'text-blue-500   bg-blue-100/70   dark:bg-blue-500/15',
+  indigo: 'bg-indigo-500 dark:bg-indigo-500/30',
+  rose:   'bg-rose-500 dark:bg-rose-500/30',
+  violet: 'bg-violet-500 dark:bg-violet-500/30',
+  blue:   'bg-blue-500 dark:bg-blue-500/30',
 };
 
-function Row({ icon, tone, title, value, onClick, destructive }) {
+function Row({ icon, tone, title, value, onClick, destructive, disabled = false }) {
   return (
     <button
+      type="button"
       onClick={onClick}
-      className={`w-full flex items-center gap-3 px-4 py-3 active:bg-gray-50 dark:active:bg-white/[0.04] text-left ${destructive ? 'text-rose-600 dark:text-rose-400' : 'text-gray-900 dark:text-white'}`}
+      disabled={disabled}
+      className={`w-full flex items-center gap-3 px-4 py-3 active:bg-gray-50 dark:active:bg-white/[0.04] text-left disabled:cursor-wait disabled:opacity-55 ${destructive ? 'text-rose-600 dark:text-rose-400' : 'text-gray-900 dark:text-white'}`}
     >
-      <div className={`w-9 h-9 rounded-xl grid place-items-center shrink-0 ${TONE[tone]}`}>
+      <div className={`w-9 h-9 rounded-xl grid place-items-center shrink-0 text-white ${TONE[tone]}`}>
         {icon}
       </div>
       <p className="flex-1 text-[14px] font-medium tracking-tight">{title}</p>
       {value && <span className="text-[12.5px] text-gray-500 dark:text-gray-400">{value}</span>}
-      {onClick && !destructive && <ChevronRight size={14} className="text-gray-300 dark:text-white/30 shrink-0" />}
-    </button>
-  );
-}
-
-function PickerSheet({ title, onClose, children }) {
-  return (
-    <div className="fixed inset-0" style={{ zIndex: Z.sheet }}>
-      <button onClick={onClose} aria-label="Close" className="absolute inset-0 bg-black/50 backdrop-blur-[2px] animate-fade-in" />
-      <div className="absolute bottom-0 left-0 right-0 rounded-t-3xl bg-white dark:bg-[#13131f] border-t border-gray-200 dark:border-white/[0.06] shadow-2xl pb-2 animate-slide-up"
-           style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)' }}>
-        <div className="flex justify-center pt-2.5 pb-1">
-          <div className="w-9 h-1 rounded-full bg-gray-300 dark:bg-white/15" />
-        </div>
-        <div className="flex items-center justify-between px-5 pt-1 pb-3">
-          <h3 className="text-[15px] font-bold text-gray-900 dark:text-white tracking-tight">{title}</h3>
-          <button onClick={onClose} className="w-8 h-8 rounded-full grid place-items-center text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
-            <X size={16} />
-          </button>
-        </div>
-        <div className="px-3 pb-3 space-y-1.5">
-          {children}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PickerRow({ active, title, sub, onClick, locked, lockLabel }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={locked}
-      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left ${
-        active ? 'bg-blue-500/10 border border-blue-500'
-        : locked ? 'bg-gray-50 dark:bg-white/[0.02] border border-transparent opacity-60 cursor-not-allowed'
-        : 'bg-gray-50 dark:bg-white/[0.03] border border-transparent'
-      }`}
-    >
-      <div className="flex-1 min-w-0">
-        <p className="text-[13.5px] font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
-          {title}
-          {locked && lockLabel && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-300/80">
-              <Lock size={10} /> {lockLabel}
-            </span>
-          )}
-        </p>
-        <p className="text-[11.5px] text-gray-500 dark:text-gray-400 mt-0.5">{sub}</p>
-      </div>
-      {active && <Check size={15} className="text-blue-500 shrink-0" />}
+      {onClick && !destructive && !disabled && <ChevronRight size={14} className="text-gray-300 dark:text-white/30 shrink-0" />}
     </button>
   );
 }

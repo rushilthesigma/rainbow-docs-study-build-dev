@@ -1,10 +1,10 @@
 // Fallback tier catalog. Server's /api/billing/tiers is authoritative;
 // this renders when that endpoint is missing (old server build).
 // NOTE: `dailyCredits` is a legacy field name — the credit pool is now WEEKLY
-// (free 995/week, paid 9,500/week). Mirrors LIMITS in server.js.
+// (free 500/week, paid 9,500/week). Mirrors LIMITS in server.js.
 const FALLBACK_TIERS = {
   free: { id: 'free', label: 'Free', amountUsd: 0, interval: 'month', mode: null, buyable: false,
-          dailyCredits: 995,  limits: { dailyCredits: 995,  noteMaps: 3 } },
+          dailyCredits: 500,  limits: { dailyCredits: 500,  noteMaps: 3 } },
   paid: { id: 'paid', label: 'Paid', amountUsd: 4, interval: 'month', mode: 'subscription', buyable: true,
           dailyCredits: 9500, limits: { dailyCredits: 9500, noteMaps: Infinity } },
 };

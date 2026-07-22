@@ -8,7 +8,6 @@
 @source not "../presetBlocks.json";
 @source not "../data";
 @source not "../scripts";
-@source not "../electron";
 @source not "../build";
 
 @custom-variant dark (&:where(.dark, .dark *));
@@ -54,6 +53,20 @@ html {
   scroll-behavior: smooth;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+html.native-app,
+html.native-app body,
+html.native-app #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: #0a0a14;
+}
+
+html.native-app body {
+  -webkit-touch-callout: none;
 }
 
 body {
@@ -435,6 +448,20 @@ body {
 }
 .animate-typing-bounce { animation: typing-bounce 1.1s ease-in-out infinite; }
 
+/* Compact indeterminate activity bar for controls backed by a single async
+   request. The moving segment communicates activity without a fake percent. */
+@keyframes indeterminate-progress {
+  0%   { transform: translateX(-110%); }
+  55%  { transform: translateX(70%); }
+  100% { transform: translateX(210%); }
+}
+.animate-indeterminate-progress {
+  animation: indeterminate-progress 1.05s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-indeterminate-progress { animation: none; width: 100%; }
+}
+
 /* Twinkling stars in the macOS-style login wallpaper sky. */
 @keyframes star-twinkle {
   0%, 100% { opacity: 0.35; transform: scale(1); }
@@ -448,6 +475,31 @@ body {
   to   { opacity: 1; transform: translateY(0); }
 }
 .animate-fade-up { animation: fade-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards; opacity: 0; }
+
+/* Sign-in mark: one quick launch-and-settle, followed by a small book-open
+   motion. It plays once so the authentication screen stays calm. */
+@keyframes signin-book-intro {
+  0% { opacity: 0; transform: scale(0.58) rotate(-7deg); }
+  68% { opacity: 1; transform: scale(1.08) rotate(2deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0); }
+}
+@keyframes signin-book-open {
+  0%, 45% { transform: scaleX(0.72); }
+  72% { transform: scaleX(1.12); }
+  100% { transform: scaleX(1); }
+}
+.signin-book-intro {
+  transform-origin: center;
+  animation: signin-book-intro 0.58s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.signin-book-glyph {
+  transform-origin: center;
+  animation: signin-book-open 0.58s cubic-bezier(0.22, 1, 0.36, 1) 0.08s both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .signin-book-intro,
+  .signin-book-glyph { animation: none; }
+}
 
 /* View-switch fade - applied via the <ViewFade> wrapper whenever an
    app changes which sub-view it renders. The wrapper's `key` prop is

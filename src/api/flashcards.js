@@ -48,6 +48,10 @@ export async function deleteCard(deckId, cardId) {
 export async function submitReview(deckId, cardId, quality) {
   return apiFetch(`/api/flashcards/${deckId}/review`, {
     method: 'POST',
-    body: JSON.stringify({ cardId, quality }),
+    // Older surfaces still pass a right/wrong boolean. Preserve that contract
+    // while dedicated review surfaces send the full SM-2 quality (0-5).
+    body: JSON.stringify(typeof quality === 'boolean'
+      ? { cardId, correct: quality }
+      : { cardId, quality }),
   });
 }

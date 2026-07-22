@@ -441,7 +441,7 @@ export default function MobileStudy() {
             type="button"
             onClick={() => setModelSheetOpen(true)}
             disabled={streaming}
-            className="flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-full border border-gray-200 dark:border-white/[0.08] bg-gray-50 dark:bg-[#13131f] text-gray-700 dark:text-gray-200 active:bg-gray-100 dark:active:bg-white/[0.06] disabled:opacity-50"
+            className="flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-full border border-blue-200 dark:border-blue-400/30 bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-100 active:bg-blue-100 dark:active:bg-blue-500/20 disabled:opacity-50"
           >
             {multiActive ? <Layers size={13} className="text-blue-500" /> : <Cpu size={13} className="text-blue-500" />}
             <span className="text-[12px] font-semibold max-w-[120px] truncate">
@@ -586,7 +586,7 @@ function ModelSheet({ active, mode, bestOfModels, bestOfJudge, plan, email, onCl
                 disabled={m !== 'single' && !canUseBestOf}
                 className={`px-1 py-1.5 rounded-lg text-[11.5px] font-semibold transition-colors disabled:opacity-40 ${
                   mode === m
-                    ? 'bg-white dark:bg-white/[0.11] text-gray-900 dark:text-white shadow-sm'
+                    ? 'bg-blue-500 text-white shadow-sm'
                     : 'text-gray-500 dark:text-white/45'
                 }`}
               >

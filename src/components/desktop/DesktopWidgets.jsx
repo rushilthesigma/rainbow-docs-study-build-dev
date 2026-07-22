@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback, memo } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Flame, Play, Pause, RotateCcw, StickyNote, Calendar as CalendarIcon, Quote, Layers } from 'lucide-react';
+import { X, Flame, Play, Pause, RotateCcw, StickyNote, Calendar as CalendarIcon, Quote, Layers, BookOpen, ArrowRight } from 'lucide-react';
 import { useWidgets } from '../../context/WidgetContext';
 import { useWindowManager } from '../../context/WindowManagerContext';
 import { useAuth } from '../../context/AuthContext';
 import { useUIPreference } from '../../context/UIPreferenceContext';
 import { createNote, updateNote, getNote, getRecommendedReview } from '../../api/notes';
+import { listCurricula } from '../../api/curriculum';
 
 /* ── desktop grid ── */
 // Each cell is exactly one widget-column wide so the size picker maps 1:1 to grid cols.
@@ -1343,8 +1344,90 @@ function ReviewWidget({ id, position, cols, rows, accent, opacity, radius }) {
   );
 }
 
+// The curriculum widget uses the newest course
+// with unfinished work wins, falling back to the newest completed course.
+// Refresh on focus and curriculum progress so the desktop stays useful after
+// a lesson or Quiz Bowl round is completed.
+function useFeaturedCurriculum() {
+  const [curriculum, setCurriculum] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    try {
+      const { curricula = [] } = await listCurricula();
+      const featured = curricula.find(course => course.completedLessons < course.totalLessons) || curricula[0] || null;
+      if (!featured) {
+        setCurriculum(null);
+      } else {
+        setCurriculum(featured);
+      }
+    } catch {
+      setCurriculum(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+    const refresh = () => load();
+    window.addEventListener('focus', refresh);
+    window.addEventListener('covalent:curriculum-progress', refresh);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('covalent:curriculum-progress', refresh);
+    };
+  }, [load]);
+
+  return { curriculum, loading };
+}
+
+function CourseProgressWidget({ id, position, cols, rows, accent, opacity, radius }) {
+  const { openApp } = useWindowManager();
+  const { curriculum, loading } = useFeaturedCurriculum();
+  const total = curriculum?.totalLessons || 0;
+  const completed = curriculum?.completedLessons || 0;
+  const progress = total ? Math.round((completed / total) * 100) : 0;
+  const titleSize = scale(13, cols, rows, 0.06, 0.10);
+  const numberSize = scale(30, cols, rows, 0.08, 0.12);
+  const metaSize = scale(10, cols, rows, 0.06, 0.10);
+  const openCourse = () => openApp('curricula', 'Curricula', curriculum ? { seedCurriculumId: curriculum.id } : { focusIfOpen: true });
+
+  return (
+    <Shell id={id} position={position} label="Course Progress" cols={cols} rows={rows} accent={accent} opacity={opacity} radius={radius}>
+      <div className="px-3.5 pb-3.5">
+        {loading ? (
+          <p className="text-white/30" style={{ fontSize: metaSize }}>Loading course progress…</p>
+        ) : curriculum ? (
+          <>
+            <div className="flex items-start gap-2">
+              <BookOpen size={14} className="mt-0.5 shrink-0 text-blue-300/80" />
+              <p className="min-w-0 flex-1 truncate font-semibold text-white/85" style={{ fontSize: titleSize }}>{curriculum.title}</p>
+            </div>
+            <div className="mt-2 flex items-end justify-between">
+              <span className="font-black leading-none text-white/90 tabular-nums" style={{ fontSize: numberSize }}>{progress}%</span>
+              <span className="pb-0.5 text-white/35 tabular-nums" style={{ fontSize: metaSize }}>{completed} of {total} tasks</span>
+            </div>
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/[0.08]">
+              <div className="h-full rounded-full bg-blue-400/80" style={{ width: `${progress}%` }} />
+            </div>
+            <button data-nodrag onClick={openCourse} onMouseDown={e => e.stopPropagation()} className="mt-2.5 inline-flex items-center gap-1 text-blue-300/80 hover:text-blue-200" style={{ fontSize: metaSize }}>
+              Continue course <ArrowRight size={10} />
+            </button>
+          </>
+        ) : (
+          <button data-nodrag onClick={openCourse} onMouseDown={e => e.stopPropagation()} className="inline-flex items-center gap-1 text-white/45 hover:text-white/70" style={{ fontSize: titleSize }}>
+            Create your first course <ArrowRight size={11} />
+          </button>
+        )}
+      </div>
+    </Shell>
+  );
+}
+
 const WIDGET_MAP = {
   clock:      ClockWidget,
+  course_progress: CourseProgressWidget,
   streak:     StudyStreakWidget,
   pomodoro:   PomodoroWidget,
   calendar:   CalendarWidget,

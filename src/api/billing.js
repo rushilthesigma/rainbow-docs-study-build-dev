@@ -13,6 +13,7 @@ export const createCheckoutSession = (_tier) =>
 export const getTiers = () => apiFetch('/api/billing/tiers');
 // Caller's plan + per-resource usage vs limits, for the upgrade popover.
 export const getMyUsage = () => apiFetch('/api/billing/usage');
+export const resetWeeklyCredits = () => apiFetch('/api/billing/reset-credits', { method: 'POST' });
 export const openBillingPortal = () => apiFetch('/api/billing/portal', { method: 'POST' });
 // Pull latest subscription state from Stripe and mirror to user.data -
 // use after redirecting back from Checkout so the upgrade activates

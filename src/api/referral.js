@@ -1,7 +1,7 @@
 import { apiFetch } from './client';
 
-// Fetch the caller's own referral code + redemption progress.
-// Shape: { code, referralsUsed, referralsRequired, unlocked, redeemedCode }
+// Fetch the caller's own referral code + banked credit reset balance.
+// Shape: { code, referralsUsed, creditResets: { earned, used, available }, redeemedCode }
 export const getMyReferralCode = () => apiFetch('/api/referral/my-code');
 
 // Redeem someone else's code. Server enforces: format (8 alphanumeric),

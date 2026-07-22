@@ -56,6 +56,28 @@ export async function listCurricula() {
   return apiFetch('/api/curriculum');
 }
 
+export async function listCurriculumMarketplace() {
+  return apiFetch('/api/curriculum/marketplace');
+}
+
+export async function enrollMarketplaceCurriculum(listingId) {
+  return apiFetch('/api/curriculum/marketplace/enroll', {
+    method: 'POST',
+    body: JSON.stringify({ listingId }),
+  });
+}
+
+export async function publishCurriculum(id, anonymous = false) {
+  return apiFetch(`/api/curriculum/${id}/publish`, {
+    method: 'POST',
+    body: JSON.stringify({ anonymous }),
+  });
+}
+
+export async function unpublishCurriculum(id) {
+  return apiFetch(`/api/curriculum/${id}/publish`, { method: 'DELETE' });
+}
+
 export async function getCurriculum(id) {
   return apiFetch(`/api/curriculum/${id}`);
 }
@@ -108,7 +130,7 @@ export async function getStreak() {
   return apiFetch('/api/study/streak');
 }
 
-// ===== STRUCTURED LESSON BLOCKS (varied block types + final quiz) =====
+// ===== STRUCTURED LESSON BLOCKS (curricula: MCQ, matching, fill-blank + final MCQ) =====
 // Every block call takes an optional trailing `shareId`. When set, the
 // server resolves the lesson on the curriculum OWNER's record (shared
 // curricula are one live object, not copies), so a recipient doing the

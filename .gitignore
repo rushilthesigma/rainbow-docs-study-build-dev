@@ -1,6 +1,10 @@
 node_modules/
 dist/
 .env
+.env.mobile.local
+android/key.properties
+android/app/*.jks
+android/app/*.keystore
 .claude/
 uploads/
 users.json
@@ -16,13 +20,7 @@ parties.json
 # Stashed Figma-style workspace revamp (restorable if we ever want it back)
 .figma-revamp/
 
-# JimmyQRG games mirror, pulled by scripts/fetch-jimmyqrg.sh, ~450MB.
-# Do NOT commit; rerun the script to restore locally.
-games/
 .write-test
-MacIsland/.build/
-MacIsland/build/
 
-# Electron build output and backup files - not source, never commit.
-release/
+# Backup files are not source.
 *.bak

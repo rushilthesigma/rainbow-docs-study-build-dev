@@ -414,6 +414,62 @@ Yamaguchi|Yamaguchi|Prefecture
 Yamanashi|Kofu|Prefecture
 `),
   },
+  {
+    country: 'Canada',
+    region: 'Americas',
+    rows: rows(`
+Alberta|Edmonton|Province
+British Columbia|Victoria|Province
+Manitoba|Winnipeg|Province
+New Brunswick|Fredericton|Province
+Newfoundland and Labrador|St. John's|Province
+Nova Scotia|Halifax|Province
+Ontario|Toronto|Province
+Prince Edward Island|Charlottetown|Province
+Quebec|Quebec City|Province
+Saskatchewan|Regina|Province
+Northwest Territories|Yellowknife|Territory
+Nunavut|Iqaluit|Territory
+Yukon|Whitehorse|Territory
+`),
+  },
+  {
+    country: 'Germany',
+    region: 'Europe',
+    rows: rows(`
+Baden-Württemberg|Stuttgart|State
+Bavaria|Munich|State
+Berlin|Berlin|State
+Brandenburg|Potsdam|State
+Bremen|Bremen|State
+Hamburg|Hamburg|State
+Hesse|Wiesbaden|State
+Lower Saxony|Hanover|State
+Mecklenburg-Western Pomerania|Schwerin|State
+North Rhine-Westphalia|Düsseldorf|State
+Rhineland-Palatinate|Mainz|State
+Saarland|Saarbrücken|State
+Saxony|Dresden|State
+Saxony-Anhalt|Magdeburg|State
+Schleswig-Holstein|Kiel|State
+Thuringia|Erfurt|State
+`),
+  },
+  {
+    country: 'South Africa',
+    region: 'Africa',
+    rows: rows(`
+Eastern Cape|Bhisho|Province
+Free State|Bloemfontein|Province
+Gauteng|Johannesburg|Province
+KwaZulu-Natal|Pietermaritzburg|Province
+Limpopo|Polokwane|Province
+Mpumalanga|Mbombela|Province
+Northern Cape|Kimberley|Province
+North West|Mahikeng|Province
+Western Cape|Cape Town|Province
+`),
+  },
 ];
 
 const scopeNote = {
@@ -483,4 +539,3 @@ export const SUBDIVISION_GEO_NOTES = subdivisionGroups.flatMap(group => (
     type,
   }))
 ));
-

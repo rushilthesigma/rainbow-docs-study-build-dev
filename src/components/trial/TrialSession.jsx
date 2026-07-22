@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { useWindowManager } from '../../context/WindowManagerContext';
-import { isQuizBowlAnswerAccepted } from '../../lib/qbAnswerChecker';
+import { useWindowManagerOptional } from '../../context/WindowManagerContext';
+import { judgeQuizBowlQuestion } from '../../lib/qbAnswerChecker';
 import { Zap, Trophy, X, Check, AlertCircle, ChevronRight, Users, Swords, ArrowRight, Mic } from 'lucide-react';
 import Button from '../shared/Button';
 import { buzzToQuality } from '../../utils/sm2';
@@ -78,14 +78,14 @@ function MatchHeader({ userScore, botScore, botName, target = 10 }) {
 }
 
 // ── Scoring ───────────────────────────────────────────────────────────────
-// Default = legacy "Standard" continuous-curve scoring. Custom formats
-// (IAC Prelim, IAC Playoff, JV) come in from TrialPage / QuizBowlApp.
+// Default = IAC preliminary scoring: one point per correct answer, no negs,
+// race to eight in 1v1. Other formats come from TrialPage / QuizBowlApp.
 // Tier-aware: if the format defines `tiers: [{ upTo, pts }]`, buzz
 // position picks the matching tier. `ratio >= 1` uses `afterEndPts` /
 // `negAfter` to model the IAC "after question was read" rules.
 const DEFAULT_FORMAT = {
-  id: 'standard', label: 'Standard',
-  powerThreshold: null, powerPts: null, getPts: 10, negPts: -5, target: null,
+  id: 'iac-prelim', label: 'IAC Prelim',
+  powerThreshold: null, powerPts: null, getPts: 1, negPts: 0, target: 8,
 };
 function scoreForBuzz({ correct, ratio, format }) {
   const f = format || DEFAULT_FORMAT;
@@ -106,10 +106,6 @@ function scoreForBuzz({ correct, ratio, format }) {
 }
 
 // ── Answer checker ────────────────────────────────────────────────────────
-function checkAnswer(userAns, answerline) {
-  return isQuizBowlAnswerAccepted(answerline, userAns);
-}
-
 // ── Main ──────────────────────────────────────────────────────────────────
 // Props:
 //   questions  - QB question objects
@@ -125,7 +121,11 @@ export default function TrialSession({
   questions, difficulty, bots: botsProp, matchMode = false,
   lobbyMode = false, botNames, scoringFormat, onComplete, onMatchFinished,
 }) {
-  const { state } = useWindowManager();
+  // TrialSession is shared by desktop windows and standalone/mobile trial
+  // surfaces. Only the desktop shell has window state; elsewhere the trial
+  // itself is the active surface.
+  const windowManager = useWindowManagerOptional();
+  const windowState = windowManager?.state;
   const ACTIVE_BOTS = botsProp ?? ALL_BOTS.slice(0, 3);
   const FORMAT = scoringFormat || DEFAULT_FORMAT;
   const MATCH_TARGET = FORMAT.target || 10;
@@ -140,6 +140,7 @@ export default function TrialSession({
   const [phase,        setPhase]        = useState('reading'); // reading|buzzed|result|done
   const [buzzRatio,    setBuzzRatio]    = useState(0);
   const [answer,       setAnswer]       = useState('');
+  const [answerPrompt, setAnswerPrompt] = useState('');
   const [answerResult, setAnswerResult] = useState(null);
   const [xp,           setXp]           = useState(0);
   const [combo,        setCombo]        = useState(0);
@@ -151,6 +152,7 @@ export default function TrialSession({
   const [sessionResults, setSessionResults]= useState([]);
   const [matchWinner,    setMatchWinner]   = useState(null);
   const [userNegged,     setUserNegged]    = useState(false);
+  const [wrongAnswer,    setWrongAnswer]   = useState(null);
 
   // Refs so timeout callbacks and the single keydown listener always read
   // current values without stale-closure re-registration.
@@ -180,7 +182,7 @@ export default function TrialSession({
   // game can be saved and replayed by the same MatchReplayView.
   const questionLogRef   = useRef([]);
   const currentBuzzesRef = useRef([]);
-  const _tsIsActiveRef   = useRef(false);  _tsIsActiveRef.current = state.windows[state.activeWindowId]?.appId === 'quizbowl';
+  const _tsIsActiveRef   = useRef(false);  _tsIsActiveRef.current = !windowState || windowState.windows[windowState.activeWindowId]?.appId === 'quizbowl';
   const buzzWordRef      = useRef(0);
   const qLoggedRef       = useRef(false);
   const replayEmittedRef = useRef(false);
@@ -299,8 +301,10 @@ export default function TrialSession({
     currentBuzzesRef.current = [];
     qLoggedRef.current = false;
     setAnswer('');
+    setAnswerPrompt('');
     setAnswerResult(null);
     setUserNegged(false);
+    setWrongAnswer(null);
     // Preserve cumulative scores, reset per-question fields
     setBotStates(prev => ACTIVE_BOTS.map(b => {
       const ex = prev.find(p => p.id === b.id);
@@ -511,14 +515,20 @@ export default function TrialSession({
     if (phaseRef.current !== 'buzzed') return;
     if (voiceOnRef.current) micRef.current?.stop({ finalizeNow: false });
     const ans      = typeof spoken === 'string' ? spoken : answerRef.current;
-    const correct  = checkAnswer(ans, q.answerline || q.answer);
+    const judgement = judgeQuizBowlQuestion(q, ans);
+    if (judgement.directive === 'prompt') {
+      setAnswerPrompt(judgement.directedPrompt || 'Be more specific.');
+      return;
+    }
+    const correct  = judgement.directive === 'accept';
+    setAnswerPrompt('');
     const quality  = buzzToQuality(correct, buzzRatio);
     const xpGained = correct ? Math.round(10 * (1 + combo * 0.25) * (2 - buzzRatio)) : 0;
     const ptsGained= scoreForBuzz({ correct, ratio: buzzRatio, format: FORMAT });
     const newScore = userScore + ptsGained;
 
     setAnswerResult({ correct, xpGained, ptsGained, userAnswer: ans.trim() });
-    setSessionResults(prev => [...prev, { questionId: q.id, question: q, quality, correct, buzzRatio }]);
+    setSessionResults(prev => [...prev, { questionId: q.id, questionIndex: qIdx, question: q, quality, correct, buzzRatio }]);
     currentBuzzesRef.current.push({
       userId: 'me',
       name: 'You',
@@ -543,6 +553,13 @@ export default function TrialSession({
     } else {
       setCombo(0);
       setUserScore(p => p + ptsGained);
+      setWrongAnswer({
+        qIdx,
+        answer: ans.trim(),
+        buzzRatio,
+        ptsGained,
+        xpGained,
+      });
       // Neg: question keeps going until a bot answers or it runs out.
       // Release the claim so bots whose timers haven't fired yet can
       // still buzz on the open question.
@@ -558,6 +575,50 @@ export default function TrialSession({
 
     setPhase('result');
     setTimeout(advanceQuestion, 2200);
+  }
+
+  function correctWrongAnswer() {
+    if (!wrongAnswer || wrongAnswer.qIdx !== qIdx || phaseRef.current !== 'reading') return;
+
+    const correctedPts = scoreForBuzz({ correct: true, ratio: wrongAnswer.buzzRatio, format: FORMAT });
+    const scoreDelta = correctedPts - wrongAnswer.ptsGained;
+    const lastBuzz = [...currentBuzzesRef.current].reverse().find(b => b.userId === 'me' && !b.correct);
+    if (lastBuzz) {
+      lastBuzz.correct = true;
+      lastBuzz.points = correctedPts;
+      lastBuzz.reviewAccepted = true;
+    }
+    setSessionResults(prev => prev.map(result => (
+      result.questionIndex === qIdx ? {
+        ...result,
+        correct: true,
+        quality: buzzToQuality(true, wrongAnswer.buzzRatio),
+      } : result
+    )));
+    setUserScore(score => score + scoreDelta);
+    setXp(value => value + wrongAnswer.xpGained);
+    setCombo(value => value + 1);
+    setWrongAnswer(null);
+    setUserNegged(false);
+    claimedRef.current = 'user';
+    clearAllTimers();
+    setBuzzedBy('user');
+    setAnswerResult({
+      correct: true,
+      xpGained: wrongAnswer.xpGained,
+      ptsGained: correctedPts,
+      userAnswer: wrongAnswer.answer,
+      corrected: true,
+    });
+    setPhase('result');
+
+    const correctedScore = userScore + scoreDelta;
+    if (matchMode && correctedScore >= MATCH_TARGET) {
+      logQuestion();
+      setTimeout(() => { setMatchWinner('user'); setPhase('done'); emitReplay(); }, 1800);
+    } else {
+      setTimeout(advanceQuestion, 2200);
+    }
   }
 
   // Snapshot the current question + its buzzes into the replay log.
@@ -727,7 +788,13 @@ export default function TrialSession({
             {userNegged && phase === 'reading' && (
               <div className="rounded-lg px-3 py-2 bg-rose-500/[0.08] border border-rose-500/[0.20] flex items-center gap-2">
                 <AlertCircle size={12} className="text-rose-400 flex-shrink-0" />
-                <p className="text-[12px] text-rose-300/80">Wrong · question continues</p>
+                <p className="flex-1 text-[12px] text-rose-300/80">Wrong · question continues</p>
+                {wrongAnswer?.qIdx === qIdx && (
+                  <button onClick={correctWrongAnswer}
+                    className="shrink-0 rounded-md border border-amber-400/25 bg-amber-400/[0.10] px-2 py-1 text-[10px] font-semibold text-amber-100 hover:border-amber-300/45 transition-colors">
+                    I was right
+                  </button>
+                )}
               </div>
             )}
 
@@ -770,30 +837,33 @@ export default function TrialSession({
 
             {/* Answer input */}
             {phase === 'buzzed' && buzzedBy === 'user' && (
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <input
-                    autoFocus value={answer} onChange={e => setAnswer(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && submitAnswer()}
-                    placeholder={voiceOn && mic.listening ? 'Listening… speak your answer' : 'Answer…'}
-                    className={`w-full pl-4 ${voiceOn ? 'pr-10' : 'pr-4'} py-3 rounded-lg border border-blue-500/40 bg-white/[0.05] text-[14px] text-white placeholder-white/25 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/25 transition-colors`}
-                  />
-                  {voiceOn && (
-                    <button
-                      type="button"
-                      onClick={() => mic.listening ? mic.stop() : startDictation()}
-                      aria-label={mic.listening ? 'Stop dictation' : 'Start dictation'}
-                      title={mic.listening ? 'Stop dictation' : 'Start dictation'}
-                      className={`absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md transition-colors ${mic.listening ? 'text-blue-300 bg-blue-500/15' : 'text-white/35 hover:text-blue-300 hover:bg-blue-500/10'}`}
-                    >
-                      <Mic size={14} className={mic.listening ? 'animate-pulse' : ''} />
-                    </button>
-                  )}
+              <div className="space-y-2">
+                {answerPrompt && <p className="text-[11px] font-semibold text-amber-300">Prompt: {answerPrompt}</p>}
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      autoFocus value={answer} onChange={e => { setAnswer(e.target.value); setAnswerPrompt(''); }}
+                      onKeyDown={e => e.key === 'Enter' && submitAnswer()}
+                      placeholder={voiceOn && mic.listening ? 'Listening… speak your answer' : 'Answer…'}
+                      className={`w-full pl-4 ${voiceOn ? 'pr-10' : 'pr-4'} py-3 rounded-lg border border-blue-500/40 bg-white/[0.05] text-[14px] text-white placeholder-white/25 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/25 transition-colors`}
+                    />
+                    {voiceOn && (
+                      <button
+                        type="button"
+                        onClick={() => mic.listening ? mic.stop() : startDictation()}
+                        aria-label={mic.listening ? 'Stop dictation' : 'Start dictation'}
+                        title={mic.listening ? 'Stop dictation' : 'Start dictation'}
+                        className={`absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md transition-colors ${mic.listening ? 'text-blue-300 bg-blue-500/15' : 'text-white/35 hover:text-blue-300 hover:bg-blue-500/10'}`}
+                      >
+                        <Mic size={14} className={mic.listening ? 'animate-pulse' : ''} />
+                      </button>
+                    )}
+                  </div>
+                  <button onClick={() => submitAnswer()} disabled={!answer.trim()}
+                    className="px-5 py-3 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[13px] font-bold disabled:opacity-30 transition-colors">
+                    <ArrowRight size={16} />
+                  </button>
                 </div>
-                <button onClick={() => submitAnswer()} disabled={!answer.trim()}
-                  className="px-5 py-3 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[13px] font-bold disabled:opacity-30 transition-colors">
-                  <ArrowRight size={16} />
-                </button>
               </div>
             )}
             {phase === 'buzzed' && buzzedBy === 'user' && voiceOn && micError && (
@@ -977,7 +1047,7 @@ export function AnswerResultPanel({ correct, officialAnswer, meta }) {
         <span className="mr-1">{tone.icon}</span>{tone.label}
       </p>
       {correct === false ? (
-        <div className="w-full rounded-lg border border-rose-300/25 bg-rose-300/[0.10] px-3 py-2.5">
+        <div>
           <span className="block text-[10px] font-semibold uppercase tracking-wider text-rose-100/55">Correct answer</span>
           <span className="mt-0.5 block text-[15px] font-semibold text-white">{officialAnswer}</span>
         </div>

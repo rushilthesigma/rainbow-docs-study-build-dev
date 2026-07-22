@@ -5,45 +5,31 @@
   "description": "RushilAI",
   "author": "Rushil Kelapure",
   "type": "module",
-  "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
-    "dev:full": "node server.js & vite",
-    "server": "node server.js",
+    "dev:full": "node --watch server.js & vite",
+    "server": "node --watch server.js",
     "start": "node server.js",
     "build": "vite build",
     "render-build": "npm install && vite build",
     "preview": "vite preview",
-    "electron": "electron .",
-    "electron:build": "vite build && electron-builder --mac"
-  },
-  "build": {
-    "appId": "com.rushilai.app",
-    "productName": "RushilAI",
-    "asar": false,
-    "directories": {
-      "output": "release",
-      "buildResources": "build"
-    },
-    "mac": {
-      "category": "public.app-category.education",
-      "target": "dmg",
-      "icon": "build/icon.icns"
-    },
-    "files": [
-      "dist/**/*",
-      "electron/**/*",
-      "server.js",
-      "prompts.js",
-      "data/**/*",
-      "presetBlocks.json",
-      ".env",
-      "package.json",
-      "node_modules/**/*"
-    ]
+    "build:mobile": "node scripts/build-mobile.mjs",
+    "mobile:copy": "npm run build:mobile && cap copy",
+    "mobile:sync": "npm run build:mobile && cap sync",
+    "mobile:android": "npm run mobile:sync && cap open android",
+    "mobile:ios": "npm run mobile:sync && cap open ios",
+    "mobile:assets": "capacitor-assets generate --ios --android --assetPath assets --iconBackgroundColor '#2563eb' --iconBackgroundColorDark '#2563eb' --splashBackgroundColor '#0a0a14' --splashBackgroundColorDark '#0a0a14'"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.1",
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/app": "^8.1.0",
+    "@capacitor/browser": "^8.0.3",
+    "@capacitor/core": "^8.4.1",
+    "@capacitor/ios": "^8.4.1",
+    "@capacitor/splash-screen": "^8.0.1",
+    "@capacitor/status-bar": "^8.0.2",
+    "@capawesome/capacitor-google-sign-in": "^0.1.2",
     "@google/generative-ai": "^0.24.1",
     "@tiptap/extension-mathematics": "3.27.1",
     "@tiptap/extension-placeholder": "3.27.1",
@@ -78,13 +64,13 @@
     "tiptap-markdown": "^0.9.0"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.4.1",
     "@tailwindcss/typography": "^0.5.16",
     "@tailwindcss/vite": "^4.1.4",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
-    "electron": "^41.1.1",
-    "electron-builder": "^26.8.1",
     "tailwindcss": "^4.1.4",
     "vite": "^7.2.4"
   }

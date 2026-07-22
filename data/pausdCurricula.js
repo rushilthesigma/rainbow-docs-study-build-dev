@@ -14,13 +14,17 @@
 // teaches each lesson at PAUSD-honors rigor. Science courses follow
 // the NGSS California Integrated 1/2/3 sequence.
 //
-// The Africa and Europe Geography electives are generated from the user's IGC
-// study notes (one unit per country, grounded in the notes via textbookContext)
-// and live in their own modules.
+// Regional Geography and History electives live in their own modules and are
+// grounded in either the user's IGC material or the shared country note library.
 import { AFRICA_GEOGRAPHY_COURSE } from './africaGeography.js';
 import { EUROPE_GEOGRAPHY_COURSE } from './europeGeography.js';
 import { ASIA_GEOGRAPHY_COURSE } from './asiaGeography.js';
+import { OCEANIA_GEOGRAPHY_COURSE } from './oceaniaGeography.js';
 import { HUMAN_GEOGRAPHY_COURSE } from './humanGeography.js';
+import { NORTH_AMERICA_GEOGRAPHY_COURSE } from './northAmericaGeography.js';
+import { OCEANIA_HISTORY_COURSE } from './oceaniaHistory.js';
+import { ASIA_HISTORY_COURSE } from './asiaHistory.js';
+import { SOUTH_AMERICA_HISTORY_COURSE } from './southAmericaHistory.js';
 
 export const PAUSD_CATALOG = [
   // =====================================================================
@@ -1527,13 +1531,17 @@ export const PAUSD_CATALOG = [
   },
 
   // =====================================================================
-  // GEOGRAPHY - "Africa Geography" and "Europe Geography", generated from
-  // the user's IGC study notes. Country-by-country units + a cumulative
-  // final exam each.
+  // GEOGRAPHY - country-by-country regional courses grounded in the shared
+  // study-note library, plus a competition-oriented human geography course.
   // =====================================================================
   AFRICA_GEOGRAPHY_COURSE,
   EUROPE_GEOGRAPHY_COURSE,
   ASIA_GEOGRAPHY_COURSE,
+  NORTH_AMERICA_GEOGRAPHY_COURSE,
+  OCEANIA_GEOGRAPHY_COURSE,
+  OCEANIA_HISTORY_COURSE,
+  ASIA_HISTORY_COURSE,
+  SOUTH_AMERICA_HISTORY_COURSE,
   HUMAN_GEOGRAPHY_COURSE,
 ];
 

@@ -21,7 +21,6 @@
 //   tour           - onboarding spotlight
 //   shortcuts      - keyboard cheat sheet
 //   toast          - top-level toasts
-//   presentation   - fullscreen takeover (slideshow)
 export const Z = {
   content: 10,
   dock: 100,

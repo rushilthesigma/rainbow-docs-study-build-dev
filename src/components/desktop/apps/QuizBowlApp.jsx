@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { Zap, Play, Pause, Check, X, Loader2, Lightbulb, Users, BookOpen, Sparkles, Settings, ArrowRight, Target, TrendingDown, TrendingUp, Clock, History, Flame, ChevronRight, ChevronDown, ArrowLeft, Trophy, Swords, RefreshCw, Eye, EyeOff, Volume2, VolumeX, Mic, Search, Pencil, Trash2, Layers, RotateCcw, ListChecks, Save } from 'lucide-react';
 import TrialSession, { AnswerResultPanel } from '../../trial/TrialSession';
 import { apiFetch } from '../../../api/client';
-import { fetchQBReaderTossups, saveQuizBowlSet, fetchQuizBowlHistory, fetchQuizBowlRecommendations, fetchQuizBowlPatterns, fetchQuizBowlSm2Due, fetchQuizBowlMatches, saveAiMatchReplay, fetchSavedQuizBowlSets, getSavedQuizBowlSet, createSavedQuizBowlSet, deleteSavedQuizBowlSet, renamePlayedQuizBowlSet, deletePlayedQuizBowlSet } from '../../../api/quizMatch';
+import { fetchQBReaderTossups, saveQuizBowlSet, fetchQuizBowlHistory, fetchQuizBowlRecommendations, fetchQuizBowlPatterns, fetchQuizBowlSm2Due, fetchQuizBowlMatches, saveAiMatchReplay, fetchSavedQuizBowlSets, getSavedQuizBowlSet, getQuizBowlCollectionSet, fetchQuizBowlPresetSet, createSavedQuizBowlSet, importSavedQuizBowlPacket, deleteSavedQuizBowlSet, renamePlayedQuizBowlSet, deletePlayedQuizBowlSet } from '../../../api/quizMatch';
 import { intervalLabel } from '../../../utils/sm2';
 import { peek, fetchOnce, bustPrefix } from '../../../api/cache';
 import ViewFade from '../../shared/ViewFade';
@@ -19,8 +19,9 @@ import { useQbModel } from '../../../hooks/useQbModel';
 import { studyModelLabel } from '../../study/studyModels';
 import { useSpeechRecognition, speechRecognitionSupported } from '../../../hooks/useSpeechRecognition';
 import { speechSynthesisSupported } from '../../../hooks/useSpeechSynthesis';
-import { CountryPracticeBrowser, SavedSetEditor, SavedSetLibrary } from './QuizBowlSetLibrary';
-import { isQuizBowlAnswerAccepted } from '../../../lib/qbAnswerChecker';
+import { CountryPracticeBrowser, QuizBowlCollection, SavedSetEditor, SavedSetLibrary } from './QuizBowlSetLibrary';
+import { judgeQuizBowlQuestion } from '../../../lib/qbAnswerChecker';
+import { markLessonComplete } from '../../../api/curriculum';
 
 // Explicitly open (then immediately release) an audio stream before starting
 // recognition. This is the same permission flow as Study Mode dictation.
@@ -36,6 +37,7 @@ async function requestMicPermission() {
 
 const DIFFICULTIES = ['Easy', 'Medium', 'Hard', 'Tournament'];
 const CATEGORIES = ['Science', 'History', 'Literature', 'Geography', 'Math', 'Art', 'Music', 'Philosophy', 'Pop Culture', 'Mixed'];
+const QUICK_START_CATEGORIES = ['Mixed', 'History', 'Science', 'Literature', 'Geography', 'Art'];
 const MIC_ERROR_MESSAGES = {
   'not-allowed': 'Microphone access is blocked. Allow it in your browser settings, then retry.',
   'service-not-allowed': 'Speech recognition is blocked in this browser.',
@@ -55,18 +57,28 @@ const BOT_ROSTER = [
 ];
 const DEFAULT_BOT_NAMES = Object.fromEntries(BOT_ROSTER.map(b => [b.id, b.name]));
 
-const SYSTEM_PROMPT = `You are a quiz bowl question writer. Write pyramidal quiz bowl tossup questions.
+const SYSTEM_PROMPT = `You are an elite ACF/NAQT packet editor writing rigorously pyramidal quiz bowl tossups.
 
 RULES:
-- Each question is a single paragraph that starts with hard clues and progressively gets easier
-- The answer should be guessable from the first few clues by experts, but obvious by the end
+- Each tossup is one coherent paragraph, normally 7-10 sentences and 120-190 words.
+- Enforce a steep clue ladder. The first 30-35% must use extremely obscure but verifiable specialist clues: minor works, technical terminology, lesser-known episodes, named scholarly arguments, secondary characters, or distinctive details. These clues should reward a true subject expert, not merely a strong generalist.
+- The middle 30-35% may use difficult connecting clues. Only the final 25-30% may use canonical classroom facts, famous works, common epithets, dates, locations, or the obvious giveaway.
+- Silently audit clue order before returning JSON: if an earlier clue is more widely known than a later clue, reorder or replace it. Never open with a definition, birthplace, most-famous work, signature discovery, famous quotation, or other stock giveaway.
+- Every clue must independently and factually point to the same answer. Prefer precise, uniquely identifying clues over vague pronouns or generic descriptions. Do not invent obscurity by fabricating facts.
 - NEVER state the answer inside the question text - clues describe it without naming it, and the question does not end with "What is X?"
-- Include exactly one NAQT-style power mark "(*)" placed roughly 60-70% through the question (after the hard clues, before the giveaway). Buzzing before (*) earns +15, after earns +10.
+- Include exactly one NAQT-style power mark "(*)" 65-75% through the question, immediately before the accessible clues and giveaway. Buzzing before (*) earns +15, after earns +10.
+- End with a natural "For 10 points, name..."-style request, without inserting the answer.
 - Write exactly the number of questions requested
 - Output ONLY valid JSON, no markdown
 
+ANSWER GUIDE:
+- "answer" is the canonical answer.
+- "accept" is a JSON array of literal, fully acceptable equivalents such as a surname, alternate title, transliteration, abbreviation, or former name. Do not include loose fragments and do not write regex syntax.
+- "prompt" is a JSON array of objects for incomplete answers that require clarification. Each object is {"answer":"literal partial answer","message":"brief directed prompt"}. A prompted response is not yet correct.
+- Use empty arrays when no aliases or prompts are genuinely needed.
+
 Format:
-{"questions":[{"text":"Hard opening clue. More obscure clues. (*) Easier middle clue. Giveaway clue.","answer":"Answer"}]}`;
+{"questions":[{"text":"Extremely obscure specialist clues. Hard connecting clues. (*) Accessible clues. For 10 points, name this answer.","answer":"Canonical answer","accept":["Valid alternate answer"],"prompt":[{"answer":"Ambiguous partial","message":"Be more specific."}]}]}`;
 
 // `source` ({ title, text }) is the QBpedia handoff: when present the notes
 // are the ONLY permitted fact base — the prompt flips from "write about a
@@ -147,15 +159,15 @@ HARD RULES (these override everything above):
 - If the notes cannot support ${count} fully distinct questions, reuse different facts and angles from the notes rather than inventing material.
 ${customInstructions ? `- Additional instructions from the user: ${customInstructions}` : ''}${avoidBlock ? `${avoidBlock}
 - If the notes are too thin to avoid every banned answer, prefer fresh answers first and only then reuse a banned one with entirely different clues.` : ''}
-Return JSON: {"questions":[{"text":"...","answer":"..."}]}`;
+Return JSON using the complete answer guide: {"questions":[{"text":"...","answer":"...","category":"...","accept":[],"prompt":[]}]}`;
   }
   return `Generate ${count} pyramidal quiz bowl tossup questions.
 Category: ${category}
 Difficulty: ${difficulty}
 ${difficultyGuide[difficulty] || ''}
 ${customInstructions ? `\nAdditional instructions from the user: ${customInstructions}` : ''}${avoidBlock}
-Each question must be pyramidal (hardest clues first, easiest giveaway last).
-Return JSON: {"questions":[{"text":"...","answer":"..."}]}`;
+Each question must be aggressively pyramidal: extremely obscure specialist clues first, hard connecting clues next, and familiar giveaway material only at the very end.
+Return JSON using the complete answer guide: {"questions":[{"text":"...","answer":"...","category":"...","accept":[],"prompt":[]}]}`;
 }
 
 // Mirror of the server's NAQT-mark parser. AI-generated tossups arrive
@@ -284,7 +296,7 @@ function useSpokenReveal(text, active, paused = false) {
   return { revealed, done, wordIndex, totalWords: words.length, stop };
 }
 
-export default function QuizBowlApp({ initialTopic = null, initialCategory = null, initialDifficulty = null, initialQuestions = null, initialContext = null, autoStart = false } = {}) {
+export default function QuizBowlApp({ initialTopic = null, initialCategory = null, initialDifficulty = null, initialQuestions = null, initialContext = null, autoStart = false, curriculumId = null, curriculumLessonId = null } = {}) {
   const { openApp, state } = useWindowManager();
   function openLessonFor(topic) {
     if (!topic) return;
@@ -352,6 +364,7 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
   const [hubLoading, setHubLoading] = useState(!(cachedHist && cachedRecs && cachedPats));
   const setStartedAtRef = useRef(hasPreloaded ? Date.now() : null);
   const savedSetIdRef = useRef(null);       // guard so we save each set exactly once
+  const curriculumCompletionRef = useRef(false);
   // Generation context of the set currently being played (AI sets only) -
   // saved with the set so future generations of the same request can
   // avoid repeating its answers.
@@ -427,15 +440,44 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
     } catch (err) { setError(err.message || 'Could not open that set.'); }
   }
 
+  async function playCollectionSet(listing) {
+    try {
+      if (listing.source === 'preset') {
+        const data = await fetchQuizBowlPresetSet(listing.presetSlug);
+        return playSavedSet(data.set);
+      }
+      const data = await getQuizBowlCollectionSet(listing.listingId);
+      playSavedSet(data.set);
+    } catch (err) {
+      setError(err.message || 'Could not open that collection set.');
+      throw err;
+    }
+  }
+
+  function launchCountryPreset(set) { return playSavedSet(set); }
+
   async function createEmptySavedSet() {
     try {
       const data = await createSavedQuizBowlSet({
-        title: 'Untitled set', category: 'Mixed', difficulty: 'Easy', questions: [],
+        title: 'Untitled packet', category: 'Mixed', difficulty: 'Easy', status: 'draft', questions: [],
       });
       setEditingSavedSet(data.set);
       setSavedSets(current => [data.set, ...current]);
       setView('set-editor');
     } catch (err) { setError(err.message || 'Could not create a saved set.'); }
+  }
+
+  async function importPacketPdf(file) {
+    try {
+      const data = await importSavedQuizBowlPacket(file);
+      setEditingSavedSet(data.set);
+      setSavedSets(current => [data.set, ...current.filter(set => set.id !== data.set.id)]);
+      setView('set-editor');
+      return data;
+    } catch (err) {
+      setError(err.message || 'Could not import that PDF packet.');
+      throw err;
+    }
   }
 
   async function deleteSavedSet(id) {
@@ -578,6 +620,8 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
   const [answer, setAnswer] = useState('');
   const [showResult, setShowResult] = useState(false);
   const [correct, setCorrect] = useState(null);
+  const [wrongAnswer, setWrongAnswer] = useState(null);
+  const [answerPrompt, setAnswerPrompt] = useState('');
   const [scores, setScores] = useState([]);
   const [reading, setReading] = useState(true);
   const [isPaused, setIsPaused] = useState(false);
@@ -642,6 +686,8 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
     setStartedAtRef.current = Date.now();
     savedSetIdRef.current = null;
     playingOriginRef.current = null;
+    setAnswerPrompt('');
+    setWrongAnswer(null);
   }
 
   // Launch a set with explicit category/difficulty/source - used by the
@@ -651,7 +697,7 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
   // topic. Pass `notes` ({ title, text }) to ground generation entirely in
   // source material — only the QBpedia handoff does; hub CTAs must not, or
   // a category drill after an article game would stay pinned to the article.
-  async function launchSet({ category: cat, difficulty: diff, source = 'qbreader', customInstructions: customInstr = '', notes = null }) {
+  async function launchSet({ category: cat, difficulty: diff, source = 'qbreader', customInstructions: customInstr = '', notes = null, title = '' }) {
     setCategory(cat);
     setDifficulty(diff);
     setQuestionSource(source);
@@ -666,7 +712,7 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
         setQuestions(tossups);
         setPlayingSource('qbreader');
       } else {
-        const ctx = { category: cat, customInstructions: customInstr, noteTitle: notes?.title || '' };
+        const ctx = { category: cat, customInstructions: customInstr, noteTitle: notes?.title || '', title };
         const avoid = await seenAnswersFor(ctx);
         playingCtxRef.current = ctx;
         const result = await apiFetch('/api/chat', {
@@ -781,6 +827,7 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
 
   function handleBuzz() {
     if (buzzed) return;
+    setAnswerPrompt('');
     setBuzzed(true); setReading(false); stop();
     // Match Study Mode dictation: stop TTS, request the mic, then begin the
     // same push-to-talk recognition session used by its composer.
@@ -792,16 +839,40 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
   function handleSubmit(spoken) {
     const given = typeof spoken === 'string' ? spoken : answer;
     if (!given.trim()) return;
-    const isCorrect = isQuizBowlAnswerAccepted(q.answerline || q.answer, given);
+    const judgement = judgeQuizBowlQuestion(q, given);
+    if (judgement.directive === 'prompt') {
+      setAnswerPrompt(judgement.directedPrompt || 'Be more specific.');
+      return;
+    }
+    const isCorrect = judgement.directive === 'accept';
+    setAnswerPrompt('');
     setCorrect(isCorrect); setShowResult(true);
     const points = naqtPointsFor(isCorrect, wordIndex, q.powerWordIndex, totalWords);
+    setWrongAnswer(isCorrect ? null : {
+      question: currentQ,
+      buzzWord: wordIndex,
+      totalWords,
+      powerWordIndex: q.powerWordIndex ?? null,
+    });
     setScores(prev => [...prev, { question: currentQ, correct: isCorrect, buzzWord: wordIndex, totalWords, powerWordIndex: q.powerWordIndex ?? null, points, answer: given.trim(), correctAnswer: q.answer }]);
   }
 
   function handleTimeout() {
     const points = naqtPointsFor(false, -1, q.powerWordIndex, totalWords);
     setScores(prev => [...prev, { question: currentQ, correct: false, buzzWord: -1, totalWords, powerWordIndex: q.powerWordIndex ?? null, points, answer: '', correctAnswer: q.answer }]);
-    setShowResult(true); setCorrect(false); setBuzzed(true);
+    setShowResult(true); setCorrect(false); setWrongAnswer(null); setBuzzed(true);
+  }
+
+  function correctWrongAnswer() {
+    if (!wrongAnswer || wrongAnswer.question !== currentQ || !q) return;
+    const correctedPoints = naqtPointsFor(true, wrongAnswer.buzzWord, wrongAnswer.powerWordIndex, wrongAnswer.totalWords);
+    setScores(previous => previous.map((score, index) => (
+      index === previous.length - 1 && score.question === currentQ
+        ? { ...score, correct: true, points: correctedPoints, reviewAccepted: true }
+        : score
+    )));
+    setCorrect(true);
+    setWrongAnswer(null);
   }
 
   useEffect(() => {
@@ -875,16 +946,46 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
     if (isInfinite) {
       if (currentQ + 1 >= questions.length) return;
       setCurrentQ(prev => prev + 1);
-      setBuzzed(false); setShowResult(false); setCorrect(null); setAnswer(''); setReading(true); setIsPaused(false);
+      setBuzzed(false); setShowResult(false); setCorrect(null); setWrongAnswer(null); setAnswer(''); setAnswerPrompt(''); setReading(true); setIsPaused(false);
       return;
     }
     if (currentQ < questions.length - 1) {
       setCurrentQ(prev => prev + 1);
-      setBuzzed(false); setShowResult(false); setCorrect(null); setAnswer(''); setReading(true); setIsPaused(false);
+      setBuzzed(false); setShowResult(false); setCorrect(null); setWrongAnswer(null); setAnswer(''); setAnswerPrompt(''); setReading(true); setIsPaused(false);
     } else setView('review');
   }
 
   function endRound() { setView('review'); }
+
+  function exitSet() {
+    _stopRef.current?.();
+    _micRef.current?.abort();
+    setSettingsOpen(false);
+    setQuestions([]);
+    setScores([]);
+    setCurrentQ(0);
+    setBuzzed(false);
+    setShowResult(false);
+    setCorrect(null);
+    setWrongAnswer(null);
+    setAnswer('');
+    setAnswerPrompt('');
+    setReading(false);
+    setIsPaused(false);
+    setStartedAtRef.current = null;
+    savedSetIdRef.current = null;
+    playingCtxRef.current = null;
+    playingOriginRef.current = null;
+    setView('hub');
+  }
+
+  useEffect(() => {
+    if (view !== 'review' || !curriculumId || !curriculumLessonId || curriculumCompletionRef.current) return;
+    curriculumCompletionRef.current = true;
+    markLessonComplete(curriculumId, curriculumLessonId)
+      .then(() => window.dispatchEvent(new CustomEvent('covalent:curriculum-progress', { detail: { curriculumId } })))
+      .catch(() => { curriculumCompletionRef.current = false; });
+  }, [view, curriculumId, curriculumLessonId]);
 
   // Keep function refs current so the single keydown listener (registered
   // only when view changes) always calls the latest version.
@@ -902,6 +1003,7 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
       if (e.key === ' ' && !buzzed && !showResult) {
         e.preventDefault();
         if (paused) { setIsPaused(false); return; }
+        setAnswerPrompt('');
         setBuzzed(true); setReading(false); _stopRef.current?.();
         if (_voiceModeRef.current && speechRecognitionSupported) _startMicRef.current?.();
       }
@@ -1038,7 +1140,7 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
           </div>
           <div className="grid grid-cols-3 gap-2">
             <button onClick={() => { setView('custom'); setQuestions([]); setScores([]); }} className="py-2.5 rounded-lg border border-white/[0.08] bg-white/[0.03] text-[13px] font-semibold text-white/70 hover:bg-white/[0.06]">New set</button>
-            <button onClick={() => { setCurrentQ(0); setBuzzed(false); setShowResult(false); setReading(true); setScores([]); setAnswer(''); setView('playing'); }} className="py-2.5 rounded-lg bg-white/[0.09] hover:bg-white/[0.13] text-white/70 text-[13px] font-semibold">Replay</button>
+            <button onClick={() => { setCurrentQ(0); setBuzzed(false); setShowResult(false); setCorrect(null); setWrongAnswer(null); setReading(true); setScores([]); setAnswer(''); setView('playing'); }} className="py-2.5 rounded-lg bg-white/[0.09] hover:bg-white/[0.13] text-white/70 text-[13px] font-semibold">Replay</button>
             <button onClick={saveCurrentSetForEditing} className="py-2.5 rounded-lg border border-blue-400/30 bg-blue-500/[0.08] text-[13px] font-semibold text-blue-200 hover:bg-blue-500/[0.16]">Save & edit</button>
           </div>
         </div>
@@ -1110,6 +1212,12 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
               </button>
             </>
           )}
+          <button
+            onClick={exitSet}
+            className="shrink-0 rounded-full border border-white/[0.10] px-2 py-0.5 text-[10px] font-medium text-white/45 transition-colors hover:border-rose-400/30 hover:bg-rose-500/10 hover:text-rose-200"
+          >
+            Exit set
+          </button>
           {isInfinite && settingsOpen && (
             <div className="absolute right-2 top-full mt-1 w-72 z-20 rounded-lg border border-white/[0.12] bg-white dark:bg-[#181818] p-3.5 space-y-3">
               <div className="flex items-center justify-between">
@@ -1183,27 +1291,30 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
             </>
           )}
           {buzzed && !showResult && (
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <input value={answer} onChange={e => setAnswer(e.target.value)}
-                  placeholder={voiceMode && mic.listening ? 'Listening… speak your answer' : 'Answer…'} autoFocus
-                  className={`w-full pl-4 ${voiceMode ? 'pr-10' : 'pr-4'} py-3 rounded-lg border border-blue-500/40 bg-white/[0.05] text-[14px] text-white placeholder-white/25 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/25 transition-colors`} />
-                {voiceMode && (
-                  <button
-                    type="button"
-                    onClick={() => mic.listening ? mic.stop() : startDictation()}
-                    aria-label={mic.listening ? 'Stop dictation' : 'Start dictation'}
-                    title={mic.listening ? 'Stop dictation' : 'Start dictation'}
-                    className={`absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md transition-colors ${mic.listening ? 'text-blue-300 bg-blue-500/15' : 'text-white/35 hover:text-blue-300 hover:bg-blue-500/10'}`}
-                  >
-                    <Mic size={14} className={mic.listening ? 'animate-pulse' : ''} />
-                  </button>
-                )}
+            <div className="space-y-2">
+              {answerPrompt && <p className="text-[11px] font-semibold text-amber-300">Prompt: {answerPrompt}</p>}
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <input value={answer} onChange={e => { setAnswer(e.target.value); setAnswerPrompt(''); }}
+                    placeholder={voiceMode && mic.listening ? 'Listening… speak your answer' : 'Answer…'} autoFocus
+                    className={`w-full pl-4 ${voiceMode ? 'pr-10' : 'pr-4'} py-3 rounded-lg border border-blue-500/40 bg-white/[0.05] text-[14px] text-white placeholder-white/25 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/25 transition-colors`} />
+                  {voiceMode && (
+                    <button
+                      type="button"
+                      onClick={() => mic.listening ? mic.stop() : startDictation()}
+                      aria-label={mic.listening ? 'Stop dictation' : 'Start dictation'}
+                      title={mic.listening ? 'Stop dictation' : 'Start dictation'}
+                      className={`absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md transition-colors ${mic.listening ? 'text-blue-300 bg-blue-500/15' : 'text-white/35 hover:text-blue-300 hover:bg-blue-500/10'}`}
+                    >
+                      <Mic size={14} className={mic.listening ? 'animate-pulse' : ''} />
+                    </button>
+                  )}
+                </div>
+                <button onClick={() => { mic.stop({ finalizeNow: false }); handleSubmit(); }} disabled={!answer.trim()}
+                  className="px-5 py-3 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[13px] font-bold disabled:opacity-30 transition-colors">
+                  <ArrowRight size={16} />
+                </button>
               </div>
-              <button onClick={() => { mic.stop({ finalizeNow: false }); handleSubmit(); }} disabled={!answer.trim()}
-                className="px-5 py-3 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[13px] font-bold disabled:opacity-30 transition-colors">
-                <ArrowRight size={16} />
-              </button>
             </div>
           )}
           {buzzed && !showResult && voiceMode && micError && (
@@ -1232,6 +1343,12 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
                   return pts ? `${pts}` : 'Incorrect';
                 })()}
               />
+              {!correct && wrongAnswer?.question === currentQ && (
+                <button onClick={correctWrongAnswer}
+                  className="w-full py-2.5 rounded-lg border border-amber-400/25 bg-amber-400/[0.08] text-amber-100 text-[12px] font-semibold hover:border-amber-300/45 transition-colors">
+                  I was right
+                </button>
+              )}
               <div className="flex gap-2">
                 <button onClick={() => openLessonFor(q.answer)}
                   className="flex-1 py-3 rounded-lg border border-blue-500/40 bg-blue-500/[0.08] text-blue-300 text-[12px] font-semibold hover:bg-blue-500/[0.15] hover:text-blue-200 inline-flex items-center justify-center gap-1.5 transition-colors">
@@ -1277,14 +1394,16 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
   if (view === 'country-practice') {
     return <ViewFade viewKey="country-practice" className="h-full"><CountryPracticeBrowser
       onBack={() => setView('hub')}
-      onPractice={(preset) => {
-        setView('hub');
-        return launchSet({
-          category: 'Geography', difficulty: 'Easy', source: 'ai',
-          customInstructions: `Focus exclusively on geography of ${preset.label}.`,
-          notes: { title: preset.title || `Geography of ${preset.label}`, text: preset.source },
-        });
-      }}
+      onPractice={launchCountryPreset}
+    /></ViewFade>;
+  }
+
+  // ===== PUBLIC, ALREADY-WRITTEN SETS =====
+  if (view === 'collection') {
+    return <ViewFade viewKey="collection" className="h-full"><QuizBowlCollection
+      onBack={() => setView('hub')}
+      onMyPackets={() => { loadSavedSets(); setView('saved-sets'); }}
+      onPlay={playCollectionSet}
     /></ViewFade>;
   }
 
@@ -1294,6 +1413,7 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
       sets={savedSets} loading={savedSetsLoading}
       onBack={() => setView('hub')}
       onNew={createEmptySavedSet}
+      onImport={importPacketPdf}
       onEdit={openSavedSet}
       onPlay={(id) => getSavedQuizBowlSet(id).then(data => playSavedSet(data.set)).catch(err => setError(err.message || 'Could not open that set.'))}
       onDelete={deleteSavedSet}
@@ -1491,6 +1611,7 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
       onMultiplayer={() => setView('multiplayer')}
       onCustom={() => setView('custom')}
       onClueLab={() => setView('clue-lab')}
+      onCollection={() => setView('collection')}
       onCountryPractice={() => setView('country-practice')}
       onSavedSets={() => { loadSavedSets(); setView('saved-sets'); }}
       onMySets={() => setView('my-sets')}
@@ -1507,7 +1628,7 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
 // ============================================================
 // HUB
 // ============================================================
-function QuizBowlHub({ hubLoading, history, skillProfile, recs, patterns, sm2Due = [], matchList = [], error, generating, onLaunch, onMultiplayer, onCustom, onClueLab, onAILobby, onCountryPractice, onSavedSets, onMySets, onOpenPlayedSet, onReplay, onReplayMatch, onReplays }) {
+function QuizBowlHub({ hubLoading, history, skillProfile, recs, patterns, sm2Due = [], matchList = [], error, generating, onLaunch, onMultiplayer, onCustom, onClueLab, onAILobby, onCollection, onCountryPractice, onSavedSets, onMySets, onOpenPlayedSet, onReplay, onReplayMatch, onReplays }) {
   const stats = history?.stats || { sets: 0, accuracy: 0, studyMs: 0, categoryStats: {} };
   const sets = history?.sets || [];
   const [showBuzzPatterns, setShowBuzzPatterns] = useState(false);
@@ -1540,48 +1661,144 @@ function QuizBowlHub({ hubLoading, history, skillProfile, recs, patterns, sm2Due
   const hoDiff = topStrength ? (topStrength.acc >= 85 ? 'Tournament' : 'Hard') : 'Hard';
 
   return (
-    <div className="h-full overflow-y-auto bg-transparent">
-      <div className="p-5 pb-8 space-y-4">
+    <div className="h-full overflow-y-auto bg-transparent pr-2">
+      <div className="pb-8 space-y-5">
         {/* Header */}
-        <div className="flex items-center justify-between mb-1">
-          <h2 className="text-lg font-bold text-white/90">Quiz Bowl</h2>
-        </div>
-
-        {/* Top stat row */}
-        <div className="grid grid-cols-3 gap-2">
-          <HubStat label="Sets" value={stats.sets} />
-          <HubStat label="Accuracy" value={`${stats.accuracy}%`} accent={stats.accuracy >= 75 ? 'emerald' : stats.accuracy >= 50 ? 'amber' : 'rose'} />
-          <HubStat label="Study time" value={formatDuration(stats.studyMs)} />
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-bold text-white/90">Quiz Bowl</h2>
+            <p className="mt-0.5 text-[11px] text-white/35">Pyramidal tossups, practice sets, and match review</p>
+          </div>
+          <div className="flex items-center gap-3 pt-0.5">
+            <button
+              type="button"
+              onClick={onMySets}
+              data-tour="qb-my-sets"
+              className="inline-flex items-center gap-1.5 text-xs text-white/40 transition-colors hover:text-white/70"
+            >
+              <Layers size={12} /> My sets
+            </button>
+            <button
+              type="button"
+              onClick={onReplays}
+              className="inline-flex items-center gap-1.5 text-xs text-white/40 transition-colors hover:text-white/70"
+            >
+              <History size={12} /> Replays
+            </button>
+          </div>
         </div>
 
         {error && <p className="text-[11px] text-rose-400 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-center">{error}</p>}
 
-        {/* My Sets - the permanent archive of every played set */}
-        <button onClick={onMySets} data-tour="qb-my-sets"
-          className="w-full text-left rounded-lg border border-white/[0.08] bg-white/[0.03] p-4 hover:bg-white/[0.06] hover:border-white/[0.14] transition-all flex items-center gap-3.5">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-blue-400/25 bg-blue-500/10 flex-shrink-0">
-            <Layers size={17} className="text-blue-300" />
+        {/* QBpedia-style direct entry points: one click starts a standard round. */}
+        <section>
+          <h3 className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Quick start</h3>
+          <div className="flex flex-wrap gap-1.5">
+            {QUICK_START_CATEGORIES.map(quickCategory => (
+              <button
+                key={quickCategory}
+                type="button"
+                onClick={() => onLaunch({ category: quickCategory, difficulty: 'Medium', source: 'qbreader' })}
+                disabled={generating}
+                className="rounded-lg bg-blue-500 px-2.5 py-1 text-[12px] font-medium text-white transition-colors hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {quickCategory}
+              </button>
+            ))}
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-[14px] font-bold text-white/90">My sets</p>
-          </div>
-          <ChevronRight size={15} className="text-white/25 flex-shrink-0" />
-        </button>
+        </section>
 
-        {/* Buzz patterns - collapsed behind a button, shows when there's enough data */}
+        {/* Authored packets and maintained presets are full set sources, so
+            keep them prominent and distinct from one-off custom rounds. */}
+        <section>
+          <h3 className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Choose a set</h3>
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={onCountryPractice}
+              className="group flex w-full min-w-0 items-center gap-3 rounded-lg bg-blue-500 px-3.5 py-3 text-left text-white transition-colors hover:bg-blue-400"
+            >
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-2">
+                  <span className="text-[13px] font-semibold text-white/95">Preset sets</span>
+                </span>
+                <span className="mt-0.5 block text-[10px] leading-snug text-white/70">Browse built-in geography and history courses</span>
+              </span>
+              <span className="shrink-0 text-[10px] font-semibold text-white/80 transition-colors group-hover:text-white">Browse</span>
+            </button>
+            <button
+              type="button"
+              onClick={onSavedSets}
+              data-tour="qb-custom-sets"
+              className="group flex w-full min-w-0 items-center gap-3 rounded-lg border border-dashed border-white/[0.16] bg-white/[0.025] px-3.5 py-3 text-left transition-colors hover:border-white/[0.28] hover:bg-white/[0.055]"
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block text-[13px] font-semibold text-white/80 transition-colors group-hover:text-white/95">Custom sets</span>
+                <span className="mt-0.5 block text-[10px] leading-snug text-white/40">Write a packet from scratch or import a PDF</span>
+              </span>
+              <span className="shrink-0 text-[10px] font-semibold text-white/35 transition-colors group-hover:text-white/65">Create or import</span>
+            </button>
+          </div>
+        </section>
+
+        {/* Primary play destinations use the same solid-blue treatment as the
+            preset set action so the section reads as a clear action group. */}
+        <section>
+          <h3 className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Play</h3>
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={onAILobby}
+              data-tour="qb-ai-lobby"
+              className="group flex w-full min-w-0 items-center gap-3 rounded-lg bg-blue-500 px-3.5 py-3 text-left text-white transition-colors hover:bg-blue-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300/70"
+            >
+              <Swords size={15} className="shrink-0 text-white/85" />
+              <span className="min-w-0 flex-1">
+                <span className="block text-[13px] font-semibold text-white/95">Compete in a lobby</span>
+                <span className="mt-0.5 block text-[10px] leading-snug text-white/70">Play a full match against AI opponents</span>
+              </span>
+              <ChevronRight size={14} className="shrink-0 text-white/65 transition-colors group-hover:text-white" />
+            </button>
+            <button
+              type="button"
+              onClick={onCollection}
+              className="group flex w-full min-w-0 items-center gap-3 rounded-lg bg-blue-500 px-3.5 py-3 text-left text-white transition-colors hover:bg-blue-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300/70"
+            >
+              <BookOpen size={15} className="shrink-0 text-white/85" />
+              <span className="min-w-0 flex-1">
+                <span className="block text-[13px] font-semibold text-white/95">Quiz Bowl Collection</span>
+                <span className="mt-0.5 block text-[10px] leading-snug text-white/70">Browse already-written community sets</span>
+              </span>
+              <ChevronRight size={14} className="shrink-0 text-white/65 transition-colors group-hover:text-white" />
+            </button>
+          </div>
+        </section>
+
+        {/* Secondary tools stay compact so the play paths remain dominant. */}
+        <div className="grid grid-cols-3 gap-2">
+          <button onClick={onMultiplayer}
+            className="inline-flex items-center justify-center rounded-lg bg-blue-500 py-2 text-[11px] font-semibold text-white transition-colors hover:bg-blue-400">
+            Multiplayer
+          </button>
+          <button onClick={onCustom} data-tour="qb-custom-set"
+            className="inline-flex items-center justify-center rounded-lg bg-blue-500 py-2 text-[11px] font-semibold text-white transition-colors hover:bg-blue-400">
+            Custom round
+          </button>
+          <button onClick={onClueLab}
+            className="inline-flex items-center justify-center rounded-lg bg-blue-500 py-2 text-[11px] font-semibold text-white transition-colors hover:bg-blue-400">
+            Clue Lab
+          </button>
+        </div>
+
+        {/* Buzz patterns - collapsed behind a compact button, shows when there's enough data */}
         {patterns && (
           <>
             <button onClick={() => setShowBuzzPatterns(v => !v)}
-              className="w-full text-left rounded-lg border border-white/[0.08] bg-white/[0.03] p-4 hover:bg-white/[0.06] hover:border-white/[0.14] transition-all flex items-center gap-3.5">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-violet-400/25 bg-violet-500/10 flex-shrink-0">
-                <Zap size={17} className="text-violet-300" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-[14px] font-bold text-white/90">Buzz patterns</p>
-              </div>
+              className="inline-flex items-center gap-1.5 text-xs text-white/40 transition-colors hover:text-white/70">
+              <Zap size={12} className="text-violet-300/80" /> Buzz patterns
               {showBuzzPatterns
-                ? <ChevronDown size={15} className="text-white/25 flex-shrink-0" />
-                : <ChevronRight size={15} className="text-white/25 flex-shrink-0" />}
+                ? <ChevronDown size={13} className="text-white/25" />
+                : <ChevronRight size={13} className="text-white/25" />}
             </button>
             {showBuzzPatterns && <BuzzPatterns patterns={patterns} />}
           </>
@@ -1620,48 +1837,6 @@ function QuizBowlHub({ hubLoading, history, skillProfile, recs, patterns, sm2Due
             )}
           </div>
         )}
-
-        {/* Preset geography practice + personal editable packets. Country
-            selection goes straight into a grounded Easy-level round. */}
-        <div className="grid grid-cols-2 gap-2">
-          <button onClick={onCountryPractice}
-            className="text-left rounded-lg border border-blue-400/20 bg-blue-500/[0.05] p-3.5 hover:bg-blue-500/[0.10] hover:border-blue-400/35 transition-colors">
-            <p className="text-[13px] font-bold text-white/90">Every country</p>
-          </button>
-          <button onClick={onSavedSets}
-            className="text-left rounded-lg border border-blue-400/20 bg-blue-500/[0.05] p-3.5 hover:bg-blue-500/[0.10] hover:border-blue-400/35 transition-colors">
-            <p className="text-[13px] font-bold text-white">Save & edit</p>
-          </button>
-        </div>
-
-        {/* Play vs AI CTA */}
-        <button
-          onClick={onAILobby}
-          data-tour="qb-ai-lobby"
-          className="w-full text-left rounded-lg border border-white/[0.08] bg-white/[0.03] p-4 hover:bg-white/[0.06] hover:border-white/[0.14] transition-all"
-        >
-          <p className="text-[14px] font-bold text-white/90">Compete in a Lobby</p>
-        </button>
-
-        {/* Quick access: head-to-head + custom set + replays + clue analysis */}
-        <div className="grid grid-cols-4 gap-2">
-          <button onClick={onMultiplayer}
-            className="py-2.5 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[12px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
-            Multiplayer
-          </button>
-          <button onClick={onCustom} data-tour="qb-custom-set"
-            className="py-2.5 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[12px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
-            Custom
-          </button>
-          <button onClick={onReplays}
-            className="py-2.5 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[12px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
-            Replays
-          </button>
-          <button onClick={onClueLab}
-            className="py-2.5 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[12px] font-semibold inline-flex items-center justify-center gap-2 transition-colors">
-            Clue Lab
-          </button>
-        </div>
 
         {/* Skills tracker - ML-powered category breakdown + struggle/mastery topics */}
         <SkillsPanel
@@ -1709,49 +1884,16 @@ function QuizBowlHub({ hubLoading, history, skillProfile, recs, patterns, sm2Due
                 <button key={i}
                   onClick={() => onLaunch({ category: r.category, difficulty: r.difficulty, source: r.source || 'qbreader', customInstructions: r.customInstructions || '' })}
                   disabled={generating}
-                  className="group w-full text-left rounded-lg border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] hover:border-white/[0.14] p-3 transition-colors disabled:opacity-40 flex items-center gap-3"
+                  className="group flex w-full min-w-0 items-center gap-3 rounded-lg bg-blue-500 px-3 py-2 text-left text-white transition-colors hover:bg-blue-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300/70 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <div className="flex-1 min-w-0">
-                    <p className="text-[13px] font-semibold text-white/90">
+                    <p className="text-[11px] font-semibold text-white/95">
                       {r.topic || r.category}
-                      <span className="text-white/35 font-normal"> · {r.difficulty}</span>
+                      <span className="text-white/70 font-normal"> · {r.difficulty}</span>
                     </p>
                   </div>
                 </button>
               ))}
-            </div>
-          </div>
-        )}
-
-        {/* Past sets */}
-        {sets.length > 0 && (
-          <div>
-            <div className="flex items-center gap-1.5 mb-1.5">
-              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Past sets</span>
-              <span className="text-[10px] text-white/30">· {sets.length}</span>
-              <button onClick={onMySets} className="ml-auto text-[10px] text-white/30 hover:text-white/60 transition-colors">See all →</button>
-            </div>
-            <div className="space-y-1">
-              {sets.slice(0, 10).map((s) => {
-                const pct = s.total ? Math.round((s.score / s.total) * 100) : 0;
-                const ago = formatRelative(Date.now() - new Date(s.finishedAt).getTime());
-                const hasPoints = typeof s.points === 'number';
-                const scoreCls = pct >= 75 ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/25'
-                  : pct >= 50 ? 'text-white/80 bg-white/[0.06] border-white/[0.12]'
-                  : 'text-rose-300 bg-rose-500/10 border-rose-500/25';
-                return (
-                  <div key={s.id} onClick={() => onOpenPlayedSet?.(s)}
-                    className="flex items-center gap-3 px-2 py-2.5 border-b border-white/[0.06] last:border-b-0 cursor-pointer hover:bg-white/[0.03] rounded-md transition-colors group">
-                    <div className={`min-w-[44px] px-2 py-1 rounded-md border text-center text-[11px] font-bold tabular-nums ${scoreCls}`}>
-                      {hasPoints ? `${s.points} pts` : `${s.score}/${s.total}`}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[12px] font-medium text-white/85 truncate">{playedSetTitle(s)} <span className="text-white/35">· {s.difficulty}</span></p>
-                      <p className="text-[10px] text-white/35">{ago} · {s.source === 'ai' ? 'AI' : 'QBReader'} · {formatDuration(s.durationMs)} · {s.score}/{s.total} correct</p>
-                    </div>
-                  </div>
-                );
-              })}
             </div>
           </div>
         )}
@@ -1983,10 +2125,10 @@ function BuzzPatterns({ patterns }) {
   if (!p) return null;
 
   return (
-    <div className="rounded-lg border border-white/[0.08] bg-white/[0.02] overflow-hidden pt-3">
+    <div className="min-w-0 rounded-lg border border-white/[0.08] bg-white/[0.025] p-3 space-y-3">
       {/* Sparkline - recent 20 buzzes as dots on a timeline */}
       {p.recentBuzzes?.length > 3 && (
-        <div className="px-4 py-2">
+        <div>
           <div className="relative h-8 rounded-lg bg-white/[0.03] border border-white/[0.04] overflow-hidden">
             {/* Zone markers */}
             <div className="absolute inset-0 flex">
@@ -2015,22 +2157,22 @@ function BuzzPatterns({ patterns }) {
       )}
 
       {/* Timing breakdown: early / mid / late */}
-      <div className="grid grid-cols-3 gap-px bg-white/[0.04] mx-4 rounded-lg overflow-hidden mb-3">
+      <div className="grid grid-cols-3 gap-px overflow-hidden rounded-lg bg-white/[0.04]">
         <TimingCell label="Early" count={p.early.count} accuracy={p.early.accuracy} tone="emerald" />
         <TimingCell label="Mid" count={p.mid.count} accuracy={p.mid.accuracy} tone="blue" />
         <TimingCell label="Late" count={p.late.count} accuracy={p.late.accuracy} tone="amber" />
       </div>
 
       {/* Avg buzz position + timeout rate */}
-      <div className="grid grid-cols-2 gap-2 px-4 mb-3">
-        <div className="rounded-lg bg-white/[0.03] border border-white/[0.05] px-3 py-2">
+      <div className="grid grid-cols-2 gap-2">
+        <div className="rounded-lg border border-white/[0.06] bg-white/[0.04] px-3 py-2.5">
           <div className="text-[9px] uppercase tracking-[0.14em] font-bold text-white/35 mb-0.5">Avg buzz point</div>
           <div className="text-[15px] font-bold text-white/90 tabular-nums">{p.avgBuzzPosition}%</div>
           <div className="mt-1 h-1 rounded-full bg-white/[0.06] overflow-hidden">
             <div className="h-full rounded-full bg-violet-400/70" style={{ width: `${p.avgBuzzPosition}%` }} />
           </div>
         </div>
-        <div className="rounded-lg bg-white/[0.03] border border-white/[0.05] px-3 py-2">
+        <div className="rounded-lg border border-white/[0.06] bg-white/[0.04] px-3 py-2.5">
           <div className="text-[9px] uppercase tracking-[0.14em] font-bold text-white/35 mb-0.5">Timeout rate</div>
           <div className={`text-[15px] font-bold tabular-nums ${p.timeoutRate > 25 ? 'text-rose-300' : 'text-white/90'}`}>{p.timeoutRate}%</div>
           <div className="mt-1 h-1 rounded-full bg-white/[0.06] overflow-hidden">
@@ -2039,17 +2181,34 @@ function BuzzPatterns({ patterns }) {
         </div>
       </div>
 
+      <div className="grid grid-cols-2 gap-2">
+        <div className="rounded-lg border border-white/[0.06] bg-white/[0.04] px-3 py-2.5">
+          <div className="mb-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-white/35">Best zone</div>
+          <div className="text-[13px] font-bold tabular-nums text-violet-200">
+            {p.optimalZone ? `${p.optimalZone.start}–${p.optimalZone.end}%` : '—'}
+          </div>
+          <div className="mt-0.5 text-[9px] text-white/35">highest accuracy window</div>
+        </div>
+        <div className="rounded-lg border border-white/[0.06] bg-white/[0.04] px-3 py-2.5">
+          <div className="mb-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-white/35">Recent trend</div>
+          <div className={`text-[13px] font-bold tabular-nums ${p.trend > 0 ? 'text-emerald-300' : p.trend < 0 ? 'text-amber-300' : 'text-white/70'}`}>
+            {p.trend > 0 ? 'Earlier' : p.trend < 0 ? 'Later' : 'Steady'}
+          </div>
+          <div className="mt-0.5 text-[9px] text-white/35">buzz timing</div>
+        </div>
+      </div>
+
       {/* Per-category buzz habits */}
       {p.categoryPatterns?.length > 0 && (
-        <div className="px-4 mb-3">
-          <div className="text-[9px] uppercase tracking-[0.14em] font-bold text-white/30 mb-1.5">Category buzz habits</div>
+        <div>
+          <div className="mb-1.5 text-[9px] font-bold uppercase tracking-[0.14em] text-white/30">Category buzz habits</div>
           <div className="space-y-1">
             {p.categoryPatterns.map(c => {
               const barColor = c.accuracy >= 75 ? 'bg-emerald-400/60' : c.accuracy >= 50 ? 'bg-blue-400/60' : 'bg-rose-400/60';
               return (
-                <div key={c.category} className="flex items-center gap-2">
-                  <span className="text-[10px] text-white/60 w-[70px] truncate">{c.category}</span>
-                  <div className="flex-1 h-1.5 rounded-full bg-white/[0.05] overflow-hidden relative">
+                <div key={c.category} className="grid min-w-0 grid-cols-[minmax(0,70px)_minmax(0,1fr)_auto] items-center gap-2">
+                  <span className="min-w-0 truncate text-[10px] text-white/60">{c.category}</span>
+                  <div className="min-w-0 h-1.5 rounded-full bg-white/[0.05] overflow-hidden relative">
                     {/* Buzz position marker */}
                     <div
                       className="absolute top-0 bottom-0 w-0.5 bg-white/50 z-10"
@@ -2057,7 +2216,7 @@ function BuzzPatterns({ patterns }) {
                     />
                     <div className={`h-full rounded-full ${barColor}`} style={{ width: `${c.accuracy}%` }} />
                   </div>
-                  <span className="text-[9px] text-white/40 tabular-nums w-14 text-right">
+                  <span className="whitespace-nowrap text-right text-[9px] text-white/40 tabular-nums">
                     {c.avgBuzzPosition}% · {c.accuracy}%
                   </span>
                 </div>
@@ -2221,7 +2380,9 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
   const [category, setCategory]         = useState('History');
   const [difficulty, setDifficulty]     = useState('medium');
   const [source, setSource]             = useState('qbreader');
-  const [scoringFormat, setScoringFormat] = useState(AI_LOBBY_SCORING_FORMATS[0]);
+  const [scoringFormat, setScoringFormat] = useState(
+    () => AI_LOBBY_SCORING_FORMATS.find((format) => format.id === 'iac-prelim') || AI_LOBBY_SCORING_FORMATS[0]
+  );
   const [questions, setQuestions]       = useState([]);
   const [sessionBots, setSessionBots]   = useState(null);
   const [matchMode, setMatchMode]       = useState(false);

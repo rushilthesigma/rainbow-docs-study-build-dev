@@ -5,17 +5,18 @@ import {
   RefreshCw, ChevronRight, Zap, ClipboardList, BarChart3, X, Check,
   Swords, Activity, ChevronDown, Sparkles, TrendingDown, Clock,
   Lock, Unlock, GraduationCap, Globe, AlertTriangle, Wand2, Edit3,
-  Gift, Users, Network,
+  Gift, Users, Network, RotateCcw,
 } from 'lucide-react';
 import {
   checkAdmin, getMetrics, listUsers, getUser, toggleBan, deleteUser,
   getStudySession, getStandaloneLesson, getCurriculumLesson, getUserQuizBowl,
-  unlockExam,
+  unlockExam, grantCreditReset, grantCreditResetToAll, getPromptProtectionSettings, updatePromptProtectionSettings,
 } from '../../../api/admin';
 import { listWikiReports, resolveWikiReport, deleteWikiPage } from '../../../api/wiki';
 import { ownerGrantPro, ownerRevokePro } from '../../../api/billing';
 import LoadingSpinner from '../../shared/LoadingSpinner';
 import AdvisorBadge from '../../shared/AdvisorBadge';
+import PillGroup from '../../shared/PillGroup';
 import { peek, fetchOnce, bust, bustPrefix } from '../../../api/cache';
 import ViewFade from '../../shared/ViewFade';
 import { useToast } from '../../shared/Toast';
@@ -29,7 +30,7 @@ export default function AdminApp() {
   // per-user list since landing visits are anonymous/pre-signup.
   const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState('list'); // list | analytics | detail | chat | wiki | referrals
+  const [view, setView] = useState('list'); // list | analytics | detail | chat | wiki | referrals | moderation
   const [selectedUser, setSelectedUser] = useState(null);
   const [conv, setConv] = useState(null);
 
@@ -40,6 +41,8 @@ export default function AdminApp() {
   // from the public landing demo flow, so they count toward total
   // users and the analytics tiles.
   const [includeDemo, setIncludeDemo] = useState(true);
+  const [grantingAllReset, setGrantingAllReset] = useState(false);
+  const toast = useToast();
 
   useEffect(() => {
     const cacheKey = `admin:users:${includeDemo ? '1' : '0'}`;
@@ -101,6 +104,28 @@ export default function AdminApp() {
     setUsers(prev => prev.filter(u => u.id !== uid));
     bustPrefix('admin:users:');
     if (selectedUser?.id === uid) { setView('list'); setSelectedUser(null); }
+  }
+  async function handleGrantReset(uid) {
+    const result = await grantCreditReset(uid);
+    setUsers(prev => prev.map(u => u.id === uid ? { ...u, creditResets: result.creditResets } : u));
+    setSelectedUser(prev => prev?.id === uid ? { ...prev, creditResets: result.creditResets } : prev);
+    bustPrefix('admin:users:');
+    return result;
+  }
+  async function handleGrantResetToAll() {
+    if (grantingAllReset) return;
+    if (!confirm('Give one free credit reset to every account?')) return;
+    setGrantingAllReset(true);
+    try {
+      const result = await grantCreditResetToAll();
+      bustPrefix('admin:users:');
+      await refreshList();
+      toast.success(`Granted a free reset to ${result.granted} account${result.granted === 1 ? '' : 's'}.`);
+    } catch (e) {
+      toast.error(e?.data?.message || e?.message || 'Could not grant resets to all accounts.');
+    } finally {
+      setGrantingAllReset(false);
+    }
   }
   async function handleSetPlan(email, tier) {
     if (tier === 'free') {
@@ -195,6 +220,7 @@ export default function AdminApp() {
           onBan={() => handleBan(selectedUser.id)}
           canBan={canBan}
           onDelete={() => handleDelete(selectedUser.id)}
+          onGrantReset={() => handleGrantReset(selectedUser.id)}
           onSetPlan={(tier) => handleSetPlan(selectedUser.email, tier)}
           onOpenConv={openConv}
           onRefreshUser={async () => {
@@ -236,6 +262,14 @@ export default function AdminApp() {
     );
   }
 
+  if (view === 'moderation') {
+    return (
+      <ViewFade viewKey="moderation" className="h-full flex flex-col">
+        <ModerationPanel onClose={() => setView('list')} />
+      </ViewFade>
+    );
+  }
+
   return (
     <ViewFade viewKey="list" className="h-full flex flex-col">
     <UserList
@@ -251,12 +285,135 @@ export default function AdminApp() {
       onAnalytics={() => setView('analytics')}
       onWiki={() => setView('wiki')}
       onReferrals={() => setView('referrals')}
+      onModeration={() => setView('moderation')}
+      onGrantResetAll={handleGrantResetToAll}
+      grantingAllReset={grantingAllReset}
     />
     </ViewFade>
   );
 }
 
 function sumMsgs(u) { return (u.chatMessages?.study || 0) + (u.chatMessages?.lessons || 0) + (u.chatMessages?.curriculum || 0); }
+
+/* ====================== MODERATION ====================== */
+function ModerationPanel({ onClose }) {
+  const toast = useToast();
+  const [strictness, setStrictness] = useState(null);
+  const [savedStrictness, setSavedStrictness] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const settings = await getPromptProtectionSettings();
+        if (!active) return;
+        setStrictness(settings.strictness);
+        setSavedStrictness(settings.strictness);
+      } catch (err) {
+        if (active) setError(err.message || 'Could not load moderation settings');
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, []);
+
+  async function save() {
+    if (!strictness || saving) return;
+    setSaving(true);
+    setError('');
+    try {
+      const settings = await updatePromptProtectionSettings(strictness);
+      setStrictness(settings.strictness);
+      setSavedStrictness(settings.strictness);
+      toast.success('Moderation strictness updated.');
+    } catch (err) {
+      setError(err.message || 'Could not save moderation settings');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const details = {
+    relaxed: 'Blocks direct requests to reveal or transform hidden system and developer instructions.',
+    balanced: 'Adds common override and indirect extraction attempts. This matches the previous default behavior.',
+    strict: 'Also blocks obfuscated markup, “repeat everything above,” and no-guardrail roleplay phrasing.',
+  };
+
+  return (
+    <div className="mx-auto flex h-full w-full max-w-3xl flex-col text-white/85">
+      <header className="flex items-start gap-3 border-b border-white/[0.07] pb-4">
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-0.5 rounded-lg p-1.5 text-white/45 transition-colors hover:bg-white/[0.06] hover:text-white/85"
+          aria-label="Back to Admin Panel"
+        >
+          <ArrowLeft size={16} />
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <Shield size={17} className="text-rose-300" />
+            <h2 className="text-lg font-bold text-white/90">Moderation</h2>
+          </div>
+          <p className="mt-1 text-[12px] text-white/45">Tune the regex guard that intercepts attempts to extract or override confidential assistant instructions.</p>
+        </div>
+      </header>
+
+      {loading ? (
+        <div className="flex flex-1 items-center justify-center"><LoadingSpinner size={24} /></div>
+      ) : (
+        <div className="mt-5 space-y-5">
+          <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
+            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Prompt protection</p>
+            <h3 className="mt-2 text-[15px] font-semibold text-white/90">Regex matching strictness</h3>
+            <p className="mt-1 max-w-xl text-[12px] leading-5 text-white/45">The setting applies globally to every supported AI provider. Direct matches are always checked; higher levels layer in more high-confidence patterns.</p>
+            <div className="mt-4">
+              <PillGroup
+                label="Detection level"
+                value={strictness || 'balanced'}
+                onChange={setStrictness}
+                options={[
+                  { value: 'relaxed', label: 'Relaxed' },
+                  { value: 'balanced', label: 'Balanced' },
+                  { value: 'strict', label: 'Strict' },
+                ]}
+              />
+            </div>
+            <div className="mt-4 rounded-lg border border-white/[0.07] bg-black/[0.12] px-3 py-2.5">
+              <p className="text-[12px] text-white/70">{details[strictness] || details.balanced}</p>
+              <p className="mt-1 text-[11px] leading-4 text-white/35">Use Strict when abuse is elevated; use Relaxed when benign discussions of AI instruction design need more room.</p>
+            </div>
+            {error && <p role="alert" className="mt-3 text-xs text-rose-300">{error}</p>}
+            <div className="mt-4 flex items-center justify-between gap-3 border-t border-white/[0.07] pt-3">
+              <span className="text-[11px] text-white/35">{strictness === savedStrictness ? 'All changes saved' : 'Unsaved change'}</span>
+              <button
+                type="button"
+                onClick={save}
+                disabled={saving || strictness === savedStrictness}
+                className="rounded-lg bg-blue-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                {saving ? 'Saving…' : 'Save changes'}
+              </button>
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-white/[0.08] bg-white/[0.02] px-4 py-3">
+            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Coverage</p>
+            <div className="mt-3 grid gap-2 text-[12px] text-white/52 sm:grid-cols-3">
+              <p><span className="font-medium text-white/75">Direct disclosure</span><br />Requests to reveal hidden prompts or messages.</p>
+              <p><span className="font-medium text-white/75">Instruction overrides</span><br />Attempts to bypass previous or developer instructions.</p>
+              <p><span className="font-medium text-white/75">Obfuscation</span><br />Strict mode adds delimiter, replay, and no-rules phrasing.</p>
+            </div>
+          </section>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Composite "activeness" score for the user list sort. Recency dominates
 // (a user seen today beats a one-shot whale from last month), engagement
@@ -282,7 +439,7 @@ function activenessScore(u) {
 }
 
 /* ====================== USER LIST ====================== */
-function UserList({ users, total, metrics, query, setQuery, planFilter, setPlanFilter, sort, setSort, includeDemo, setIncludeDemo, onOpen, onRefresh, onAnalytics, onWiki, onReferrals }) {
+function UserList({ users, total, metrics, query, setQuery, planFilter, setPlanFilter, sort, setSort, includeDemo, setIncludeDemo, onOpen, onRefresh, onAnalytics, onWiki, onReferrals, onModeration, onGrantResetAll, grantingAllReset }) {
   const DAY = 86_400_000;
   const HOUR = 3_600_000;
   const now = Date.now();
@@ -344,11 +501,26 @@ function UserList({ users, total, metrics, query, setQuery, planFilter, setPlanF
             <Gift size={13} /> Referrals
           </button>
           <button
+            onClick={onGrantResetAll}
+            disabled={grantingAllReset}
+            className="flex items-center gap-1 text-emerald-300/70 hover:text-emerald-200 px-2.5 py-1.5 rounded-lg hover:bg-emerald-500/[0.08] transition-colors text-[11px] font-medium disabled:cursor-wait disabled:opacity-45"
+            title="Grant one free banked credit reset to every account"
+          >
+            <RotateCcw size={13} /> {grantingAllReset ? 'Granting…' : 'Free reset all'}
+          </button>
+          <button
             onClick={onAnalytics}
             className="flex items-center gap-1 text-white/35 hover:text-white/75 px-2.5 py-1.5 rounded-lg hover:bg-white/[0.06] transition-colors text-[11px] font-medium"
             title="Analytics"
           >
             <BarChart3 size={13} /> Analytics
+          </button>
+          <button
+            onClick={onModeration}
+            className="flex items-center gap-1 text-white/35 hover:text-white/75 px-2.5 py-1.5 rounded-lg hover:bg-white/[0.06] transition-colors text-[11px] font-medium"
+            title="Moderation settings"
+          >
+            <Shield size={13} /> Moderation
           </button>
           <button
             onClick={onRefresh}
@@ -781,8 +953,23 @@ function StatRow({ label, value }) {
 }
 
 /* ====================== USER DETAIL ====================== */
-function UserDetail({ user: u, onBack, onBan, canBan, onDelete, onSetPlan, onOpenConv, onRefreshUser }) {
+function UserDetail({ user: u, onBack, onBan, canBan, onDelete, onGrantReset, onSetPlan, onOpenConv, onRefreshUser }) {
   const [tab, setTab] = useState('overview');
+  const [grantingReset, setGrantingReset] = useState(false);
+  const toast = useToast();
+
+  async function handleGrantReset() {
+    if (grantingReset) return;
+    setGrantingReset(true);
+    try {
+      const result = await onGrantReset();
+          toast.success(`Free reset granted. ${result.creditResets.available} now available.`);
+    } catch (e) {
+      toast.error(e?.data?.message || e?.message || 'Could not grant a reset.');
+    } finally {
+      setGrantingReset(false);
+    }
+  }
 
   const totalMsgs =
     (u.studySessions || []).reduce((n, s) => n + (s.messageCount || 0), 0) +
@@ -818,6 +1005,14 @@ function UserDetail({ user: u, onBack, onBan, canBan, onDelete, onSetPlan, onOpe
       {/* Actions */}
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <PlanPicker plan={u.plan || 'free'} onSetPlan={onSetPlan} />
+        <button
+          type="button"
+          onClick={handleGrantReset}
+          disabled={grantingReset}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-400/20 bg-emerald-500/[0.09] px-3 py-1.5 text-xs font-medium text-emerald-200 transition-colors hover:border-emerald-400/35 hover:bg-emerald-500/[0.14] disabled:cursor-wait disabled:opacity-45"
+        >
+          <RotateCcw size={12} /> {grantingReset ? 'Granting…' : 'Grant free reset'}
+        </button>
         {canBan && (
           <button onClick={onBan} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${u.banned ? 'bg-emerald-700/80 text-white' : 'bg-rose-700/80 text-white'}`}>
             <Ban size={12} className="inline mr-1" /> {u.banned ? 'Unban' : 'Ban'}
@@ -1637,6 +1832,15 @@ function BillingTab({ u }) {
         <KV label="Pro until" value={u.proUntil ? new Date(u.proUntil).toLocaleString() : '-'} />
         <KV label="Stripe customer" value={u.stripeCustomerId || '-'} mono />
         <KV label="Stripe subscription" value={u.stripeSubscriptionId || '-'} mono />
+      </div>
+      <div className="rounded-2xl border border-white/[0.07] bg-white/[0.03] backdrop-blur-sm p-4 space-y-2">
+        <div className="flex items-center gap-1.5 mb-1">
+          <RotateCcw size={12} className="text-emerald-300/70" />
+          <span className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-white/40">Credit resets</span>
+        </div>
+        <KV label="Available" value={u.creditResets?.available ?? 0} />
+        <KV label="Earned" value={u.creditResets?.earned ?? 0} />
+        <KV label="Used" value={u.creditResets?.used ?? 0} />
       </div>
       <div className="rounded-2xl border border-white/[0.07] bg-white/[0.03] backdrop-blur-sm p-4 space-y-2">
         <div className="flex items-center gap-1.5 mb-1">

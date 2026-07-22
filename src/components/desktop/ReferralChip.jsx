@@ -5,14 +5,14 @@ import { getMyReferralCode, redeemReferralCode } from '../../api/referral';
 
 // Tiny gift-icon chip in the desktop MenuBar. Click → popover with:
 //   • The user's own shareable code (copy button)
-//   • Referral progress (n / 2 unlocks Plus-Lite)
+//   • Banked credit resets (one earned per successful referral)
 //   • An input to redeem someone else's code (if they haven't already)
 //
 // Server enforces single-use + no self-referral; this UI just routes the
 // errors back to inline copy.
 export default function ReferralChip() {
   const [open, setOpen] = useState(false);
-  const [info, setInfo] = useState(null);        // { code, referralsUsed, referralsRequired, unlocked, redeemedCode }
+  const [info, setInfo] = useState(null);        // { code, referralsUsed, creditResets, redeemedCode }
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -24,7 +24,7 @@ export default function ReferralChip() {
 
   useEffect(() => {
     if (!open) return;
-    if (!info) refresh();
+    refresh();
     function onClick(e) { if (popoverRef.current && !popoverRef.current.contains(e.target)) setOpen(false); }
     function onKey(e) { if (e.key === 'Escape') setOpen(false); }
     document.addEventListener('pointerdown', onClick);
@@ -56,14 +56,12 @@ export default function ReferralChip() {
     setError(null);
     setSuccess(null);
     try {
-      const r = await redeemReferralCode(code);
-      setSuccess(r.ownerUnlocked
-        ? 'Code redeemed - they just earned +100 weekly credits.'
-        : `Code redeemed. Thanks!`);
+      await redeemReferralCode(code);
+      setSuccess('Code redeemed — they just banked one credit reset.');
       setInput('');
       await refresh();
     } catch (e) {
-      const msg = e?.message || e?.code || 'Could not redeem that code.';
+      const msg = e?.data?.message || e?.message || e?.code || 'Could not redeem that code.';
       setError(msg);
     }
     setBusy(false);
@@ -79,20 +77,21 @@ export default function ReferralChip() {
   }
 
   const alreadyRedeemed = !!info?.redeemedCode;
-  const myProgress = info ? `${info.referralsUsed}/${info.referralsRequired}` : '-/-';
-  const unlocked = !!info?.unlocked;
+  const bankedResets = info?.creditResets?.available ?? 0;
+  const hasBankedReset = bankedResets > 0;
 
   return (
     <div className="relative" ref={popoverRef}>
       <button
         onClick={() => setOpen(o => !o)}
-        title="Referral code"
+        title="Referrals and credit resets"
+        aria-label={`Referrals and credit resets${info ? `: ${bankedResets} available` : ''}`}
         className="p-1 rounded text-gray-500 hover:text-gray-800 dark:text-white/55 dark:hover:text-white/90 transition-colors inline-flex items-center gap-1"
       >
         <Gift size={13} />
         {info && (
-          <span className={`text-[10px] tabular-nums font-semibold ${unlocked ? 'text-emerald-500 dark:text-emerald-300' : 'text-gray-500 dark:text-white/55'}`}>
-            {myProgress}
+          <span className={`text-[10px] tabular-nums font-semibold ${hasBankedReset ? 'text-emerald-500 dark:text-emerald-300' : 'text-gray-500 dark:text-white/55'}`}>
+            {bankedResets}
           </span>
         )}
       </button>
@@ -116,6 +115,7 @@ export default function ReferralChip() {
                 onClick={() => setRevealed(v => !v)}
                 disabled={!info?.code}
                 title={revealed ? 'Hide' : 'Show'}
+                aria-label={revealed ? 'Hide referral code' : 'Show referral code'}
                 className="p-1.5 rounded-md text-gray-400 hover:text-gray-900 hover:bg-gray-100 dark:text-white/55 dark:hover:text-white dark:hover:bg-white/[0.08] transition-colors disabled:opacity-40"
               >
                 {revealed ? <EyeOff size={13} /> : <Eye size={13} />}
@@ -124,15 +124,17 @@ export default function ReferralChip() {
                 onClick={copyCode}
                 disabled={!info?.code}
                 title="Copy"
+                aria-label="Copy referral code"
                 className="p-1.5 rounded-md text-gray-400 hover:text-gray-900 hover:bg-gray-100 dark:text-white/55 dark:hover:text-white dark:hover:bg-white/[0.08] transition-colors disabled:opacity-40"
               >
                 {copied ? <Check size={13} className="text-emerald-500 dark:text-emerald-300" /> : <Copy size={13} />}
               </button>
             </div>
-            <p className={`text-[11px] mt-2 ${unlocked ? 'text-emerald-500 dark:text-emerald-300' : 'text-gray-500 dark:text-white/55'}`}>
-              {unlocked
-                ? `+100 weekly credits unlocked · ${info.referralsUsed} friends joined`
-                : `${info ? info.referralsUsed : 0} / ${info?.referralsRequired ?? 2} friends joined - earn +100 weekly credits at ${info?.referralsRequired ?? 2}.`}
+            <p className={`text-[11px] mt-2 ${hasBankedReset ? 'text-emerald-500 dark:text-emerald-300' : 'text-gray-500 dark:text-white/55'}`}>
+              {bankedResets} {bankedResets === 1 ? 'reset' : 'resets'} banked · {info?.referralsUsed || 0} {(info?.referralsUsed || 0) === 1 ? 'friend' : 'friends'} joined
+            </p>
+            <p className="text-[10.5px] mt-1 text-gray-400 dark:text-white/35">
+              Each friend who joins earns you one reset. Resets stay banked until you use them.
             </p>
           </div>
 

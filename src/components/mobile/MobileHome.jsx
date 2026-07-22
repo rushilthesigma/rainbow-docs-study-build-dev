@@ -60,15 +60,12 @@ export default function MobileHome({ onNavigate }) {
     <div className="px-4 pt-5 pb-8">
       {/* Greeting */}
       <div className="mb-5">
-        <p className="text-[12px] uppercase tracking-[0.16em] font-bold text-blue-500 dark:text-blue-300 mb-1">
-          {greetingForHour()}
-        </p>
         <h1 className="text-[28px] font-bold tracking-[-0.02em] text-gray-900 dark:text-white leading-tight">
           Hi, {firstName}.
         </h1>
         {showDesktopNotice && (
           <div className="mt-3 flex items-center gap-3 rounded-xl bg-red-600 px-3.5 py-3 text-white" role="status">
-            <p className="min-w-0 flex-1 text-[12px] font-semibold leading-snug">RushilAI is much better on desktop.</p>
+            <p className="min-w-0 flex-1 text-[12px] font-semibold leading-snug">The newest features are mainly available on desktop.</p>
             <button
               type="button"
               onClick={() => setShowDesktopNotice(false)}
@@ -138,14 +135,6 @@ export default function MobileHome({ onNavigate }) {
 }
 
 // ===== helpers =====
-
-function greetingForHour() {
-  const h = new Date().getHours();
-  if (h < 5) return 'Late night';
-  if (h < 12) return 'Good morning';
-  if (h < 18) return 'Good afternoon';
-  return 'Good evening';
-}
 
 function pickContinueCard(curricula, lessons) {
   // Most-recent in-progress curriculum lesson wins.

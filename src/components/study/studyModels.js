@@ -3,7 +3,7 @@
 // Study Mode picker UI. Keep credit costs in sync with server.js.
 //
 // Credit model: every model is selectable by everyone. Each message spends
-// the model's credit cost from the user's weekly pool (free 995/week, paid
+// the model's credit cost from the user's weekly pool (free 500/week, paid
 // 9,500/week). There are no per-model caps and no plan locks.
 
 // Accounts that should not see Claude/OpenAI options. DeepSeek remains
@@ -74,7 +74,7 @@ export function recommendedCheapModel(email, excludeKey) {
 }
 
 export const STUDY_MODELS = [
-  { key: 'flash-lite',     label: 'Flash Lite',      provider: 'Gemini',   blurb: 'Fastest · everyday study' },
+  { key: 'flash-lite',     label: 'Gemini 3.5 Flash-Lite', provider: 'Gemini',   blurb: 'Fastest · everyday study' },
   { key: 'gpt-5.4',        label: 'GPT-5.4',         provider: 'OpenAI',   blurb: 'Versatile + capable' },
   { key: 'gpt-5.4-mini',   label: 'GPT-5.4 mini',    provider: 'OpenAI',   blurb: 'Fast + capable' },
   { key: 'gpt-5.6-sol',    label: 'GPT-5.6 Sol',     provider: 'OpenAI',   blurb: 'OpenAI flagship' },
@@ -83,7 +83,7 @@ export const STUDY_MODELS = [
   { key: 'deepseek-flash', label: 'DeepSeek V4',     provider: 'DeepSeek', blurb: 'Fast + free' },
   { key: 'deepseek-pro',   label: 'DeepSeek V4 Pro', provider: 'DeepSeek', blurb: 'Step-by-step reasoning' },
   { key: 'grok',           label: 'Grok 4.3',        provider: 'xAI',      blurb: 'Frontier reasoning' },
-  { key: 'flash',          label: 'Flash',           provider: 'Gemini',   blurb: 'Balanced reasoning' },
+  { key: 'flash',          label: 'Gemini 3.6 Flash', provider: 'Gemini',   blurb: 'Balanced reasoning' },
   { key: 'gemini-pro',     label: 'Gemini Pro',      provider: 'Gemini',   blurb: 'Hardest math + code' },
 ];
 

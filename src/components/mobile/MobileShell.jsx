@@ -1,4 +1,4 @@
-import { useState, useImperativeHandle, forwardRef } from 'react';
+import { useState, useEffect, useImperativeHandle, forwardRef } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import BottomTabs from './BottomTabs';
 import MobileHeader from './MobileHeader';
@@ -13,6 +13,8 @@ import MobileDebate from './MobileDebate';
 import MobileApps from './MobileApps';
 import { MobileAdmin, MobileQBpedia } from './MobileFeatureApps';
 import { zIndexStyle } from '../../styles/tokens';
+import { App as CapacitorApp } from '@capacitor/app';
+import { isNativeApp } from '../../native/platform';
 // Page registry for the mobile shell.
 //   - `hideHeader`   → suppresses MobileHeader (page renders its own).
 //   - `manageLayout` → page owns its own scrolling + flex layout
@@ -27,7 +29,7 @@ import { zIndexStyle } from '../../styles/tokens';
 // not from the bottom tab bar. The "More" tab + sheet were dropped per
 // product direction.
 const PAGE_MAP = {
-  home:        { title: 'RushilAI',  component: MobileHome,       isHome: true,  hideHeader: false },
+  home:        { title: 'RushilAI',  component: MobileHome,       isHome: true,  hideHeader: true  },
   curricula:   { title: 'Courses',   component: MobileCurricula,                 hideHeader: true  },
   lessons:     { title: 'Lessons',   component: MobileLessons,                   hideHeader: true  },
   notes:       { title: 'Notes',     component: MobileNotes,                     hideHeader: true  },
@@ -50,8 +52,9 @@ const MAIN_TABS = ['home', 'curricula', 'lessons', 'notes', 'settings'];
 // Exposes an imperative `goBack()` / `goHome()` API via ref so the
 // Mobile Preview app's dev toolbar can drive navigation from outside.
 const MobileShell = forwardRef(function MobileShell(_props, ref) {
+  const [launchQuizBowl] = useState(() => sessionStorage.getItem('postOnboardOpen') === 'quizbowl');
   const [activeTab, setActiveTab] = useState('home');
-  const [activePage, setActivePage] = useState('home');
+  const [activePage, setActivePage] = useState(launchQuizBowl ? 'quizbowl' : 'home');
   // Browser-style nav history. `back` is the stack of previously
   // visited (tab, page) pairs; `forward` mirrors what we've popped
   // off so the user can redo with the forward button. Stored in state
@@ -59,6 +62,12 @@ const MobileShell = forwardRef(function MobileShell(_props, ref) {
   // accurately on every render.
   const [backStack, setBackStack] = useState([]);
   const [forwardStack, setForwardStack] = useState([]);
+
+  // Desktop has the same handoff convention. Consume it once so later
+  // visits to the mobile shell return to Home normally.
+  useEffect(() => {
+    if (launchQuizBowl) sessionStorage.removeItem('postOnboardOpen');
+  }, [launchQuizBowl]);
 
   function navigate(nextTab, nextPage) {
     if (nextTab === activeTab && nextPage === activePage) return;
@@ -102,6 +111,28 @@ const MobileShell = forwardRef(function MobileShell(_props, ref) {
     else if (PAGE_MAP[target]) navigate('home', target);
   }
 
+  useEffect(() => {
+    if (!isNativeApp) return undefined;
+    let listener;
+    let disposed = false;
+    CapacitorApp.addListener('backButton', () => {
+      if (backStack.length) {
+        goBackOne();
+      } else if (!MAIN_TABS.includes(activePage)) {
+        navigate(activeTab, activeTab);
+      } else {
+        CapacitorApp.minimizeApp().catch(() => {});
+      }
+    }).then((handle) => {
+      if (disposed) handle.remove();
+      else listener = handle;
+    });
+    return () => {
+      disposed = true;
+      listener?.remove();
+    };
+  }, [activePage, activeTab, backStack.length]);
+
   useImperativeHandle(ref, () => ({
     goBack: () => {
       if (backStack.length) goBackOne();
@@ -122,9 +153,8 @@ const MobileShell = forwardRef(function MobileShell(_props, ref) {
 
   return (
     <div className="relative h-full w-full flex flex-col bg-[#F4F5F7] dark:bg-[#0a0a14] overflow-hidden">
-      {/* Most pages render their own centered title; we still show the
-          shared MobileHeader for the home tab + when there's a back
-          button to surface, so navigation stays consistent. */}
+      {/* Pages render their own headings. Keep the shared header only when
+          a secondary surface needs an explicit back button. */}
       {(!page.hideHeader || onBack) && (
         <MobileHeader title={page.hideHeader ? '' : page.title} onBack={onBack} />
       )}

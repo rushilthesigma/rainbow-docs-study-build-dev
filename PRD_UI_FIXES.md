@@ -9,7 +9,7 @@
 
 ## 1. Background
 
-Covalent AI is a React 19 + Vite + Tailwind app (with an Electron desktop shell) that ships three layout tiers: `DesktopShell` (macOS-style windowed apps), `AppShell` (web), and `MobileApp` (<768px). The codebase is ~27K LOC across 127 files with 8 context providers.
+Covalent AI is a React 19 + Vite + Tailwind app that ships three layout tiers: `DesktopShell` (macOS-style windowed apps), `AppShell` (web), and `MobileApp` (<768px). The codebase is ~27K LOC across 127 files with 8 context providers.
 
 An audit surfaced consistent issues across accessibility, error handling, component scale, styling discipline, responsive behavior, and z-index layering. None of these are blocking shipping, but together they degrade reliability, slow iteration, and create user-visible glitches that look like bugs even when underlying logic is correct.
 
@@ -176,7 +176,7 @@ Each phase ends with a manual walkthrough on the golden paths (Dashboard → Stu
 
 ## 9. Open Questions
 
-- Is there a target browser/OS matrix beyond "modern Chromium + Electron 41"? Affects how aggressive we can be on CSS features.
+- Is there a target browser/OS matrix beyond modern Chromium? Affects how aggressive we can be on CSS features.
 - Are mobile users a first-class audience or a fallback? Drives how much budget Phase 3 mobile pass gets.
 - Should `ErrorBoundary` report to a telemetry endpoint, or just render a friendly fallback locally?
 

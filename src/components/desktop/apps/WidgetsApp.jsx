@@ -2,7 +2,7 @@ import { useState } from 'react';
 import {
   X, Plus, Clock, Flame, Timer, Calendar as CalendarIcon,
   StickyNote, Quote, Calculator, ListChecks, Sparkles,
-  Settings2, RotateCcw,
+  Settings2, RotateCcw, BookOpen,
 } from 'lucide-react';
 import { useWidgets } from '../../../context/WidgetContext';
 
@@ -12,6 +12,7 @@ import { useWidgets } from '../../../context/WidgetContext';
 // desktop and can be removed from the "My Widgets" tab.
 const WIDGET_CATALOG = [
   { type: 'clock',      label: 'Clock',        icon: Clock,        desc: 'Date & time' },
+  { type: 'course_progress', label: 'Course Progress', icon: BookOpen, desc: 'Progress in your active course' },
   { type: 'streak',     label: 'Study Streak', icon: Flame,        desc: 'Daily streak count' },
   { type: 'pomodoro',   label: 'Pomodoro',     icon: Timer,        desc: '25/5 focus timer' },
   { type: 'calendar',   label: 'Calendar',     icon: CalendarIcon, desc: 'This month at a glance' },
@@ -26,7 +27,7 @@ const WIDGET_CATALOG = [
 // section per app, each with 1-2 widgets - so users browse "what
 // widgets go with Notes?" instead of scrolling a flat catalog.
 const WIDGET_GROUPS = [
-  { appId: 'curricula', label: 'Curricula',  types: ['calendar', 'streak']      },
+  { appId: 'curricula', label: 'Curricula',  types: ['course_progress', 'calendar', 'streak'] },
   { appId: 'notes',     label: 'Notes',      types: ['note', 'todo', 'review']  },
   { appId: 'lessons',   label: 'Lessons',    types: ['pomodoro']                },
   { appId: 'mathtutor', label: 'Math Tutor', types: ['calculator']              },
@@ -46,6 +47,18 @@ function WidgetPreview({ type }) {
         <span className="text-[22px] font-black text-white/85 tabular-nums leading-none">{time}</span>
       </div>
       <p className="text-[9px] text-white/35 mt-0.5">{date}</p>
+    </div>
+  );
+
+  if (type === 'course_progress') return (
+    <div className="w-full h-full flex flex-col justify-center px-3">
+      <p className="text-[10.5px] font-semibold text-white/80 truncate">AP Biology</p>
+      <div className="mt-1.5 h-1 rounded-full bg-white/10 overflow-hidden">
+        <div className="h-full w-3/5 rounded-full bg-blue-400/80" />
+      </div>
+      <div className="mt-1 flex items-center justify-between text-[8px] text-white/30">
+        <span>18 of 30 tasks</span><span>60%</span>
+      </div>
     </div>
   );
 

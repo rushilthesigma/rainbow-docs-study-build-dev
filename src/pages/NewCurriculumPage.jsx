@@ -126,7 +126,12 @@ export default function NewCurriculumPage() {
           <PillGroup label="Lesson Length" options={LESSON_LENGTH_OPTIONS} value={settings.lessonLength} onChange={v => update('lessonLength', v)} />
           <div className="space-y-3 pt-2">
             <Toggle label="Include examples" checked={settings.includeExamples} onChange={v => update('includeExamples', v)} />
-            <Toggle label="Include exercises" checked={settings.includeExercises} onChange={v => update('includeExercises', v)} />
+            <Toggle
+              label="Include exercises"
+              description="Fill-in-the-blank, matching, and multiple choice only"
+              checked={settings.includeExercises}
+              onChange={v => update('includeExercises', v)}
+            />
             <Toggle
               label="Graded mode"
               description="Each lesson gets an AI-assigned task with a rubric. Submissions are graded and roll up to a course grade - visible to parents."

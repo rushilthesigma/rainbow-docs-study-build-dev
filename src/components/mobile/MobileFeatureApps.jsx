@@ -18,7 +18,12 @@ function FeatureSurface({ label, scroll = false, children }) {
 export function MobileQBpedia({ onNavigate }) {
   return (
     <FeatureSurface label="QBpedia">
-      <QBpediaApp onOpenApp={(appId) => onNavigate?.(appId)} />
+      <div
+        className="mobile-accent-scope h-full min-h-0"
+        style={{ '--app-accent': '#8b5cf6', '--app-accent-contrast': '#ffffff' }}
+      >
+        <QBpediaApp mobile onOpenApp={(appId) => onNavigate?.(appId)} />
+      </div>
     </FeatureSurface>
   );
 }

@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
-import { FileText, Plus, ChevronRight, ArrowLeft, Save, Trash2, Download } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { FileText, Plus, ChevronRight, ArrowLeft, Save, Trash2, Download, Upload } from 'lucide-react';
 import { listNotes, createNote, getNote, updateNote, deleteNote } from '../../api/notes';
 import { exportNoteAsPdf } from '../../lib/notesPdf';
+import { importNotesFromFiles, NOTE_IMPORT_ACCEPT } from '../../lib/noteImport';
 import MobilePage from './MobilePage';
 import MarkdownNoteEditor from '../notes/MarkdownNoteEditor';
 
@@ -24,6 +25,8 @@ export default function MobileNotes() {
   const [summary, setSummary] = useState('');
   const [saving, setSaving] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const importInputRef = useRef(null);
   const [savedAt, setSavedAt] = useState(null);
 
   useEffect(() => {
@@ -39,6 +42,22 @@ export default function MobileNotes() {
       setNotes((prev) => [note, ...prev]);
       openNote(note);
     } catch (err) { console.error(err); }
+  }
+
+  async function handleImport(event) {
+    const files = event.target.files;
+    event.target.value = '';
+    if (!files?.length || importing) return;
+    setImporting(true);
+    try {
+      await importNotesFromFiles(files);
+      const refreshed = await listNotes();
+      setNotes(refreshed.notes || []);
+    } catch (err) {
+      alert(err?.message || 'Could not import those notes.');
+    } finally {
+      setImporting(false);
+    }
   }
 
   async function openNote(note) {
@@ -111,14 +130,14 @@ export default function MobileNotes() {
             disabled={exportingPdf}
             aria-label="Export as PDF"
             title="Export as PDF"
-            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-white/[0.08] border border-white/[0.12] disabled:opacity-50 text-white/65 text-[12px] font-bold"
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-blue-500/15 border border-blue-400/30 disabled:opacity-50 text-blue-100 text-[12px] font-bold"
           >
             <Download size={11} /> PDF
           </button>
           <button
             onClick={handleSave}
             disabled={saving}
-            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-white/[0.10] border border-white/[0.14] disabled:opacity-50 text-white/70 text-[12px] font-bold"
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-blue-500 border border-blue-400/30 disabled:opacity-50 text-white text-[12px] font-bold active:bg-blue-600"
           >
             <Save size={11} /> Save
           </button>
@@ -148,22 +167,45 @@ export default function MobileNotes() {
   // ===== LIST =====
   return (
     <MobilePage
-      eyebrow="Notes"
       title="My Notes"
-      subtitle={loading ? 'Loading…' : `${notes.length} ${notes.length === 1 ? 'note' : 'notes'}`}
     >
       <button
         onClick={handleNew}
-        className="w-full rounded-2xl bg-white/[0.13] border border-white/[0.24] p-4 mb-4 active:scale-[0.99] transition-transform text-left backdrop-blur-sm"
+        className="w-full rounded-2xl bg-blue-500 border border-blue-400/30 p-4 mb-4 active:scale-[0.99] transition-transform text-left"
       >
         <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-xl bg-white/[0.15] grid place-items-center shrink-0">
+          <div className="w-11 h-11 rounded-xl bg-blue-400/30 grid place-items-center shrink-0">
             <Plus size={20} className="text-white/85" />
           </div>
           <p className="flex-1 text-[15px] font-bold tracking-tight text-white/90">New note</p>
-          <ChevronRight size={16} className="text-white/55" />
+          <ChevronRight size={16} className="text-white/80" />
         </div>
       </button>
+
+      <button
+        onClick={() => importInputRef.current?.click()}
+        disabled={importing}
+        className="w-full rounded-2xl border border-white/[0.08] bg-white/[0.03] p-3.5 mb-4 disabled:opacity-50 text-left"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-400/15 grid place-items-center shrink-0">
+            <Upload size={17} className="text-emerald-300/80" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[14px] font-bold tracking-tight text-white/80">{importing ? 'Importing notes…' : 'Import notes'}</p>
+            <p className="text-[11px] text-white/30 mt-0.5">Markdown, text, or JSON</p>
+          </div>
+          <ChevronRight size={16} className="text-white/25" />
+        </div>
+      </button>
+      <input
+        ref={importInputRef}
+        type="file"
+        multiple
+        accept={NOTE_IMPORT_ACCEPT}
+        hidden
+        onChange={handleImport}
+      />
 
       {!loading && notes.length === 0 && (
         <div className="text-center py-12">

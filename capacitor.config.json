@@ -1,0 +1,33 @@
+{
+  "appId": "com.rushilai.app",
+  "appName": "RushilAI",
+  "webDir": "dist",
+  "backgroundColor": "#0a0a14",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "backgroundColor": "#0a0a14",
+    "allowMixedContent": false
+  },
+  "ios": {
+    "backgroundColor": "#0a0a14",
+    "contentInset": "never",
+    "preferredContentMode": "mobile"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchAutoHide": true,
+      "launchShowDuration": 1200,
+      "backgroundColor": "#0a0a14",
+      "androidScaleType": "CENTER_INSIDE",
+      "showSpinner": false
+    },
+    "StatusBar": {
+      "style": "LIGHT",
+      "backgroundColor": "#0a0a14",
+      "overlaysWebView": true
+    }
+  }
+}
+

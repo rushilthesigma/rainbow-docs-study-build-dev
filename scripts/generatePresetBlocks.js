@@ -23,7 +23,7 @@ const ROOT       = join(__dirname, '..');
 dotenv.config({ path: join(ROOT, '.env') });
 
 // ── Model names (must match server.js) ────────────────────────────────────
-const GEMINI_FLASH = 'gemini-3.5-flash';
+const GEMINI_FLASH = 'gemini-3.6-flash';
 const GEMINI_PRO   = 'gemini-3.1-pro-preview';
 
 const LESSON_BLOCK_COUNT = {
@@ -242,6 +242,7 @@ async function generateBlocks(course, unit, lesson) {
     contextLines: [
       lesson.description ? `Lesson goal: ${lesson.description}` : '',
       course.description ? `Course context: ${course.description}` : '',
+      unit.textbookContext ? `Source material (use this as the factual source of truth):\n${String(unit.textbookContext).slice(0, 12000)}` : '',
     ],
     difficulty,
     blockCount,

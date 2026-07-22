@@ -6,11 +6,6 @@ import { BookOpen, MessageSquare, FileText, Settings, Shield, Zap, Lightbulb, Ca
 // MobilePreview component still exists in the tree (admin/MobilePreview.jsx)
 // in case we want to re-surface it; just nothing references it from
 // the visible UI anymore.
-// Slides was axed - the AI deck-builder app was retired so the dock,
-// AppWindow router, and the WindowManager / Window slides-specific
-// maximize behaviour were all stripped. The SlideshowApp component and
-// /api/slideshows client file still exist on disk but nothing imports
-// them anymore, so they are dead code.
 const APP_REGISTRY = [
   // Literal-hex blue stops (not `blue-*` tokens) so the user's accent-hue
   // picker, which rotates the global blue scale, never recolors this icon.

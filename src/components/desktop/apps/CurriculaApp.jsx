@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, Plus, Loader2, BookOpen, ChevronDown, ChevronRight, CheckCircle2, Circle, Lock, ClipboardCheck, PenTool, FileText, Check, X, Trophy, Wand2, Paperclip, Upload, Calculator, GraduationCap, Atom, Sigma, Map as MapIcon, List, ListChecks, Share2, Users, BarChart3, Zap } from 'lucide-react';
-import { listCurricula, generateCurriculum, getCurriculum, sendLessonMessage, getLessonHistory, editCurriculumWithAI, extractSourceUrl, extractFiles, refineCurriculum, generateLessonBlocks, generateFinalQuiz, gradeQuizBlock, gradeOpenBlock, completeLessonBlock, getCurriculumGradebook } from '../../../api/curriculum';
+import { ArrowLeft, Plus, Loader2, BookOpen, ChevronDown, ChevronRight, CheckCircle2, Circle, Lock, ClipboardCheck, PenTool, FileText, Check, X, Trophy, Wand2, Paperclip, Upload, Calculator, Map as MapIcon, List, ListChecks, Share2, Users, BarChart3, Zap, Search, Store, UserRound, Download, Library, EyeOff, Sparkles } from 'lucide-react';
+import { listCurricula, generateCurriculum, getCurriculum, sendLessonMessage, getLessonHistory, editCurriculumWithAI, extractSourceUrl, extractFiles, refineCurriculum, generateLessonBlocks, generateFinalQuiz, gradeQuizBlock, gradeOpenBlock, completeLessonBlock, getCurriculumGradebook, listCurriculumMarketplace, enrollMarketplaceCurriculum, publishCurriculum, unpublishCurriculum } from '../../../api/curriculum';
 import { getSharedItem, listOutgoing } from '../../../api/share';
 import { useSharing } from '../../../context/SharingContext';
 import { peek, fetchOnce, bust } from '../../../api/cache';
@@ -12,6 +12,7 @@ import { useDemoMode } from '../../../context/DemoModeContext';
 import { DEFAULT_SETTINGS, DIFFICULTY_OPTIONS, LEARNING_STYLE_OPTIONS } from '../../../utils/constants';
 import Button from '../../shared/Button';
 import Input from '../../shared/Input';
+import Modal from '../../shared/Modal';
 import ShareDialog from '../../shared/ShareDialog';
 import PillGroup from '../../shared/PillGroup';
 import Toggle from '../../shared/Toggle';
@@ -54,7 +55,18 @@ function quizBowlTargetForCurriculum(curriculum) {
   const isHistory = subject === 'history'
     || curriculum?.category === 'History'
     || /\bhistory\b/.test(searchable);
-  return isHistory ? { label: 'History', topic } : null;
+  if (isHistory) return { label: 'History', topic };
+
+  const categoryMap = {
+    Math: 'Math',
+    Science: 'Science',
+    'Computer Science': 'Science',
+    'Language & Literature': 'Literature',
+    Arts: 'Art',
+    'Social Science': 'Philosophy',
+    Other: 'Mixed',
+  };
+  return { label: categoryMap[curriculum?.category] || 'Mixed', topic };
 }
 
 function withQuizBowlLessonSwaps(curriculum) {
@@ -101,7 +113,7 @@ function gradePillClass(pct) {
 // note" action), the window-manager `meta` is spread as props. We use
 // `seedView` to jump straight to the new-curriculum form and `seedTopic`
 // / `seedSources` to pre-fill the topic field and attached sources.
-export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) {
+export default function CurriculaApp({ seedTopic, seedSources, seedView, seedCurriculumId } = {}) {
   const { user } = useAuth();
   const toast = useToast();
   const isBeta = !!user?.data?.isBeta;
@@ -121,13 +133,14 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
   // Seed the view from `seedView` prop (passed via window meta when another
   // app - e.g. NotesApp - opens this one with "Build Curriculum from this
   // note"). Safe to use directly as the initial state now that useBrowserBack
-  // below skips 'new'/'pausd' (see comment there).
+  // below skips 'new'/'marketplace' (see comment there).
   const [view, setView] = useState(seedView || 'list');
   // Seed from cache so re-entering the app doesn't flash the skeleton.
   const cachedCurricula = peek('curricula:list');
   const [curricula, setCurricula] = useState(() => cachedCurricula?.curricula || []);
   const [loading, setLoading] = useState(!cachedCurricula);
   const [selectedCurriculum, setSelectedCurriculum] = useState(null);
+  const seededCurriculumOpened = useRef(false);
   // Curriculum sharing. `activeShare` is set while viewing a curriculum that
   // was shared WITH me (all reads/writes then carry its shareId and resolve
   // to the owner's copy). `outgoingPartners` holds the accepted recipients
@@ -148,10 +161,10 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
 
   // Browser Back navigates up one level inside the curriculum stack instead
   // of leaving the SPA. lesson / math_tutor / assessment → detail → list.
-  // Excludes 'new' and 'pausd' - those are top-level sibling views to
+  // Excludes 'new' and 'marketplace' - those are top-level sibling views to
   // 'list', not drill-downs, and intercepting Back for them caused a
   // StrictMode race that flipped a seeded 'new' view back to 'list'.
-  useBrowserBack(view !== 'list' && view !== 'new' && view !== 'pausd', () => {
+  useBrowserBack(view !== 'list' && view !== 'new' && view !== 'marketplace', () => {
     if (view === 'lesson') setView('detail');
     else if (view === 'assessment') setView('detail');
     else if (view === 'math_tutor') setView('detail');
@@ -212,10 +225,15 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
 
   const [shareTarget, setShareTarget] = useState(null);
 
-  // PAUSD catalog browser state
-  const [pausdCatalog, setPausdCatalog] = useState([]);
-  const [pausdLoading, setPausdLoading] = useState(false);
+  // Public curriculum marketplace state. Presets and community-published
+  // curricula intentionally share one index and one discovery surface.
+  const [marketplaceCatalog, setMarketplaceCatalog] = useState([]);
+  const [marketplaceLoading, setMarketplaceLoading] = useState(false);
+  const [marketplaceError, setMarketplaceError] = useState('');
   const [enrollingSlug, setEnrollingSlug] = useState(null);
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [publishAnonymous, setPublishAnonymous] = useState(false);
+  const [publishBusy, setPublishBusy] = useState(false);
 
   useEffect(() => {
     fetchOnce('curricula:list', listCurricula)
@@ -223,25 +241,39 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
       .catch(() => setLoading(false));
   }, []);
 
-  // Lazy-load the PAUSD catalog the first time the user opens that view.
-  async function loadPausdCatalog() {
-    if (pausdCatalog.length || pausdLoading) return;
-    setPausdLoading(true);
+  // Curriculum widgets can deep-link into their course. Guard the effect so
+  // React StrictMode cannot open/fetch the same course twice on mount.
+  useEffect(() => {
+    if (!seedCurriculumId || seededCurriculumOpened.current) return;
+    seededCurriculumOpened.current = true;
+    openCurriculum(seedCurriculumId);
+  }, [seedCurriculumId]);
+
+  // Lazy-load the marketplace the first time the user opens that view.
+  async function loadMarketplace({ refresh = false } = {}) {
+    if ((!refresh && marketplaceCatalog.length) || marketplaceLoading) return;
+    setMarketplaceLoading(true);
+    setMarketplaceError('');
     try {
-      const data = await apiFetch('/api/pausd/catalog');
-      setPausdCatalog(data.catalog || []);
-    } catch (e) { console.error('Failed to load PAUSD catalog:', e); }
-    setPausdLoading(false);
+      const data = await listCurriculumMarketplace();
+      setMarketplaceCatalog(data.listings || []);
+    } catch (e) {
+      console.error('Failed to load curriculum marketplace:', e);
+      setMarketplaceError(e?.message || 'Could not load the marketplace.');
+    }
+    setMarketplaceLoading(false);
   }
 
-  async function enrollPausd(slug) {
+  async function enrollFromMarketplace(listing) {
     if (enrollingSlug) return;
-    setEnrollingSlug(slug);
+    setEnrollingSlug(listing.listingId);
     try {
-      const data = await apiFetch('/api/pausd/enroll', {
-        method: 'POST',
-        body: JSON.stringify({ slug }),
-      });
+      const data = listing.source === 'preset'
+        ? await apiFetch('/api/pausd/enroll', {
+            method: 'POST',
+            body: JSON.stringify({ slug: listing.listingId.replace(/^preset:/, '') }),
+          })
+        : await enrollMarketplaceCurriculum(listing.listingId);
       // If they're already enrolled, show the existing one. Otherwise
       // prepend the new one.
       if (data.alreadyEnrolled) {
@@ -253,10 +285,49 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
       }
       setView('detail');
     } catch (e) {
-      console.error('Enroll failed:', e);
-      toast.error('Failed to enroll: ' + (e?.message || 'unknown error'));
+      console.error('Marketplace enrollment failed:', e);
+      toast.error('Could not add course: ' + (e?.message || 'unknown error'));
     }
     setEnrollingSlug(null);
+  }
+
+  function openPublishDialog() {
+    setPublishAnonymous(selectedCurriculum?.marketplace?.anonymous === true);
+    setPublishOpen(true);
+  }
+
+  async function saveMarketplacePublication() {
+    if (!selectedCurriculum || publishBusy) return;
+    setPublishBusy(true);
+    try {
+      const data = await publishCurriculum(selectedCurriculum.id, publishAnonymous);
+      const updated = { ...selectedCurriculum, marketplace: data.marketplace };
+      setSelectedCurriculum(updated);
+      setCurricula(prev => prev.map(c => c.id === updated.id ? { ...c, marketplace: data.marketplace } : c));
+      setPublishOpen(false);
+      setMarketplaceCatalog([]);
+      toast.success(selectedCurriculum.marketplace?.published ? 'Marketplace listing updated.' : 'Curriculum published.');
+    } catch (e) {
+      toast.error(e?.message || 'Could not publish this curriculum.');
+    }
+    setPublishBusy(false);
+  }
+
+  async function removeMarketplacePublication() {
+    if (!selectedCurriculum || publishBusy) return;
+    setPublishBusy(true);
+    try {
+      const data = await unpublishCurriculum(selectedCurriculum.id);
+      const updated = { ...selectedCurriculum, marketplace: data.marketplace };
+      setSelectedCurriculum(updated);
+      setCurricula(prev => prev.map(c => c.id === updated.id ? { ...c, marketplace: data.marketplace } : c));
+      setPublishOpen(false);
+      setMarketplaceCatalog([]);
+      toast.success('Curriculum removed from the marketplace.');
+    } catch (e) {
+      toast.error(e?.message || 'Could not remove this listing.');
+    }
+    setPublishBusy(false);
   }
 
   async function handleGenerate() {
@@ -375,6 +446,16 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
     try { const data = await getCurriculum(id); setSelectedCurriculum(data.curriculum); } catch {}
   }
 
+  useEffect(() => {
+    const curriculumId = selectedCurriculum?.id;
+    if (!curriculumId) return undefined;
+    const handleProgress = (event) => {
+      if (event.detail?.curriculumId === curriculumId) refreshSelectedCurriculum(curriculumId);
+    };
+    window.addEventListener('covalent:curriculum-progress', handleProgress);
+    return () => window.removeEventListener('covalent:curriculum-progress', handleProgress);
+  }, [selectedCurriculum?.id]);
+
   async function openCurriculum(id) {
     setView('detail');
     setActiveShare(null);
@@ -456,6 +537,8 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
         initialTopic: lesson.quizBowlTopic || `${target.topic}: ${lesson.title}`,
         initialCategory: lesson.quizBowlCategory || target.label,
         autoStart: true,
+        curriculumId,
+        curriculumLessonId: lesson.id,
       });
       return;
     }
@@ -782,6 +865,19 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
             )}
             {!activeShare && (
               <button
+                onClick={openPublishDialog}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                  c.marketplace?.published
+                    ? 'border-blue-400/30 bg-blue-500/[0.12] text-blue-100 hover:bg-blue-500/[0.18]'
+                    : 'border-white/10 text-white/50 hover:border-white/25 hover:text-white/80'
+                }`}
+                title={c.marketplace?.published ? 'Manage marketplace listing' : 'Publish to the curriculum marketplace'}
+              >
+                <Upload size={12} /> {c.marketplace?.published ? 'Published' : 'Publish'}
+              </button>
+            )}
+            {!activeShare && (
+              <button
                 onClick={() => setView('edit')}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 text-xs font-medium text-white/50 hover:border-white/25 hover:text-white/80 transition-colors"
                 title="Edit curriculum"
@@ -808,6 +904,13 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
                   {c.courseGrade.letter} · {c.courseGrade.percent}%
                 </span>
                 <span className="text-[11px] text-white/30">{c.courseGrade.gradedCount} graded</span>
+              </div>
+            )}
+            {c.marketplace?.published && (
+              <div className="flex items-center gap-1.5 mb-4 -mt-1 text-[11px] text-blue-200/75">
+                {c.marketplace.anonymous ? <EyeOff size={12} /> : <UserRound size={12} />}
+                Public on the marketplace {c.marketplace.anonymous ? 'anonymously' : 'with your name'}
+                {c.marketplace.installCount > 0 && <span className="text-white/30">· {c.marketplace.installCount} added</span>}
               </div>
             )}
           </div>
@@ -839,6 +942,37 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
             )}
           </>
         )}
+
+        <Modal
+          open={publishOpen}
+          onClose={() => !publishBusy && setPublishOpen(false)}
+          title={c.marketplace?.published ? 'Marketplace listing' : 'Publish curriculum'}
+          description="Share the course structure and learning material publicly. Your private progress, answers, scores, and lesson chats are never included."
+        >
+          <div className="space-y-4">
+            <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
+              <p className="text-sm font-medium text-white/90">{c.title}</p>
+              <p className="mt-1 text-xs text-white/45">{displayCurriculum.units?.length || 0} units · {totalLessons} lessons</p>
+            </div>
+            <Toggle
+              label="Post anonymously"
+              description="The listing will say Anonymous creator instead of showing your name."
+              accent="blue"
+              checked={publishAnonymous}
+              onChange={setPublishAnonymous}
+            />
+            <div className="flex items-center justify-between gap-2 pt-3 border-t border-white/[0.08]">
+              {c.marketplace?.published ? (
+                <Button variant="ghost" size="sm" disabled={publishBusy} onClick={removeMarketplacePublication} className="text-rose-300 hover:text-rose-200">
+                  Remove listing
+                </Button>
+              ) : <span />}
+              <Button size="sm" loading={publishBusy} onClick={saveMarketplacePublication}>
+                <Upload size={13} /> {c.marketplace?.published ? 'Save listing' : 'Publish publicly'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
 
       </ViewFade>
     );
@@ -965,7 +1099,13 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
             <PillGroup label="Style" options={LEARNING_STYLE_OPTIONS} value={settings.learningStyle} onChange={v => setSettings(p => ({ ...p, learningStyle: v }))} />
             <div className="flex gap-4">
               <Toggle label="Examples" accent="blue" checked={settings.includeExamples} onChange={v => setSettings(p => ({ ...p, includeExamples: v }))} />
-              <Toggle label="Exercises" accent="blue" checked={settings.includeExercises} onChange={v => setSettings(p => ({ ...p, includeExercises: v }))} />
+              <Toggle
+                label="Exercises"
+                description="Fill-in-the-blank, matching, and multiple choice only"
+                accent="blue"
+                checked={settings.includeExercises}
+                onChange={v => setSettings(p => ({ ...p, includeExercises: v }))}
+              />
             </div>
 
             {/* ===== Source material (textbooks + websites) ===== */}
@@ -1056,16 +1196,18 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
     );
   }
 
-  // PAUSD catalog view - browse and enroll in pre-built courses
-  if (view === 'pausd') {
+  // Curriculum marketplace - browse presets and community courses together.
+  if (view === 'marketplace') {
     return (
-      <ViewFade viewKey="pausd" className="h-full flex flex-col">
-        <PausdCatalogView
-          catalog={pausdCatalog}
-          loading={pausdLoading}
+      <ViewFade viewKey="marketplace" className="h-full flex flex-col">
+        <CurriculumMarketplaceView
+          catalog={marketplaceCatalog}
+          loading={marketplaceLoading}
+          error={marketplaceError}
           enrollingSlug={enrollingSlug}
           onBack={() => setView('list')}
-          onEnroll={enrollPausd}
+          onRetry={() => loadMarketplace({ refresh: true })}
+          onEnroll={enrollFromMarketplace}
         />
       </ViewFade>
     );
@@ -1082,26 +1224,26 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
           <Button
             size="sm"
             variant="secondary"
-            onClick={() => { loadPausdCatalog(); setView('pausd'); }}
+            onClick={() => { loadMarketplace(); setView('marketplace'); }}
           >
-            <GraduationCap size={14} /> PAUSD
+            <Store size={14} /> Marketplace
           </Button>
           <Button size="sm" data-tour="new-curriculum-button" onClick={() => setView('new')}><Plus size={14} /> New</Button>
         </div>
       </div>
 
-      {/* PAUSD promo strip */}
+      {/* Marketplace discovery strip */}
       <button
-        onClick={() => { loadPausdCatalog(); setView('pausd'); }}
+        onClick={() => { loadMarketplace(); setView('marketplace'); }}
         data-tour="pausd-catalog-button"
         className="w-full mb-4 flex items-center gap-3 p-3 rounded-xl border border-white/[0.08] bg-white/[0.04] hover:border-white/[0.16] hover:bg-white/[0.07] transition-colors text-left backdrop-blur-sm"
       >
         <div className="w-10 h-10 rounded-lg bg-white/[0.07] text-white/70 flex items-center justify-center flex-shrink-0">
-          <GraduationCap size={18} />
+          <Store size={18} />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-white">PAUSD Common Core</p>
-          <p className="text-[11px] text-white/50">Pre-built middle + high-school courses.</p>
+          <p className="text-sm font-semibold text-white">Curriculum Marketplace</p>
+          <p className="text-[11px] text-white/50">Search preset and community-made courses.</p>
         </div>
         <ChevronRight size={16} className="text-white/30 flex-shrink-0" />
       </button>
@@ -1158,8 +1300,8 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView } = {}) 
           <p className="text-sm text-white/45 mb-4">No curricula yet</p>
           <div className="flex items-center justify-center gap-2">
             <Button onClick={() => setView('new')}><Plus size={16} /> New</Button>
-            <Button variant="secondary" onClick={() => { loadPausdCatalog(); setView('pausd'); }}>
-              <GraduationCap size={16} /> PAUSD
+            <Button variant="secondary" onClick={() => { loadMarketplace(); setView('marketplace'); }}>
+              <Store size={16} /> Browse marketplace
             </Button>
           </div>
         </div>
@@ -1242,6 +1384,7 @@ function UnitSection({ unit, onOpenLesson }) {
         <div className="border-t border-white/8 p-1.5">
           {(unit.lessons || []).map((lesson, i) => {
             const TypeIcon = TYPE_ICONS[lesson.type] || BookOpen;
+            const typeColor = TYPE_COLORS[lesson.type] || 'text-white/35';
             // Anchor the FIRST lesson of the FIRST unit so the guided tour
             // can highlight it after enrollment.
             const tourAnchor = unit.tourAnchorFirst && i === 0 && lesson.type === 'lesson';
@@ -1252,7 +1395,7 @@ function UnitSection({ unit, onOpenLesson }) {
                 data-tour={tourAnchor ? 'first-lesson' : undefined}
                 className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left hover:bg-white/8 transition-colors group"
               >
-                {lesson.isCompleted ? <CheckCircle2 size={14} className="text-white/40 flex-shrink-0" /> : lesson.chatHistory?.length > 0 ? <Circle size={14} className="text-white/35 flex-shrink-0" /> : <TypeIcon size={14} className="text-white/35 flex-shrink-0" />}
+                {lesson.isCompleted ? <CheckCircle2 size={14} className="text-white/40 flex-shrink-0" /> : lesson.chatHistory?.length > 0 ? <Circle size={14} className="text-white/35 flex-shrink-0" /> : <TypeIcon size={14} className={`${typeColor} flex-shrink-0`} />}
                 <span className={`text-sm flex-1 truncate ${lesson.isCompleted ? 'text-white/25 line-through' : 'text-white/60 group-hover:text-white'}`}>{lesson.title}</span>
                 {typeof lesson.score === 'number' && (lesson.type === 'unit_test' || lesson.type === 'essay') && (
                   <span className={`flex-shrink-0 text-[10px] font-bold tabular-nums px-1.5 py-0.5 rounded-md border ${gradePillClass(lesson.score)}`}>{lesson.score}%</span>
@@ -1409,7 +1552,7 @@ function AssessmentView({ lesson, curriculum, onBack }) {
 
   return (
     <div className="h-full overflow-y-auto bg-transparent">
-      <div className="max-w-2xl mx-auto px-5 py-6">
+      <div className="max-w-3xl mx-auto px-5 py-6">
         {/* ── Back nav ── */}
         <button
           onClick={onBack}
@@ -1419,12 +1562,18 @@ function AssessmentView({ lesson, curriculum, onBack }) {
         </button>
 
         {/* ── Header ── */}
-        <div className="mb-6">
-          <div className="flex items-center gap-2 mb-1">
-            <h1 className="text-[18px] font-bold text-white/90 leading-snug">{lesson.title}</h1>
-            {totalRubricPoints && (
-              <span className="text-[10px] text-white/25 font-medium flex-shrink-0">{totalRubricPoints} pts</span>
-            )}
+        <div className="mb-7 flex items-start gap-3">
+          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-amber-400/[0.18] bg-amber-500/[0.08] text-amber-300/85">
+            <FileText size={16} aria-hidden="true" />
+          </div>
+          <div className="min-w-0">
+            <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.16em] text-white/40">Graded essay</p>
+            <div className="flex items-baseline gap-2">
+              <h1 className="text-[20px] font-bold leading-snug text-white/90">{lesson.title}</h1>
+              {totalRubricPoints && (
+                <span className="shrink-0 font-mono text-[11px] text-white/35">{totalRubricPoints} pts</span>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1444,74 +1593,80 @@ function AssessmentView({ lesson, curriculum, onBack }) {
 
         {/* ===== ESSAY FORM ===== */}
         {!loading && !error && assessment && !result && isEssay && (
-          <div className="space-y-4">
-            {/* Prompt */}
-            <div className="rounded-2xl border border-amber-500/25 bg-amber-500/[0.05] p-5">
-              <p className="text-[9px] font-black uppercase tracking-[0.22em] text-amber-400/70 mb-3">Essay Prompt</p>
-              <MathText as="p" className="text-[14px] text-white/85 leading-[1.75]">{assessment.prompt || ''}</MathText>
+          <div className="space-y-5">
+            <div className="grid gap-5 border-y border-white/[0.07] py-5 lg:grid-cols-5">
+              {/* Prompt */}
+              <section className="lg:col-span-3">
+                <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Prompt</p>
+                <MathText as="p" className="text-[14px] leading-7 text-white/82">{assessment.prompt || ''}</MathText>
+              </section>
+
+              {/* Rubric */}
+              {Array.isArray(assessment.rubric) && assessment.rubric.length > 0 && (
+                <section className="border-t border-white/[0.07] pt-4 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Rubric</p>
+                    <span className="font-mono text-[10px] text-white/30">{assessment.rubric.length} criteria</span>
+                  </div>
+                  <div className="divide-y divide-white/[0.06]">
+                    {assessment.rubric.map((r, i) => (
+                      <div key={i} className="py-2 first:pt-0 last:pb-0">
+                        <div className="flex items-start justify-between gap-3">
+                          <span className="text-[12px] font-medium text-white/75">{r.criterion}</span>
+                          <span className="shrink-0 font-mono text-[10px] text-amber-300/80">{r.maxScore || 5} pts</span>
+                        </div>
+                        {r.description && <p className="mt-0.5 text-[11px] leading-snug text-white/35">{r.description}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
             </div>
 
-            {/* Rubric */}
-            {Array.isArray(assessment.rubric) && assessment.rubric.length > 0 && (
-              <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4">
-                <p className="text-[9px] font-black uppercase tracking-[0.22em] text-white/25 mb-3">Grading Rubric</p>
-                <div className="flex flex-col gap-2">
-                  {assessment.rubric.map((r, i) => (
-                    <div key={i} className="flex items-start gap-3">
-                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-white/[0.05] text-[9px] font-bold text-white/30 flex items-center justify-center mt-0.5">{i + 1}</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-baseline justify-between gap-2">
-                          <span className="text-[12px] font-semibold text-white/75">{r.criterion}</span>
-                          <span className="flex-shrink-0 text-[10px] font-bold tabular-nums text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded-md">{r.maxScore || 5} pts</span>
-                        </div>
-                        {r.description && <p className="text-[11px] text-white/35 mt-0.5 leading-snug">{r.description}</p>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {/* Textarea */}
-            <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] overflow-hidden focus-within:border-white/20 transition-colors">
-              <div className="px-4 pt-3 pb-2 border-b border-white/[0.06]">
-                <p className="text-[9px] font-black uppercase tracking-[0.22em] text-white/25">Your Response</p>
+            <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.03] transition-colors focus-within:border-blue-400/45 focus-within:ring-2 focus-within:ring-blue-400/[0.12]">
+              <div className="flex items-center justify-between gap-3 border-b border-white/[0.06] px-4 py-3">
+                <label htmlFor={`essay-response-${lesson.id}`} className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/45">Your response</label>
+                <span className="font-mono text-[10px] text-white/30">Draft</span>
               </div>
               <textarea
+                id={`essay-response-${lesson.id}`}
                 value={essayText}
                 onChange={e => setEssayText(e.target.value)}
                 placeholder="Make a clear argument, support it with evidence, and address each rubric criterion."
                 rows={14}
-                className="w-full px-4 py-4 bg-transparent text-[13px] text-white/80 outline-none resize-y leading-7 placeholder:text-white/20"
+                className="w-full resize-y bg-transparent px-4 py-4 text-[14px] leading-7 text-white/85 outline-none placeholder:text-white/25"
               />
-              <div className="flex items-center justify-between px-4 py-2.5 border-t border-white/[0.06]">
-                <p className="text-[10px] text-white/25 tabular-nums">
-                  <span className="font-semibold text-white/45">{wordCount}</span> {wordCount === 1 ? 'word' : 'words'}
-                  <span className="mx-1.5 text-white/15">·</span>
-                  <span className="font-semibold text-white/45">{essayText.length}</span> chars
+              <div className="flex items-center justify-between gap-3 border-t border-white/[0.06] px-4 py-2.5">
+                <p className="font-mono text-[10px] text-white/35">
+                  {wordCount} {wordCount === 1 ? 'word' : 'words'} <span className="mx-1.5 text-white/20">·</span> {essayText.length} characters
                 </p>
                 {!canSubmitEssay && essayText.length > 0 && (
-                  <p className="text-[10px] text-amber-400 font-medium">30 characters minimum</p>
+                  <p className="text-[10px] font-medium text-amber-300/85">30 characters minimum</p>
                 )}
                 {canSubmitEssay && (
-                  <p className="text-[10px] text-emerald-400 font-medium flex items-center gap-1">
+                  <p className="flex items-center gap-1 text-[10px] font-medium text-emerald-300/90">
                     <Check size={9} /> Ready
                   </p>
                 )}
               </div>
             </div>
 
-            <button
+            <div className="flex items-center justify-end gap-3">
+              <p className="mr-auto text-[11px] text-white/35">AI feedback is based on the rubric above.</p>
+              <Button
               onClick={handleEssaySubmit}
               disabled={grading || !canSubmitEssay}
-              className="w-full py-3 rounded-2xl bg-white text-black text-[13px] font-bold disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2 hover:bg-white/90 transition-colors"
+              loading={grading}
+              className="min-w-[140px]"
             >
               {grading ? (
-                <><div className="w-3.5 h-3.5 border-2 border-black/30 border-t-black rounded-full animate-spin" /> Grading…</>
+                <><Loader2 size={14} className="animate-spin" /> Grading…</>
               ) : (
-                'Submit Essay'
+                'Submit for grading'
               )}
-            </button>
+              </Button>
+            </div>
           </div>
         )}
 
@@ -1532,96 +1687,95 @@ function AssessmentView({ lesson, curriculum, onBack }) {
             : pct >= 65 ? { text: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/25', bar: 'bg-amber-500' }
             : { text: 'text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/25', bar: 'bg-rose-500' };
           return (
-            <div className="space-y-4">
-              {/* Score hero */}
-              <div className={`rounded-2xl border ${col.border} ${col.bg} p-6 text-center`}>
-                <div className="flex items-end justify-center gap-3 mb-2">
-                  <span className={`text-6xl font-black tabular-nums ${col.text}`}>{letter}</span>
-                  <span className={`text-2xl font-bold pb-1 ${col.text} opacity-60`}>{pct}%</span>
+            <div className="space-y-6">
+              <section className={`grid gap-5 rounded-xl border ${col.border} ${col.bg} p-4 sm:grid-cols-[104px_minmax(0,1fr)] sm:items-center`}>
+                <div className="border-b border-white/[0.08] pb-4 text-center sm:border-b-0 sm:border-r sm:pb-0 sm:pr-5">
+                  <div className="flex items-baseline justify-center gap-1.5">
+                    <span className={`text-4xl font-bold tabular-nums ${col.text}`}>{letter}</span>
+                    <span className={`font-mono text-[13px] ${col.text} opacity-70`}>{pct}%</span>
+                  </div>
+                  <p className="mt-1 font-mono text-[10px] text-white/35">{result.score} / {result.total} pts</p>
                 </div>
-                <p className="text-[12px] text-white/35">{result.score} / {result.total} pts</p>
-                <div className="mt-4 h-1 rounded-full bg-white/[0.07] overflow-hidden mx-auto max-w-[140px]">
-                  <div className={`h-full rounded-full transition-all duration-700 ${col.bar}`} style={{ width: `${pct}%` }} />
+                <div>
+                  <p className="mb-1.5 text-[11px] font-bold uppercase tracking-[0.16em] text-white/45">Grading complete</p>
+                  {result.overallFeedback ? (
+                    <MathText as="p" className="text-[13px] leading-relaxed text-white/75">{result.overallFeedback}</MathText>
+                  ) : (
+                    <p className="text-[13px] text-white/55">Your essay has been scored against the rubric.</p>
+                  )}
                 </div>
-              </div>
-
-              {/* Overall feedback */}
-              {result.overallFeedback && (
-                <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
-                  <p className="text-[9px] font-black uppercase tracking-[0.22em] text-white/25 mb-2">Overall Feedback</p>
-                  <MathText as="p" className="text-[13px] text-white/70 leading-relaxed">{result.overallFeedback}</MathText>
-                </div>
-              )}
+              </section>
 
               {/* Rubric breakdown */}
               {Array.isArray(result.rubricScores) && result.rubricScores.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-[9px] font-black uppercase tracking-[0.22em] text-white/25 px-0.5">Rubric Breakdown</p>
+                <section>
+                  <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Rubric breakdown</p>
+                  <div className="divide-y divide-white/[0.07] border-y border-white/[0.07]">
                   {result.rubricScores.map((r, i) => {
                     const p = r.maxScore > 0 ? Math.round((r.score / r.maxScore) * 100) : 0;
                     const c = p >= 80 ? { score: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20', bar: 'bg-emerald-500' }
                       : p >= 60 ? { score: 'text-amber-400 bg-amber-500/10 border-amber-500/20', bar: 'bg-amber-500' }
                       : { score: 'text-rose-400 bg-rose-500/10 border-rose-500/20', bar: 'bg-rose-500' };
                     return (
-                      <div key={i} className="rounded-2xl border border-white/[0.07] bg-white/[0.02] p-4">
-                        <div className="flex items-start justify-between gap-3 mb-2">
+                      <div key={i} className="py-3.5">
+                        <div className="mb-2 flex items-start justify-between gap-3">
                           <p className="text-[13px] font-semibold text-white/80">{r.criterion}</p>
-                          <span className={`flex-shrink-0 text-[11px] font-bold tabular-nums px-2 py-0.5 rounded-lg border ${c.score}`}>{r.score}/{r.maxScore}</span>
+                          <span className={`shrink-0 rounded-md border px-1.5 py-0.5 font-mono text-[10px] font-bold ${c.score}`}>{r.score}/{r.maxScore}</span>
                         </div>
-                        <div className="h-0.5 rounded-full bg-white/[0.06] mb-2.5 overflow-hidden">
+                        <div className="mb-2 h-1 overflow-hidden rounded-full bg-white/[0.06]">
                           <div className={`h-full rounded-full ${c.bar}`} style={{ width: `${p}%` }} />
                         </div>
                         {r.feedback && <MathText as="p" className="text-[11px] text-white/40 leading-snug">{r.feedback}</MathText>}
                       </div>
                     );
                   })}
-                </div>
+                  </div>
+                </section>
               )}
 
               {/* Strengths + improvements */}
-              <div className="grid grid-cols-1 gap-3">
+              <div className="grid gap-5 sm:grid-cols-2">
                 {Array.isArray(result.strengths) && result.strengths.length > 0 && (
-                  <div className="rounded-2xl border border-emerald-800/40 bg-emerald-900/10 p-4">
-                    <p className="text-[9px] font-black uppercase tracking-[0.22em] text-emerald-400/70 mb-3">Strengths</p>
-                    <ul className="space-y-2">
+                  <section>
+                    <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-emerald-300/75">Strengths</p>
+                    <ul className="space-y-2.5 border-t border-white/[0.07] pt-3">
                       {result.strengths.map((s, i) => (
                         <li key={i} className="flex items-start gap-2.5">
-                          <Check size={11} className="text-emerald-400 flex-shrink-0 mt-0.5" />
-                          <span className="text-[12px] text-white/60 leading-snug">{s}</span>
+                          <Check size={12} className="mt-0.5 shrink-0 text-emerald-300/90" />
+                          <span className="text-[12px] leading-snug text-white/60">{s}</span>
                         </li>
                       ))}
                     </ul>
-                  </div>
+                  </section>
                 )}
                 {Array.isArray(result.improvements) && result.improvements.length > 0 && (
-                  <div className="rounded-2xl border border-amber-800/40 bg-amber-900/10 p-4">
-                    <p className="text-[9px] font-black uppercase tracking-[0.22em] text-amber-400/70 mb-3">To Improve</p>
-                    <ul className="space-y-2">
+                  <section>
+                    <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-amber-300/75">Next time</p>
+                    <ul className="space-y-2.5 border-t border-white/[0.07] pt-3">
                       {result.improvements.map((s, i) => (
                         <li key={i} className="flex items-start gap-2.5">
-                          <span className="text-amber-400 flex-shrink-0 text-[11px] font-bold mt-0.5">→</span>
-                          <span className="text-[12px] text-white/60 leading-snug">{s}</span>
+                          <span className="mt-0.5 shrink-0 text-[12px] font-bold text-amber-300/90">→</span>
+                          <span className="text-[12px] leading-snug text-white/60">{s}</span>
                         </li>
                       ))}
                     </ul>
-                  </div>
+                  </section>
                 )}
               </div>
 
               {/* Actions */}
-              <div className="flex flex-col gap-2 pt-1">
-                <button
+              <div className="flex flex-wrap justify-end gap-2 border-t border-white/[0.07] pt-5">
+                <Button
                   onClick={() => { setResult(null); setEssayText(result.essay || essayText); }}
-                  className="w-full py-2.5 rounded-2xl border border-white/[0.09] text-[13px] font-medium text-white/50 hover:bg-white/[0.05] hover:text-white/70 transition-colors"
+                  variant="secondary"
                 >
                   Revise &amp; Resubmit
-                </button>
-                <button
+                </Button>
+                <Button
                   onClick={onBack}
-                  className="w-full py-3 rounded-2xl bg-white text-black text-[13px] font-bold hover:bg-white/90 transition-colors"
                 >
                   Back to Curriculum
-                </button>
+                </Button>
               </div>
             </div>
           );
@@ -1746,103 +1900,172 @@ function EditCurriculumView({ curriculum, onBack, onUpdated }) {
 }
 
 // =============================================================
-// PAUSD Catalog browser - grid of pre-built courses, grouped by
-// subject. Tap a course → enroll → opens the cloned curriculum
-// in detail view (handled by parent).
+// Curriculum Marketplace — a search-first discovery hub with a source filter
+// for community-made courses and dense wiki-style result rows.
 // =============================================================
-function PausdCatalogView({ catalog, loading, enrollingSlug, onBack, onEnroll }) {
-  const grouped = catalog.reduce((acc, c) => {
-    const key = c.subject || 'other';
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(c);
-    return acc;
-  }, {});
+function CurriculumMarketplaceView({ catalog, loading, error, enrollingSlug, onBack, onRetry, onEnroll }) {
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState('All');
 
-  // Sort math courses by an explicit ladder; science by grade.
-  const mathOrder = ['foundations-in-math', 'concepts-in-math', 'algebra-1', 'geometry-h'];
-  if (grouped.math) grouped.math.sort((a, b) => mathOrder.indexOf(a.slug) - mathOrder.indexOf(b.slug));
-  if (grouped.science) grouped.science.sort((a, b) => String(a.grade).localeCompare(String(b.grade)));
+  const filters = ['All', 'Community'];
+  const normalizedQuery = query.trim().toLowerCase();
+  const visible = catalog.filter(course => {
+    const haystack = [course.title, course.description, course.category, course.subject, course.author, course.grade]
+      .filter(Boolean).join(' ').toLowerCase();
+    const matchesQuery = !normalizedQuery || haystack.includes(normalizedQuery);
+    const matchesFilter = filter === 'All' || course.source === 'community';
+    return matchesQuery && matchesFilter;
+  });
 
-  const SUBJECT_META = {
-    math: { label: 'Mathematics', icon: Sigma, color: 'text-white/60', bg: 'bg-white/[0.04]' },
-    science: { label: 'Science', icon: Atom, color: 'text-emerald-500', bg: 'bg-emerald-50 dark:bg-emerald-900/20' },
-    geography: { label: 'Geography', icon: MapIcon, color: 'text-sky-400', bg: 'bg-sky-50 dark:bg-sky-900/20' },
-  };
+  const featured = visible.filter(course => course.featured).slice(0, 6);
+  const community = visible.filter(course => course.source === 'community');
+  const library = visible.filter(course => course.source === 'preset' && !featured.includes(course));
+  // Community is a source view, not a search mode. It keeps the normal
+  // marketplace sections and simply removes preset listings.
+  const hasActiveSearch = Boolean(normalizedQuery) && filter === 'All';
+
+  function CourseSection({ title, icon: Icon, items }) {
+    if (!items.length) return null;
+    return (
+      <section className="mb-5">
+        <div className="flex items-center gap-2 mb-1.5 px-1">
+          <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 inline-flex items-center gap-1.5">
+            <Icon size={12} /> {title}
+          </h3>
+          <span className="text-[10px] text-white/25 tabular-nums">{items.length}</span>
+        </div>
+        <div>
+          {items.map((course, index) => (
+            <MarketplaceCourseRow
+              key={course.listingId}
+              course={course}
+              enrolling={enrollingSlug === course.listingId}
+              onEnroll={() => onEnroll(course)}
+              tourAnchor={course.source === 'preset' && index === 0}
+            />
+          ))}
+        </div>
+      </section>
+    );
+  }
 
   return (
-    <div>
-      <button onClick={onBack} className="flex items-center gap-2 text-sm text-white/40 hover:text-white/90 mb-4">
-        <ArrowLeft size={16} /> Back to my curricula
-      </button>
-
-      <div className="flex items-center gap-2 mb-5">
-        <GraduationCap size={20} className="text-white/50" />
-        <h2 className="text-lg font-bold text-white">PAUSD Common Core Catalog</h2>
+    <div className="h-full min-h-0 flex flex-col">
+      <div className="flex items-center justify-between mb-4 flex-shrink-0">
+        <div>
+          <button onClick={onBack} className="flex items-center gap-2 text-sm text-white/35 hover:text-white/65 transition-colors mb-2">
+            <ArrowLeft size={16} /> My curricula
+          </button>
+          <h2 className="text-lg font-bold text-white/95">Curriculum Marketplace</h2>
+          <p className="mt-0.5 text-[11px] text-white/40">Preset courses and curricula made by the community.</p>
+        </div>
+        <div className="hidden sm:flex items-center gap-2 text-[10px] text-white/35">
+          <Store size={13} /> {catalog.length} public course{catalog.length === 1 ? '' : 's'}
+        </div>
       </div>
 
-      {loading && catalog.length === 0 ? (
-        <div className="flex items-center justify-center py-16">
-          <LoadingSpinner size={24} />
-        </div>
-      ) : (
-        <div className="space-y-6">
-          {['math', 'science', 'geography'].map(key => {
-            const courses = grouped[key];
-            if (!courses?.length) return null;
-            const meta = SUBJECT_META[key] || { label: key, icon: BookOpen, color: 'text-white/45', bg: 'bg-white/[0.04]' };
-            const SubjectIcon = meta.icon;
-            return (
-              <section key={key}>
-                <div className="flex items-center gap-2 mb-2.5">
-                  <div className={`w-7 h-7 rounded-md ${meta.bg} flex items-center justify-center`}>
-                    <SubjectIcon size={14} className={meta.color} />
-                  </div>
-                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">{meta.label}</h3>
-                  <span className="text-[10px] text-white/40">· {courses.length} course{courses.length === 1 ? '' : 's'}</span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {courses.map((c, i) => (
-                    <PausdCourseCard
-                      key={c.slug}
-                      course={c}
-                      enrolling={enrollingSlug === c.slug}
-                      onEnroll={() => onEnroll(c.slug)}
-                      tourAnchor={key === 'math' && i === 0}
-                    />
-                  ))}
-                </div>
-              </section>
-            );
-          })}
-        </div>
-      )}
+      <div className="relative mb-3 flex-shrink-0">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30 pointer-events-none" />
+        <input
+          value={query}
+          onChange={event => setQuery(event.target.value)}
+          placeholder="Search topics, subjects, grade levels, or creators…"
+          inputMode="search"
+          className="w-full pl-9 pr-3 py-2.5 text-sm rounded-lg border border-white/[0.10] bg-white/[0.04] text-white/90 placeholder-white/30 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 transition-colors"
+        />
+      </div>
+
+      <div className="flex gap-1.5 overflow-x-auto scrollbar-hide pb-3 flex-shrink-0">
+        {filters.map(item => (
+          <button
+            key={item}
+            onClick={() => {
+              setFilter(item);
+              if (item === 'Community') setQuery('');
+            }}
+            className={`shrink-0 rounded-lg px-2.5 py-1 text-[11px] font-medium border transition-colors ${
+              filter === item
+                ? 'border-blue-500 bg-blue-500 text-white'
+                : 'border-white/[0.06] bg-white/[0.025] text-white/45 hover:bg-white/[0.06] hover:text-white/70'
+            }`}
+          >
+            {item}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pb-2">
+        {loading && catalog.length === 0 ? (
+          <div className="flex items-center justify-center py-16"><LoadingSpinner size={24} /></div>
+        ) : error && catalog.length === 0 ? (
+          <div className="text-center py-14">
+            <Store size={28} className="mx-auto mb-3 text-white/20" />
+            <p className="text-sm text-white/65">Marketplace unavailable</p>
+            <p className="mt-1 text-xs text-white/35">{error}</p>
+            <Button size="sm" variant="secondary" className="mt-4" onClick={onRetry}>Try again</Button>
+          </div>
+        ) : visible.length === 0 ? (
+          <div className="text-center py-14">
+            <Search size={28} className="mx-auto mb-3 text-white/20" />
+            <p className="text-sm text-white/65">No curricula match “{query || filter}”</p>
+            <button onClick={() => { setQuery(''); setFilter('All'); }} className="mt-2 text-xs text-blue-300 hover:text-blue-200">Clear search</button>
+          </div>
+        ) : hasActiveSearch ? (
+          <CourseSection title="Results" icon={Search} items={visible} />
+        ) : (
+          <>
+            <CourseSection title="Featured courses" icon={Sparkles} items={featured} />
+            <CourseSection title="Community made" icon={Users} items={community} />
+            <CourseSection title="Course library" icon={Library} items={library} />
+          </>
+        )}
+      </div>
     </div>
   );
 }
 
-function PausdCourseCard({ course, enrolling, onEnroll, tourAnchor }) {
-  // Uniform card style - every PAUSD course is honors-tier so no special
-  // accent is needed. Subtle gray border with a blue hover state.
+function MarketplaceCourseRow({ course, enrolling, onEnroll, tourAnchor }) {
+  const category = course.category || 'Other';
+  const meta = [
+    course.grade ? `Grade ${course.grade}` : null,
+    `${course.unitCount || 0} units`,
+    `${course.lessonCount || 0} lessons`,
+    course.installCount ? `${course.installCount} added` : null,
+  ].filter(Boolean).join(' · ');
+
   return (
-    <button
-      onClick={onEnroll}
-      disabled={enrolling}
+    <div
       data-tour={tourAnchor ? 'pausd-course-card' : undefined}
-      className="text-left flex flex-col h-full p-4 rounded-xl border border-white/[0.08] bg-white/[0.04] backdrop-blur-sm hover:border-white/[0.18] hover:bg-white/[0.07] transition-colors disabled:opacity-60"
+      className="group min-h-16 flex items-center gap-3 px-2 py-2.5 border-b border-white/[0.06] last:border-b-0 hover:bg-white/[0.035] rounded-md transition-colors"
     >
-      <h4 className="text-sm font-bold text-white leading-snug mb-1.5">{course.title}</h4>
-      <div className="flex items-center justify-between mt-auto">
-        <p className="text-[10px] text-white/40 tabular-nums">
-          Grade {course.grade} · {course.unitCount}u · {course.lessonCount} lessons
-        </p>
-        {enrolling ? (
-          <InlineProgress active />
-        ) : (
-          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-white/70">
-            Enroll <ChevronRight size={12} />
-          </span>
-        )}
+      <div className="w-[72px] shrink-0">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-white/30 group-hover:text-white/45 transition-colors line-clamp-2">{category}</span>
       </div>
-    </button>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <h4 className="text-sm font-medium text-white/90 truncate">{course.title}</h4>
+          <span className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${
+            course.source === 'community'
+              ? 'bg-blue-500/[0.14] text-blue-200/90'
+              : 'bg-white/[0.06] text-white/35'
+          }`}>
+            {course.source === 'community' ? 'Community' : 'Preset'}
+          </span>
+        </div>
+        <p className="mt-1.5 text-[10.5px] text-white/35 truncate">
+          {course.anonymous ? <EyeOff size={10} className="inline mr-1 -mt-px" /> : <UserRound size={10} className="inline mr-1 -mt-px" />}
+          {course.author} · {meta}
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={onEnroll}
+        disabled={enrolling}
+        aria-label={`Add ${course.title} to my curricula`}
+        className="shrink-0 inline-flex min-w-[66px] items-center justify-center gap-1.5 rounded-lg border border-blue-500 bg-blue-500 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:border-blue-400 hover:bg-blue-400 disabled:opacity-40 transition-colors"
+      >
+        {enrolling ? <InlineProgress active /> : <><Download size={12} /> Add</>}
+      </button>
+    </div>
   );
 }

@@ -21,6 +21,7 @@ import SettingsPage from './pages/SettingsPage';
 import AppShell from './components/layout/AppShell';
 import DesktopShell from './components/desktop/DesktopShell';
 import MobileShell from './components/mobile/MobileShell';
+import MobileQuizBowlOnboarding from './components/mobile/MobileQuizBowlOnboarding';
 import Onboarding from './components/desktop/Onboarding';
 import LoadingSpinner from './components/shared/LoadingSpinner';
 
@@ -140,42 +141,16 @@ function AppRouter() {
   }
 
   if (!onboarded) {
-    // Desktop onboarding is built for wide layouts and looks broken
-    // on a phone. On mobile, auto-mark onboarded server-side so the
-    // user lands directly in MobileShell.
+    // Mobile has its own Quiz Bowl-first onboarding. It collects the
+    // defaults needed for a first round and then sends the player into
+    // the mobile Quiz Bowl app, rather than using the desktop setup.
     if (isMobile) {
-      // Fire-and-forget - by the time fetchUser refreshes, the gate
-      // re-evaluates with onboarded=true and we render MobileShell.
-      autoCompleteOnboarding(user);
-      return <LoadingSpinner fullScreen />;
+      return <MobileQuizBowlOnboarding />;
     }
     return <Onboarding onComplete={() => { /* fetchUser inside Onboarding refreshes the gate */ }} />;
   }
 
   return isMobile ? <MobileShell /> : <DesktopShell />;
-}
-
-// Mobile auto-onboard helper. Imported lazily so the syncData module
-// doesn't get pulled into the main bundle just for the rare case of
-// a fresh signed-in mobile user hitting the gate.
-let _autoCompleteOnboardingPromise = null;
-function autoCompleteOnboarding(user) {
-  if (_autoCompleteOnboardingPromise) return;
-  _autoCompleteOnboardingPromise = (async () => {
-    try {
-      const { syncData } = await import('./api/auth');
-      await syncData({
-        preferences: { ...(user?.data?.preferences || {}), onboarded: true },
-      });
-      // Reload so AuthContext refetches the user with the new flag
-      // and the gate flips through to MobileShell. Easier than wiring
-      // fetchUser through the helper.
-      window.location.reload();
-    } catch (err) {
-      console.error('Auto-onboard failed:', err);
-      _autoCompleteOnboardingPromise = null; // allow retry
-    }
-  })();
 }
 
 export default function App() {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Globe, FlaskConical, Check, Search } from 'lucide-react';
+import { Globe, FlaskConical, Landmark, Check, Search } from 'lucide-react';
 import { listNotePresets, addNotePreset } from '../../api/notes';
 import LoadingSpinner from '../shared/LoadingSpinner';
 
@@ -22,12 +22,14 @@ export default function PresetNotesBrowser({ notes, onOpenNote, onAdded }) {
     return map;
   }, [notes]);
 
-  const { geoGrouped, subdivisionGrouped, scienceGrouped } = useMemo(() => {
-    if (!presets) return { geoGrouped: [], subdivisionGrouped: [], scienceGrouped: [] };
+  const { geoGrouped, historyGrouped, historySubdivisionGrouped, subdivisionGrouped, scienceGrouped } = useMemo(() => {
+    if (!presets) return { geoGrouped: [], historyGrouped: [], historySubdivisionGrouped: [], subdivisionGrouped: [], scienceGrouped: [] };
     const q = query.trim().toLowerCase();
 
     const geoPresets = presets.filter(p => !p.category || p.category === 'geo');
     const subdivisionPresets = presets.filter(p => p.category === 'geo-subdivision');
+    const historyPresets = presets.filter(p => p.category === 'history');
+    const historySubdivisionPresets = presets.filter(p => p.category === 'history-subdivision');
     const sciPresets = presets.filter(p => p.category === 'science');
 
     const filteredGeo = q
@@ -37,6 +39,14 @@ export default function PresetNotesBrowser({ notes, onOpenNote, onAdded }) {
     const filteredSubdivisions = q
       ? subdivisionPresets.filter(p => [p.label, p.country, p.subgroup, p.subdivisionType].filter(Boolean).some(value => value.toLowerCase().includes(q)))
       : subdivisionPresets;
+
+    const filteredHistory = q
+      ? historyPresets.filter(p => (p.label || p.country || '').toLowerCase().includes(q) || (p.subgroup || p.subregion || '').toLowerCase().includes(q))
+      : historyPresets;
+
+    const filteredHistorySubdivisions = q
+      ? historySubdivisionPresets.filter(p => [p.label, p.country, p.subgroup, p.subdivisionType].filter(Boolean).some(value => value.toLowerCase().includes(q)))
+      : historySubdivisionPresets;
 
     const filteredSci = q
       ? sciPresets.filter(p => (p.label || '').toLowerCase().includes(q) || (p.group || '').toLowerCase().includes(q) || (p.subgroup || '').toLowerCase().includes(q))
@@ -56,11 +66,25 @@ export default function PresetNotesBrowser({ notes, onOpenNote, onAdded }) {
       group.items.push(item);
     }
 
+    const historyGrouped = GEO_REGION_ORDER
+      .map(region => ({ region, items: filteredHistory.filter(p => (p.region || p.group) === region) }))
+      .filter(group => group.items.length > 0);
+
+    const historySubdivisionGrouped = [];
+    for (const item of filteredHistorySubdivisions) {
+      let group = historySubdivisionGrouped.find(g => g.country === item.country);
+      if (!group) {
+        group = { country: item.country, items: [] };
+        historySubdivisionGrouped.push(group);
+      }
+      group.items.push(item);
+    }
+
     const scienceGrouped = SCIENCE_COURSE_ORDER
       .map(course => ({ course, items: filteredSci.filter(p => p.group === course) }))
       .filter(g => g.items.length > 0);
 
-    return { geoGrouped, subdivisionGrouped, scienceGrouped };
+    return { geoGrouped, historyGrouped, historySubdivisionGrouped, subdivisionGrouped, scienceGrouped };
   }, [presets, query]);
 
   async function handlePick(preset) {
@@ -82,14 +106,22 @@ export default function PresetNotesBrowser({ notes, onOpenNote, onAdded }) {
   const tabs = [
     { id: 'science', label: 'Science', icon: FlaskConical },
     { id: 'geo', label: 'Geography', icon: Globe },
+    { id: 'history', label: 'History', icon: Landmark },
+    { id: 'history-subdivisions', label: 'Division history', icon: Landmark },
     { id: 'subdivisions', label: 'Subdivisions', icon: Globe },
   ];
 
-  const grouped = tab === 'geo' ? geoGrouped : tab === 'subdivisions' ? subdivisionGrouped : scienceGrouped;
-  const groupKey = tab === 'geo' ? 'region' : tab === 'subdivisions' ? 'country' : 'course';
-  const emptyMsg = tab === 'geo'
+  const grouped = tab === 'geo'
+    ? geoGrouped
+    : tab === 'history'
+      ? historyGrouped
+      : tab === 'history-subdivisions'
+        ? historySubdivisionGrouped
+        : tab === 'subdivisions' ? subdivisionGrouped : scienceGrouped;
+  const groupKey = tab === 'geo' || tab === 'history' ? 'region' : tab === 'subdivisions' || tab === 'history-subdivisions' ? 'country' : 'course';
+  const emptyMsg = tab === 'geo' || tab === 'history'
     ? 'No countries match that search'
-    : tab === 'subdivisions' ? 'No subdivisions match that search' : 'No topics match that search';
+    : tab === 'subdivisions' || tab === 'history-subdivisions' ? 'No subdivisions match that search' : 'No topics match that search';
 
   return (
     <div className="flex flex-col gap-3">
@@ -117,7 +149,7 @@ export default function PresetNotesBrowser({ notes, onOpenNote, onAdded }) {
         <input
           value={query}
           onChange={e => setQuery(e.target.value)}
-          placeholder={tab === 'geo' ? 'Search countries' : tab === 'subdivisions' ? 'Search subdivisions or countries' : 'Search topics'}
+          placeholder={tab === 'geo' || tab === 'history' ? 'Search countries' : tab === 'subdivisions' || tab === 'history-subdivisions' ? 'Search subdivisions or countries' : 'Search topics'}
           className="w-full rounded-lg bg-white/[0.05] border border-white/[0.08] focus:border-white/[0.2] outline-none pl-9 pr-3 py-2 text-[13px] text-white/85 placeholder-white/25 transition-colors"
         />
       </div>
@@ -130,7 +162,7 @@ export default function PresetNotesBrowser({ notes, onOpenNote, onAdded }) {
         {grouped.map((group) => {
           const key = group[groupKey];
           const items = group.items;
-          const Icon = tab === 'geo' || tab === 'subdivisions' ? Globe : FlaskConical;
+          const Icon = tab === 'history' || tab === 'history-subdivisions' ? Landmark : tab === 'geo' || tab === 'subdivisions' ? Globe : FlaskConical;
           return (
             <div key={key}>
               <div className="text-[11px] font-semibold uppercase tracking-wide text-white/30 mb-1.5 px-1">
@@ -154,7 +186,7 @@ export default function PresetNotesBrowser({ notes, onOpenNote, onAdded }) {
                       <Icon size={13} className="text-white/30 flex-shrink-0" />
                       <span className="flex-1 min-w-0">
                         <span className="block text-[12px] font-medium text-white/80 truncate">{displayName}</span>
-                        <span className="block text-[10px] text-white/30 truncate">{displaySub}{tab === 'subdivisions' ? ` · ${p.country}` : ''}</span>
+                        <span className="block text-[10px] text-white/30 truncate">{displaySub}{tab === 'subdivisions' || tab === 'history-subdivisions' ? ` · ${p.country}` : ''}</span>
                       </span>
                       {adding ? (
                         <LoadingSpinner size={12} />

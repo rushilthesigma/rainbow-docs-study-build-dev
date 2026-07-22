@@ -1,11 +1,13 @@
 // SM-2 Spaced Repetition Algorithm
 // quality: 0 = blackout, 1 = fail, 2 = fail but familiar, 3 = correct hard, 4 = correct, 5 = perfect
 export function sm2Update(card, quality) {
-  let { ease = 2.5, interval = 1, reps = 0 } = card;
+  let { ease = 2.5, interval = 0, reps = 0, lapses = 0 } = card;
+  const q = Math.max(0, Math.min(5, Math.round(Number(quality))));
 
-  if (quality < 3) {
+  if (q < 3) {
     reps = 0;
     interval = 1;
+    lapses += 1;
   } else {
     if (reps === 0) interval = 1;
     else if (reps === 1) interval = 6;
@@ -13,7 +15,7 @@ export function sm2Update(card, quality) {
     reps += 1;
   }
 
-  ease = Math.max(1.3, ease + 0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
+  ease = Math.max(1.3, ease + 0.1 - (5 - q) * (0.08 + (5 - q) * 0.02));
 
   const nextDue = new Date();
   nextDue.setDate(nextDue.getDate() + interval);
@@ -23,6 +25,7 @@ export function sm2Update(card, quality) {
     ease: Math.round(ease * 100) / 100,
     interval,
     reps,
+    lapses,
     nextDue: nextDue.toISOString(),
     lastReviewed: new Date().toISOString(),
   };

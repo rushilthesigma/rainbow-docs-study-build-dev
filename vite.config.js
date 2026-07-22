@@ -30,9 +30,7 @@ export default defineConfig({
         '**/data/**',
         '**/scripts/**',
         '**/uploads/**',
-        '**/electron/**',
         '**/build/**',
-        '**/games/**',
       ],
     },
     proxy: {

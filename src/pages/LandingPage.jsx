@@ -5,7 +5,7 @@ import {
   Loader2 as Loader, Sparkles, X, Check, ChevronDown,
   BookOpen, Zap, Repeat,
   Lightbulb, Calculator, MessageSquare,
-  Scale, Link2,
+  Scale, Link2, Users, Bot, Volume2, FlaskConical, ListPlus,
 } from 'lucide-react';
 import { Breakpoint } from '../styles/tokens';
 
@@ -211,8 +211,8 @@ export default function LandingPage() {
         />
         <HowItWorksSection isMobile={isMobile} />
         <FeaturesSection isMobile={isMobile} />
-        <NoteMapSection isMobile={isMobile} />
         <QuizBowlSection isMobile={isMobile} />
+        <NoteMapSection isMobile={isMobile} />
         <SignInSection
           isMobile={isMobile}
           loading={loading}
@@ -285,13 +285,10 @@ function HeroSection({ isMobile, onSignIn, onTour }) {
             Get a curriculum.
           </span>
         </h1>
-        <p className="mt-6 text-[16px] sm:text-[19px] leading-relaxed text-white/85 max-w-2xl mx-auto">
-          Units, lessons, quizzes, a midterm, and a final, all built around whatever you want to learn.
-        </p>
 
         <button
           onClick={onSignIn}
-          className="mt-10 inline-flex items-center justify-center px-7 py-3.5 rounded-xl bg-blue-500 hover:bg-blue-400 active:scale-[0.98] text-white text-[14.5px] font-semibold tracking-[-0.005em] transition-colors"
+          className="mt-10 inline-flex items-center justify-center px-8 py-4 rounded-xl bg-blue-500 hover:bg-blue-400 active:scale-[0.98] text-white text-[17px] font-semibold tracking-[-0.01em] transition-colors"
         >
           Get started
         </button>
@@ -312,41 +309,19 @@ function HeroSection({ isMobile, onSignIn, onTour }) {
 
 // ===== How it works =====
 function HowItWorksSection({ isMobile }) {
-  const STEPS = [
-    {
-      n: '1',
-      title: 'Build the course',
-      body: 'Name a topic like Calculus BC, AP Bio, or Roman history. You get a syllabus with units, lessons, a midterm, and a final.',
-    },
-    {
-      n: '2',
-      title: 'Take the quizzes',
-      body: 'Every lesson ends with a short quiz. Missed questions get logged by topic, so the app knows where you need work.',
-    },
-    {
-      n: '3',
-      title: 'Close the gaps',
-      body: 'The final pulls from your weak spots instead of a generic pool, and Quiz Bowl can build a round out of them whenever you want.',
-    },
-  ];
   return (
     <section data-section="how" className={`${sectionH(isMobile)} w-full flex flex-col items-center justify-center relative`}>
       <div className="absolute inset-0 bg-black/35" />
-      <FadeUp className="relative z-10 w-full max-w-2xl">
-        <h2 className="text-[30px] sm:text-[38px] md:text-[44px] leading-[1.08] font-bold tracking-[-0.02em] text-white mb-8">
+      <FadeUp className="relative z-10 w-full max-w-3xl">
+        <h2 className="text-[36px] sm:text-[44px] md:text-[50px] leading-[1.05] font-bold tracking-[-0.03em] text-white mb-8">
           How it works
         </h2>
-        <div className="divide-y divide-white/10 border-y border-white/10">
-          {STEPS.map((s) => (
-            <div key={s.n} className="flex gap-5 py-5">
-              <span className="shrink-0 w-6 text-[13px] font-mono text-white/40 pt-0.5">{s.n}</span>
-              <div>
-                <h3 className="text-[16px] font-semibold tracking-tight text-white">{s.title}</h3>
-                <p className="text-[13.5px] text-white/65 leading-relaxed mt-1">{s.body}</p>
-              </div>
-            </div>
-          ))}
-        </div>
+        <p className="text-[24px] sm:text-[30px] md:text-[34px] leading-[1.25] font-medium tracking-[-0.025em] text-white/95">
+          Tell RushilAI what you want to learn. It builds a complete curriculum, guides you through each lesson, and uses your quiz results to bring weak topics back until they stick.
+        </p>
+        <p className="mt-6 max-w-2xl text-[15px] sm:text-[17px] leading-relaxed text-white/60">
+          Start with any subject. Your course, notes, and progress stay connected as you learn.
+        </p>
       </FadeUp>
     </section>
   );
@@ -358,59 +333,46 @@ function FeaturesSection({ isMobile }) {
     {
       icon: BookOpen,
       title: 'Curricula',
-      body: 'Type any topic and get a full course with units, lessons, a midterm, and a final. Everything stays editable.',
-    },
-    {
-      icon: Lightbulb,
-      title: 'Lessons',
-      body: 'Each lesson walks through the material and ends with a short quiz. Whatever you miss comes back later.',
-    },
-    {
-      icon: MessageSquare,
-      title: 'Study Mode',
-      body: "Chat through anything you're studying. Attach a curriculum or sources so the answers stay on topic.",
-    },
-    {
-      icon: Calculator,
-      title: 'Math Tutor',
-      body: 'Work through problems step by step on a canvas while the tutor checks your reasoning.',
     },
     {
       icon: Zap,
       title: 'Quiz Bowl',
-      body: 'Buzz against a full lobby of AI opponents, not just one bot. Play 180,000+ real packet questions or a custom set on any topic.',
+    },
+    {
+      icon: Lightbulb,
+      title: 'Lessons',
+    },
+    {
+      icon: MessageSquare,
+      title: 'Study Mode',
+    },
+    {
+      icon: Calculator,
+      title: 'Math Tutor',
     },
     {
       icon: Scale,
       title: 'Debate',
-      body: 'Pick a side against the AI or a friend, then get a scored verdict when you finish.',
     },
   ];
   return (
     <section data-section="features" className={`${sectionH(isMobile)} w-full flex flex-col items-center justify-center relative`}>
       <div className="absolute inset-0 bg-black/35" />
       <FadeUp className="relative z-10 w-full max-w-4xl">
-        <h2 className="text-[30px] sm:text-[38px] md:text-[44px] leading-[1.08] font-bold tracking-[-0.02em] text-white mb-2">
+        <h2 className="text-[36px] sm:text-[44px] md:text-[50px] leading-[1.05] font-bold tracking-[-0.03em] text-white mb-10">
           What&apos;s inside
         </h2>
-        <p className="text-[14px] text-white/65 mb-8">
-          Every app shares one account. Quiz results turn into flashcards, and notes come back as spaced review.
-        </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 sm:gap-x-14 border-t border-white/[0.08]">
           {FEATURES.map((f) => {
             const Icon = f.icon;
             return (
-              <div key={f.title} className="flex gap-4 py-5 border-b border-white/[0.08]">
-                <Icon size={17} className="text-white/85 mt-0.5 shrink-0" strokeWidth={2} />
-                <div>
-                  <h3 className="text-[15px] font-semibold tracking-tight text-white">{f.title}</h3>
-                  <p className="text-[12.5px] text-white/65 leading-relaxed mt-1">{f.body}</p>
-                </div>
+              <div key={f.title} className="flex items-center gap-5 py-6 sm:py-7 border-b border-white/[0.08]">
+                <Icon size={32} className="text-white/90 shrink-0" strokeWidth={1.8} />
+                <h3 className="text-[22px] sm:text-[24px] font-semibold tracking-[-0.02em] text-white">{f.title}</h3>
               </div>
             );
           })}
         </div>
-        <p className="text-[12px] text-white/45 mt-6">Runs on Gemini, GPT, Grok, and DeepSeek models.</p>
       </FadeUp>
     </section>
   );
@@ -441,21 +403,18 @@ function NoteMapSection({ isMobile }) {
   const pos = Object.fromEntries(NODES.map((n) => [n.id, n]));
 
   const POINTS = [
-    { icon: Link2, title: 'Link your notes', body: 'Every note becomes a node. Drag them around and connect the ones that belong together.' },
-    { icon: Sparkles, title: 'Ask for suggestions', body: 'Ask for related topics and the AI adds new nodes, linked to the ones you already have.' },
-    { icon: Repeat, title: 'Review from the map', body: 'Run spaced-repetition review over a map, or turn any node into flashcards.' },
+    { icon: Link2, title: 'Link your notes' },
+    { icon: Sparkles, title: 'Ask for suggestions' },
+    { icon: Repeat, title: 'Review from the map' },
   ];
 
   return (
     <section data-section="notemap" className={`${sectionH(isMobile)} w-full flex flex-col items-center justify-center relative`}>
       <div className="absolute inset-0 bg-black/35" />
       <FadeUp className="relative z-10 w-full max-w-5xl">
-        <h2 className="text-[30px] sm:text-[38px] md:text-[44px] leading-[1.08] font-bold tracking-[-0.02em] text-white mb-2">
+        <h2 className="text-[36px] sm:text-[44px] md:text-[50px] leading-[1.05] font-bold tracking-[-0.03em] text-white mb-10">
           Note Map
         </h2>
-        <p className="text-[14px] text-white/65 max-w-xl mb-10">
-          Your notes become a graph. Related ideas sit next to each other instead of getting buried in a long list.
-        </p>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 items-center">
           {/* Graph illustration: one panel holding the SVG, no boxes inside it */}
@@ -507,12 +466,9 @@ function NoteMapSection({ isMobile }) {
             {POINTS.map((p) => {
               const Icon = p.icon;
               return (
-                <div key={p.title} className="flex gap-4 py-4 first:pt-0 last:pb-0">
-                  <Icon size={16} className="text-white/85 mt-0.5 shrink-0" strokeWidth={2} />
-                  <div>
-                    <h3 className="text-[15px] font-semibold tracking-tight text-white">{p.title}</h3>
-                    <p className="text-[13px] text-white/65 leading-relaxed mt-0.5">{p.body}</p>
-                  </div>
+                <div key={p.title} className="flex items-center gap-5 py-6 first:pt-0 last:pb-0">
+                  <Icon size={30} className="text-white/90 shrink-0" strokeWidth={1.8} />
+                  <h3 className="text-[20px] sm:text-[22px] font-semibold tracking-[-0.02em] text-white">{p.title}</h3>
                 </div>
               );
             })}
@@ -524,39 +480,74 @@ function NoteMapSection({ isMobile }) {
 }
 
 // ===== Quiz Bowl =====
+//
+// The flagship section: a live-match mockup on the left and the different
+// ways to play on the right, mirroring the Note Map layout (one panel plus
+// hairline rows, no nested cards).
 function QuizBowlSection({ isMobile }) {
+  const MODES = [
+    {
+      icon: Users,
+      title: 'Multiplayer',
+      desc: 'Host a room and buzz against friends in real time.',
+    },
+    {
+      icon: Bot,
+      title: 'Vs AI bots',
+      desc: 'Solo matches against bots that buzz back.',
+    },
+    {
+      icon: Volume2,
+      title: 'Read aloud',
+      desc: 'A voice reads each tossup word by word, like a real moderator.',
+    },
+    {
+      icon: Sparkles,
+      title: 'Sets from your notes',
+      desc: 'AI writes fresh tossups from whatever you are studying.',
+    },
+    {
+      icon: ListPlus,
+      title: 'Custom sets',
+      desc: 'Build your own sets on any topic with custom instructions.',
+    },
+    {
+      icon: FlaskConical,
+      title: 'Clue Lab',
+      desc: 'See which clues repeat across sets and study the ones that score.',
+    },
+  ];
+
   return (
     <section data-section="quizbowl" className={`${sectionH(isMobile)} w-full flex flex-col items-center justify-center relative`}>
       <div className="absolute inset-0 bg-black/35" />
-      <FadeUp className="relative z-10 max-w-2xl w-full">
-        <h2 className="text-[30px] sm:text-[38px] md:text-[44px] leading-[1.08] font-bold tracking-[-0.02em] text-white mb-2">
+      <FadeUp className="relative z-10 max-w-5xl w-full">
+        <h2 className="text-[36px] sm:text-[44px] md:text-[50px] leading-[1.05] font-bold tracking-[-0.03em] text-white mb-10">
           Quiz Bowl
         </h2>
-        <p className="text-[14px] text-white/65 mb-8">
-          Pyramidal tossups with a buzzer and a live scoreboard. Face a whole lobby of AI opponents at once, tuned to your level, not a single practice bot.
-        </p>
 
-        <div className="rounded-xl ring-1 ring-white/[0.10] bg-white/[0.05] overflow-hidden">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 items-center">
+        <div className="w-full max-w-[460px] mx-auto lg:mx-0 rounded-xl ring-1 ring-white/[0.10] bg-white/[0.05] overflow-hidden">
           {/* Scoreboard */}
           <div className="grid grid-cols-3 border-b border-white/[0.08]">
             <div className="flex flex-col items-center py-5">
               <span className="text-[11px] font-mono uppercase tracking-wider text-white/50 mb-1">You</span>
-              <span className="text-[42px] font-bold tabular-nums text-white leading-none">10</span>
+              <span className="text-[48px] font-bold tabular-nums text-white leading-none">10</span>
             </div>
             <div className="flex flex-col items-center justify-center border-x border-white/[0.08] gap-1">
-              <Zap size={18} className="text-blue-300" strokeWidth={2.5} />
-              <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/35">vs</span>
+              <Zap size={28} className="text-blue-300" strokeWidth={2.3} />
+              <span className="text-[12px] font-bold uppercase tracking-[0.16em] text-white/40">vs</span>
             </div>
             <div className="flex flex-col items-center py-5">
               <span className="text-[11px] font-mono uppercase tracking-wider text-white/50 mb-1">AI</span>
-              <span className="text-[42px] font-bold tabular-nums text-blue-300 leading-none">15</span>
+              <span className="text-[48px] font-bold tabular-nums text-blue-300 leading-none">15</span>
             </div>
           </div>
 
           {/* Live tossup */}
           <div className="p-5 border-b border-white/[0.08]">
             <p className="text-[10px] font-mono uppercase tracking-wider text-white/35 mb-2.5">Tossup, Q4 of 20</p>
-            <p className="text-[13.5px] text-white/80 leading-relaxed">
+            <p className="text-[15px] text-white/85 leading-relaxed">
               This mathematician lends his name to a function defined as the integral of{' '}
               <span className="font-mono text-blue-200">e&#8315;&#7511; t&#739;&#8315;&#185;</span>{' '}
               from 0 to infinity, which generalizes the factorial to real and complex numbers.{' '}
@@ -570,16 +561,30 @@ function QuizBowlSection({ isMobile }) {
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
               <span className="text-[12px] text-white/50">Live match</span>
             </div>
-            <button className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-blue-500/25 border border-blue-400/40 cursor-default">
-              <Zap size={12} className="text-blue-300" strokeWidth={2.5} />
-              <span className="text-[12px] font-semibold text-blue-200">BUZZ</span>
+            <button className="inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-blue-500/25 border border-blue-400/40 cursor-default">
+              <Zap size={16} className="text-blue-300" strokeWidth={2.5} />
+              <span className="text-[14px] font-semibold text-blue-200">BUZZ</span>
             </button>
           </div>
         </div>
 
-        <p className="text-[12px] text-white/40 mt-6">
-          Play real packet questions, or have a custom set written for any topic you name. No other quiz bowl trainer does that.
-        </p>
+        {/* Ways to play: plain rows split by hairlines, matching Note Map */}
+        <div className="divide-y divide-white/10 max-w-md mx-auto lg:mx-0 w-full">
+          {MODES.map((m) => {
+            const Icon = m.icon;
+            return (
+              <div key={m.title} className="flex items-start gap-5 py-4 first:pt-0 last:pb-0">
+                <Icon size={26} className="text-white/90 shrink-0 mt-0.5" strokeWidth={1.8} />
+                <div>
+                  <h3 className="text-[18px] sm:text-[20px] font-semibold tracking-[-0.02em] text-white">{m.title}</h3>
+                  <p className="mt-0.5 text-[13.5px] leading-relaxed text-white/55">{m.desc}</p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        </div>
+
       </FadeUp>
     </section>
   );
@@ -601,12 +606,9 @@ function SignInSection({ isMobile, loading, loginError, googleReady, googleBtnRe
       <div className="absolute inset-0 bg-black/35" />
 
       <FadeUp className="relative z-10 flex flex-col items-center w-full max-w-sm text-center">
-        <h2 className="text-[32px] sm:text-[40px] leading-[1.05] font-semibold tracking-[-0.02em] text-white">
+        <h2 className="text-[40px] sm:text-[48px] leading-[1.05] font-semibold tracking-[-0.03em] text-white">
           Sign in
         </h2>
-        <p className="mt-2 text-[14px] text-white/65">
-          Your courses, notes, and quiz history save to your Google account.
-        </p>
 
         {/* Google OAuth - primary (and only) sign-in path.
             The visible <button> is purely cosmetic (pointer-events off).
@@ -615,15 +617,15 @@ function SignInSection({ isMobile, loading, loginError, googleReady, googleBtnRe
         <div className="relative mt-8 w-full">
           <button
             disabled={loading || !googleReady}
-            className="w-full py-3 rounded-lg bg-white text-[14px] font-semibold text-slate-800 transition-all disabled:opacity-50 inline-flex items-center justify-center gap-2.5 pointer-events-none select-none"
+            className="w-full py-4 rounded-xl bg-white text-[16px] font-semibold text-slate-800 transition-all disabled:opacity-50 inline-flex items-center justify-center gap-3 pointer-events-none select-none"
             tabIndex={-1}
             aria-hidden="true"
           >
             {loading ? (
-              <span className="inline-flex items-center gap-2"><Loader size={14} className="animate-spin" /> Signing in...</span>
+              <span className="inline-flex items-center gap-2"><Loader size={20} className="animate-spin" /> Signing in...</span>
             ) : (
               <>
-                <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+                <svg width="22" height="22" viewBox="0 0 48 48" aria-hidden="true">
                   <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
                   <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
                   <path fill="#FBBC05" d="M10.53 28.59a14.5 14.5 0 0 1 0-9.18l-7.98-6.19a24.1 24.1 0 0 0 0 21.56l7.98-6.19z"/>
@@ -727,12 +729,9 @@ function WhyNotGptSection({ isMobile }) {
       <div className="absolute inset-0 bg-black/40" />
 
       <FadeUp className="relative z-10 w-full max-w-3xl">
-        <h2 className="text-center text-[30px] sm:text-[38px] leading-[1.08] font-bold tracking-[-0.02em] text-white mb-3">
+        <h2 className="text-center text-[36px] sm:text-[44px] leading-[1.05] font-bold tracking-[-0.03em] text-white mb-10">
           Why not just use ChatGPT?
         </h2>
-        <p className="text-center text-[14px] text-white/55 max-w-md mx-auto mb-10">
-          A chat box forgets you between sessions. RushilAI keeps track of what you miss and builds the next quiz around it.
-        </p>
 
         {isMobile ? (
           /* Phone: two narrow text columns are unreadable, so each row
@@ -743,12 +742,12 @@ function WhyNotGptSection({ isMobile }) {
               <div key={row.title} className="px-4 py-4">
                 <p className="text-[13px] font-semibold tracking-tight text-white mb-2.5">{row.title}</p>
                 <div className="flex gap-2.5 mb-2">
-                  <Check size={13} className="text-emerald-400 shrink-0 mt-0.5" strokeWidth={3} />
-                  <p className="text-[12.5px] leading-relaxed text-white/75">{row.us}</p>
+                  <Check size={18} className="text-emerald-400 shrink-0 mt-0.5" strokeWidth={3} />
+                  <p className="text-[14px] leading-relaxed text-white/80">{row.us}</p>
                 </div>
                 <div className="flex gap-2.5">
-                  <X size={13} className="text-white/25 shrink-0 mt-0.5" strokeWidth={2.5} />
-                  <p className="text-[12.5px] leading-relaxed text-white/40">{row.them}</p>
+                  <X size={18} className="text-white/30 shrink-0 mt-0.5" strokeWidth={2.5} />
+                  <p className="text-[14px] leading-relaxed text-white/45">{row.them}</p>
                 </div>
               </div>
             ))}
@@ -759,19 +758,19 @@ function WhyNotGptSection({ isMobile }) {
             <div className="grid grid-cols-[120px_1fr_1fr]">
               <span className="px-4 py-2.5" />
               <span className="px-4 py-2.5 flex items-center gap-1.5 border-l border-white/[0.05]">
-                <Check size={10} className="text-emerald-400 shrink-0" strokeWidth={3} />
-                <span className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-emerald-300">RushilAI</span>
+                <Check size={16} className="text-emerald-400 shrink-0" strokeWidth={3} />
+                <span className="text-[12px] font-bold uppercase tracking-[0.16em] text-emerald-300">RushilAI</span>
               </span>
               <span className="px-4 py-2.5 flex items-center gap-1.5 border-l border-white/[0.05]">
-                <X size={10} className="text-white/25 shrink-0" strokeWidth={2.5} />
-                <span className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-white/30">ChatGPT</span>
+                <X size={16} className="text-white/30 shrink-0" strokeWidth={2.5} />
+                <span className="text-[12px] font-bold uppercase tracking-[0.16em] text-white/35">ChatGPT</span>
               </span>
             </div>
             {ROWS.map((row) => (
               <div key={row.title} className="grid grid-cols-[120px_1fr_1fr] border-t border-white/[0.06]">
-                <span className="px-4 py-3.5 text-[12px] font-semibold text-white/80">{row.title}</span>
-                <p className="px-4 py-3.5 text-[12px] leading-relaxed text-white/70 border-l border-white/[0.05]">{row.us}</p>
-                <p className="px-4 py-3.5 text-[12px] leading-relaxed text-white/35 border-l border-white/[0.05]">{row.them}</p>
+                <span className="px-4 py-3.5 text-[14px] font-semibold text-white/85">{row.title}</span>
+                <p className="px-4 py-3.5 text-[13.5px] leading-relaxed text-white/75 border-l border-white/[0.05]">{row.us}</p>
+                <p className="px-4 py-3.5 text-[13.5px] leading-relaxed text-white/40 border-l border-white/[0.05]">{row.them}</p>
               </div>
             ))}
           </div>

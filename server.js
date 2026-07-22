@@ -19,16 +19,21 @@ import {
   buildStandaloneLessonPrompt, buildMathTutorPrompt, buildMathProblemSetPrompt,
   buildStudyModePrompt, buildHumanizePrompt, buildPromptRefinePrompt, buildGoalMilestonesPrompt, buildAssessmentPrompt,
   buildFlashcardPrompt, buildNodeFlashcardPrompt, buildCueGenerationPrompt, buildSummaryPrompt,
-  buildTopicSuggestionsPrompt, buildSlideshowPrompt, buildFlashSlideshowPrompt,
-  buildSlideshowCriticPrompt, buildSlideshowReviserPrompt,
-  buildSlideHtmlPrompt, buildDeckDesignBriefPrompt,
+  buildTopicSuggestionsPrompt,
   CURRICULUM_CATEGORIES,
 } from './prompts.js';
 import { PAUSD_CATALOG, getPausdTemplate, listPausdCatalog } from './data/pausdCurricula.js';
 import { dedupeTexts, analyzeQuestions } from './clueAnalysis.js';
 import { COUNTRY_GEO_NOTES, COUNTRY_GEO_NOTES_BY_SLUG } from './data/countryGeoNotes/index.js';
+import {
+  COUNTRY_HISTORY_NOTES,
+  COUNTRY_HISTORY_NOTES_BY_SLUG,
+  COUNTRY_HISTORY_SUBDIVISION_NOTES,
+  COUNTRY_HISTORY_SUBDIVISION_NOTES_BY_SLUG,
+} from './data/countryHistoryNotes/index.js';
 import { PAUSD_SCIENCE_NOTES, PAUSD_SCIENCE_NOTES_BY_SLUG } from './data/pausdScienceNotes.js';
 import checkQBReaderAnswer from 'qb-answer-checker';
+import { judgeQuizBowlQuestion } from './src/lib/qbAnswerChecker.js';
 import {
   buildAssessmentDiversityInstructions,
   filterDiverseQuestions,
@@ -41,7 +46,6 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
 dotenv.config({ path: join(__dirname, '.env'), override: true });
 
 const app = express();
@@ -60,8 +64,8 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 // capable). Each tier resolves to a DISTINCT real model so the picker
 // genuinely changes which model serves a request.
 const GEMINI_PRO        = 'gemini-3.1-pro-preview';
-const GEMINI_FLASH      = 'gemini-3.5-flash';
-const GEMINI_FLASH_LITE = 'gemini-3.1-flash-lite';
+const GEMINI_FLASH      = 'gemini-3.6-flash';
+const GEMINI_FLASH_LITE = 'gemini-3.5-flash-lite';
 
 // Claude ids. Haiku 4.5 is the fast/cheap first-impression model used for
 // new-user curriculum generation; Sonnet 4.6 backs the balanced + pro tiers.
@@ -505,14 +509,14 @@ const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 // CURRICULUM_CREDIT_COST, an AI Quiz Bowl tossup set a flat
 // QB_TOSSUP_CREDIT_COST, and multi-model runs (reroute / best-of / brute force)
 // a DISCOUNTED bundle price (see comparisonCreditCost). Note maps stay a count cap.
-//   free = 995 credits/week
+//   free = 500 credits/week
 //   paid = 9,500 credits/week  ($4/mo)
 // NOTE: the `dailyCredits` field name is legacy — the pool is now weekly. Kept
 // as-is to avoid churning every reader; treat it as the per-week allowance.
 // Owners/advisors get no exemption — they draw from their plan's pool like
 // everyone else (they resolve to 'paid', so 9,500/week) and adhere to limits.
 const LIMITS = {
-  free: { dailyCredits: 995,  noteMaps: 3 },
+  free: { dailyCredits: 500,  noteMaps: 3 },
   paid: { dailyCredits: 9500, noteMaps: Infinity },
 };
 const PAID_TIERS = new Set(['paid']);
@@ -545,9 +549,10 @@ const SOURCED_CREDIT_SURCHARGE = 2;  // extra credits when a web-search answer i
 // fraction of the combined cost (floored at the priciest single model that ran),
 // so trying many models is cheaper than running each one separately.
 const MULTI_MODEL_DISCOUNT_RATE = 0.5;  // 50% off the combined model cost
-// Referrals no longer unlock a plan tier; instead 2+ referrals grant a
-// permanent daily bonus to a free user's credit pool.
-const REFERRAL_BONUS_CREDITS = 100;
+// Every successful referral banks one credit reset for the referrer. A reset
+// clears their current rolling seven-day credit usage without changing the
+// underlying plan allowance.
+const REFERRAL_CREDIT_RESET_REWARD = 1;
 
 // Credit cost for a Study-Mode model key, defaulting to the floor cost.
 function studyModelCreditCost(key) {
@@ -565,11 +570,10 @@ async function deepSeekRerouteTarget(messages, opts = {}, sourceModel = DEEPSEEK
   return geminiSiblingOf(sourceModel);
 }
 
-// Referrals: each user owns one 8-char alphanumeric code. When two
-// different users redeem the same code, the owner unlocks Plus-Lite.
-// Codes are stamped on user creation + backfilled on migrate.
+// Referrals: each user owns one 8-char alphanumeric code. Every different user
+// who redeems it banks one credit reset for the code owner. Codes are stamped
+// on user creation + backfilled on migrate.
 const REFERRAL_CODE_LEN = 8;
-const REFERRAL_THRESHOLD = 2;                  // # of redemptions to unlock plus-lite
 const REFERRAL_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';  // no 0/O/1/I/L
 
 function generateReferralCode() {
@@ -623,9 +627,8 @@ function weekKey(d = new Date()) {
 // legacy paid plan (plus/pro/lifetime, incl. lifetimePurchasedAt) all resolve
 // to paid — this grandfathers every previously-paying user. Legacy 'plus-lite'
 // was a FREE referral tier and resolves to free. Owners/advisors resolve to
-// paid so demo accounts work without paying (and are unlimited via
-// dailyCreditAllowance). Referrals no longer grant a tier; they add bonus
-// weekly credits instead.
+// paid so demo accounts work without paying. Referrals no longer grant a tier;
+// they bank credit resets instead.
 function getPlan(user, email) {
   const d = user?.data || {};
   if (d.lifetimePurchasedAt) return 'paid';                 // grandfather old lifetime buyers
@@ -635,18 +638,29 @@ function getPlan(user, email) {
   if (isOwner(email) || isAdvisor(email)) return 'paid';   // untouched demo accounts
   return 'free';
 }
-// Weekly credit pool for a user: free/paid base + a referral bonus for free
-// users. Owners/advisors are NOT exempt — they draw from their resolved plan's
+// Weekly credit pool for a user. Owners/advisors are NOT exempt — they draw from their resolved plan's
 // pool (they resolve to 'paid' via getPlan, so 9,500/week) like any other
 // account, so admins still adhere to plan limits. (Name kept for back-compat;
 // the pool is now weekly, see LIMITS / CREDIT_WINDOW_MS.)
 function dailyCreditAllowance(user, email) {
   const plan = getPlan(user, email);
-  let cap = LIMITS[plan]?.dailyCredits ?? LIMITS.free.dailyCredits;
-  if (plan === 'free' && (user?.data?.referralsUsed || 0) >= REFERRAL_THRESHOLD) {
-    cap += REFERRAL_BONUS_CREDITS;
+  return LIMITS[plan]?.dailyCredits ?? LIMITS.free.dailyCredits;
+}
+
+function creditResetBalance(user) {
+  const earned = Math.max(0, Math.floor(Number(user?.data?.creditResetsEarned) || 0));
+  const used = Math.min(earned, Math.max(0, Math.floor(Number(user?.data?.creditResetsUsed) || 0)));
+  return { earned, used, available: earned - used };
+}
+
+function creditLimitRecoveryHint(user, email) {
+  const { available } = creditResetBalance(user);
+  if (available > 0) {
+    return `Use one of your ${available} banked credit reset${available === 1 ? '' : 's'} in Settings to refill now.`;
   }
-  return cap;
+  return getPlan(user, email) === 'free'
+    ? 'Refer a friend to bank a reset, or upgrade to Paid for 9,500 credits/week.'
+    : 'Your credits refill on a rolling 7-day window.';
 }
 // Whether the account is on the paid plan.
 function isPro(user, email) { return PAID_TIERS.has(getPlan(user, email)); }
@@ -735,7 +749,7 @@ const DEEPSEEK_FREE_DAILY = 12;
 // V4 Pro is the free-but-capped reasoning option: 12/day for non-paid (own
 // window), unlimited for every paid tier, exactly like Haiku.
 const STUDY_MODELS = {
-  'flash-lite':   { id: GEMINI_FLASH_LITE, label: 'Flash Lite',   provider: 'gemini', paidOnly: false, knowledgeCutoff: modelKnowledgeCutoff(GEMINI_FLASH_LITE) },
+  'flash-lite':   { id: GEMINI_FLASH_LITE, label: 'Gemini 3.5 Flash-Lite', provider: 'gemini', paidOnly: false, knowledgeCutoff: modelKnowledgeCutoff(GEMINI_FLASH_LITE) },
   'gpt-5.4':      { id: OPENAI_GPT,        label: 'GPT-5.4',      provider: 'openai', paidOnly: true, knowledgeCutoff: modelKnowledgeCutoff(OPENAI_GPT) },
   'gpt-5.4-mini': { id: OPENAI_GPT_MINI,   label: 'GPT-5.4 mini', provider: 'openai', paidOnly: false, knowledgeCutoff: modelKnowledgeCutoff(OPENAI_GPT_MINI) },
   // GPT-5.6 family: open to every plan, gated by credit cost alone (Sol 15 / Terra 4 / Luna 1).
@@ -748,7 +762,7 @@ const STUDY_MODELS = {
   'deepseek-pro':   { id: DEEPSEEK_PRO,   label: 'DeepSeek V4 Pro',   provider: 'deepseek', paidOnly: false, freeDailyLimit: DEEPSEEK_FREE_DAILY, usageKey: 'deepseekWindow', lockKey: 'deepseekLockedUntil', knowledgeCutoff: modelKnowledgeCutoff(DEEPSEEK_PRO) },
   // Grok 4.3: permanently free for everyone, no per-model cap (only draws the shared daily quota).
   'grok':           { id: GROK,            label: 'Grok 4.3',          provider: 'xai',      paidOnly: false, knowledgeCutoff: modelKnowledgeCutoff(GROK) },
-  'flash':      { id: GEMINI_FLASH,      label: 'Flash',      provider: 'gemini', paidOnly: true, knowledgeCutoff: modelKnowledgeCutoff(GEMINI_FLASH) },
+  'flash':      { id: GEMINI_FLASH,      label: 'Gemini 3.6 Flash', provider: 'gemini', paidOnly: true, knowledgeCutoff: modelKnowledgeCutoff(GEMINI_FLASH) },
   'gemini-pro': { id: GEMINI_PRO,        label: 'Gemini Pro', provider: 'gemini', paidOnly: true, knowledgeCutoff: modelKnowledgeCutoff(GEMINI_PRO) },
 };
 // Flash Lite is the default pick for everyone (Claude/Haiku removed). Unknown or
@@ -1474,7 +1488,6 @@ function createDefaultData() {
     studySessions: [],
     assessmentHistory: [],
     lessons: [],
-    slideshows: [],               // AI-generated slide decks (legacy field - Slides was retired)
     // Each entry: { id, category, difficulty, source: 'qbreader'|'ai',
     //   score, total, durationMs, finishedAt, categoryStats: { [cat]: {correct, total} },
     //   perQuestion: [{category, correct, buzzWord, totalWords, answer, correctAnswer}] }
@@ -1527,11 +1540,13 @@ function createDefaultData() {
     // referredBy:   the code the user redeemed at signup (null if none).
     //               Each user can redeem at most one code, forever.
     // referralsUsed: how many OTHER users have redeemed THIS user's
-    //                code. When this hits REFERRAL_THRESHOLD (2), the
-    //                user is bumped to plus-lite (unless they're paid).
+    //                code. Each redemption earns one banked credit reset.
     referralCode: null,
     referredBy: null,
     referralsUsed: 0,
+    creditResetsEarned: 0,
+    creditResetsUsed: 0,
+    lastCreditResetAt: null,
 
     // ----- Parent mode (parental controls + child profiles) -----
     // When `enabled`, the account owner is treated as a parent. Curricula
@@ -1656,6 +1671,12 @@ function migrateUserData(data) {
     data.referralCode = generateReferralCode();
   }
   if (typeof data.referralsUsed !== 'number') data.referralsUsed = 0;
+  // Existing successful referrals become banked resets on first migration.
+  // Math.max keeps this idempotent after a user has already spent resets.
+  if (typeof data.creditResetsEarned !== 'number') data.creditResetsEarned = 0;
+  data.creditResetsEarned = Math.max(0, data.creditResetsEarned, data.referralsUsed);
+  if (typeof data.creditResetsUsed !== 'number') data.creditResetsUsed = 0;
+  data.creditResetsUsed = Math.min(data.creditResetsEarned, Math.max(0, data.creditResetsUsed));
   return data;
 }
 
@@ -1872,26 +1893,35 @@ async function buildStudyArtifacts(fullText, userData, sessionCtx = {}) {
     let initialQuestions = null;
     if (studyText.trim()) {
       const diffLabel = { elementary: 'easy/middle-school', middle: 'easy/middle-school', high: 'high-school varsity', college: 'college championship' }[difficulty] || 'high-school varsity';
-      const sys = `You are a quiz bowl question writer. Write pyramidal tossup questions based ONLY on the provided study material. Output ONLY valid JSON, no markdown.`;
+      const sys = `You are an elite ACF/NAQT packet editor. Write rigorously pyramidal tossups based ONLY on the provided study material. Open with the material's most obscure, uniquely identifying details, move through hard connecting clues, and reserve familiar facts for the final giveaway. Silently audit the clue order before responding. Output ONLY valid JSON, no markdown.`;
       const prompt = `Write ${count} pyramidal quiz bowl tossup questions about "${topic}" using ONLY facts from the study material below.
 
 RULES:
 - Each question is one paragraph: hardest/most-obscure clues first, easiest giveaway last
-- Embed exactly one NAQT power mark "(*)" about 60-70% through the question
+- The opening 30-35% must use the source's most obscure specialist details; the middle must use hard connecting clues; familiar facts may appear only in the final 25-30%
+- If an earlier clue is easier than a later clue, reorder or replace it before returning the set
+- Never invent facts to create artificial obscurity
+- Embed exactly one NAQT power mark "(*)" 65-75% through the question, immediately before the accessible clues
 - Difficulty: ${diffLabel}
 - Every answer must be directly supported by the text
+- Include an answer guide: "accept" is an array of literal fully equivalent answers, never regex or fragments; "prompt" is an array of {"answer":"incomplete literal","message":"directed clarification"}; use empty arrays when unnecessary
 
 STUDY MATERIAL:
 ${studyText}
 
-Return JSON: {"questions":[{"text":"Hard clue. More clues. (*) Easier clue. Giveaway.","answer":"Answer"}]}`;
+Return JSON: {"questions":[{"text":"Extremely obscure clues. Hard clues. (*) Accessible clues and giveaway.","answer":"Answer","accept":[],"prompt":[]}]}`;
       try {
         const result = await callGemini(sys, [{ role: 'user', content: prompt }], DEFAULT_MODEL, 8192, { jsonMode: true, temperature: 0.7 });
         if (result.success) {
           const parsed = parseAIJson(result.data.content?.[0]?.text || '');
           if (Array.isArray(parsed?.questions) && parsed.questions.length) {
             initialQuestions = parsed.questions
-              .map(q => ({ text: String(q.text || '').trim(), answer: String(q.answer || '').trim() }))
+              .map(q => ({
+                text: String(q.text || '').trim(),
+                answer: String(q.answer || '').trim(),
+                accept: Array.isArray(q.accept) ? q.accept.slice(0, 20) : [],
+                prompt: Array.isArray(q.prompt) ? q.prompt.slice(0, 20) : [],
+              }))
               .filter(q => q.text && q.answer);
             if (!initialQuestions.length) initialQuestions = null;
           }
@@ -3032,6 +3062,9 @@ function messagesHaveImages(messages) {
 // configuration are stopped before they ever reach a model.
 const PROMPT_PROTECTION_MARKER = 'COVALENT_INTERNAL_PROMPT_CONFIDENTIALITY';
 const PROMPT_PROTECTION_RESPONSE = 'I can help with your learning task, but I can’t help with internal configuration.';
+const PROMPT_PROTECTION_SETTINGS_FILE = join(DATA_DIR, 'prompt-protection-settings.json');
+const PROMPT_PROTECTION_DEFAULTS = { strictness: 'balanced' };
+const PROMPT_PROTECTION_LEVELS = new Set(['relaxed', 'balanced', 'strict']);
 const PROMPT_PROTECTION_INSTRUCTIONS = `
 [${PROMPT_PROTECTION_MARKER}]
 Confidentiality rules:
@@ -3047,6 +3080,49 @@ function withPromptProtection(systemPrompt) {
   return [PROMPT_PROTECTION_INSTRUCTIONS.trim(), base].filter(Boolean).join('\n\n');
 }
 
+function normalizePromptProtectionSettings(value) {
+  const strictness = PROMPT_PROTECTION_LEVELS.has(value?.strictness)
+    ? value.strictness
+    : PROMPT_PROTECTION_DEFAULTS.strictness;
+  return { strictness };
+}
+
+function loadPromptProtectionSettings() {
+  try {
+    return normalizePromptProtectionSettings(JSON.parse(readFileSync(PROMPT_PROTECTION_SETTINGS_FILE, 'utf-8')));
+  } catch {
+    return { ...PROMPT_PROTECTION_DEFAULTS };
+  }
+}
+
+function savePromptProtectionSettings(value) {
+  const settings = normalizePromptProtectionSettings(value);
+  writeFileSync(PROMPT_PROTECTION_SETTINGS_FILE, JSON.stringify(settings, null, 2));
+  return settings;
+}
+
+// These patterns deliberately target attempts to obtain or supersede hidden
+// application instructions. They do not filter ordinary educational content.
+// The moderator-controlled level layers additional high-confidence phrasing
+// on top of the small, direct-match baseline.
+const PROMPT_PROTECTION_PATTERNS = {
+  relaxed: [
+    /\b(?:reveal|show|display|print|repeat|quote|recite|dump|output|give\s+me|tell\s+me|expose|leak|extract|summarize|paraphrase|translate|encode)\b.{0,120}\b(?:your|the|this|current|initial|hidden|developer|system)\s*(?:prompt|message|instructions?|context)\b/i,
+    /\b(?:your|the|this|current|initial|hidden|developer|system)\s*(?:prompt|message|instructions?|context)\b.{0,120}\b(?:reveal|show|display|print|repeat|quote|recite|dump|output|give\s+me|tell\s+me|expose|leak|extract|summarize|paraphrase|translate|encode)\b/i,
+  ],
+  balanced: [
+    /\b(?:what|which).{0,60}\b(?:system prompt|hidden instructions?|developer message|initial instructions?)\b/i,
+    /\b(?:ignore|override|bypass|disregard|forget)\b.{0,120}\b(?:previous|prior|system|developer|hidden|initial)\s*(?:instructions?|prompt|message)\b/i,
+    /\b(?:give\s+me|tell\s+me|summarize|paraphrase|translate|encode)\b.{0,120}\b(?:system|developer|hidden|initial)\s*(?:prompt|message|instructions?|context)\b/i,
+  ],
+  strict: [
+    /\b(?:repeat|recite|reproduce|list)\b.{0,100}\b(?:everything|all)\b.{0,80}\b(?:above|before|prior|earlier)\b/i,
+    /\b(?:what|which).{0,80}\b(?:rules|guardrails|constraints|policies)\b.{0,80}\b(?:are you following|were you given|do you have)\b/i,
+    /(?:<\s*\/?\s*(?:system|developer)\s*>|<<\s*(?:system|developer)\s*>>|\[\s*(?:system|developer)\s*\])/i,
+    /\b(?:act|behave|respond)\b.{0,80}\b(?:as if|like)\b.{0,80}\b(?:no|without)\b.{0,80}\b(?:rules|restrictions|guardrails)\b/i,
+  ],
+};
+
 function hasPromptExtractionAttempt(messages) {
   const latestUserMessage = [...(messages || [])]
     .reverse()
@@ -3055,13 +3131,13 @@ function hasPromptExtractionAttempt(messages) {
 
   const text = latestUserMessage.content.toLowerCase().replace(/\s+/g, ' ').trim();
   if (!text) return false;
-  const protectedTerms = '(?:your|the|this|current|initial|hidden|developer|system)\\s*(?:prompt|message|instructions?|context)';
-  const extractionVerbs = '(?:reveal|show|display|print|repeat|quote|recite|dump|output|give\\s+me|tell\\s+me|expose|leak|extract|summarize|paraphrase|translate|encode)';
-
-  return new RegExp(`\\b${extractionVerbs}\\b.{0,120}\\b${protectedTerms}\\b`, 'i').test(text)
-    || new RegExp(`\\b${protectedTerms}\\b.{0,120}\\b${extractionVerbs}\\b`, 'i').test(text)
-    || /\b(?:what|which).{0,60}\b(?:system prompt|hidden instructions?|developer message|initial instructions?)\b/i.test(text)
-    || /\b(?:ignore|override|bypass|disregard|forget)\b.{0,120}\b(?:previous|prior|system|developer|hidden|initial)\s*(?:instructions?|prompt|message)\b/i.test(text);
+  const { strictness } = loadPromptProtectionSettings();
+  const patterns = [
+    ...PROMPT_PROTECTION_PATTERNS.relaxed,
+    ...(strictness === 'balanced' || strictness === 'strict' ? PROMPT_PROTECTION_PATTERNS.balanced : []),
+    ...(strictness === 'strict' ? PROMPT_PROTECTION_PATTERNS.strict : []),
+  ];
+  return patterns.some((pattern) => pattern.test(text));
 }
 
 function protectedPromptResponse(model, jsonMode = false) {
@@ -3336,7 +3412,7 @@ async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096,
     const resolved = resolveModel(currentModel);
     try {
       const controller = new AbortController();
-      // Pro models on long-form structured outputs (slideshows, 16k tokens)
+      // Pro models on long-form structured outputs (16k tokens)
       // routinely run 60-180s; flash finishes in 5-15s. A single 60s ceiling
       // aborted advanced-mode generations roughly half the time, and 240s
       // still tripped on the bespoke-HTML design phase where Pro is asked
@@ -3573,12 +3649,10 @@ app.post('/api/chat', authMiddleware, async (req, res) => {
     const cost = baseCost + (effectiveSourced ? SOURCED_CREDIT_SURCHARGE : 0);
     const quota = consumeCredits(users, email, cost);
     if (!quota.allowed) {
-      const upgradeHint = quota.plan === 'free'
-        ? 'Upgrade to Paid for 9,500 credits/week.'
-        : 'Your credits reset on a rolling 7-day window.';
+      const recoveryHint = creditLimitRecoveryHint(users[email], email);
       return res.status(402).json({
         error: 'message_limit_reached',
-        message: `This answer costs ${cost} credit${cost === 1 ? '' : 's'} and you only have ${quota.remaining} left this week. ${upgradeHint}`,
+        message: `This answer costs ${cost} credit${cost === 1 ? '' : 's'} and you only have ${quota.remaining} left this week. ${recoveryHint}`,
         limit: quota.limit, remaining: quota.remaining, plan: quota.plan, cost, upgradeKind: 'upgrade',
       });
     }
@@ -3661,12 +3735,10 @@ app.post('/api/debate/chat', authMiddleware, async (req, res) => {
     const cost = baseCost + (effectiveSourced ? SOURCED_CREDIT_SURCHARGE : 0);
     const quota = consumeCredits(users, email, cost);
     if (!quota.allowed) {
-      const upgradeHint = quota.plan === 'free'
-        ? 'Upgrade to Paid for 9,500 credits/week.'
-        : 'Your credits reset on a rolling 7-day window.';
+      const recoveryHint = creditLimitRecoveryHint(users[email], email);
       return res.status(402).json({
         error: 'message_limit_reached',
-        message: `This reply costs ${cost} credit${cost === 1 ? '' : 's'} and you only have ${quota.remaining} left this week. ${upgradeHint}`,
+        message: `This reply costs ${cost} credit${cost === 1 ? '' : 's'} and you only have ${quota.remaining} left this week. ${recoveryHint}`,
         limit: quota.limit, remaining: quota.remaining, plan: quota.plan, cost, upgradeKind: 'upgrade',
       });
     }
@@ -3743,7 +3815,7 @@ app.post('/api/demo/curriculum/generate', async (req, res) => {
     const system = 'You are an expert curriculum designer. Output ONLY valid JSON. No markdown, no code fences, no explanation.';
     const user = `Design a compact learning curriculum for: "${topic}" at the ${difficulty} level.
 
-Return JSON with EXACTLY 2 units. Each unit has 3 lessons. Each lesson has a "type" from: "lesson", "math_tutor" (step-by-step math only), "essay" (graded essay), "unit_test".
+Return JSON with EXACTLY 2 units. Each unit has 3 lessons. Each lesson has a "type" from: "lesson", "essay" (graded essay), "unit_test".
 
 {
   "title": "Course title",
@@ -3796,7 +3868,8 @@ Return JSON with EXACTLY 2 units. Each unit has 3 lessons. Each lesson has a "ty
       lessons: (u.lessons || []).slice(0, 4).map((l, li) => ({
         ...l,
         id: `${curriculumId}-u${ui}-l${li}`,
-        type: ['lesson','math_tutor','essay','unit_test','practice'].includes(l.type) ? l.type : 'lesson',
+        type: ['lesson','essay','unit_test'].includes(l.type) ? l.type : 'lesson',
+        interactiveOnly: l.type === 'lesson' || !['essay','unit_test'].includes(l.type),
         isCompleted: false,
       })),
     }));
@@ -3949,12 +4022,27 @@ function quizBowlCategoryForCurriculum({ category, title, topic, subject, pausdS
   if (normalizedSubject === 'history' || category === 'History' || /\bhistory\b/.test(searchable)) {
     return 'History';
   }
-  return null;
+  // Quiz Bowl is useful as a retrieval-practice format across the whole
+  // curriculum catalog, not only in history and geography. Map our broad
+  // curriculum buckets onto the narrower set supported by Quiz Bowl; the
+  // lesson's topic still keeps every generated tossup course-specific.
+  const categoryMap = {
+    Math: 'Math',
+    Science: 'Science',
+    'Computer Science': 'Science',
+    'Language & Literature': 'Literature',
+    Arts: 'Art',
+    'Social Science': 'Philosophy',
+    Other: 'Mixed',
+  };
+  return categoryMap[category] || 'Mixed';
 }
 
 function shouldSwapInQuizBowl(unitIndex, unitCount) {
-  const stride = unitCount >= 24 ? 8 : 2;
-  return unitIndex === unitCount - 1 || (unitIndex + 1) % stride === 0;
+  // Every unit gets a retrieval round. Keeping this helper makes the policy
+  // explicit and leaves one place to tune cadence if very large curricula
+  // ever need a different rule.
+  return unitIndex >= 0 && unitIndex < unitCount;
 }
 
 function makeQuizBowlLesson({ id, courseTitle, unitTitle, category }) {
@@ -3972,6 +4060,80 @@ function makeQuizBowlLesson({ id, courseTitle, unitTitle, category }) {
     isCompleted: false,
     score: null,
   };
+}
+
+const CURRICULUM_PRACTICE_BLOCK_TYPES = new Set(['quiz', 'matching', 'fill-blank']);
+const REMOVED_CURRICULUM_LESSON_TYPES = new Set(['math_tutor', 'practice', 'problem_set']);
+
+// Keep curricula on the lightweight practice format requested by the product:
+// standard lessons contain only quizzes, matching, and fill-in-the-blank
+// blocks, while the old canvas-based Math Tutor tasks are removed entirely.
+// This also upgrades saved curricula without touching completion data on the
+// lessons and blocks that remain.
+function normalizeCurriculumPracticeTasks(curriculum) {
+  if (!curriculum || !Array.isArray(curriculum.units)) return false;
+  let changed = false;
+
+  for (const unit of curriculum.units) {
+    const originalLessons = Array.isArray(unit.lessons) ? unit.lessons : [];
+    const lessons = originalLessons.filter(lesson => (
+      !REMOVED_CURRICULUM_LESSON_TYPES.has(lesson?.type)
+      && lesson?.tool !== 'math_tutor'
+      && lesson?.tool !== 'math_canvas'
+    ));
+    if (lessons.length !== originalLessons.length) changed = true;
+
+    for (const lesson of lessons) {
+      if (lesson.type !== 'lesson') continue;
+      if (lesson.interactiveOnly !== true) {
+        lesson.interactiveOnly = true;
+        changed = true;
+      }
+      if (Array.isArray(lesson.blocks)) {
+        const practiceBlocks = lesson.blocks.filter(block => CURRICULUM_PRACTICE_BLOCK_TYPES.has(block?.type));
+        if (practiceBlocks.length !== lesson.blocks.length) {
+          lesson.blocks = practiceBlocks;
+          changed = true;
+        }
+      }
+    }
+
+    unit.lessons = lessons;
+  }
+
+  return changed;
+}
+
+// Bring older saved curricula up to the same interaction density as newly
+// generated ones. The upgrade is idempotent and persists a real lesson (not a
+// client-only placeholder), so Quiz Bowl completion and the daily task queue
+// continue to work through the normal curriculum endpoints.
+function ensureCurriculumQuizBowlCoverage(curriculum) {
+  if (!curriculum || !Array.isArray(curriculum.units)) return false;
+  const category = quizBowlCategoryForCurriculum({
+    category: curriculum.category,
+    title: curriculum.title,
+    topic: curriculum.settings?.topic,
+    subject: curriculum.subject,
+    pausdSlug: curriculum.pausdSlug,
+  });
+  let changed = false;
+  curriculum.units.forEach((unit, ui) => {
+    const lessons = Array.isArray(unit.lessons) ? unit.lessons : [];
+    if (lessons.length < 2 || lessons.some(lesson => lesson.type === 'quiz_bowl')) return;
+    const quizBowl = makeQuizBowlLesson({
+      id: `${curriculum.id}-u${ui}-quizbowl`,
+      courseTitle: curriculum.title,
+      unitTitle: unit.title,
+      category,
+    });
+    const assessmentIndex = lessons.findIndex(lesson => lesson.type === 'unit_test');
+    if (assessmentIndex >= 0) lessons.splice(assessmentIndex, 0, quizBowl);
+    else lessons.push(quizBowl);
+    unit.lessons = lessons;
+    changed = true;
+  });
+  return changed;
 }
 
 app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
@@ -4043,12 +4205,10 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
       // Generating a curriculum costs CURRICULUM_CREDIT_COST credits.
       const quota = consumeCurriculumGeneration(usersC, emailC);
       if (!quota.allowed) {
-        const upgradeHint = quota.plan === 'free'
-          ? 'Upgrade to Paid for 9,500 credits/week.'
-          : 'Your credits reset on a rolling 7-day window.';
+        const recoveryHint = creditLimitRecoveryHint(usersC[emailC], emailC);
         return res.status(402).json({
           error: 'curriculum_limit_reached',
-          message: `Generating a curriculum costs ${CURRICULUM_CREDIT_COST} credits and you only have ${quota.remaining} left this week. ${upgradeHint}`,
+          message: `Generating a curriculum costs ${CURRICULUM_CREDIT_COST} credits and you only have ${quota.remaining} left this week. ${recoveryHint}`,
           limit: quota.limit, remaining: quota.remaining, plan: quota.plan, cost: CURRICULUM_CREDIT_COST,
         });
       }
@@ -4115,15 +4275,14 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
 
     // AI-assigned subject category, validated against the fixed list. If the
     // model returned something off-list (or nothing), fall back to keyword-
-    // based math detection, else "Other". Category is the single source of
-    // truth for whether this is a math course (drives the canvas lessons).
+    // based math detection, else "Other". The category still controls course
+    // labeling and whether non-math writing assignments are added.
     const mathKeywords = ['math', 'algebra', 'calculus', 'geometry', 'trigonometry', 'statistics', 'arithmetic', 'equation', 'fraction', 'polynomial', 'linear', 'quadratic', 'integral', 'derivative', 'probability', 'number theory'];
     const topicLower = (settings.topic || '').toLowerCase();
     const keywordMath = mathKeywords.some(kw => topicLower.includes(kw));
     const aiCategory = typeof curriculum.category === 'string' ? curriculum.category.trim() : '';
     const matchedCategory = CURRICULUM_CATEGORIES.find(c => c.toLowerCase() === aiCategory.toLowerCase());
     curriculum.category = matchedCategory || (keywordMath ? 'Math' : 'Other');
-    const isMathCurriculum = curriculum.category === 'Math';
     const quizBowlCategory = quizBowlCategoryForCurriculum({
       category: curriculum.category,
       title: curriculum.title,
@@ -4131,11 +4290,8 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
     });
     const unitCount = (curriculum.units || []).length;
 
-    const PROBLEM_SET_SIZE = 5;
-    let lessonCounter = 0;
     curriculum.units = (curriculum.units || []).map((unit, ui) => {
       const lessons = (unit.lessons || []).map((lesson, li) => {
-        lessonCounter++;
         return {
           ...lesson,
           id: `${curriculumId}-u${ui}-l${li}`,
@@ -4144,47 +4300,18 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
           phase: null,
           phaseData: {},
           content: null,
+          interactiveOnly: true,
           isCompleted: false,
           score: null,
         };
       });
 
-      // For math curricula: add a Math Tutor step-by-step drill (handwriting
-      // canvas + step grading) + a free-form Practice Problems lesson. The
-      // Math Tutor walks through a guided worked problem; Practice is the
-      // student's turn on the same topic.
-      if (isMathCurriculum && lessons.length >= 2) {
-        // More canvas practice for math units: one or two guided Math Tutor
-        // walkthroughs (scaled by unit size) plus a structured Problem Set the
-        // student works one problem at a time. Replaces the old free-form
-        // "Practice Problems" lesson.
-        const tutorCount = lessons.length >= 4 ? 2 : 1;
-        const mathTutorLessons = [];
-        for (let k = 0; k < tutorCount; k++) {
-          mathTutorLessons.push({
-            id: `${curriculumId}-u${ui}-mathtutor${k}`,
-            title: tutorCount > 1 ? `${unit.title} - Worked Examples ${k + 1}` : `${unit.title} - Math Tutor`,
-            description: `Work through guided problems for ${unit.title} with step-by-step feedback on a handwriting canvas.`,
-            type: 'math_tutor',
-            tool: 'math_tutor',
-            practiceTopic: unit.title,
-            chatHistory: [],
-            phase: null,
-            phaseData: {},
-            content: null,
-            isCompleted: false,
-            score: null,
-          });
-        }
-        const problemSetLesson = {
-          id: `${curriculumId}-u${ui}-problemset`,
-          title: `${unit.title} - Problem Set`,
-          description: `Solve ${PROBLEM_SET_SIZE} problems on ${unit.title} one at a time on the canvas, with feedback and progress.`,
-          type: 'problem_set',
-          tool: 'math_tutor',
-          practiceTopic: unit.title,
-          problemCount: PROBLEM_SET_SIZE,
-          problems: [],
+      if (curriculum.category !== 'Math' && lessons.length >= 2) {
+        const essayLesson = {
+          id: `${curriculumId}-u${ui}-essay`,
+          title: `${unit.title} - Graded Essay`,
+          description: `Write a graded short essay on ${unit.title}. Feedback is scored against a rubric.`,
+          type: 'essay',
           chatHistory: [],
           phase: null,
           phaseData: {},
@@ -4192,38 +4319,18 @@ app.post('/api/curriculum/generate', authMiddleware, async (req, res) => {
           isCompleted: false,
           score: null,
         };
-        // Math Tutor walkthroughs go before the last concept lesson; the
-        // Problem Set goes after (before the unit test, pushed below).
-        lessons.splice(lessons.length - 1, 0, ...mathTutorLessons);
-        lessons.push(problemSetLesson);
-      } else if (lessons.length >= 2) {
-        // History and geography periodically replace the usual graded essay
-        // with a Quiz Bowl round. The final unit always gets one; longer
-        // courses get a round every eighth unit, while compact courses get
-        // one every other unit.
-        if (quizBowlCategory && shouldSwapInQuizBowl(ui, unitCount)) {
-          lessons.push(makeQuizBowlLesson({
-            id: `${curriculumId}-u${ui}-quizbowl`,
-            courseTitle: curriculum.title,
-            unitTitle: unit.title,
-            category: quizBowlCategory,
-          }));
-        } else {
-          const essayLesson = {
-            id: `${curriculumId}-u${ui}-essay`,
-            title: `${unit.title} - Graded Essay`,
-            description: `Write a graded short essay on ${unit.title}. Feedback is scored against a rubric.`,
-            type: 'essay',
-            chatHistory: [],
-            phase: null,
-            phaseData: {},
-            content: null,
-            isCompleted: false,
-            score: null,
-          };
-          // Essay goes before the unit test so students write before the MCQ check.
-          lessons.push(essayLesson);
-        }
+        // Writing and retrieval practice exercise different skills, so Quiz
+        // Bowl supplements the essay instead of replacing it.
+        lessons.push(essayLesson);
+      }
+
+      if (lessons.length >= 2 && shouldSwapInQuizBowl(ui, unitCount)) {
+        lessons.push(makeQuizBowlLesson({
+          id: `${curriculumId}-u${ui}-quizbowl`,
+          courseTitle: curriculum.title,
+          unitTitle: unit.title,
+          category: quizBowlCategory,
+        }));
       }
 
       // Add unit test at end (always last).
@@ -4272,6 +4379,12 @@ app.get('/api/curriculum', authMiddleware, (req, res) => {
     const parent = users[email].data.parent;
     const activeStudentId = parent?.enabled ? parent.activeStudentId : null;
     let raw = users[email].data?.curricula || [];
+    let curriculaChanged = false;
+    for (const curriculum of raw) {
+      if (ensureCurriculumQuizBowlCoverage(curriculum)) curriculaChanged = true;
+      if (normalizeCurriculumPracticeTasks(curriculum)) curriculaChanged = true;
+    }
+    if (curriculaChanged) saveUsers(users);
     if (activeStudentId) raw = raw.filter(c => c.studentId === activeStudentId);
     const curricula = raw.map(c => ({
       id: c.id,
@@ -4286,8 +4399,232 @@ app.get('/api/curriculum', authMiddleware, (req, res) => {
       totalLessons: (c.units || []).reduce((sum, u) => sum + (u.lessons || []).length, 0),
       completedLessons: (c.units || []).reduce((sum, u) => sum + (u.lessons || []).filter(l => l.isCompleted).length, 0),
       unitCount: (c.units || []).length,
+      marketplace: c.marketplace ? {
+        published: c.marketplace.published === true,
+        anonymous: c.marketplace.anonymous === true,
+        publishedAt: c.marketplace.publishedAt || null,
+        installCount: Number(c.marketplace.installCount) || 0,
+      } : null,
     }));
     res.json({ curricula });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// =================================================================
+// CURRICULUM MARKETPLACE
+// Preset courses and community-published curricula share one searchable
+// index. Community listings expose only course metadata; the course is
+// sanitized and cloned into a student's library when they enroll.
+// =================================================================
+
+function curriculumMarketplaceStats(curriculum) {
+  const units = curriculum?.units || [];
+  return {
+    unitCount: units.length,
+    lessonCount: units.reduce((sum, unit) => sum + (unit.lessons || []).length, 0),
+  };
+}
+
+function curriculumMarketplaceAuthor(user, anonymous) {
+  if (anonymous) return 'Anonymous creator';
+  return user?.data?.socialDisplayName || user?.name || 'Covalent creator';
+}
+
+function presetMarketplaceTitle(title) {
+  return String(title || '').replace(/^PAUSD\s+/i, '').trim();
+}
+
+function presetMarketplaceAuthor(course) {
+  const subject = String(course?.subject || '').toLowerCase();
+  if (subject === 'geography') return 'Naman Mishra';
+  if (subject === 'math' || subject === 'science') return 'Rushil12 (ported from PAUSD)';
+  return 'Covalent Library';
+}
+
+function listCurriculumMarketplace(users) {
+  const presets = listPausdCatalog().map((course, index) => ({
+    listingId: `preset:${course.slug}`,
+    source: 'preset',
+    title: presetMarketplaceTitle(course.title),
+    description: course.description,
+    category: ({ math: 'Math', science: 'Science', english: 'Language & Literature', history: 'History', geography: 'Geography' })[String(course.subject || '').toLowerCase()] || 'Other',
+    subject: course.subject || 'other',
+    grade: course.grade || null,
+    difficulty: course.difficulty || 'advanced',
+    unitCount: course.unitCount,
+    lessonCount: course.lessonCount,
+    author: presetMarketplaceAuthor(course),
+    anonymous: false,
+    featured: index < 6,
+    installCount: 0,
+    publishedAt: null,
+  }));
+
+  const community = [];
+  for (const user of Object.values(users || {})) {
+    for (const curriculum of user?.data?.curricula || []) {
+      if (curriculum?.marketplace?.published !== true) continue;
+      const stats = curriculumMarketplaceStats(curriculum);
+      community.push({
+        listingId: `community:${user.id}:${curriculum.id}`,
+        source: 'community',
+        title: curriculum.title || curriculum.settings?.topic || 'Untitled curriculum',
+        description: curriculum.description || '',
+        category: curriculum.category || 'Other',
+        subject: curriculum.subject || curriculum.category || 'other',
+        grade: curriculum.marketplace.grade || null,
+        difficulty: curriculum.settings?.difficulty || 'intermediate',
+        ...stats,
+        author: curriculumMarketplaceAuthor(user, curriculum.marketplace.anonymous === true),
+        anonymous: curriculum.marketplace.anonymous === true,
+        featured: false,
+        installCount: Number(curriculum.marketplace.installCount) || 0,
+        publishedAt: curriculum.marketplace.publishedAt || curriculum.createdAt || null,
+      });
+    }
+  }
+
+  community.sort((a, b) => String(b.publishedAt || '').localeCompare(String(a.publishedAt || '')));
+  return [...presets, ...community];
+}
+
+function resetMarketplaceLesson(lesson, curriculumId, unitIndex, lessonIndex) {
+  const next = JSON.parse(JSON.stringify(lesson || {}));
+  next.id = `${curriculumId}-u${unitIndex}-l${lessonIndex}`;
+  next.chatHistory = [];
+  next.phase = null;
+  next.phaseData = {};
+  next.isCompleted = false;
+  next.score = null;
+  delete next.submission;
+  delete next.completedAt;
+  delete next.lastAttempt;
+  if (Array.isArray(next.blocks)) {
+    next.blocks = next.blocks.map((block, blockIndex) => {
+      const clean = { ...block, id: `${next.id}-b${blockIndex}` };
+      delete clean.submission;
+      delete clean.responses;
+      delete clean.score;
+      delete clean.feedback;
+      delete clean.completedAt;
+      clean.isCompleted = false;
+      return clean;
+    });
+  }
+  return next;
+}
+
+function cloneMarketplaceCurriculum(source, origin) {
+  const curriculumId = crypto.randomUUID();
+  const clone = JSON.parse(JSON.stringify(source || {}));
+  clone.id = curriculumId;
+  clone.createdAt = new Date().toISOString();
+  clone.updatedAt = null;
+  clone.studentId = null;
+  clone.linkedGoalIds = [];
+  clone.marketplace = null;
+  clone.marketplaceOrigin = origin;
+  // A public course carries the finished learning experience, not the
+  // creator's attached filenames, source URLs, or personalization answers.
+  delete clone.sources;
+  clone.settings = {
+    topic: clone.settings?.topic || clone.title || '',
+    difficulty: clone.settings?.difficulty || 'intermediate',
+    learningStyle: clone.settings?.learningStyle || 'conceptual',
+    includeExamples: clone.settings?.includeExamples !== false,
+    includeExercises: clone.settings?.includeExercises !== false,
+    graded: clone.graded === true,
+  };
+  delete clone.courseGrade;
+  delete clone.lastEditedBy;
+  delete clone.lastEditedAt;
+  clone.units = (clone.units || []).map((unit, unitIndex) => ({
+    ...unit,
+    id: `${curriculumId}-u${unitIndex}`,
+    locked: false,
+    lessons: (unit.lessons || []).map((lesson, lessonIndex) => resetMarketplaceLesson(lesson, curriculumId, unitIndex, lessonIndex)),
+  }));
+  return clone;
+}
+
+app.get('/api/curriculum/marketplace', authMiddleware, (req, res) => {
+  try {
+    res.json({ listings: listCurriculumMarketplace(loadUsers()) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/curriculum/marketplace/enroll', authMiddleware, (req, res) => {
+  try {
+    const { listingId } = req.body || {};
+    if (!String(listingId || '').startsWith('community:')) {
+      return res.status(400).json({ error: 'Invalid community curriculum listing' });
+    }
+    const users = loadUsers();
+    const targetEmail = findEmailById(users, req.userId);
+    if (!targetEmail) return res.status(404).json({ error: 'User not found' });
+
+    let source = null;
+    let sourceUser = null;
+    for (const user of Object.values(users)) {
+      const curriculum = (user?.data?.curricula || []).find(c =>
+        c?.marketplace?.published === true && `community:${user.id}:${c.id}` === listingId
+      );
+      if (curriculum) { source = curriculum; sourceUser = user; break; }
+    }
+    if (!source || !sourceUser) return res.status(404).json({ error: 'This curriculum is no longer public' });
+
+    if (sourceUser.id === req.userId) {
+      return res.json({ curriculum: source, alreadyEnrolled: true });
+    }
+    const existing = (users[targetEmail].data?.curricula || []).find(c => c.marketplaceOrigin?.listingId === listingId);
+    if (existing) return res.json({ curriculum: existing, alreadyEnrolled: true });
+
+    const curriculum = cloneMarketplaceCurriculum(source, {
+      listingId,
+      author: curriculumMarketplaceAuthor(sourceUser, source.marketplace.anonymous === true),
+    });
+    users[targetEmail].data = migrateUserData(users[targetEmail].data);
+    users[targetEmail].data.curricula.unshift(curriculum);
+    source.marketplace.installCount = (Number(source.marketplace.installCount) || 0) + 1;
+    saveUsers(users);
+    res.json({ curriculum, alreadyEnrolled: false });
+  } catch (e) {
+    console.error('Marketplace enroll error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/curriculum/:id/publish', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const curriculum = (users[email].data?.curricula || []).find(c => c.id === req.params.id);
+    if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
+    const now = new Date().toISOString();
+    curriculum.marketplace = {
+      ...curriculum.marketplace,
+      published: true,
+      anonymous: req.body?.anonymous === true,
+      publishedAt: curriculum.marketplace?.publishedAt || now,
+      updatedAt: now,
+      installCount: Number(curriculum.marketplace?.installCount) || 0,
+    };
+    saveUsers(users);
+    res.json({ marketplace: curriculum.marketplace });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/curriculum/:id/publish', authMiddleware, (req, res) => {
+  try {
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    const curriculum = (users[email].data?.curricula || []).find(c => c.id === req.params.id);
+    if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
+    curriculum.marketplace = { ...curriculum.marketplace, published: false, updatedAt: new Date().toISOString() };
+    saveUsers(users);
+    res.json({ marketplace: curriculum.marketplace });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -4306,6 +4643,10 @@ app.get('/api/curriculum/:id', authMiddleware, (req, res) => {
     }
     const curriculum = (users[email].data?.curricula || []).find(c => c.id === req.params.id);
     if (!curriculum) return res.status(404).json({ error: 'Curriculum not found' });
+    const quizBowlChanged = ensureCurriculumQuizBowlCoverage(curriculum);
+    const practiceTasksChanged = normalizeCurriculumPracticeTasks(curriculum);
+    const curriculumChanged = quizBowlChanged || practiceTasksChanged;
+    if (curriculumChanged) saveUsers(users);
     if (req.query.shareId) {
       // Shared recipients get course content, not the owner's private tutoring transcripts
       const sanitized = JSON.parse(JSON.stringify(curriculum), (k, v) => k === 'chatHistory' ? [] : v);
@@ -4343,6 +4684,7 @@ app.put('/api/curriculum/:id', authMiddleware, (req, res) => {
       delete safeUpdates.studentId;
     }
     curricula[idx] = { ...curricula[idx], ...safeUpdates, updatedAt: new Date().toISOString() };
+    normalizeCurriculumPracticeTasks(curricula[idx]);
     if (sharedWrite) {
       curricula[idx].lastEditedBy = req.userId;
       curricula[idx].lastEditedAt = curricula[idx].updatedAt;
@@ -4370,8 +4712,8 @@ app.delete('/api/curriculum/:id', authMiddleware, (req, res) => {
 // =================================================================
 // PAUSD CATALOG - pre-built Khan-Academy-style courses at PAUSD rigor.
 // Browse the catalog, then enroll → clones the template into the user's
-// curricula list with full IDs and per-unit math-tutor / practice / unit-
-// test lessons (math) or essay (non-math), exactly like AI-generated
+// curricula list with full IDs and per-unit practice / unit-test lessons,
+// plus essays for non-math courses, exactly like AI-generated
 // curricula from /api/curriculum/generate.
 // =================================================================
 
@@ -4395,9 +4737,9 @@ app.get('/api/pausd/catalog/:slug', authMiddleware, (req, res) => {
 // so existing lesson-chat / math-tutor / assessment endpoints all light up
 // unchanged. Each enrolled course gets:
 //   - fresh curriculum + unit + lesson IDs
-//   - for math curricula: a Math Tutor + Practice Problems lesson per unit
-//   - for non-math curricula: a Graded Essay per unit, with selected
-//     History/Geography units using Quiz Bowl instead
+//   - for math curricula: compact quiz/matching/fill-blank practice lessons
+//   - for non-math curricula: a Graded Essay per unit
+//   - for every curriculum: a Quiz Bowl retrieval round per unit
 //   - always: a Unit Assessment at the end of every unit
 app.post('/api/pausd/enroll', authMiddleware, (req, res) => {
   try {
@@ -4414,7 +4756,10 @@ app.post('/api/pausd/enroll', authMiddleware, (req, res) => {
     // Bail if already enrolled - show them the existing one rather than
     // making a duplicate.
     const existing = (users[email].data.curricula || []).find(c => c.pausdSlug === slug);
-    if (existing) return res.json({ curriculum: existing, alreadyEnrolled: true });
+    if (existing) {
+      if (normalizeCurriculumPracticeTasks(existing)) saveUsers(users);
+      return res.json({ curriculum: existing, alreadyEnrolled: true });
+    }
 
     // Demo accounts are capped at 1 curriculum total. Already-enrolled
     // case above slips through (re-opens the existing one); only NEW
@@ -4434,7 +4779,6 @@ app.post('/api/pausd/enroll', authMiddleware, (req, res) => {
     const presetBlocksMap = loadPresetBlocks();
 
     const curriculumId = crypto.randomUUID();
-    const isMathCurriculum = tpl.subject === 'math';
     // Map the catalog's subject onto our fixed UI category buckets.
     const SUBJECT_CATEGORY = {
       math: 'Math', science: 'Science', english: 'Language & Literature',
@@ -4480,98 +4824,62 @@ app.post('/api/pausd/enroll', authMiddleware, (req, res) => {
       },
       linkedGoalIds: [],
       units: (tpl.units || []).map((unit, ui) => {
-        // Honor explicit `type` from the catalog template - math_tutor and
-        // practice (canvas) lessons can be authored INLINE inside a unit's
-        // lessons array, interspersed between section lessons. Otherwise
-        // default to type 'lesson' (chat-based).
-        const lessons = (unit.lessons || []).map((lesson, li) => {
-          const t = lesson.type || 'lesson';
-          const lessonId = `${curriculumId}-u${ui}-l${li}`;
-          const base = {
-            id: lessonId,
-            title: lesson.title,
-            description: lesson.description,
-            type: t,
+        // Canvas-based Math Tutor/practice entries are intentionally omitted.
+        // Standard lessons use the compact quiz/matching/fill-blank format.
+        const lessons = (unit.lessons || [])
+          .filter(lesson => !REMOVED_CURRICULUM_LESSON_TYPES.has(lesson?.type))
+          .map((lesson, li) => {
+            const t = lesson.type || 'lesson';
+            const lessonId = `${curriculumId}-u${ui}-l${li}`;
+            const base = {
+              id: lessonId,
+              title: lesson.title,
+              description: lesson.description,
+              type: t,
+              chatHistory: [],
+              phase: null,
+              phaseData: {},
+              content: null,
+              interactiveOnly: t === 'lesson',
+              isCompleted: false,
+              score: null,
+            };
+            if (t === 'lesson') {
+              // Stamp pre-generated blocks with this student's lesson ID so
+              // block-level routes (/grade, /complete) resolve correctly.
+              const presetKey = `${tpl.slug}:${lesson.title}`;
+              const presetBlocks = presetBlocksMap[presetKey];
+              if (presetBlocks) {
+                base.blocks = presetBlocks
+                  .filter(block => CURRICULUM_PRACTICE_BLOCK_TYPES.has(block?.type))
+                  .map((b, i) => ({ ...b, id: `${lessonId}-b${i}` }));
+              }
+            }
+            return base;
+          });
+
+        if (category !== 'Math' && lessons.length >= 2) {
+          lessons.push({
+            id: `${curriculumId}-u${ui}-essay`,
+            title: `${unit.title} - Graded Essay`,
+            description: `Write a graded short essay on ${unit.title}. Feedback is scored against a rubric.`,
+            type: 'essay',
             chatHistory: [],
             phase: null,
             phaseData: {},
             content: null,
             isCompleted: false,
             score: null,
-          };
-          if (t === 'math_tutor') {
-            base.tool = 'math_tutor';
-            base.practiceTopic = lesson.practiceTopic || unit.title;
-          } else if (t === 'practice') {
-            base.tool = 'math_canvas';
-            base.practiceTopic = lesson.practiceTopic || unit.title;
-          } else {
-            // Stamp pre-generated blocks with this student's lesson ID so
-            // block-level routes (/grade, /complete) resolve correctly.
-            const presetKey = `${tpl.slug}:${lesson.title}`;
-            const presetBlocks = presetBlocksMap[presetKey];
-            if (presetBlocks) {
-              base.blocks = presetBlocks.map((b, i) => ({ ...b, id: `${lessonId}-b${i}` }));
-            }
-          }
-          return base;
-        });
+          });
+        }
 
-        // Concept list for this unit (its section lessons). Used to seed the
-        // Math Tutor so it drills the exact material the unit just taught.
-        const conceptTitles = lessons.filter(l => l.type === 'lesson').map(l => l.title);
-
-        // Whether the template already provides an interactive math tutor.
-        const hasInlineMathTutor = lessons.some(l => l.type === 'math_tutor');
-
-        if (isMathCurriculum && lessons.length >= 2) {
-          // The feedback loop for every math unit is Lesson -> Math Tutor ->
-          // Unit Test. After the section lessons, drop in a single Math Tutor
-          // session that drills the unit's concepts on the handwriting canvas
-          // with step-by-step feedback - the warm-up gate before the unit
-          // test. We seed it with the concept list (practiceConcepts) so it
-          // practices exactly what was taught, not a generic topic. Skip only
-          // if the template already baked a tutor in inline.
-          if (!hasInlineMathTutor) {
-            lessons.push({
-              id: `${curriculumId}-u${ui}-mathtutor`,
-              title: `${unit.title} - Math Tutor`,
-              description: `Drill worked problems across ${unit.title} on the handwriting canvas, with step-by-step feedback. Your warm-up before the unit test.`,
-              type: 'math_tutor',
-              tool: 'math_tutor',
-              practiceTopic: unit.title,
-              practiceConcepts: conceptTitles,
-              isPreTest: true,
-              chatHistory: [],
-              phase: null,
-              phaseData: {},
-              content: null,
-              isCompleted: false,
-              score: null,
-            });
-          }
-        } else if (!isMathCurriculum && lessons.length >= 2) {
-          if (quizBowlCategory && shouldSwapInQuizBowl(ui, unitCount)) {
-            lessons.push(makeQuizBowlLesson({
-              id: `${curriculumId}-u${ui}-quizbowl`,
-              courseTitle: tpl.title,
-              unitTitle: unit.title,
-              category: quizBowlCategory,
-            }));
-          } else {
-            lessons.push({
-              id: `${curriculumId}-u${ui}-essay`,
-              title: `${unit.title} - Graded Essay`,
-              description: `Write a graded short essay on ${unit.title}. Feedback is scored against a rubric.`,
-              type: 'essay',
-              chatHistory: [],
-              phase: null,
-              phaseData: {},
-              content: null,
-              isCompleted: false,
-              score: null,
-            });
-          }
+        if (lessons.length >= 2 && shouldSwapInQuizBowl(ui, unitCount)) {
+          lessons.push(makeQuizBowlLesson({
+            id: `${curriculumId}-u${ui}-quizbowl`,
+            courseTitle: tpl.title,
+            unitTitle: unit.title,
+            category: quizBowlCategory,
+          }));
         }
 
         // Unit assessment last.
@@ -4897,6 +5205,8 @@ app.post('/api/curriculum/:id/lesson/:lessonId/complete', authMiddleware, (req, 
         } else {
           lesson.isCompleted = !lesson.isCompleted;
         }
+        if (lesson.isCompleted) lesson.completedAt = lesson.completedAt || new Date().toISOString();
+        else lesson.completedAt = null;
         found = true;
         foundLesson = lesson;
 
@@ -6777,6 +7087,7 @@ Return JSON:
     };
     // Submitting an assignment marks the lesson complete.
     found.lesson.isCompleted = true;
+    found.lesson.completedAt = assignment.submission.submittedAt;
     if (found.lesson.score == null) found.lesson.score = finalScore;
     saveUsers(users);
 
@@ -6826,18 +7137,24 @@ function isUsableBlock(b) {
 // Generate lesson blocks with retries + count tolerance. Lesson
 // generation must NEVER hard-fail on a count mismatch - the student
 // would just see a broken lesson with no recourse. We retry up to 3x
-// trying to hit the exact requested count; if the model keeps drifting
-// we accept the best attempt that has at least a few well-formed blocks.
+// trying to hit the exact requested count unless a caller explicitly accepts
+// a smaller complete set; otherwise we keep the fullest usable attempt.
 // Returns an array of raw blocks, or null only if every attempt produced
 // nothing usable.
-async function generateLessonBlocksWithRetry(sys, prompt, model, maxTokens, blockCount) {
+async function generateLessonBlocksWithRetry(sys, prompt, model, maxTokens, blockCount, options = {}) {
+  const allowedTypes = options.allowedTypes instanceof Set ? options.allowedTypes : null;
+  const acceptFlexibleCount = options.acceptFlexibleCount === true;
+  const minBlocks = Math.max(1, Number(options.minBlocks) || 3);
   let best = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     const result = await callGemini(sys, [{ role: 'user', content: prompt }], model, maxTokens, { jsonMode: true, temperature: 0.6 });
     if (!result.success) continue;
     const parsed = parseAIJson(result.data.content?.[0]?.text || '');
     if (!parsed || !Array.isArray(parsed.blocks)) continue;
-    const usable = parsed.blocks.filter(isUsableBlock);
+    const usable = parsed.blocks.filter(block => (
+      isUsableBlock(block) && (!allowedTypes || allowedTypes.has(block.type))
+    ));
+    if (acceptFlexibleCount && usable.length >= minBlocks) return usable.slice(0, blockCount);
     if (usable.length === blockCount) return usable;          // exact hit
     if (!best || usable.length > best.length) best = usable;  // keep the fullest
   }
@@ -6977,9 +7294,38 @@ function distinctMissedQuestions(missed, limit = 30) {
 // standalone had the full mix). `title` is the phrase after "Build "
 // (the curriculum path names the unit + course; standalone just names
 // the topic). `contextLines` are extra lines inserted before Difficulty.
-function buildVariedLessonPrompt({ title, contextLines = [], difficulty, blockCount }) {
-  const sys = `You generate one complete lesson as ${blockCount} blocks. You are a thoughtful curriculum designer — you choose the type of EVERY block based on what best teaches this specific topic. A lesson is for DOING, not just reading: the student should spend most of it actively working problems, not consuming prose. Output ONLY valid JSON - no markdown, no fences, no commentary.`;
+function buildVariedLessonPrompt({ title, contextLines = [], difficulty, blockCount, interactiveOnly = false }) {
   const context = contextLines.filter(Boolean).join('\n');
+
+  if (interactiveOnly) {
+    const minimumBlocks = Math.min(3, blockCount);
+    const sys = `You generate one interactive practice lesson with about ${blockCount} hands-on blocks. A valid set may contain ${minimumBlocks}-${blockCount} blocks; quality matters more than hitting an exact count. There is NO reading, prose, worked-example canvas, or Math Tutor task. Output ONLY valid JSON - no markdown, no fences, no commentary.`;
+    const prompt = `Build a practice set for ${title}.
+${context ? context + '\n' : ''}Difficulty: ${difficulty}.
+
+Return ${minimumBlocks}-${blockCount} blocks. Use ONLY these three exercise types — never "example", "reading", "recap", "application", "challenge", or "open":
+  • "quiz"       - 3 multiple-choice questions. Each explanation should teach the idea in 1-2 useful sentences.
+  • "fill-blank" - 4-6 sentences with one missing keyword or short phrase each. Include a helpful hint.
+  • "matching"   - 5-7 pairs. Match vocabulary, concepts, equations, steps, methods, or examples with their meaning or use.
+
+DESIGN RULES:
+  • Open with gentle retrieval and escalate difficulty across the set.
+  • Make every block self-contained: explanations, hints, and definitions provide the teaching context.
+  • Cover a different objective in every block. Within a quiz, all 3 questions must test distinct ideas.
+  • Include all three exercise types when the material supports them.
+  • Do not pad the result to hit ${blockCount}; stop once the lesson objectives are covered well.
+
+SHAPES:
+  quiz:        {"type":"quiz","title":"...","questions":[{"prompt":"...","choices":["...","...","...","..."],"answer":"<exact text of correct choice>","explanation":"<1-2 teaching sentences>"}, ...3 total...]}
+  fill-blank:  {"type":"fill-blank","title":"...","instructions":"<one-line how-to>","sentences":[{"before":"<text before the blank>","answer":"<single word or short phrase>","after":"<text after the blank>","hint":"<short hint>"}, ...4-6 sentences...]}
+  matching:    {"type":"matching","title":"...","instructions":"<one-line how-to>","pairs":[{"term":"<short term>","definition":"<definition or example, 1 sentence>"}, ...5-7 pairs...]}
+
+Distractors must be plausible. Return JSON in this shape:
+{ "blocks": [ <${minimumBlocks}-${blockCount} blocks> ] }`;
+    return { sys, prompt };
+  }
+
+  const sys = `You generate one complete lesson as ${blockCount} blocks. You are a thoughtful curriculum designer — you choose the type of EVERY block based on what best teaches this specific topic. A lesson is for DOING, not just reading: the student should spend most of it actively working problems, not consuming prose. Output ONLY valid JSON - no markdown, no fences, no commentary.`;
   // Bias the mix hard toward active exercises over passive prose. "Summary"
   // blocks (reading/recap/application) are expository — capped at ~30% of the
   // lesson; the rest must be hands-on exercises the student answers/solves.
@@ -7062,7 +7408,12 @@ app.post('/api/curriculum/:id/lesson/:lessonId/blocks/generate', authMiddleware,
     // call - that wiped the IDs the client was holding and caused
     // "Block not found" 404s on the next /grade or /complete.
     if (Array.isArray(lesson.blocks) && lesson.blocks.length > 0) {
-      return res.json({ blocks: lesson.blocks });
+      const practiceBlocks = lesson.blocks.filter(block => CURRICULUM_PRACTICE_BLOCK_TYPES.has(block?.type));
+      if (practiceBlocks.length !== lesson.blocks.length) {
+        lesson.blocks = practiceBlocks;
+        saveUsers(users);
+      }
+      if (lesson.blocks.length > 0) return res.json({ blocks: lesson.blocks });
     }
 
     // Preset curricula: serve the pre-generated static blocks instead of
@@ -7073,35 +7424,47 @@ app.post('/api/curriculum/:id/lesson/:lessonId/blocks/generate', authMiddleware,
       const presetKey = `${curriculum.pausdSlug}:${lesson.title}`;
       const presetBlocks = loadPresetBlocks()[presetKey];
       if (presetBlocks) {
-        const blocks = presetBlocks.map((b, i) => ({ ...b, id: `${lesson.id}-b${i}` }));
-        lesson.blocks = blocks;
-        saveUsers(users);
-        return res.json({ blocks });
+        const blocks = presetBlocks
+          .filter(block => CURRICULUM_PRACTICE_BLOCK_TYPES.has(block?.type))
+          .map((b, i) => ({ ...b, id: `${lesson.id}-b${i}` }));
+        if (blocks.length === 0) {
+          // Fall through to AI generation if the legacy preset contained only
+          // prose or Math Tutor-style blocks.
+        } else {
+          lesson.blocks = blocks;
+          saveUsers(users);
+          return res.json({ blocks });
+        }
       }
     }
 
-    const difficulty = curriculum.difficulty || 'intermediate';
+    const difficulty = curriculum.settings?.difficulty || curriculum.difficulty || 'intermediate';
     const blockCount = LESSON_BLOCK_COUNT[difficulty] || LESSON_BLOCK_COUNT.intermediate;
     const { sys, prompt } = buildVariedLessonPrompt({
       title: `the lesson "${lesson.title}" from the unit "${unit.title}" of the course "${curriculum.title}"`,
       contextLines: [
         lesson.description ? `Lesson goal: ${lesson.description}` : '',
         curriculum.description ? `Course context: ${curriculum.description}` : '',
+        unit.textbookContext ? `Source material (use this as the factual source of truth):\n${String(unit.textbookContext).slice(0, 12000)}` : '',
       ],
       difficulty,
       blockCount,
+      interactiveOnly: true,
     });
 
     // Speed: Flash (not Pro) is plenty for structured-JSON lesson generation
     // and runs ~2-3x faster - the prompt does the heavy lifting. Pro is
     // reserved for free-form tutoring where reasoning depth matters.
-    // Bump the token ceiling for longer lessons - expert mode emits
-    // ~14 blocks with a couple readings inside, easily 6k tokens of
-    // markdown alone. Flash's hard cap is 8192; we'll use Pro for the
-    // deepest two tiers where the ceiling matters.
+    // Bump the token ceiling for longer advanced/expert practice sets. Flash's
+    // hard cap is 8192; use Pro for the deepest two tiers where the ceiling
+    // matters even though the exact block count is flexible.
     const maxTokens = blockCount >= 10 ? 12000 : 8192;
     const model = blockCount >= 10 ? GEMINI_PRO : GEMINI_FLASH;
-    const blocksRaw = await generateLessonBlocksWithRetry(sys, prompt, model, maxTokens, blockCount);
+    const blocksRaw = await generateLessonBlocksWithRetry(sys, prompt, model, maxTokens, blockCount, {
+      allowedTypes: CURRICULUM_PRACTICE_BLOCK_TYPES,
+      acceptFlexibleCount: true,
+      minBlocks: Math.min(3, blockCount),
+    });
     if (!blocksRaw) {
       console.error('curriculum blocks/generate: no usable blocks after retries for lesson', lesson.id);
       return res.status(500).json({ error: 'Lesson generation failed. Please try again.' });
@@ -7112,10 +7475,19 @@ app.post('/api/curriculum/:id/lesson/:lessonId/blocks/generate', authMiddleware,
     // everything other requests saved while we waited.
     const fresh = refetchCurriculumLesson(access.ownerId, req.params.id, req.params.lessonId);
     if (!fresh) return res.status(404).json({ error: 'Lesson not found' });
-    // A concurrent generate may have filled this lesson first. Serve its
-    // blocks — overwriting them would orphan the ids that client holds.
+    // A concurrent generate may have filled this lesson first. Apply the same
+    // curriculum-only allow-list before serving it so no legacy or unexpected
+    // block type can slip through this race path.
     if (Array.isArray(fresh.lesson.blocks) && fresh.lesson.blocks.length > 0) {
-      return res.json({ blocks: fresh.lesson.blocks });
+      const practiceBlocks = fresh.lesson.blocks.filter(block => CURRICULUM_PRACTICE_BLOCK_TYPES.has(block?.type));
+      if (practiceBlocks.length !== fresh.lesson.blocks.length) {
+        fresh.lesson.blocks = practiceBlocks;
+        saveUsers(fresh.users);
+      }
+      // Keep the concurrent result when it contains at least one valid
+      // exercise. If it contained only disallowed formats, use the freshly
+      // generated practice set below instead of returning an empty lesson.
+      if (practiceBlocks.length > 0) return res.json({ blocks: practiceBlocks });
     }
 
     // No SRS slot anymore - the AI mixes types as it sees fit, so a
@@ -7385,6 +7757,7 @@ app.post('/api/curriculum/:id/lesson/:lessonId/blocks/:bid/complete', authMiddle
     const allDone = blocks.length > 0 && blocks.every(b => b.completedAt);
     if (allDone && !found.lesson.isCompleted) {
       found.lesson.isCompleted = true;
+      found.lesson.completedAt = new Date().toISOString();
       const quizScores = blocks
         .filter(b => b.type === 'quiz' && typeof b.score === 'number').map(b => b.score);
       found.lesson.score = quizScores.length ? Math.round(quizScores.reduce((s, n) => s + n, 0) / quizScores.length) : null;
@@ -8480,31 +8853,86 @@ app.post('/api/flashcards/:deckId/review', authMiddleware, (req, res) => {
     else card.incorrectCount = (card.incorrectCount || 0) + 1;
 
     saveUsers(users);
-    res.json({ card });
+    res.json({ ok: true, card });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ===== NOTES =====
+
+function presetForSlug(slug) {
+  return COUNTRY_GEO_NOTES_BY_SLUG[slug]
+    || COUNTRY_HISTORY_NOTES_BY_SLUG[slug]
+    || COUNTRY_HISTORY_SUBDIVISION_NOTES_BY_SLUG[slug]
+    || PAUSD_SCIENCE_NOTES_BY_SLUG[slug]
+    || null;
+}
+
+// Existing preset notes are copied into a user's data when they are added, so
+// they do not automatically receive improvements made to the catalog. Add the
+// new national-context section to older subdivision-history copies once, while
+// leaving any edits the user made to the rest of the note intact.
+function refreshLegacySubdivisionHistoryNote(note) {
+  if (!note?.presetSlug) return false;
+  const preset = COUNTRY_HISTORY_SUBDIVISION_NOTES_BY_SLUG[note.presetSlug];
+  if (!preset?.mainNotes) return false;
+
+  const current = String(note.mainNotes || '').trim();
+  // Older copies had only the short local overview and study frame. Replace
+  // those copies with the complete preset so the sections appear in the same
+  // order as the catalog, rather than appending new material at the bottom.
+  if (!current.includes('## Administrative context')) {
+    note.mainNotes = preset.mainNotes;
+    note.cues = [...preset.cues];
+    note.summary = preset.summary;
+    note.updatedAt = new Date().toISOString();
+    return true;
+  }
+
+  if (current.includes('## National context')) return false;
+
+  const contextStart = preset.mainNotes.indexOf('\n## National context');
+  if (contextStart < 0) return false;
+  const contextEnd = preset.mainNotes.indexOf('\n## Administrative context', contextStart);
+  const nationalContext = preset.mainNotes
+    .slice(contextStart, contextEnd >= 0 ? contextEnd : undefined)
+    .trim();
+  if (!nationalContext) return false;
+
+  const currentBody = current.trimEnd();
+  const administrativeContext = currentBody.indexOf('\n## Administrative context');
+  note.mainNotes = administrativeContext >= 0
+    ? `${currentBody.slice(0, administrativeContext).trimEnd()}\n\n${nationalContext}\n\n${currentBody.slice(administrativeContext).trimStart()}`
+    : `${currentBody}\n\n${nationalContext}`;
+  note.updatedAt = new Date().toISOString();
+  return true;
+}
 
 app.get('/api/notes', authMiddleware, (req, res) => {
   try {
     const users = loadUsers();
     const email = findEmailById(users, req.userId);
     if (!email) return res.status(404).json({ error: 'User not found' });
-    let normalizedPresetTypes = false;
+    let notesChanged = false;
     for (const note of users[email].data?.notes || []) {
       if (note.presetSlug && note.type !== 'regular') {
         note.type = 'regular';
-        normalizedPresetTypes = true;
+        notesChanged = true;
       }
+      if (refreshLegacySubdivisionHistoryNote(note)) notesChanged = true;
     }
-    if (normalizedPresetTypes) saveUsers(users);
-    const notes = (users[email].data?.notes || []).map(n => ({
-      id: n.id, title: n.title, type: n.type || 'regular', createdAt: n.createdAt, updatedAt: n.updatedAt,
-      topicId: n.topicId ?? null,
-      presetSlug: n.presetSlug ?? null,
-      preview: (n.mainNotes || '').slice(0, 100),
-    }));
+    if (notesChanged) saveUsers(users);
+    const now = Date.now();
+    const notes = (users[email].data?.notes || []).map(n => {
+      const flashcards = Array.isArray(n.flashcards) ? n.flashcards : [];
+      return {
+        id: n.id, title: n.title, type: n.type || 'regular', createdAt: n.createdAt, updatedAt: n.updatedAt,
+        topicId: n.topicId ?? null,
+        presetSlug: n.presetSlug ?? null,
+        preview: (n.mainNotes || '').slice(0, 100),
+        flashcardCount: flashcards.length,
+        flashcardDueCount: flashcards.filter(card => cardIsDue(card, now)).length,
+      };
+    });
     res.json({ notes });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -8530,8 +8958,9 @@ app.post('/api/notes', authMiddleware, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Preset note catalog: built-in country and first-level subdivision geography
-// study notes users can add to their own notes. Registered before /api/notes/:nid so "presets" is
+// Preset note catalog: built-in country geography/history, first-level
+// subdivision geography, and science study notes users can add to their own
+// notes. Registered before /api/notes/:nid so "presets" is
 // not captured as a note id.
 app.get('/api/notes/presets', authMiddleware, (req, res) => {
   const geoPresets = COUNTRY_GEO_NOTES.filter(p => p.category !== 'geo-subdivision').map(p => ({
@@ -8548,17 +8977,30 @@ app.get('/api/notes/presets', authMiddleware, (req, res) => {
     country: p.country, region: p.region,
     subdivision: p.subdivision, subdivisionType: p.subdivisionType,
   }));
+  const historyPresets = COUNTRY_HISTORY_NOTES.map(p => ({
+    slug: p.slug, category: 'history',
+    label: p.country, group: p.region, subgroup: p.subregion,
+    title: p.title, preview: p.summary,
+    country: p.country, region: p.region, subregion: p.subregion,
+  }));
+  const historySubdivisionPresets = COUNTRY_HISTORY_SUBDIVISION_NOTES.map(p => ({
+    slug: p.slug, category: 'history-subdivision',
+    label: p.subdivision, group: p.country, subgroup: p.subdivisionType,
+    title: p.title, preview: p.summary,
+    country: p.country, region: p.region,
+    subdivision: p.subdivision, subdivisionType: p.subdivisionType,
+  }));
   const sciencePresets = PAUSD_SCIENCE_NOTES.map(p => ({
     slug: p.slug, category: 'science',
     label: p.subject, group: p.grade.split(' — ')[1] || p.course, subgroup: p.grade,
     title: p.title, preview: p.summary,
   }));
-  res.json({ presets: [...geoPresets, ...subdivisionPresets, ...sciencePresets] });
+  res.json({ presets: [...geoPresets, ...historyPresets, ...historySubdivisionPresets, ...subdivisionPresets, ...sciencePresets] });
 });
 
 app.post('/api/notes/presets/:slug', authMiddleware, (req, res) => {
   try {
-    const preset = COUNTRY_GEO_NOTES_BY_SLUG[req.params.slug] || PAUSD_SCIENCE_NOTES_BY_SLUG[req.params.slug];
+    const preset = presetForSlug(req.params.slug);
     if (!preset) return res.status(404).json({ error: 'Preset not found' });
     const users = loadUsers();
     const email = findEmailById(users, req.userId);
@@ -8591,6 +9033,7 @@ app.get('/api/notes/:nid', authMiddleware, (req, res) => {
     }
     const note = (users[email].data?.notes || []).find(n => n.id === req.params.nid);
     if (!note) return res.status(404).json({ error: 'Note not found' });
+    if (!req.query.shareId && refreshLegacySubdivisionHistoryNote(note)) saveUsers(users);
     res.json({ note: note.presetSlug ? { ...note, type: 'regular' } : note });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -9901,1630 +10344,6 @@ app.post('/api/gems/:id/chat', authMiddleware, requireMessageQuota, async (req, 
 });
 */
 
-// ===== SLIDESHOWS =====
-// AI-generated + manually-built presentation decks. Full CRUD, templates,
-// inline image support (image URLs), speaker notes, multiple layouts.
-
-// Slide-deck templates for the "Start blank" flow. Each returns a seed
-// array of slides with placeholder content the user then edits.
-// Safe numeric clamp for freeform slide element coords.
-function clamp(n, lo, hi) { n = Number(n); if (!Number.isFinite(n)) return lo; return Math.max(lo, Math.min(hi, n)); }
-
-// Strip <script>, javascript: URLs, and on* event handlers from pasted
-// SVG markup. Keeps the markup rendered-only, never executed.
-function sanitizeSvg(raw) {
-  if (!raw) return '';
-  let s = String(raw).slice(0, 50_000);
-  // Only allow content starting with <svg or a single tag - reject anything else.
-  s = s.replace(/<script[\s\S]*?<\/script>/gi, '');
-  s = s.replace(/ on[a-z]+\s*=\s*"[^"]*"/gi, '');
-  s = s.replace(/ on[a-z]+\s*=\s*'[^']*'/gi, '');
-  s = s.replace(/javascript:/gi, '');
-  // Require the content to contain an <svg> root.
-  if (!/<svg[\s>]/i.test(s)) return '';
-  return s;
-}
-
-function buildTemplateSlides(id, title, deckId) {
-  function s(i, layout, title, subtitle, bullets, notes = '', extras = {}) {
-    return {
-      id: `${deckId}-${i}`, layout, title, subtitle: subtitle || '',
-      bullets: bullets || [], notes, image: extras.image || '', imageCaption: extras.imageCaption || '',
-    };
-  }
-  switch (id) {
-    case 'pitch':
-      return [
-        s(0, 'title',   title || 'Our Pitch',      'One-line hook for the product', [],      'Open strong. State the problem in one sentence.'),
-        s(1, 'content', 'The Problem',             '', ['Pain point 1', 'Pain point 2', 'Who feels it most'], 'Make it visceral - name the user.'),
-        s(2, 'content', 'Our Solution',            '', ['Core feature', 'What makes us different', 'Why it works'], 'Demo here if you have one.'),
-        s(3, 'content', 'Why Now',                 '', ['Shift 1', 'Shift 2', 'Shift 3'], 'Timing is everything.'),
-        s(4, 'content', 'Traction',                '', ['Users / revenue', 'Growth rate', 'Notable signals'], 'Hard numbers only.'),
-        s(5, 'content', 'The Team',                '', ['Founder 1 - role', 'Founder 2 - role', 'Advisors'], 'Why this team can win.'),
-        s(6, 'summary', 'The Ask',                 '', ['Amount raising', 'Use of funds', 'Timeline'], 'End with a clear ask.'),
-      ];
-    case 'lesson':
-      return [
-        s(0, 'title',   title || 'Lesson title',  'A 1-sentence hook', [], 'Start by naming what the student will walk away with.'),
-        s(1, 'content', 'What it is',             '', ['Definition', 'Everyday analogy', 'Why it matters'], ''),
-        s(2, 'content', 'How it works',           '', ['Step 1', 'Step 2', 'Step 3'], ''),
-        s(3, 'content', 'Worked example',         '', ['Given: …', 'Process: …', 'Answer: …'], 'Walk through each step out loud.'),
-        s(4, 'content', 'Common mistakes',        '', ['Mistake 1 → correct view', 'Mistake 2 → correct view'], ''),
-        s(5, 'summary', 'Recap',                  '', ['Key idea', 'What to practice next'], ''),
-      ];
-    case 'bookreport':
-      return [
-        s(0, 'title',   title || 'Book Report', 'Author · Year', [], ''),
-        s(1, 'content', 'Premise',              '', ['Setting', 'Main character(s)', 'Central conflict'], ''),
-        s(2, 'content', 'Plot summary',         '', ['Act 1', 'Act 2', 'Act 3'], 'Keep it under 90 seconds to read aloud.'),
-        s(3, 'content', 'Themes',               '', ['Theme 1 - supporting quote', 'Theme 2 - supporting quote'], ''),
-        s(4, 'quote',   '"A resonant quote from the book."', '- Character / page #', [], ''),
-        s(5, 'content', 'What I took away',     '', ['Insight 1', 'Insight 2'], ''),
-        s(6, 'summary', 'Rating & recommendation', '', ['Who should read this', 'Who should skip'], ''),
-      ];
-    case 'project':
-      return [
-        s(0, 'title',   title || 'Project proposal', 'Working title', [], ''),
-        s(1, 'content', 'Background',          '', ['Context', 'What exists today', 'Gap'], ''),
-        s(2, 'content', 'Goal',                '', ['What we\u2019re building', 'Who it\u2019s for'], ''),
-        s(3, 'content', 'Approach',            '', ['Phase 1', 'Phase 2', 'Phase 3'], ''),
-        s(4, 'content', 'Timeline',            '', ['Week 1-2', 'Week 3-4', 'Week 5+'], ''),
-        s(5, 'content', 'Risks',               '', ['Risk 1 → mitigation', 'Risk 2 → mitigation'], ''),
-        s(6, 'summary', 'Success metrics',     '', ['How we\u2019ll measure it', 'What \u201cdone\u201d looks like'], ''),
-      ];
-    case 'class':
-      return [
-        s(0, 'title',   title || 'Class Presentation', 'Your name · Class · Date', [], ''),
-        s(1, 'content', 'Overview',            '', ['What this talk covers', 'Why it matters'], ''),
-        s(2, 'imageRight', 'Visual context',   '', ['Key point tied to the image', 'Second point'], 'Describe the image out loud.', { image: '', imageCaption: 'Replace with an image URL on the right panel' }),
-        s(3, 'content', 'Deep dive',           '', ['Point A', 'Point B', 'Point C'], ''),
-        s(4, 'twoCol',  'Compare & contrast',  '', ['Option 1 pro', 'Option 2 pro', 'Option 1 con', 'Option 2 con'], ''),
-        s(5, 'summary', 'Takeaways & Q&A',     '', ['Main idea 1', 'Main idea 2', 'Happy to take questions'], ''),
-      ];
-    case 'blank':
-    default:
-      return [
-        s(0, 'title',   title || 'Untitled slideshow', 'Click to edit your subtitle', [], ''),
-        s(1, 'content', 'New section',                 '', ['First point', 'Second point'], ''),
-        s(2, 'summary', 'Key takeaways',               '', ['Takeaway 1', 'Takeaway 2'], ''),
-      ];
-  }
-}
-
-// AI-generated + manually-built presentation decks. One-shot generation,
-app.get('/api/slideshows', authMiddleware, (req, res) => {
-  try {
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (!email) return res.status(404).json({ error: 'User not found' });
-    users[email].data = migrateUserData(users[email].data);
-    const list = (users[email].data.slideshows || []).map(s => {
-      const first = (s.slides || [])[0];
-      return {
-        id: s.id, title: s.title, topic: s.topic,
-        slideCount: (s.slides || []).length,
-        createdAt: s.createdAt,
-        palette: s.palette,
-        font: s.font,
-        firstSlide: first ? {
-          id: first.id, layout: first.layout,
-          elements: first.elements, background: first.background,
-          title: first.title, body: first.body, accent: first.accent,
-          eyebrow: first.eyebrow, subtitle: first.subtitle,
-          bullets: first.bullets, items: first.items,
-          imageDataUrl: first.imageDataUrl || null,
-          html: first.html || '',
-        } : null,
-      };
-    });
-    res.json({ slideshows: list });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.get('/api/slideshows/:id', authMiddleware, (req, res) => {
-  try {
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (!email) return res.status(404).json({ error: 'User not found' });
-    users[email].data = migrateUserData(users[email].data);
-    const deck = (users[email].data.slideshows || []).find(s => s.id === req.params.id);
-    if (!deck) return res.status(404).json({ error: 'Not found' });
-    // Heal legacy slides on read - runs the same mechanical contrast fixer
-    // over the stored slides before responding. Nothing unreadable should
-    // ever reach the client, even if it predates the current fix.
-    let mutated = false;
-    deck.slides = (deck.slides || []).map(s => {
-      if (!Array.isArray(s.elements) || !s.elements.length) return s;
-      const fixed = autoFixSlide(s);
-      if (JSON.stringify(fixed.elements) !== JSON.stringify(s.elements) ||
-          fixed.background !== s.background) mutated = true;
-      return fixed;
-    });
-    if (mutated) saveUsers(users);
-    res.json({ slideshow: deck });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.delete('/api/slideshows/:id', authMiddleware, (req, res) => {
-  try {
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (!email) return res.status(404).json({ error: 'User not found' });
-    users[email].data = migrateUserData(users[email].data);
-    users[email].data.slideshows = (users[email].data.slideshows || []).filter(s => s.id !== req.params.id);
-    saveUsers(users);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Create a blank slideshow. Body: { title } - everything else defaults.
-// Starts with a single title slide that the user then builds on top of.
-app.post('/api/slideshows', authMiddleware, (req, res) => {
-  try {
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (!email) return res.status(404).json({ error: 'User not found' });
-    users[email].data = migrateUserData(users[email].data);
-
-    const title = String(req.body?.title || 'Untitled slideshow').trim().slice(0, 200);
-    const templateId = String(req.body?.template || 'blank');
-    const deckId = crypto.randomUUID();
-    const slides = buildTemplateSlides(templateId, title, deckId);
-    const deck = {
-      id: deckId,
-      title,
-      subtitle: '',
-      topic: title,
-      slides,
-      settings: { manual: true, template: templateId },
-      createdAt: new Date().toISOString(),
-    };
-    users[email].data.slideshows.unshift(deck);
-    saveUsers(users);
-    res.json({ slideshow: deck });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ===== Per-slide AI helpers =====
-//
-// The AI gets a detailed design brief (archetypes, hierarchy rules, color
-// pairings, positioning math) so what comes back is composable - we insert
-// the returned `elements[]` as-is instead of synthesizing a boring
-// title/bullets layout from scratch. The prompt is the difference between
-// "looks like a form" and "looks designed."
-const SLIDE_DESIGN_SYSTEM = `You are a senior presentation designer composing ONE information-dense slide. Your priority is CONTENT: every pixel of space should carry useful information. Visual decoration is secondary - but the slide must still look clean and professional, never ugly.
-
-## Core philosophy
-Function over form. A slide packed with substantive, well-organized text beats a sparse slide with a big icon. Audiences come for information, not aesthetics.
-
-## Archetypes - 90% of slides should be CONTENT or COMPARISON
-- CONTENT (default): title top-left, large body text block filling 60-70% of the canvas. Use whenever there is anything to explain.
-- COMPARISON: title + two equal-width columns of dense text. Use for vs., before/after, pros/cons.
-- SUMMARY: title + numbered or bulleted takeaway list. Use for recaps.
-- QUOTE: large italic quote + attribution. ONLY when the slide IS a quote - not just to break things up.
-- HERO: short punchy title + 1-sentence subtitle, NO body. Use ONLY for section openers and title slides - never for content.
-
-Do NOT use HERO slides for content. Do NOT leave slides sparse just to look "designed".
-
-## NO decorative graphics
-- Do NOT output icon elements.
-- Do NOT output shape elements.
-- Do NOT output image elements.
-- The ONLY allowed kind is "text". Every element must contain real, substantive prose or data.
-
-## Composition rules
-- Fill 75-90% of the canvas with text. Whitespace should be margins, not gaps.
-- Padding: ≥4% from every edge.
-- Background + text must have a WCAG contrast ratio of 4.5+. NON-NEGOTIABLE. Common safe pairings:
-    light bg (#ffffff, #f9fafb, #fef3c7, #dbeafe, #d1fae5) ↔ dark text (#111827, #1f2937)
-    dark bg (#0f172a, #1e293b, #111827, #1e1e2e, #2563eb) ↔ light text (#ffffff, #f3f4f6)
-- One accent color allowed on the title only.
-- Elements must NOT overlap.
-
-## Font sizes
-- Title: 38-52 (smaller = more title text fits)
-- Subtitle / section label: 18-22
-- Body / bullets: 17-21 (smaller so more lines fit)
-- Captions: 13-16
-
-Weights: 700 for titles, 500 for subtitles, 400 for body.
-
-## Body text - this is the most important part
-Body elements must contain COMPLETE SENTENCES. Each bullet/point should be 20-35 words explaining the concept in enough depth that someone who has never heard of the topic understands it. Do NOT write fragment labels. Do NOT write 3-word bullets. Write paragraphs or rich bullet lists.
-
-## Coordinate system
-x, y, w, h are PERCENTAGES of the slide (0-100). Each element stays within 3-97 on every axis. Elements must NOT overlap significantly.
-
-## Packing text
-Pack lines into ONE text element with "\\n" between them. Do NOT create one element per bullet. A body element should be w:88, h:65 or larger.
-
-## Output
-Return ONLY valid JSON - no markdown, no code fences, no commentary:
-{
-  "background": "#RRGGBB",
-  "notes": "2-3 sentences of detailed speaker notes the presenter says aloud",
-  "layout": "title" | "content" | "summary" | "quote" | "freeform",
-  "elements": [
-    { "kind": "text", "x": 6, "y": 8, "w": 88, "h": 12, "text": "...", "fontSize": 46, "fontWeight": "700", "italic": false, "underline": false, "align": "left", "color": "#RRGGBB" },
-    { "kind": "text", "x": 6, "y": 24, "w": 88, "h": 68, "text": "...", "fontSize": 19, "fontWeight": "400", "italic": false, "underline": false, "align": "left", "color": "#RRGGBB" }
-  ]
-}
-
-Typically 2-3 text elements per slide (title + body, or title + two columns). The body element should be large and full of detail. A good slide looks like a dense Wikipedia section rendered beautifully, not an airport billboard.`;
-
-// Generate a single slide on a topic and insert it after `insertAfter`
-// (default: append to the end of the deck).
-app.post('/api/slideshows/:id/ai/slide', authMiddleware, async (req, res) => {
-  try {
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (!email) return res.status(404).json({ error: 'User not found' });
-    users[email].data = migrateUserData(users[email].data);
-    const deck = (users[email].data.slideshows || []).find(s => s.id === req.params.id);
-    if (!deck) return res.status(404).json({ error: 'Deck not found' });
-
-    const topic = String(req.body?.topic || '').trim().slice(0, 160);
-    const insertAfter = Number.isFinite(Number(req.body?.insertAfter))
-      ? Math.max(-1, Math.min((deck.slides || []).length - 1, Number(req.body.insertAfter)))
-      : (deck.slides || []).length - 1;
-    if (!topic) return res.status(400).json({ error: 'Topic required' });
-
-    const nid = `${deck.id}-ai${Date.now()}`;
-    const model = modelForUser(users[email], email);
-
-    // SAME SHAPE AS THE WHOLE-DECK GENERATOR. One slide, one JSON object
-    // with title/subtitle/bullets/notes/layout. That's the contract that
-    // already works for `/api/slideshows/generate`; reuse it here so the
-    // client renders via the legacy SlideCanvas that already looks right.
-    const system = `You are a presentation content writer. Your priority is information density. Every slide should teach the viewer something substantive. Default to "content" layout unless the slide is purely a title/opener or a literal quote.
-
-Output ONLY valid JSON - no markdown, no fences.`;
-    const user = `Deck title: "${deck.title || 'Untitled'}".
-Topic: "${topic}".
-
-Compose the slide. Use "content" unless the topic is a section opener ("title") or a literal quote ("quote").
-
-JSON shape:
-{
-  "title": "Short title under 10 words",
-  "subtitle": "",
-  "bullets": ["5-7 complete-sentence points, each 20-35 words - real teaching sentences that explain the concept in depth, not fragment labels. Empty array only for title/quote slides."],
-  "notes": "2-4 sentences of detailed speaker notes that add context beyond the slide text",
-  "layout": "title" | "content" | "summary" | "quote"
-}`;
-
-    const aiResult = await callGemini(system, [{ role: 'user', content: user }], model, 1500, { jsonMode: true, temperature: 0.85 });
-    if (!aiResult.success) return res.status(500).json({ error: aiResult.error || 'AI call failed' });
-    const parsed = parseAIJson(aiResult.data.content?.[0]?.text || '');
-    if (!parsed?.title) return res.status(500).json({ error: 'AI response missing title' });
-
-    const newSlide = {
-      id: nid,
-      layout: ['title','content','summary','quote','twoCol','freeform'].includes(parsed.layout) ? parsed.layout : 'content',
-      title: String(parsed.title).slice(0, 200),
-      subtitle: String(parsed.subtitle || '').slice(0, 300),
-      bullets: Array.isArray(parsed.bullets) ? parsed.bullets.slice(0, 6).map(b => String(b).slice(0, 300)) : [],
-      notes: String(parsed.notes || '').slice(0, 1000),
-      image: '', imageCaption: '',
-      // Legacy field stays null - renderer uses theme default. Matches how
-      // the bulk-generated slides work.
-      background: null,
-      elements: [],
-    };
-
-    deck.slides.splice(insertAfter + 1, 0, newSlide);
-    saveUsers(users);
-    console.log(`AI slide inserted at ${insertAfter + 1} - layout=${newSlide.layout}, ${newSlide.bullets.length} bullets`);
-    res.json({ slideshow: deck, insertedAt: insertAfter + 1 });
-  } catch (e) { console.error('AI slide error:', e); res.status(500).json({ error: e.message }); }
-});
-
-// ===== Programmatic slide-design validator =====
-// The text-only "self critique" pass was unreliable - the AI would happily
-// rationalize a black-on-black slide as fine. Instead we compute the real
-// problems (WCAG contrast, overlap, out-of-bounds, font-size hierarchy),
-// hand the list back to the AI so it has a concrete fix list, and loop
-// until the slide validates. If the loop exhausts, we mechanically
-// auto-fix the worst issues (contrast gets flipped, out-of-bounds gets
-// clamped) so the user never sees a black-on-black slide.
-
-function hexToRgb(hex) {
-  if (typeof hex !== 'string') return null;
-  let h = hex.replace('#', '');
-  if (h.length === 3) h = h.split('').map(c => c + c).join('');
-  if (h.length < 6) return null;
-  const n = parseInt(h.slice(0, 6), 16);
-  if (!Number.isFinite(n)) return null;
-  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
-}
-function relLuminance({ r, g, b }) {
-  const toLin = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
-  return 0.2126 * toLin(r) + 0.7152 * toLin(g) + 0.0722 * toLin(b);
-}
-function contrastRatio(a, b) {
-  const ra = hexToRgb(a), rb = hexToRgb(b);
-  if (!ra || !rb) return 1;
-  const la = relLuminance(ra), lb = relLuminance(rb);
-  const L1 = Math.max(la, lb), L2 = Math.min(la, lb);
-  return (L1 + 0.05) / (L2 + 0.05);
-}
-// Hard minimum - 4.5 on anything. The "3.0 for large text" WCAG allowance
-// was letting borderline-unreadable dark-on-dark slides through.
-const MIN_CONTRAST = 4.5;
-function pickHighContrastText(bgHex) {
-  const whiteC = contrastRatio('#ffffff', bgHex);
-  const blackC = contrastRatio('#111827', bgHex);
-  return whiteC >= blackC ? '#ffffff' : '#111827';
-}
-function rectsOverlap(a, b) {
-  return !(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y);
-}
-
-function validateSlideDesign(slide) {
-  const issues = [];
-  const bg = slide.background || '#ffffff';
-  const els = Array.isArray(slide.elements) ? slide.elements : [];
-  if (!els.length) issues.push('Slide has no elements.');
-
-  els.forEach((el, i) => {
-    const id = `element[${i}]`;
-    if (el.kind === 'text') {
-      const ratio = contrastRatio(el.color || '#111827', bg);
-      if (ratio < MIN_CONTRAST) {
-        issues.push(`${id}: low contrast (${ratio.toFixed(2)} vs required ${MIN_CONTRAST}). Text color ${el.color} on background ${bg}. Change text color to a strongly contrasting hex.`);
-      }
-    }
-    // Bounds: must fit with ≥5% padding on left/top, ≥3% on right/bottom.
-    if (el.x < 3 || el.y < 3 || el.x + el.w > 97 || el.y + el.h > 97) {
-      issues.push(`${id}: out of bounds or too close to the edge (x=${el.x}, y=${el.y}, w=${el.w}, h=${el.h}). Keep every element inside 3-97% on each axis.`);
-    }
-  });
-
-  // Significant overlaps between text elements (>15% of either box covered).
-  for (let i = 0; i < els.length; i++) {
-    for (let j = i + 1; j < els.length; j++) {
-      const a = els[i], b = els[j];
-      if (a.kind === 'text' && b.kind === 'text' && rectsOverlap(a, b)) {
-        const ix = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
-        const iy = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
-        const overlapArea = ix * iy;
-        const aArea = a.w * a.h, bArea = b.w * b.h;
-        const pct = overlapArea / Math.min(aArea, bArea);
-        if (pct > 0.15) {
-          issues.push(`element[${i}] and element[${j}] overlap significantly. Reposition so they don\u2019t.`);
-        }
-      }
-    }
-  }
-
-  // Hierarchy: need one element ≥ 32px AND at least one smaller element
-  // (when more than one text element exists).
-  const textEls = els.filter(e => e.kind === 'text');
-  if (textEls.length >= 2) {
-    const maxFs = Math.max(...textEls.map(e => Number(e.fontSize) || 0));
-    const minFs = Math.min(...textEls.map(e => Number(e.fontSize) || 0));
-    if (maxFs < 32) issues.push('No dominant element - the largest text is under 32px. Make one element clearly the title (40+).');
-    if (maxFs / Math.max(1, minFs) < 1.6) issues.push('Hierarchy is flat - the biggest text should be at least 1.6× the smallest.');
-  }
-
-  return issues;
-}
-
-// Mechanical last-resort fix: flip text colors to a high-contrast choice
-// against the background, clamp every element into bounds. Guarantees the
-// slide is at least readable even if the AI never produces a clean version.
-function autoFixSlide(slide) {
-  const bg = slide.background || '#ffffff';
-  const els = (slide.elements || []).map(el => {
-    const fixed = { ...el };
-    if (fixed.kind === 'text') {
-      const ratio = contrastRatio(fixed.color || '#111827', bg);
-      if (ratio < MIN_CONTRAST) fixed.color = pickHighContrastText(bg);
-    }
-    fixed.x = Math.max(3, Math.min(97, fixed.x));
-    fixed.y = Math.max(3, Math.min(97, fixed.y));
-    fixed.w = Math.max(5, Math.min(97 - fixed.x, fixed.w));
-    fixed.h = Math.max(3, Math.min(97 - fixed.y, fixed.h));
-    return fixed;
-  });
-  return { ...slide, background: bg, elements: els };
-}
-
-// ===== Web image lookup (Wikipedia) =====
-// Free, no API key. The AI emits image elements with a `searchQuery`
-// field; we resolve each one to a real URL before persisting.
-async function searchWikipediaImage(query) {
-  const q = String(query || '').trim();
-  if (!q) return null;
-  try {
-    // Direct page summary first - cleanest thumbnail match.
-    const summary = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(q)}`, {
-      headers: { 'User-Agent': `RushilAI/1.0 (${process.env.CONTACT_EMAIL || 'contact@example.com'})` },
-    }).then(r => r.ok ? r.json() : null).catch(() => null);
-    if (summary?.originalimage?.source) return summary.originalimage.source;
-    if (summary?.thumbnail?.source) return summary.thumbnail.source;
-    // Fall back to site-wide search + page images.
-    const search = await fetch(
-      `https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrsearch=${encodeURIComponent(q)}&gsrlimit=3&prop=pageimages&piprop=original|thumbnail&pithumbsize=1200`,
-      { headers: { 'User-Agent': 'RushilAI/1.0' } },
-    ).then(r => r.ok ? r.json() : null).catch(() => null);
-    const pages = search?.query?.pages;
-    if (pages) {
-      for (const k of Object.keys(pages)) {
-        const p = pages[k];
-        if (p.original?.source) return p.original.source;
-        if (p.thumbnail?.source) return p.thumbnail.source;
-      }
-    }
-  } catch (e) { console.warn('Wikipedia image search failed:', e.message); }
-  return null;
-}
-
-// Strip adjectives / articles from a query to get at the main noun.
-// "a detailed diagram of the Krebs cycle" → "Krebs cycle".
-function simplifyQuery(q) {
-  const cleaned = String(q || '')
-    .replace(/\b(a|an|the|some|this|that|these|those|of|for|with|showing|illustrating|diagram|photo|image|picture|detailed|abstract|colorful|modern|professional)\b/gi, ' ')
-    .replace(/[^\w\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return cleaned;
-}
-
-async function searchWebImage(query) {
-  // Try the original query, then a simplified noun-phrase version.
-  const original = String(query || '').trim();
-  const simplified = simplifyQuery(original);
-  const attempts = [...new Set([original, simplified].filter(Boolean))];
-  for (const q of attempts) {
-    const url = await searchWikipediaImage(q);
-    if (url) return url;
-  }
-  return null;
-}
-
-// Walk a composed slide, resolving any AI-requested image elements.
-// If we CAN'T find an image, the element is dropped entirely so the user
-// never sees a "no image" placeholder box.
-async function resolveSlideImageQueries(slide) {
-  if (!Array.isArray(slide.elements)) return slide;
-  const resolved = [];
-  for (const el of slide.elements) {
-    if (el.kind !== 'image') { resolved.push(el); continue; }
-    // Already has a real URL (http/https/data: from paste) - keep.
-    if (el.src && /^(https?:|data:)/i.test(el.src)) { resolved.push(el); continue; }
-    // Gather queries in priority order: searchQuery, query, slide title.
-    const queries = [el.searchQuery, el.query, slide.title].filter(Boolean);
-    let url = null;
-    for (const q of queries) {
-      url = await searchWebImage(q);
-      if (url) break;
-    }
-    if (url) {
-      resolved.push({ ...el, src: url });
-    } else {
-      console.log(`Dropping image element - no match for queries: ${queries.join(' | ')}`);
-    }
-  }
-  slide.elements = resolved;
-  return slide;
-}
-
-// ============================================================
-// Hand-designed slide template library. Each template is a complete,
-// polished layout - positioning, typography, color pairings, everything -
-// with text slots addressed by `role`. The AI no longer designs slides
-// from scratch; it PICKS which template fits the topic and FILLS the
-// role slots. Because the designs are human-quality, every generated
-// slide looks good by construction.
-// ============================================================
-const SLIDE_TEMPLATES = [
-  {
-    id: 'hero-light',
-    match: 'Intro, section opener, chapter title, "welcome to X". Use when the slide is a high-energy title.',
-    background: '#ffffff',
-    layout: 'title',
-    elements: [
-      { kind: 'text', role: 'title',    x: 8,  y: 36, w: 84, h: 18, fontSize: 88, fontWeight: '700', color: '#111827', align: 'center' },
-      { kind: 'text', role: 'subtitle', x: 15, y: 58, w: 70, h: 8,  fontSize: 24, fontWeight: '400', color: '#6b7280', align: 'center' },
-    ],
-  },
-  {
-    id: 'hero-dark',
-    match: 'Dramatic opener, bold statement, powerful section transition on dark background.',
-    background: '#0f172a',
-    layout: 'title',
-    elements: [
-      { kind: 'text', role: 'title',    x: 8,  y: 36, w: 84, h: 18, fontSize: 88, fontWeight: '700', color: '#ffffff', align: 'center' },
-      { kind: 'text', role: 'subtitle', x: 15, y: 58, w: 70, h: 8,  fontSize: 22, fontWeight: '400', color: '#94a3b8', align: 'center' },
-    ],
-  },
-  {
-    id: 'stat-hero',
-    match: 'A headline number, percentage, or short phrase as the whole story. For data points.',
-    background: '#ffffff',
-    layout: 'freeform',
-    elements: [
-      { kind: 'text', role: 'stat',     x: 6,  y: 20, w: 88, h: 40, fontSize: 140, fontWeight: '800', color: '#2563eb', align: 'center' },
-      { kind: 'text', role: 'title',    x: 15, y: 62, w: 70, h: 8,  fontSize: 26, fontWeight: '600', color: '#111827', align: 'center' },
-      { kind: 'text', role: 'subtitle', x: 15, y: 74, w: 70, h: 12, fontSize: 18, fontWeight: '400', color: '#6b7280', align: 'center' },
-    ],
-  },
-  {
-    id: 'content-classic',
-    match: 'Default concept slide. Title + supporting points below. Use when the topic needs explanation.',
-    background: '#ffffff',
-    layout: 'content',
-    elements: [
-      { kind: 'text', role: 'title', x: 6, y: 8,  w: 88, h: 12, fontSize: 50, fontWeight: '700', color: '#111827', align: 'left' },
-      { kind: 'text', role: 'body',  x: 6, y: 26, w: 88, h: 65, fontSize: 24, fontWeight: '400', color: '#1f2937', align: 'left' },
-    ],
-  },
-  {
-    id: 'content-with-image',
-    match: 'Concept + a photo or diagram. Title and bullets on the left, image on the right. Use when a visual would help.',
-    background: '#ffffff',
-    layout: 'freeform',
-    elements: [
-      { kind: 'text', role: 'title', x: 5,  y: 10, w: 50, h: 12, fontSize: 42, fontWeight: '700', color: '#111827', align: 'left' },
-      { kind: 'text', role: 'body',  x: 5,  y: 28, w: 50, h: 64, fontSize: 20, fontWeight: '400', color: '#1f2937', align: 'left' },
-      { kind: 'image', role: 'image', x: 58, y: 10, w: 37, h: 82 },
-    ],
-  },
-  {
-    id: 'quote',
-    match: 'A memorable quote. For rhetorical emphasis, literary passages, or pull-quote style.',
-    background: '#fef3c7',
-    layout: 'quote',
-    elements: [
-      { kind: 'text', role: 'quote',       x: 8,  y: 28, w: 84, h: 34, fontSize: 44, fontWeight: '500', color: '#111827', align: 'center', italic: true },
-      { kind: 'text', role: 'attribution', x: 20, y: 68, w: 60, h: 6,  fontSize: 20, fontWeight: '500', color: '#92400e', align: 'center' },
-    ],
-  },
-  {
-    id: 'summary-bold',
-    match: 'Key takeaways / wrap-up / recap slide. 3-5 short points on a soft background.',
-    background: '#dbeafe',
-    layout: 'summary',
-    elements: [
-      { kind: 'text', role: 'title', x: 6, y: 10, w: 88, h: 12, fontSize: 46, fontWeight: '700', color: '#1e3a8a', align: 'left' },
-      { kind: 'text', role: 'body',  x: 6, y: 28, w: 88, h: 62, fontSize: 24, fontWeight: '500', color: '#1e3a8a', align: 'left' },
-    ],
-  },
-  {
-    id: 'asymmetric-dark',
-    match: 'Bold section transition. Oversized title, small tagline, dark background, offset layout.',
-    background: '#111827',
-    layout: 'freeform',
-    elements: [
-      { kind: 'text', role: 'title',    x: 5, y: 20, w: 68, h: 44, fontSize: 104, fontWeight: '800', color: '#ffffff', align: 'left' },
-      { kind: 'text', role: 'subtitle', x: 5, y: 68, w: 52, h: 6,  fontSize: 18, fontWeight: '400', color: '#94a3b8', align: 'left' },
-    ],
-  },
-  {
-    id: 'two-column',
-    match: 'Comparison - side-by-side ideas, pro/con, before/after, option A vs option B.',
-    background: '#ffffff',
-    layout: 'twoCol',
-    elements: [
-      { kind: 'text', role: 'title',    x: 6,  y: 8,  w: 88, h: 10, fontSize: 42, fontWeight: '700', color: '#111827', align: 'left' },
-      { kind: 'text', role: 'colA',     x: 6,  y: 24, w: 42, h: 66, fontSize: 20, fontWeight: '400', color: '#1f2937', align: 'left' },
-      { kind: 'text', role: 'colB',     x: 52, y: 24, w: 42, h: 66, fontSize: 20, fontWeight: '400', color: '#1f2937', align: 'left' },
-    ],
-  },
-  {
-    id: 'warm-content',
-    match: 'Friendly / humanist content slide. Warmer palette. For people-focused topics.',
-    background: '#fef3c7',
-    layout: 'content',
-    elements: [
-      { kind: 'text', role: 'title', x: 6, y: 10, w: 88, h: 12, fontSize: 48, fontWeight: '700', color: '#92400e', align: 'left' },
-      { kind: 'text', role: 'body',  x: 6, y: 28, w: 88, h: 62, fontSize: 22, fontWeight: '400', color: '#78350f', align: 'left' },
-    ],
-  },
-];
-
-// Heuristic template picker - simple feature matching on the topic so the
-// server picks a sensible layout EVERY time, even if the AI call fails.
-function pickTemplateForTopic(topic, deckTitle) {
-  const t = String(topic || '').trim();
-  const lower = t.toLowerCase();
-  // Quote-ish: wrapped in quotes, or contains " said " / " quote "
-  if (/^["\u201c\u2018]/.test(t) || /\bsaid\b|\bquote\b|\bquoted\b/i.test(lower)) return SLIDE_TEMPLATES.find(x => x.id === 'quote');
-  // Stat-ish: starts with a number, or contains %, or "billion/million/thousand"
-  if (/^\s*\$?\d/.test(t) || /%|billion|million|thousand|\bpercent\b|\b\d+x\b/i.test(lower)) return SLIDE_TEMPLATES.find(x => x.id === 'stat-hero');
-  // Comparison
-  if (/\bvs\.?\b|\bversus\b|\bcompare\b|\bcomparison\b|\bpros? and cons?\b|\bbefore and after\b/i.test(lower)) return SLIDE_TEMPLATES.find(x => x.id === 'two-column');
-  // Summary / recap / takeaways
-  if (/\btakeaways?\b|\bsummary\b|\brecap\b|\bconclusion\b|\bkey points?\b|\bin short\b/i.test(lower)) return SLIDE_TEMPLATES.find(x => x.id === 'summary-bold');
-  // Hero / section opener (short - likely a section title)
-  if (t.split(/\s+/).length <= 4 && t.length < 40) return SLIDE_TEMPLATES.find(x => x.id === 'hero-light');
-  // Default: classic content slide - text-first, no images
-  return SLIDE_TEMPLATES.find(x => x.id === 'content-classic');
-}
-
-// Minimal copy-only prompt. The AI fills ONLY the slots the chosen
-// template actually defines - no picking, no design.
-function buildSlotPrompt(tmpl, topic, deckTitle) {
-  const roleLines = tmpl.elements.map(el => {
-    if (el.kind === 'image') return `- imageQuery (string) - a specific noun phrase for a web image search. Example: "Abraham Lincoln portrait"`;
-    switch (el.role) {
-      case 'title':    return `- title (string, under 10 words) - the slide's headline`;
-      case 'subtitle': return `- subtitle (string, 1 short sentence) - supporting line`;
-      case 'body':     return `- body (string) - 5-7 complete-sentence points SEPARATED BY \\n. Each point is 20-35 words that explains the concept in depth - not a label, a real sentence. No bullet characters.`;
-      case 'stat':     return `- stat (string, under 12 chars) - the headline number/phrase (e.g. "42%", "147B")`;
-      case 'quote':       return `- quote (string) - the actual quote text`;
-      case 'attribution': return `- attribution (string) - the speaker/source (e.g. "- Abraham Lincoln")`;
-      case 'colA':     return `- colA (string) - content for the left column. 3-4 complete-sentence points separated by \\n, each 20-30 words.`;
-      case 'colB':     return `- colB (string) - content for the right column. 3-4 complete-sentence points separated by \\n, each 20-30 words.`;
-      default:         return `- ${el.role} (string)`;
-    }
-  }).join('\n');
-
-  return `Deck title: "${deckTitle}".
-Topic for THIS slide: "${topic}".
-Archetype: ${tmpl.id} - ${tmpl.match}
-
-Write the slide's copy. Fill every slot below with ACTUAL content about the topic - do NOT return placeholder text, instructions, or empty strings. If you can't think of content for a slot, invent plausible content for the topic.
-
-Required slots (exact keys):
-${roleLines}
-
-Also include "notes" (string) - 1-2 sentences of speaker notes.
-
-Output ONLY JSON:
-{
-${tmpl.elements.map(el => el.kind === 'image' ? '  "imageQuery": "..."' : `  "${el.role}": "..."`).join(',\n')},
-  "notes": "..."
-}`;
-}
-
-// Merge a chosen template + the AI's slot content into a full slide.
-// Every text element gets its copy; image elements get their searchQuery.
-function materializeTemplateSlide(tmpl, slots, id) {
-  const elements = tmpl.elements.map((el, j) => {
-    const base = {
-      id: `${id}-el${j}`,
-      kind: el.kind,
-      x: el.x, y: el.y, w: el.w, h: el.h,
-      fontSize: el.fontSize || 20,
-      fontWeight: el.fontWeight || '400',
-      italic: !!el.italic,
-      underline: !!el.underline,
-      align: el.align || 'left',
-      color: el.color || '#111827',
-      text: '',
-      src: '',
-      searchQuery: '',
-    };
-    if (el.kind === 'text') {
-      base.text = String(slots?.[el.role] || '').slice(0, 1000);
-    } else if (el.kind === 'image') {
-      base.searchQuery = String(slots?.imageQuery || slots?.[el.role] || '').slice(0, 160);
-    }
-    return base;
-  });
-  // Drop text elements the AI left empty - keeps the design clean.
-  const filtered = elements.filter(el => el.kind === 'image' || (el.text && el.text.trim()));
-  return {
-    id,
-    layout: tmpl.layout || 'freeform',
-    title: slots?.title || '',
-    subtitle: slots?.subtitle || '',
-    bullets: [],
-    notes: '',
-    image: '', imageCaption: '',
-    background: tmpl.background,
-    elements: filtered,
-  };
-}
-
-// Pass 1 of "generate a slide from a topic": the AI drafts the raw
-// content (title, bullets, notes, layout) - no positioning, no design
-// yet. This gives the design pass the same anchor material that the
-// improve flow naturally has (the slide the user already built),
-// so both paths produce equally good final layouts.
-async function draftSlideContent(topic, model) {
-  const system = 'You are a presentation content writer. Output ONLY valid JSON. No markdown, no commentary.';
-  const user = `Draft the CONTENT for a single slide about: "${topic}". Default to "content" layout unless the slide is purely a title/section opener or a quote. Every slide should be information-dense.
-
-Return this exact shape:
-{
-  "title": "Short slide title under 10 words",
-  "subtitle": "Optional 1-sentence supporting line, or empty string",
-  "bullets": ["5-7 complete-sentence points, each 20-35 words, explaining the concept in depth - not fragment labels, real teaching sentences. Use empty array only for title/quote slides."],
-  "notes": "2-4 sentences of detailed speaker notes that elaborate on the body content",
-  "layout": "title" | "content" | "summary" | "quote" | "freeform",
-  "imageIdea": ""
-}`;
-  try {
-    const result = await callGemini(system, [{ role: 'user', content: user }], model, 1200, { jsonMode: true, temperature: 0.85 });
-    if (!result.success) return null;
-    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
-    if (!parsed?.title) return null;
-    return parsed;
-  } catch { return null; }
-}
-
-// Shared pipeline used by BOTH "generate a new slide" AND "improve this
-// slide". The two endpoints differ only in what they do with the result
-// (insert vs replace). Everything else - the design prompt, retry loop,
-// validation, auto-fix, image resolution, searchQuery cleanup - is
-// identical so outputs are equally good.
-async function composeAndFinalizeSlide({ users, email, deck, topic, instruction, priorSlide, targetId, fallbackTitle }) {
-  const model = modelForUser(users[email], email);
-  const deckCtx = `Deck title: "${deck.title}".`;
-  const seedContext = instruction
-    ? `${deckCtx}\nInstruction for this slide: "${instruction}".\n`
-    : `${deckCtx}\n`;
-  // When we have a prior slide, pass it through the compose loop so the AI
-  // can retain what's working and change what isn't.
-  const { slide: composed, attempts, issues, autoFixed } =
-    await aiComposeSlide(topic, seedContext, model, priorSlide);
-  if (!composed) {
-    return { error: `Could not produce a valid slide after ${attempts} attempts.` };
-  }
-  let slide = sanitizeComposedSlide(composed, targetId, fallbackTitle || topic);
-  slide = await resolveSlideImageQueries(slide);
-  slide.elements = slide.elements.map(el => { const { searchQuery, ...rest } = el; return rest; });
-  return { slide, attempts, issues, autoFixed };
-}
-
-// Multi-pass AI composition loop. Generates a draft, checks it against the
-// programmatic validator, and if it fails, sends the specific issue list
-// BACK to the AI so the next attempt has concrete targets. Up to 4
-// attempts; if it never validates, auto-fix the best attempt so we always
-// return a readable slide.
-async function aiComposeSlide(topic, seedContext, model, priorSlide = null) {
-  let bestCandidate = null;
-  let bestIssueCount = Infinity;
-  let lastIssues = null;
-
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const issueBlock = lastIssues?.length
-      ? `\nThe previous draft had THESE issues - fix EVERY one of them:\n- ${lastIssues.join('\n- ')}\n`
-      : '';
-    const priorBlock = priorSlide
-      ? `\nCurrent slide you are improving:\n${JSON.stringify(priorSlide)}\n`
-      : '';
-    const user = `${seedContext}${priorBlock}${issueBlock}
-Compose a single slide about: "${topic}". Output ONLY the design-system JSON - background, notes, layout, elements[].`;
-
-    const result = await callGemini(
-      SLIDE_DESIGN_SYSTEM,
-      [{ role: 'user', content: user }],
-      model,
-      3500,
-      { temperature: 0.95, jsonMode: true },
-    );
-    if (!result.success) continue;
-
-    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
-    if (!parsed || !Array.isArray(parsed.elements) || !parsed.elements.length) {
-      lastIssues = ['Output was not valid JSON with an elements array.'];
-      continue;
-    }
-
-    const issues = validateSlideDesign(parsed);
-    if (!issues.length) return { slide: parsed, attempts: attempt + 1, issues: [] };
-
-    if (issues.length < bestIssueCount) {
-      bestIssueCount = issues.length;
-      bestCandidate = parsed;
-    }
-    lastIssues = issues;
-  }
-
-  // Loop exhausted - auto-fix the least-bad draft.
-  const fallback = bestCandidate ? autoFixSlide(bestCandidate) : null;
-  return { slide: fallback, attempts: 4, issues: lastIssues || [], autoFixed: true };
-}
-
-// Clamps, validates, and normalizes an AI-composed slide. Critically:
-// ALWAYS persists an explicit background. Without one, the client
-// fell back to the app theme - and the validator's assumption of white
-// disagreed with a dark-themed render → black-on-black slides.
-function sanitizeComposedSlide(parsed, id, fallbackTopic) {
-  const validColor = (c) => typeof c === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : null;
-  const layout = ['title','content','summary','twoCol','quote','freeform'].includes(parsed.layout)
-    ? parsed.layout : 'freeform';
-  const background = validColor(parsed.background) || '#ffffff';
-  const elements = (parsed.elements || []).slice(0, 10).map((el, j) => ({
-    id: `${id}-el${j}`,
-    kind: el.kind === 'image' ? 'image' : 'text',
-    x: clamp(Number(el.x) || 0, 0, 100),
-    y: clamp(Number(el.y) || 0, 0, 100),
-    w: clamp(Number(el.w) || 40, 5, 100),
-    h: clamp(Number(el.h) || 10, 3, 100),
-    text: el.kind === 'image' ? '' : String(el.text || '').slice(0, 1000),
-    src: el.kind === 'image' ? String(el.src || '').slice(0, 2_000_000) : '',
-    // Preserved through sanitize so `resolveSlideImageQueries` can look it
-    // up. Stripped after image resolution (never persisted long-term).
-    searchQuery: el.kind === 'image' ? String(el.searchQuery || el.query || '').slice(0, 160) : '',
-    fontSize: clamp(Number(el.fontSize) || 20, 8, 160),
-    fontWeight: ['400','500','600','700','800'].includes(String(el.fontWeight)) ? String(el.fontWeight) : '400',
-    italic: !!el.italic,
-    underline: !!el.underline,
-    align: ['left','center','right'].includes(el.align) ? el.align : 'left',
-    // If no color (or invalid), pick whichever of black/white contrasts better with the background.
-    color: validColor(el.color) || pickHighContrastText(background),
-  }));
-  // Keep elements in-bounds: if anything extends past 100, pull it back.
-  for (const el of elements) {
-    if (el.x + el.w > 100) el.w = Math.max(5, 100 - el.x);
-    if (el.y + el.h > 100) el.h = Math.max(3, 100 - el.y);
-  }
-  // Always run the mechanical contrast fixer - guarantees no unreadable
-  // slide ever gets persisted, no matter what the AI produced.
-  return autoFixSlide({
-    id,
-    layout,
-    title: (elements[0]?.text || fallbackTopic || '').slice(0, 200),
-    subtitle: '',
-    bullets: [],
-    notes: String(parsed.notes || '').slice(0, 1000),
-    image: '', imageCaption: '',
-    background,
-    elements,
-  });
-}
-
-// Improve / rewrite an existing slide with a free-text instruction. Uses
-// the same design system as the generator so the rewritten slide is a
-// fully composed layout, not a plain bulleted form.
-app.post('/api/slideshows/:id/ai/improve', authMiddleware, async (req, res) => {
-  try {
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (!email) return res.status(404).json({ error: 'User not found' });
-    users[email].data = migrateUserData(users[email].data);
-    const deck = (users[email].data.slideshows || []).find(s => s.id === req.params.id);
-    if (!deck) return res.status(404).json({ error: 'Deck not found' });
-
-    const idx = Number(req.body?.slideIndex);
-    if (!Number.isFinite(idx) || idx < 0 || idx >= (deck.slides || []).length) {
-      return res.status(400).json({ error: 'slideIndex out of range' });
-    }
-    const instruction = String(req.body?.instruction || 'Improve clarity, hierarchy, and visual balance.').slice(0, 400);
-    const target = deck.slides[idx];
-
-    const priorSlide = {
-      title: target.title, subtitle: target.subtitle,
-      bullets: target.bullets, notes: target.notes,
-      layout: target.layout, background: target.background,
-      elements: Array.isArray(target.elements) ? target.elements : [],
-    };
-    const result = await composeAndFinalizeSlide({
-      users, email, deck,
-      // "Topic" for improve = what the current slide is about, with the
-      // instruction providing the delta. The shared helper puts both into
-      // the prompt the same way the generator does.
-      topic: target.title || deck.title,
-      instruction,
-      priorSlide,
-      targetId: target.id,
-      fallbackTitle: target.title,
-    });
-    if (result.error) return res.status(500).json({ error: result.error });
-
-    const updated = result.slide;
-    console.log(`AI slide improved in ${result.attempts} attempt(s)${result.autoFixed ? ' (auto-fixed)' : ''}. Remaining issues: ${result.issues?.length || 0}`);
-    // Preserve the slide's stable id + speaker notes unless the AI provided new ones.
-    updated.id = target.id;
-    if (!updated.notes) updated.notes = target.notes;
-    deck.slides[idx] = updated;
-    saveUsers(users);
-    res.json({ slideshow: deck, slideIndex: idx });
-  } catch (e) { console.error('AI improve error:', e); res.status(500).json({ error: e.message }); }
-});
-
-// ===== Vision-based slide review =====
-// Client renders the slide to a PNG, we ship it straight to Gemini's
-// multimodal endpoint with the slide JSON and ask for concrete element
-// adjustments (new x/y/w/h/color/fontSize). The returned patches are
-// applied to the slide and the new slide ships back to the client, which
-// animates the elements into their new positions.
-app.post('/api/slideshows/:id/ai/review-image', authMiddleware, async (req, res) => {
-  try {
-    if (!genAI) return res.status(500).json({ error: 'AI not configured' });
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (!email) return res.status(404).json({ error: 'User not found' });
-    users[email].data = migrateUserData(users[email].data);
-    const deck = (users[email].data.slideshows || []).find(s => s.id === req.params.id);
-    if (!deck) return res.status(404).json({ error: 'Deck not found' });
-
-    const idx = Number(req.body?.slideIndex);
-    if (!Number.isFinite(idx) || idx < 0 || idx >= (deck.slides || []).length) {
-      return res.status(400).json({ error: 'slideIndex out of range' });
-    }
-    const image = String(req.body?.imageBase64 || '');
-    const base64 = image.replace(/^data:image\/\w+;base64,/, '');
-    if (!base64 || base64.length < 100) return res.status(400).json({ error: 'Invalid image' });
-
-    const slide = deck.slides[idx];
-    const designPrompt = `You are a senior presentation designer reviewing a slide someone just rendered.
-
-You'll get the RENDERED IMAGE of the slide plus the underlying JSON. Look at the image, judge the design, and return element-level adjustments.
-
-Slide JSON (elements are indexed by array position):
-${JSON.stringify({ background: slide.background, elements: slide.elements }, null, 2)}
-
-Rules for your output:
-- Look at the IMAGE, not just the JSON - trust what you see.
-- If the text is unreadable on the background, fix it by changing the element color AND/OR the slide background.
-- If an element is cut off, overlapping another element, or visually cramped, reposition it.
-- If the hierarchy is flat, bump the most-important element's fontSize.
-- Keep it MINIMAL - only patch elements that actually need it.
-- All coords are 0-100 percentages of the slide.
-
-Output ONLY JSON in this exact shape (no prose, no markdown):
-{
-  "rating": 1-10,
-  "feedback": "1-2 sentence design note",
-  "background": "#RRGGBB" | null,     // null = leave as-is
-  "adjustments": [
-    {
-      "index": 0,                      // element index in the slide's elements array
-      "patch": {                       // any subset of these fields
-        "x": 10, "y": 20, "w": 80, "h": 15,
-        "fontSize": 42, "fontWeight": "700",
-        "color": "#111827", "align": "left"
-      }
-    }
-  ]
-}`;
-
-    const m = genAI.getGenerativeModel({
-      model: resolveModel(modelForUser(users[email], email, { stream: true })),
-      generationConfig: {
-        maxOutputTokens: 2048,
-        temperature: 0.6,
-        responseMimeType: 'application/json',
-      },
-    });
-    const result = await m.generateContent([
-      { text: designPrompt },
-      { inlineData: { mimeType: 'image/png', data: base64 } },
-    ]);
-    const text = result?.response?.text?.() || '';
-    const parsed = parseAIJson(text);
-    if (!parsed) return res.status(500).json({ error: 'Could not parse critique' });
-
-    // Apply adjustments.
-    const validColor = (c) => typeof c === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : null;
-    if (validColor(parsed.background)) slide.background = parsed.background;
-    if (Array.isArray(parsed.adjustments)) {
-      for (const adj of parsed.adjustments) {
-        const i = Number(adj?.index);
-        if (!Number.isFinite(i) || i < 0 || i >= (slide.elements || []).length) continue;
-        const el = slide.elements[i];
-        const p = adj.patch || {};
-        if (Number.isFinite(Number(p.x))) el.x = clamp(Number(p.x), 0, 100);
-        if (Number.isFinite(Number(p.y))) el.y = clamp(Number(p.y), 0, 100);
-        if (Number.isFinite(Number(p.w))) el.w = clamp(Number(p.w), 5, 100);
-        if (Number.isFinite(Number(p.h))) el.h = clamp(Number(p.h), 3, 100);
-        if (Number.isFinite(Number(p.fontSize))) el.fontSize = clamp(Number(p.fontSize), 8, 160);
-        if (['400','500','600','700','800'].includes(String(p.fontWeight))) el.fontWeight = String(p.fontWeight);
-        if (['left','center','right'].includes(p.align)) el.align = p.align;
-        if (validColor(p.color)) el.color = p.color;
-      }
-    }
-    // One more pass of the mechanical safety net.
-    deck.slides[idx] = autoFixSlide(slide);
-    saveUsers(users);
-
-    res.json({
-      slideshow: deck,
-      slideIndex: idx,
-      rating: Number(parsed.rating) || null,
-      feedback: String(parsed.feedback || '').slice(0, 400),
-    });
-  } catch (e) {
-    console.error('Vision review error:', e);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Update a slideshow (manual edits: rename, tweak slide content, reorder).
-// Body: { title?, subtitle?, slides? } - slides is the full replacement array.
-// Retroactively re-design every slide in an existing deck via the bespoke
-// HTML pipeline. Useful for decks generated before HTML design was added -
-// or for fixing up a deck where the user wants a fresh look without
-// changing the content.
-app.post('/api/slideshows/:id/redesign', authMiddleware, async (req, res) => {
-  try {
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (!email) return res.status(404).json({ error: 'User not found' });
-    users[email].data = migrateUserData(users[email].data);
-    const deck = (users[email].data.slideshows || []).find(s => s.id === req.params.id);
-    if (!deck) return res.status(404).json({ error: 'Not found' });
-    const model = modelForUser(users[email], email);
-    const stats = await generateBespokeHtmlForDeck({ deck, model });
-    deck.htmlDesigned = stats.generated;
-    saveUsers(users);
-    res.json({ slideshow: deck, stats });
-  } catch (e) {
-    console.error('[slideshow-redesign] error:', e);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.put('/api/slideshows/:id', authMiddleware, (req, res) => {
-  try {
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (!email) return res.status(404).json({ error: 'User not found' });
-    users[email].data = migrateUserData(users[email].data);
-    const deck = (users[email].data.slideshows || []).find(s => s.id === req.params.id);
-    if (!deck) return res.status(404).json({ error: 'Not found' });
-
-    const { title, subtitle, slides, palette, font } = req.body || {};
-    if (title !== undefined) deck.title = String(title).slice(0, 200);
-    if (subtitle !== undefined) deck.subtitle = String(subtitle).slice(0, 300);
-    const VP = ['ink','newsprint','ocean','forest','plum','coral','mono','sun','midnight','slate','rose','sage'];
-    const VF = ['editorial','modern','humanist','geometric'];
-    if (palette && VP.includes(palette)) deck.palette = palette;
-    if (font && VF.includes(font)) deck.font = font;
-    if (Array.isArray(slides)) {
-      const ALL_LAYOUTS = ['title','agenda','section','hero','content','bullets','cards','numbered','compare',
-        'twoCol','split','stat','quote','bigText','summary','imageHero','imageRight','imageLeft','imageFull','freeform'];
-      const validColor = (c) => typeof c === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : null;
-      deck.slides = slides.slice(0, 40).map((s, i) => ({
-        id: s.id || `${deck.id}-${i}`,
-        layout: ALL_LAYOUTS.includes(s.layout) ? s.layout : 'content',
-        eyebrow: String(s.eyebrow || '').slice(0, 80),
-        title: String(s.title || '').slice(0, 240),
-        subtitle: String(s.subtitle || '').slice(0, 300),
-        body: String(s.body || '').slice(0, 3000),
-        bullets: Array.isArray(s.bullets) ? s.bullets.slice(0, 10).map(b => String(b).slice(0, 500)) : [],
-        items: Array.isArray(s.items) ? s.items.slice(0, 8).map(it => ({ label: String(it?.label||'').slice(0,80), body: String(it?.body||'').slice(0,600) })) : [],
-        accent: String(s.accent || '').slice(0, 80),
-        imagePrompt: String(s.imagePrompt || '').slice(0, 400),
-        notes: String(s.notes || '').slice(0, 2000),
-        imageDataUrl: s.imageDataUrl ? String(s.imageDataUrl).slice(0, 5_000_000) : '',
-        // Preserve bespoke HTML so saves don't wipe the LLM-designed render
-        // path. Cap at 60k like the sanitizer to be safe.
-        html: s.html ? String(s.html).slice(0, 60_000) : '',
-        background: validColor(s.background) || null,
-        freeform: !!s.freeform,
-        elements: Array.isArray(s.elements) ? s.elements.slice(0, 40).map((el, j) => {
-          const validKind = ['text','image','icon','shape','svg'].includes(el.kind) ? el.kind : 'text';
-          const validColor = (c) => typeof c === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : null;
-          return {
-            id: el.id || `${s.id || deck.id + '-' + i}-el${j}`,
-            kind: validKind,
-            x: clamp(Number(el.x) || 0, 0, 100),
-            y: clamp(Number(el.y) || 0, 0, 100),
-            w: clamp(Number(el.w) || 40, 5, 100),
-            h: clamp(Number(el.h) || 10, 3, 100),
-            text: validKind === 'text' ? String(el.text || '').slice(0, 1000) : '',
-            src: validKind === 'image' ? String(el.src || '').slice(0, 2_000_000) : '',
-            // SVG markup - scripts/event handlers stripped.
-            svg: validKind === 'svg' ? sanitizeSvg(String(el.svg || '')) : '',
-            // Lucide icon name (e.g. "Lightbulb", "Rocket", "Leaf").
-            iconName: validKind === 'icon' ? String(el.iconName || '').slice(0, 60) : '',
-            // Decorative shape: rect | circle | pill.
-            shape: validKind === 'shape' ? (['rect','circle','pill'].includes(el.shape) ? el.shape : 'rect') : '',
-            fontSize: clamp(Number(el.fontSize) || 20, 8, 120),
-            fontWeight: ['400','500','600','700','800'].includes(String(el.fontWeight)) ? String(el.fontWeight) : '400',
-            italic: !!el.italic,
-            underline: !!el.underline,
-            align: ['left','center','right'].includes(el.align) ? el.align : 'left',
-            color: validColor(el.color) || '#111827',
-            // Secondary color used by shapes (outline / fill gradient) and icons.
-            accent: validColor(el.accent) || null,
-          };
-        }) : [],
-      }));
-    }
-    saveUsers(users);
-    res.json({ slideshow: deck });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// AI image generation for slideshow slides.
-// Returns a base64 data URL via Gemini's image-generation model.
-app.post('/api/images/generate', authMiddleware, async (req, res) => {
-  try {
-    if (!genAI) return res.status(500).json({ error: 'AI not configured' });
-    const { prompt } = req.body || {};
-    if (!String(prompt || '').trim()) return res.status(400).json({ error: 'prompt required' });
-
-    const safePrompt = String(prompt).slice(0, 400);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-image' });
-    const result = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: `Create a clean, visually striking image for a presentation slide about: ${safePrompt}. Style: modern, minimal, high-contrast. No text overlays. Cinematic composition, editorial photography quality.` }] }],
-      generationConfig: { responseModalities: ['IMAGE', 'TEXT'] },
-    });
-    const parts = result?.response?.candidates?.[0]?.content?.parts || [];
-    for (const part of parts) {
-      if (part.inlineData?.data) {
-        const mime = part.inlineData.mimeType || 'image/png';
-        return res.json({ imageDataUrl: `data:${mime};base64,${part.inlineData.data}` });
-      }
-    }
-    return res.status(500).json({ error: 'No image returned by model' });
-  } catch (e) {
-    console.error('Image gen error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ===== Slideshow theme/font tokens (mirrored from client) =====
-// Kept in sync with src/components/desktop/apps/SlideshowApp.jsx so the
-// HTML-design prompt knows the actual color and typography palette the
-// renderer will apply. If these drift, slides will look off - keep them
-// in lock-step.
-const SLIDESHOW_THEMES = {
-  newsprint: { mode: 'light', bg: '#fbf7f0', surface: '#f3ece0', border: '#d8cbb1', text: '#1a1a1a', muted: '#5b5443', faint: '#a8a08c', accent: '#9b1c1c', accent2: '#1a3a5c', font: 'editorial' },
-  ink:       { mode: 'light', bg: '#ffffff', surface: '#f4f4f5', border: '#e4e4e7', text: '#0a0a0a', muted: '#52525b', faint: '#a1a1aa', accent: '#2563eb', accent2: '#0f172a', font: 'modern'    },
-  mono:      { mode: 'light', bg: '#f5f5f4', surface: '#e7e5e4', border: '#d6d3d1', text: '#1c1917', muted: '#57534e', faint: '#a8a29e', accent: '#1c1917', accent2: '#78716c', font: 'geometric' },
-  sun:       { mode: 'light', bg: '#fef9e7', surface: '#fef3c7', border: '#facc15', text: '#1f1300', muted: '#78350f', faint: '#a16207', accent: '#d97706', accent2: '#b45309', font: 'humanist'  },
-  sage:      { mode: 'light', bg: '#f3f7f2', surface: '#e0ebe0', border: '#a7c4a3', text: '#0e1f0e', muted: '#3f5b3d', faint: '#6b8e69', accent: '#15803d', accent2: '#0e3d20', font: 'humanist'  },
-  rose:      { mode: 'light', bg: '#fdf2f8', surface: '#fce7f3', border: '#f9a8d4', text: '#3a0e2c', muted: '#831843', faint: '#be185d', accent: '#be185d', accent2: '#831843', font: 'editorial' },
-  midnight:  { mode: 'dark',  bg: '#0a0a16', surface: '#13132a', border: '#2a2a4a', text: '#ffffff', muted: '#a5b4fc', faint: '#6b7280', accent: '#a78bfa', accent2: '#7c3aed', font: 'modern'    },
-  slate:     { mode: 'dark',  bg: '#0f172a', surface: '#1e293b', border: '#334155', text: '#f8fafc', muted: '#cbd5e1', faint: '#64748b', accent: '#38bdf8', accent2: '#0ea5e9', font: 'geometric' },
-  ocean:     { mode: 'dark',  bg: '#02132f', surface: '#0a2547', border: '#1e3a5f', text: '#f0f9ff', muted: '#7dd3fc', faint: '#38bdf8', accent: '#22d3ee', accent2: '#0891b2', font: 'modern'    },
-  forest:    { mode: 'dark',  bg: '#06140e', surface: '#0e2419', border: '#1e3d2c', text: '#f0fdf4', muted: '#86efac', faint: '#4ade80', accent: '#4ade80', accent2: '#16a34a', font: 'humanist'  },
-  plum:      { mode: 'dark',  bg: '#1a0b1d', surface: '#2d1230', border: '#4a2050', text: '#fdf4ff', muted: '#e9d5ff', faint: '#c084fc', accent: '#f0abfc', accent2: '#c026d3', font: 'editorial' },
-  coral:     { mode: 'dark',  bg: '#1a0808', surface: '#2a0d0d', border: '#4a1818', text: '#fff7ed', muted: '#fed7aa', faint: '#fb923c', accent: '#fb7185', accent2: '#f43f5e', font: 'editorial' },
-};
-const SLIDESHOW_FONTS = {
-  editorial: { head: '"Fraunces", "Playfair Display", Georgia, serif',     body: '"Inter", system-ui, sans-serif' },
-  modern:    { head: '"Space Grotesk", "Inter", system-ui, sans-serif',    body: '"Inter", system-ui, sans-serif' },
-  humanist:  { head: '"Lora", "Source Serif 4", Georgia, serif',           body: '"Inter", system-ui, sans-serif' },
-  geometric: { head: '"Manrope", "Inter", system-ui, sans-serif',          body: '"Manrope", "Inter", system-ui, sans-serif' },
-};
-
-// HTML sanitiser. We trust Gemini broadly but strip the obvious foot-guns:
-// scripts, on* event handlers, javascript: URLs, external <link>/<script>
-// references. Whitelist <img src> to https/data URLs only. Keep everything
-// else - Gemini's <style> blocks, <svg>, <div>, etc. are fine.
-function sanitizeSlideHtml(raw) {
-  if (!raw) return '';
-  let html = String(raw).slice(0, 60_000);
-  // Strip markdown fences if the model wrapped its output despite our ask.
-  html = html.replace(/^```(?:html)?\s*/i, '').replace(/```\s*$/i, '').trim();
-  // Strip <script>…</script> entirely.
-  html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-  // Strip <link> / <meta> / <iframe> tags entirely.
-  html = html.replace(/<(link|meta|iframe|object|embed)\b[^>]*>/gi, '');
-  // Remove any on* event handler attributes.
-  html = html.replace(/\s+on[a-z]+\s*=\s*"[^"]*"/gi, '');
-  html = html.replace(/\s+on[a-z]+\s*=\s*'[^']*'/gi, '');
-  html = html.replace(/\s+on[a-z]+\s*=\s*[^\s>]+/gi, '');
-  // Strip javascript: URLs anywhere.
-  html = html.replace(/javascript\s*:/gi, '');
-  // Strip @import in <style> - would let model fetch external CSS.
-  html = html.replace(/@import\b[^;]*;?/gi, '');
-  // Strip url(...) references that aren't data: or https: (no http://, no //)
-  // Allow {{IMAGE}} placeholder verbatim.
-  html = html.replace(/url\(\s*["']?(?!(data:|https:|\{\{IMAGE\}\}))[^"')]+["']?\s*\)/gi, 'none');
-  return html.trim();
-}
-
-// Compare the model's HTML output against the source slide content and
-// flag whichever required fields were dropped. Most common failure mode:
-// the model writes a title + decoration and forgets the body/bullets,
-// leaving a near-empty slide.
-//
-// "Present" is a substring test on visible text (HTML tags stripped, case
-// insensitive). For body we sample the first ~20 chars - covers fragmented
-// rendering like <span>Struct</span>ured knowledge. For bullets/items we
-// require at least the leading word of each to appear.
-function checkSlideContentPresent(html, slide) {
-  if (!html) return { ok: false, missing: ['html'] };
-  // Strip tags, normalise whitespace, lowercase for substring matching.
-  const visible = String(html)
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
-  const has = (needle) => {
-    const s = String(needle || '').trim().toLowerCase();
-    if (!s) return true;
-    // Match on the first 24 chars (or full string if shorter) - enough to
-    // disambiguate, short enough to survive minor punctuation rewrites.
-    return visible.includes(s.slice(0, Math.min(24, s.length)));
-  };
-  const missing = [];
-  // Title is required on every layout that has one.
-  if (slide.title && !has(slide.title)) missing.push('title');
-  // Layouts where body is the whole point - missing body = empty slide.
-  const bodyRequired = !['title', 'section', 'bigText', 'quote'].includes(slide.layout);
-  if (bodyRequired && slide.body && slide.body.length > 20 && !has(slide.body)) missing.push('body');
-  // Bullets / items: require ≥70% present.
-  if (Array.isArray(slide.bullets) && slide.bullets.length) {
-    const hit = slide.bullets.filter(b => has(b)).length;
-    if (hit / slide.bullets.length < 0.7) missing.push(`bullets (${hit}/${slide.bullets.length})`);
-  }
-  if (Array.isArray(slide.items) && slide.items.length) {
-    const hit = slide.items.filter(it => has(it.label) || has(it.body)).length;
-    if (hit / slide.items.length < 0.7) missing.push(`items (${hit}/${slide.items.length})`);
-  }
-  return { ok: missing.length === 0, missing };
-}
-
-// Pre-pass: one Pro call that writes a deck-wide design brief - shared mood,
-// type scale, motif, accent rules, diagram style. Every per-slide call is
-// then handed this brief so the 10 slides feel like one deck instead of 10
-// random web pages. This is the single biggest visual-quality lever; on its
-// own it noticeably tightens the deck even without changing the per-slide
-// model. Returns null on failure - per-slide calls then run without a brief.
-async function generateDeckDesignBrief({ deck, theme, font }) {
-  try {
-    const p = buildDeckDesignBriefPrompt({ deck, theme, font });
-    const r = await callGemini(p.system, [{ role: 'user', content: p.user }],
-      GEMINI_PRO, 2500, { temperature: 0.6 });
-    if (!r.success) {
-      console.warn(`[slideshow-brief] FAILED: ${r.error}`);
-      return null;
-    }
-    const text = String(r.data.content?.[0]?.text || '').trim();
-    if (text.length < 200) {
-      console.warn(`[slideshow-brief] too short (${text.length} chars), discarding`);
-      return null;
-    }
-    console.log(`[slideshow-brief] generated (${text.length} chars)`);
-    return text;
-  } catch (e) {
-    console.warn(`[slideshow-brief] THREW: ${e.message}`);
-    return null;
-  }
-}
-
-// Parallel bespoke HTML generation for every slide in the deck. Two-stage:
-//   1. One Pro call writes a deck-wide design brief (shared mood, motif,
-//      type scale, accent rules). Without this the deck reads as 10
-//      unrelated designs; with it the deck has visual DNA.
-//   2. Each slide is coded in parallel with the brief as shared context.
-//      Pro model + 10k tokens lets the designer write rich SVG diagrams
-//      and proper editorial layouts, not template fills.
-// Failures fall back gracefully (slide.html stays empty and the renderer
-// uses the template path).
-async function generateBespokeHtmlForDeck({ deck, model, onProgress }) {
-  const themeKey = (Object.keys(SLIDESHOW_THEMES).includes(deck.palette)) ? deck.palette : 'newsprint';
-  const theme = SLIDESHOW_THEMES[themeKey];
-  const fontKey = SLIDESHOW_FONTS[deck.font] ? deck.font : (theme.font || 'editorial');
-  const font = SLIDESHOW_FONTS[fontKey];
-  const total = deck.slides.length;
-  // Per-slide HTML uses Flash, not Pro. Pro on 10k-token bespoke HTML output
-  // aborted roughly half the time in practice - Pro is too slow for this
-  // exact workload with the 360s ceiling. Flash + a Pro-written design
-  // brief is both faster and far more reliable: the brief carries the
-  // design intelligence, and Flash is plenty capable of implementing it.
-  const designModel = GEMINI_FLASH;
-  console.log(`[slideshow-html] starting design for ${total} slides on theme=${themeKey} font=${fontKey} model=${designModel}`);
-
-  // Stage 1: deck-wide design brief (~15-30s on Pro).
-  onProgress?.({ phase: 'Drafting design brief…', pct: 82 });
-  const designBrief = await generateDeckDesignBrief({ deck, theme, font });
-  onProgress?.({ phase: `Coding ${total} slides in HTML…`, pct: 86 });
-
-  // Stage 2: per-slide HTML, parallel. Brief is shared context.
-  // Each slide gets up to TWO attempts - if the first attempt drops content
-  // (a real failure mode where the model writes just title + decoration),
-  // we retry once with a more pointed prompt. Beats shipping an empty slide.
-  let completed = 0;
-  const tasks = deck.slides.map((slide, i) => (async () => {
-    const tickProgress = () => {
-      completed++;
-      onProgress?.({ phase: `Designed ${completed}/${total} slides…`, pct: 86 + Math.floor((completed / total) * 10) });
-    };
-    const attempt = async (retryNote) => {
-      const p = buildSlideHtmlPrompt({ slide, deck, theme, font, slideIndex: i, totalSlides: total, designBrief });
-      const userMsg = retryNote ? `${p.user}\n\n# Retry note\n${retryNote}` : p.user;
-      const r = await callGemini(p.system, [{ role: 'user', content: userMsg }],
-        designModel, 10000, { temperature: 0.7 });
-      if (!r.success) return { ok: false, error: r.error };
-      const text = r.data.content?.[0]?.text || '';
-      const cleaned = sanitizeSlideHtml(text);
-      if (!cleaned || cleaned.length < 60) return { ok: false, error: 'empty response' };
-      const presence = checkSlideContentPresent(cleaned, slide);
-      if (!presence.ok) return { ok: false, error: 'missing content', cleaned, presence };
-      return { ok: true, html: cleaned };
-    };
-    try {
-      let result = await attempt(null);
-      // Retry once if the model dropped required content (most common
-      // quality regression - title + decoration with no body/bullets).
-      if (!result.ok && result.error === 'missing content') {
-        console.warn(`[slideshow-html] slide ${i} (${slide.layout}) missing content on attempt 1: ${result.presence.missing.join(', ')} - retrying`);
-        result = await attempt(`Your previous attempt dropped these required fields: ${result.presence.missing.join(', ')}. Render them ALL in full. Do not output a title-only slide.`);
-      }
-      tickProgress();
-      if (!result.ok) {
-        console.warn(`[slideshow-html] slide ${i} (${slide.layout}) FAILED: ${result.error}${result.presence ? ' (' + result.presence.missing.join(', ') + ')' : ''}`);
-        return { ok: false, error: result.error };
-      }
-      const cleaned = result.html;
-      // Sanity: must contain a <div class="slide" or similar root.
-      if (!cleaned.includes('class="slide"') && !cleaned.includes("class='slide'")) {
-        return { ok: true, html: `<div class="slide" style="position:relative;width:100%;height:100%;background:${theme.bg};color:${theme.text};font-family:${font.body};overflow:hidden;">${cleaned}</div>` };
-      }
-      return { ok: true, html: cleaned };
-    } catch (e) {
-      tickProgress();
-      console.warn(`[slideshow-html] slide ${i} (${slide.layout}) THREW: ${e.message}`);
-      return { ok: false, error: e.message };
-    }
-  })());
-
-  const results = await Promise.all(tasks);
-  let successCount = 0;
-  deck.slides = deck.slides.map((s, i) => {
-    if (results[i]?.ok && results[i].html) {
-      successCount++;
-      return { ...s, html: results[i].html };
-    }
-    return s;
-  });
-  if (designBrief) deck.designBrief = designBrief;
-  console.log(`[slideshow-html] ${successCount}/${total} slides bespoke-designed (brief=${designBrief ? 'yes' : 'no'})`);
-  return { generated: successCount, total };
-}
-
-// ===== Slideshow auto-review (critic + reviser loop) =====
-// Runs after the first-pass deck generation. The critic model produces a
-// structured list of issues; the reviser model edits the deck to address
-// each one. We loop up to MAX_REVIEW_PASSES (2) or until the critic
-// returns "ship it" (no high-severity issues + score ≥ 9).
-//
-// We use the FLASH-LITE model for the critic - it's cheap, fast, and good
-// at structured output. The reviser uses the same model the user picked
-// for generation, since it needs to write quality prose.
-const MAX_REVIEW_PASSES = 2;
-
-async function reviewAndPolishDeck({ topic, parsed, model }) {
-  const log = [];
-  for (let pass = 1; pass <= MAX_REVIEW_PASSES; pass++) {
-    let critique = null;
-    try {
-      const cp = buildSlideshowCriticPrompt({ topic, deck: parsed });
-      const cr = await callGemini(cp.system, [{ role: 'user', content: cp.user }],
-        GEMINI_FLASH, 3500, { jsonMode: true, temperature: 0.15 });
-      if (!cr.success) {
-        log.push({ pass, ok: false, reason: 'critic call failed', error: cr.error });
-        break;
-      }
-      critique = parseAIJson(cr.data.content?.[0]?.text || '');
-    } catch (e) {
-      log.push({ pass, ok: false, reason: 'critic threw', error: e.message });
-      break;
-    }
-    if (!critique || !Array.isArray(critique.issues)) {
-      log.push({ pass, ok: false, reason: 'critic returned malformed JSON' });
-      break;
-    }
-
-    const issues = critique.issues || [];
-    const score = Number(critique.overallScore) || 0;
-    const summary = String(critique.summary || '').slice(0, 200);
-    const highCount = issues.filter(i => i.severity === 'high').length;
-    log.push({ pass, ok: true, score, summary, issueCount: issues.length, highCount });
-    console.log(`[slideshow-review] pass ${pass}: score=${score}, issues=${issues.length} (${highCount} high)`);
-
-    // Ship-it threshold: nothing major and score is 9+. Or no issues at all.
-    if (issues.length === 0 || (score >= 9 && highCount === 0)) {
-      log[log.length - 1].verdict = 'ship';
-      break;
-    }
-
-    // Run the reviser. Cap issues at 12 to keep the reviser focused.
-    const trimmed = issues.slice(0, 12);
-    let revised = null;
-    try {
-      const rp = buildSlideshowReviserPrompt({ topic, deck: parsed, issues: trimmed });
-      const rr = await callGemini(rp.system, [{ role: 'user', content: rp.user }],
-        model, 6000, { jsonMode: true, temperature: 0.3 });
-      if (!rr.success) {
-        log.push({ pass, ok: false, reason: 'reviser call failed', error: rr.error });
-        break;
-      }
-      revised = parseAIJson(rr.data.content?.[0]?.text || '');
-    } catch (e) {
-      log.push({ pass, ok: false, reason: 'reviser threw', error: e.message });
-      break;
-    }
-    if (Array.isArray(revised?.slides) && revised.slides.length === parsed.slides.length) {
-      // Merge revised slides - preserve fields the reviser dropped.
-      parsed.slides = parsed.slides.map((orig, idx) => {
-        const r = revised.slides[idx] || {};
-        return {
-          ...orig,        // keep original fields as a baseline
-          ...r,           // overwrite anything the reviser changed
-          id: orig.id,    // never change the id
-        };
-      });
-      log[log.length - 1].applied = true;
-    } else {
-      log.push({ pass, ok: false, reason: 'reviser returned wrong slide count' });
-      break;
-    }
-  }
-  return log;
-}
-
-app.post('/api/slideshows/improve-slide', authMiddleware, async (req, res) => {
-  try {
-    const { topic, slide, intent } = req.body || {};
-    if (!slide) return res.status(400).json({ error: 'slide required' });
-
-    const intentGuides = {
-      sharpen: 'Tighten and sharpen - cut filler, prefer punchy, concrete wording. Aim for ~20% fewer words while keeping every fact.',
-      expand: 'Add more substance - bring in concrete examples, numbers, or specifics. Bullets/items can grow up to one more line each. Do not pad with fluff.',
-      engaging: 'Make it more engaging - open with a hook, use vivid concrete language, prefer active voice. Keep the facts; lift the energy.',
-      bullets: 'Restructure into clear bullet points - convert body prose into 4-6 strong bullets, each starting with a key term in **bold**.',
-      polish: 'Polish grammar, flow, and word choice. Fix any awkward phrasing. Do not change meaning or content.',
-      simplify: 'Simplify - write so a smart non-expert gets it on first read. Shorter sentences, plain words, no jargon unless essential.',
-    };
-    const intentLine = intentGuides[intent] || 'Rewrite to be clearer, more impactful, and more substantive.';
-
-    const system = `You are an expert presentation editor. Given a single slide's content, rewrite it according to the user's specific intent below. Keep the same layout and general structure. Return ONLY valid JSON matching exactly the same fields provided - no extra keys, no commentary.
-
-User intent: ${intentLine}
-
-Rules:
-- Titles: punchy, concrete, ≤ 8 words
-- Body prose: dense, specific, no filler - every sentence must earn its place. Prefer active voice.
-- Bullets: each starts with a strong verb or key term in **bold**, followed by a concise factual sentence
-- Items (cards/numbered): label ≤ 4 words, body 1-2 tight sentences with a concrete detail
-- Preserve the layout field exactly`;
-
-    const user = `Topic context: "${topic || 'unknown'}"\n\nSlide to improve:\n${JSON.stringify(slide, null, 2)}\n\nReturn the improved slide as JSON with the same fields.`;
-
-    const result = await callGemini(system, [{ role: 'user', content: user }], GEMINI_PRO, 4096, { jsonMode: true, temperature: 0.5 });
-    if (!result.success) return res.status(500).json({ error: result.error });
-
-    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
-    if (!parsed) return res.status(500).json({ error: 'AI response was malformed' });
-
-    return res.json({ slide: parsed });
-  } catch (e) {
-    console.error('improve-slide error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.post('/api/slideshows/generate', authMiddleware, async (req, res) => {
-  // SSE keeps the connection alive past Render's 30s proxy timeout.
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders();
-  const send = (obj) => { try { res.write(`data: ${JSON.stringify(obj)}\n\n`); res.flush?.(); } catch {} };
-  // Heartbeat every 8s - prevents Render's 30s idle-connection kill.
-  const keepalive = setInterval(() => { try { res.write(': keepalive\n\n'); res.flush?.(); } catch {} }, 8000);
-
-  try {
-    const { topic, slideCount, difficulty, style, template, customInfo, sourceText, palette: userPalette, mode: genMode } = req.body || {};
-    if (!topic?.trim()) { send({ type: 'error', error: 'Topic is required' }); return res.end(); }
-
-    const users = loadUsers();
-    const email = findEmailById(users, req.userId);
-    if (!email) { send({ type: 'error', error: 'User not found' }); return res.end(); }
-    users[email].data = migrateUserData(users[email].data);
-
-    send({ type: 'progress', phase: 'Drafting slides…', pct: 10 });
-    const safeSourceText = sourceText ? String(sourceText).slice(0, 20000) : undefined;
-    const { system, user } = genMode === 'flash'
-      ? buildFlashSlideshowPrompt({ topic: topic.trim(), slideCount: Math.min(Number(slideCount) || 8, 10) })
-      : buildSlideshowPrompt({ topic: topic.trim(), slideCount, difficulty, style, template, customInfo, sourceText: safeSourceText });
-    // Flash: bumped to GEMINI_FLASH (not Lite) + 8k tokens so flash decks
-    // can actually carry substantive bodies/bullets - Lite + 4k was capping
-    // body fields at 1-2 sentences. Advanced: Pro + full prompt = ~90s.
-    const model = genMode === 'flash' ? GEMINI_FLASH : GEMINI_PRO;
-    console.log(`[slideshow-generate] mode=${genMode} model=${model}`);
-    const maxTokens = genMode === 'flash' ? 8192 : 16384;
-    let result = await callGemini(system, [{ role: 'user', content: user }], model, maxTokens, { jsonMode: true, temperature: 0.7 });
-    if (!result.success) { send({ type: 'error', error: result.error }); return res.end(); }
-
-    send({ type: 'progress', phase: 'Writing content…', pct: 38 });
-    let parsed = parseAIJson(result.data.content?.[0]?.text || '');
-    if (!parsed?.slides?.length) {
-      send({ type: 'progress', phase: 'Retrying generation…', pct: 44 });
-      const retry = await callGemini(system, [{ role: 'user', content: user }], model, maxTokens, { jsonMode: true, temperature: 0.4 });
-      if (retry.success) parsed = parseAIJson(retry.data.content?.[0]?.text || '');
-    }
-    if (!parsed?.slides?.length) {
-      send({ type: 'error', error: 'AI response was malformed. Try again.' }); return res.end();
-    }
-
-    // Flash skips review and bespoke HTML - one AI call, done in ~15s.
-    let reviewLog = [];
-    if (genMode !== 'flash') {
-      send({ type: 'progress', phase: 'Reviewing content…', pct: 55 });
-      reviewLog = await reviewAndPolishDeck({ topic: topic.trim(), parsed, model });
-      send({ type: 'progress', phase: 'Applying revisions…', pct: 72 });
-    }
-
-    const VALID_LAYOUTS = [
-      'title','hero','content','summary','quote','stat','twoCol','section','split','freeform',
-      // Google-Slides-grade additions: structured layouts the prompt now produces.
-      'agenda','bullets','cards','numbered','compare','bigText',
-      // Image-forward layouts - picture is the visual element, not a wash.
-      'imageHero','imageRight','imageLeft','imageFull',
-    ];
-    // Track HTML generation outcome so the client can show a status chip.
-    let htmlGenStats = { generated: 0, total: 0 };
-    const VALID_PALETTES = ['ink','newsprint','ocean','forest','plum','coral','mono','sun','midnight','slate','rose','sage'];
-    const VALID_FONTS = ['editorial','modern','humanist','geometric'];
-    const deckId = crypto.randomUUID();
-    const deck = {
-      id: deckId,
-      title: parsed.title || topic,
-      subtitle: parsed.subtitle || '',
-      topic: topic.trim(),
-      // Per-deck visual hints from the LLM. The renderer uses these to pick a
-      // theme + font pairing automatically; user can still override in the UI.
-      palette: VALID_PALETTES.includes(userPalette) ? userPalette : (VALID_PALETTES.includes(parsed.palette) ? parsed.palette : 'newsprint'),
-      font: VALID_FONTS.includes(parsed.font) ? parsed.font : 'editorial',
-      slides: parsed.slides.map((s, i) => ({
-        id: `${deckId}-${i}`,
-        layout: VALID_LAYOUTS.includes(s.layout)
-          ? s.layout
-          : (i === 0 ? 'title' : i === parsed.slides.length - 1 ? 'summary' : 'content'),
-        eyebrow: String(s.eyebrow || '').slice(0, 60),
-        title: String(s.title || '').slice(0, 240),
-        subtitle: String(s.subtitle || '').slice(0, 300),
-        body: String(s.body || '').slice(0, 3000),
-        bullets: Array.isArray(s.bullets) ? s.bullets.slice(0, 10).map(b => String(b).slice(0, 500)) : [],
-        // Structured items for cards / numbered / compare / agenda layouts.
-        // Each item is {label, body} where label is a short header and body
-        // is one short clause/sentence. Anything malformed is dropped silently.
-        items: Array.isArray(s.items)
-          ? s.items.slice(0, 6).map(it => ({
-              label: String(it?.label || '').slice(0, 80),
-              body:  String(it?.body  || '').slice(0, 600),
-            })).filter(it => it.label || it.body)
-          : [],
-        accent: String(s.accent || '').slice(0, 60),
-        imagePrompt: String(s.imagePrompt || '').slice(0, 240),
-        notes: String(s.notes || '').slice(0, 1000),
-      })),
-      settings: { difficulty: difficulty || 'intermediate', style: style || 'educational' },
-      // Auto-review trace: which passes ran, score per pass, issue counts.
-      // Surfaced in the UI so the user can see what the AI critic flagged
-      // and what the reviser fixed.
-      reviewLog,
-      createdAt: new Date().toISOString(),
-    };
-
-    // Flash skips bespoke HTML - uses template renderer, saves ~20s.
-    if (genMode !== 'flash') {
-      send({ type: 'progress', phase: 'Drafting design brief…', pct: 80 });
-      try {
-        htmlGenStats = await generateBespokeHtmlForDeck({
-          deck,
-          model,
-          onProgress: ({ phase, pct }) => send({ type: 'progress', phase, pct }),
-        });
-        deck.htmlDesigned = htmlGenStats.generated;
-      } catch (e) {
-        console.warn('[slideshow-html] generation failed:', e.message);
-        deck.htmlDesigned = 0;
-      }
-    }
-
-    users[email].data.slideshows.unshift(deck);
-    saveUsers(users);
-
-    clearInterval(keepalive);
-    send({ type: 'done', slideshow: deck });
-    res.end();
-  } catch (e) {
-    clearInterval(keepalive);
-    console.error('Slideshow generate error:', e);
-    send({ type: 'error', error: e.message });
-    res.end();
-  }
-});
-
 // ===== PROFILE =====
 
 app.get('/api/profile', authMiddleware, (req, res) => {
@@ -12476,7 +11295,7 @@ RULES:
 - Output ONLY a valid JSON object with the updated curriculum. No markdown, no explanation.
 - Preserve existing ids on units/lessons whenever you keep them. For new units/lessons generate new ids using the pattern "\${curriculumId}-u\${n}" and "\${curriculumId}-u\${n}-l\${m}" with sensible numbers.
 - Every unit must have a "lessons" array and "locked":false.
-- Every lesson must have "id", "title", "description", and "type" (one of: "lesson", "math_tutor", "practice", "essay", "unit_test", "quiz_bowl"). "math_tutor" = step-by-step worked problems on a handwriting canvas (math only). "essay" = a graded short essay (scored against a rubric). "quiz_bowl" launches a topic-focused Quiz Bowl game.
+- Every lesson must have "id", "title", "description", and "type" (one of: "lesson", "essay", "unit_test", "quiz_bowl"). Standard lessons are interactive practice made only from quizzes, matching, and fill-in-the-blank. "essay" = a graded short essay (scored against a rubric). "quiz_bowl" launches a topic-focused Quiz Bowl game. Never add Math Tutor, canvas practice, or problem-set lessons.
 - DO NOT invent user progress fields like chatHistory, isCompleted, score, phase - the server preserves those on the client side.
 - If the instruction is ambiguous, use your best judgment. Do NOT refuse.
 - Output minified JSON on a single line - no indentation or extra whitespace. Large curricula must fit in the response.
@@ -12544,6 +11363,7 @@ Return JSON with this exact shape:
           title: l.title || 'Untitled',
           description: l.description || '',
           type: l.type || 'lesson',
+          interactiveOnly: (l.type || 'lesson') === 'lesson',
           quizBowlTopic: l.quizBowlTopic || existing.quizBowlTopic || null,
           quizBowlCategory: l.quizBowlCategory || existing.quizBowlCategory || null,
           // preserve progress if present
@@ -12551,7 +11371,11 @@ Return JSON with this exact shape:
           phase: existing.phase ?? null,
           phaseData: existing.phaseData || {},
           content: existing.content ?? null,
+          blocks: Array.isArray(existing.blocks)
+            ? existing.blocks.filter(block => CURRICULUM_PRACTICE_BLOCK_TYPES.has(block?.type))
+            : [],
           isCompleted: !!existing.isCompleted,
+          completedAt: existing.completedAt || null,
           score: existing.score ?? null,
         };
       });
@@ -12567,6 +11391,7 @@ Return JSON with this exact shape:
     curriculum.title = updated.title || curriculum.title;
     curriculum.description = updated.description || curriculum.description;
     curriculum.units = newUnits;
+    normalizeCurriculumPracticeTasks(curriculum);
     curriculum.updatedAt = new Date().toISOString();
     saveUsers(users);
 
@@ -12660,12 +11485,10 @@ function requireMessageQuota(req, res, next) {
   const cost = baseCost + (sourced ? SOURCED_CREDIT_SURCHARGE : 0);
   const result = consumeCredits(users, email, cost);
   if (!result.allowed) {
-    const upgradeHint = result.plan === 'free'
-      ? 'Upgrade to Paid for 9,500 credits/week.'
-      : 'Your credits reset on a rolling 7-day window.';
+    const recoveryHint = creditLimitRecoveryHint(users[email], email);
     return res.status(402).json({
       error: 'message_limit_reached',
-      message: `This answer costs ${cost} credit${cost === 1 ? '' : 's'} and you only have ${result.remaining} left this week. ${upgradeHint}`,
+      message: `This answer costs ${cost} credit${cost === 1 ? '' : 's'} and you only have ${result.remaining} left this week. ${recoveryHint}`,
       limit: result.limit, remaining: result.remaining, plan: result.plan, cost, upgradeKind: 'upgrade',
     });
   }
@@ -13360,6 +12183,7 @@ app.get('/api/billing/status', authMiddleware, (req, res) => {
         windowHours: 168,
         windowDays: 7,
       },
+      creditResets: creditResetBalance(users[email]),
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -13394,6 +12218,7 @@ app.get('/api/billing/usage', authMiddleware, (req, res) => {
       remaining: unlimited ? null : Math.max(0, allowance - used),
       unlimited,
     },
+    creditResets: creditResetBalance(users[email]),
     modelCosts: MODEL_CREDIT_COST,
     featureCosts: {
       curriculum: CURRICULUM_CREDIT_COST,
@@ -13410,6 +12235,52 @@ app.get('/api/billing/usage', authMiddleware, (req, res) => {
     used: {
       noteMaps: (u.noteMaps || []).length,
     },
+  });
+});
+
+// Spend one banked referral reset to clear the caller's rolling seven-day
+// credit usage. Empty windows are rejected so a reset cannot be wasted.
+app.post('/api/billing/reset-credits', authMiddleware, (req, res) => {
+  const users = loadUsers();
+  const email = findEmailById(users, req.userId);
+  if (!email) return res.status(404).json({ error: 'User not found' });
+  users[email].data = migrateUserData(users[email].data);
+  ensureUsageBucket(users[email]);
+
+  const before = creditResetBalance(users[email]);
+  if (before.available < 1) {
+    return res.status(409).json({
+      error: 'no_credit_resets',
+      message: 'You do not have a banked credit reset. Refer a friend to earn one.',
+    });
+  }
+
+  const usedBeforeReset = rollingMsgUsage(users[email]);
+  if (usedBeforeReset <= 0) {
+    return res.status(409).json({
+      error: 'no_credit_usage',
+      message: 'Your weekly credit balance is already full.',
+    });
+  }
+
+  users[email].data.usage.msgWindow = [];
+  users[email].data.creditResetsUsed += 1;
+  users[email].data.lastCreditResetAt = new Date().toISOString();
+  saveUsers(users);
+
+  const plan = getPlan(users[email], email);
+  const allowance = dailyCreditAllowance(users[email], email);
+  res.json({
+    ok: true,
+    plan,
+    clearedCredits: usedBeforeReset,
+    credits: {
+      allowance,
+      used: 0,
+      remaining: allowance,
+      unlimited: allowance === Infinity,
+    },
+    creditResets: creditResetBalance(users[email]),
   });
 });
 
@@ -13441,9 +12312,7 @@ app.get('/api/billing/tiers', (req, res) => {
 
 // ===== Referrals =====
 // GET /api/referral/my-code - returns the caller's own code + how many
-// people have redeemed it and how many more are needed to unlock the
-// Plus-Lite tier. Client uses this on Settings + the top bar so the
-// progress is visible.
+// people have redeemed it and the caller's banked reset balance.
 app.get('/api/referral/my-code', authMiddleware, (req, res) => {
   const users = loadUsers();
   const email = findEmailById(users, req.userId);
@@ -13455,8 +12324,7 @@ app.get('/api/referral/my-code', authMiddleware, (req, res) => {
   res.json({
     code: d.referralCode,
     referralsUsed: d.referralsUsed || 0,
-    referralsRequired: REFERRAL_THRESHOLD,
-    unlocked: (d.referralsUsed || 0) >= REFERRAL_THRESHOLD,
+    creditResets: creditResetBalance(users[email]),
     redeemedCode: d.referredBy || null,
   });
 });
@@ -13499,21 +12367,18 @@ app.post('/api/referral/redeem', authMiddleware, (req, res) => {
   }
   users[ownerEmail].data = migrateUserData(users[ownerEmail].data);
 
-  // Apply: stamp redemption + bump the owner's counter.
+  // Apply: stamp redemption, bump the owner's counter, and bank one reset.
   users[myEmail].data.referredBy = raw;
   users[ownerEmail].data.referralsUsed = (users[ownerEmail].data.referralsUsed || 0) + 1;
+  users[ownerEmail].data.creditResetsEarned = (users[ownerEmail].data.creditResetsEarned || 0) + REFERRAL_CREDIT_RESET_REWARD;
 
   saveUsers(users);
 
-  const ownerUnlocked = users[ownerEmail].data.referralsUsed >= REFERRAL_THRESHOLD;
   res.json({
     ok: true,
     redeemedCode: raw,
     ownerReferralsUsed: users[ownerEmail].data.referralsUsed,
-    ownerUnlocked,
-    // Once the owner hits REFERRAL_THRESHOLD redemptions, their free daily
-    // credit pool gains REFERRAL_BONUS_CREDITS (applied in dailyCreditAllowance).
-    referralBonusCredits: REFERRAL_BONUS_CREDITS,
+    referralCreditResets: REFERRAL_CREDIT_RESET_REWARD,
   });
 });
 
@@ -13803,6 +12668,25 @@ app.get('/api/admin/check', authMiddleware, (req, res) => {
   res.json({ isAdmin: isAdmin(req.userId), canBan: canBanUsers(req.userId) });
 });
 
+// Moderators can tune the prompt-extraction detector without a deploy. The
+// setting is global because the protection applies consistently across models.
+app.get('/api/admin/moderation/prompt-protection', authMiddleware, adminMiddleware, (_req, res) => {
+  res.json(loadPromptProtectionSettings());
+});
+
+app.put('/api/admin/moderation/prompt-protection', authMiddleware, adminMiddleware, (req, res) => {
+  const strictness = req.body?.strictness;
+  if (!PROMPT_PROTECTION_LEVELS.has(strictness)) {
+    return res.status(400).json({ error: 'Strictness must be relaxed, balanced, or strict' });
+  }
+  try {
+    res.json(savePromptProtectionSettings({ strictness }));
+  } catch (err) {
+    console.error('Failed to save prompt protection settings:', err);
+    res.status(500).json({ error: 'Unable to save moderation settings' });
+  }
+});
+
 // List all users
 // Match any auto-created demo user - landing-page mini-OS spins up a
 // throwaway user per tab, and the legacy `dev@covalent.test` fixture.
@@ -13890,6 +12774,7 @@ app.get('/api/admin/users', authMiddleware, adminMiddleware, (req, res) => {
       referralCode: u.data?.referralCode || null,
       referralsUsed: u.data?.referralsUsed || 0,
       referredBy: u.data?.referredBy || null,
+      creditResets: creditResetBalance(u),
     };
   });
   res.json({ users: list });
@@ -14052,6 +12937,7 @@ app.get('/api/admin/users/:uid', authMiddleware, adminMiddleware, (req, res) => 
       referralCode: u.data?.referralCode || null,
       referralsUsed: u.data?.referralsUsed || 0,
       referredBy: u.data?.referredBy || null,
+      creditResets: creditResetBalance(u),
       referredUsers: u.data?.referralCode
         ? Object.entries(users)
             .filter(([, ru]) => ru.data?.referredBy === u.data.referralCode)
@@ -14143,6 +13029,40 @@ app.post('/api/admin/users/:uid/ban', authMiddleware, adminMiddleware, banMiddle
   }
   saveUsers(users);
   res.json({ banned: users[email].banned });
+});
+
+// Grant one banked weekly-credit reset to a user. This is intentionally a
+// separate admin reward from referral-earned resets; both draw from the same
+// durable reset inventory once granted.
+app.post('/api/admin/users/:uid/credit-resets/grant', authMiddleware, adminMiddleware, (req, res) => {
+  const users = loadUsers();
+  const email = Object.keys(users).find(e => users[e].id === req.params.uid);
+  if (!email) return res.status(404).json({ error: 'User not found' });
+
+  users[email].data = migrateUserData(users[email].data);
+  users[email].data.creditResetsEarned += 1;
+  saveUsers(users);
+
+  res.json({
+    success: true,
+    granted: 1,
+    creditResets: creditResetBalance(users[email]),
+  });
+});
+
+// Grant one banked weekly-credit reset to every account. This intentionally
+// includes demo accounts: the reset is a durable, non-destructive allowance,
+// and the admin action is an explicit product-wide gift.
+app.post('/api/admin/credit-resets/grant-all', authMiddleware, adminMiddleware, (req, res) => {
+  const users = loadUsers();
+  let granted = 0;
+  for (const user of Object.values(users)) {
+    user.data = migrateUserData(user.data);
+    user.data.creditResetsEarned += 1;
+    granted += 1;
+  }
+  saveUsers(users);
+  res.json({ success: true, granted });
 });
 
 // Delete user
@@ -14689,30 +13609,156 @@ app.post('/api/quizbowl/sets', authMiddleware, (req, res) => {
 });
 
 // ===== QUIZ BOWL PRESETS + PERSONAL SET LIBRARY =====
-// Country practice is grounded in the same maintained geography notes that
-// power the Notes presets. The catalog stays deliberately light; the full
-// source text is returned only after a country is selected.
+// Country practice is grounded in the same maintained geography and history
+// notes that power the Notes presets. The catalog stays deliberately light;
+// full source text is returned only after a country course is selected.
+function quizBowlCountryPresetCatalog() {
+  const geography = COUNTRY_GEO_NOTES
+    .filter(preset => preset.category !== 'geo-subdivision')
+    .map(preset => ({
+      slug: preset.slug,
+      label: preset.country,
+      category: 'Geography',
+      region: preset.region,
+      subregion: preset.subregion,
+      title: preset.title || `Geography of ${preset.country}`,
+      preview: preset.summary,
+    }));
+  const history = COUNTRY_HISTORY_NOTES.map(preset => ({
+    slug: preset.slug,
+    label: preset.country,
+    category: 'History',
+    region: preset.region,
+    subregion: preset.subregion,
+    title: preset.title || `History of ${preset.country}`,
+    preview: preset.summary,
+  }));
+  return [...geography, ...history];
+}
+
+// Country preset tossups are generated lazily. Once a set exists it becomes
+// the shared, definitive version for every player, so replaying it never
+// calls /api/chat and never spends the player's credits.
+const QUIZBOWL_PRESET_SETS_FILE = join(DATA_DIR, 'quizbowlPresetSets.json');
+const quizBowlPresetGenerationLocks = new Map();
+
+function loadQuizBowlPresetSets() {
+  try {
+    if (existsSync(QUIZBOWL_PRESET_SETS_FILE)) {
+      const value = JSON.parse(readFileSync(QUIZBOWL_PRESET_SETS_FILE, 'utf-8'));
+      return value && typeof value === 'object' ? value : {};
+    }
+  } catch (error) { console.error('Error loading Quiz Bowl preset sets:', error); }
+  return {};
+}
+
+function saveQuizBowlPresetSets(sets) {
+  try { writeFileSync(QUIZBOWL_PRESET_SETS_FILE, JSON.stringify(sets, null, 2)); }
+  catch (error) { console.error('Error saving Quiz Bowl preset sets:', error); }
+}
+
+const QUIZBOWL_PRESET_SYSTEM = `You are an elite ACF/NAQT packet editor writing rigorously pyramidal quiz bowl tossups from source notes.
+Write exactly 10 tossups. Each should be one coherent 7-10 sentence paragraph with extremely obscure source-supported clues first, hard connecting clues in the middle, and accessible giveaway clues last. Include exactly one NAQT-style power mark "(*)" 65-75% through each question. Never invent facts or state the answer in the question. Every answer must be supported by the notes. Output ONLY valid JSON with no markdown.
+Format: {"questions":[{"text":"... (*) ... For 10 points, name this answer.","answer":"Canonical answer","accept":[],"prompt":[]}]}`;
+
+function quizBowlPresetSource(preset) {
+  return [preset.mainNotes, ...(preset.cues || []), preset.summary].filter(Boolean).join('\n\n').slice(0, 30000);
+}
+
+function quizBowlPresetDefinition(slug) {
+  const geography = COUNTRY_GEO_NOTES_BY_SLUG[slug];
+  const history = COUNTRY_HISTORY_NOTES_BY_SLUG[slug];
+  const preset = geography || history;
+  if (!preset || preset.category === 'geo-subdivision') return null;
+  return {
+    slug: preset.slug,
+    title: preset.title,
+    label: preset.country,
+    category: history ? 'History' : 'Geography',
+    difficulty: 'Easy',
+    source: quizBowlPresetSource(preset),
+  };
+}
+
+async function getOrGenerateQuizBowlPresetSet(slug) {
+  const definition = quizBowlPresetDefinition(slug);
+  if (!definition) return null;
+  const existing = loadQuizBowlPresetSets()[slug];
+  if (existing?.questions?.length) return { set: existing, cached: true };
+  if (quizBowlPresetGenerationLocks.has(slug)) return quizBowlPresetGenerationLocks.get(slug);
+
+  const generation = (async () => {
+    const latest = loadQuizBowlPresetSets()[slug];
+    if (latest?.questions?.length) return { set: latest, cached: true };
+    const prompt = `Generate the definitive country ${definition.category.toLowerCase()} preset set for ${definition.label}. Use ONLY the source notes below. Return exactly 10 questions in the requested JSON format.\n\nSOURCE NOTES for "${definition.title}":\n${definition.source}`;
+    const result = await callGemini(
+      QUIZBOWL_PRESET_SYSTEM,
+      [{ role: 'user', content: prompt }],
+      GEMINI_FLASH,
+      8192,
+      { jsonMode: true, temperature: 0.7 },
+    );
+    if (!result.success) throw new Error(result.error || 'Preset generation failed');
+    const parsed = parseAIJson(result.data.content?.[0]?.text || '');
+    const questions = (Array.isArray(parsed?.questions) ? parsed.questions : [])
+      .map((question, index) => ({
+        id: `preset-${slug}-${index + 1}`,
+        text: String(question?.text || '').trim(),
+        answer: String(question?.answer || '').trim(),
+        accept: Array.isArray(question?.accept) ? question.accept.slice(0, 20) : [],
+        prompt: Array.isArray(question?.prompt) ? question.prompt.slice(0, 20) : [],
+        category: definition.category,
+      }))
+      .filter(question => question.text && question.answer)
+      .slice(0, 10);
+    if (questions.length < 10) throw new Error('Preset generation returned an incomplete set');
+    const set = {
+      id: `preset:${slug}`,
+      title: definition.title,
+      category: definition.category,
+      difficulty: definition.difficulty,
+      source: 'preset',
+      presetSlug: slug,
+      author: 'Covalent Library',
+      generatedAt: new Date().toISOString(),
+      questions,
+    };
+    const sets = loadQuizBowlPresetSets();
+    sets[slug] = set;
+    saveQuizBowlPresetSets(sets);
+    return { set, cached: false };
+  })();
+  quizBowlPresetGenerationLocks.set(slug, generation);
+  try { return await generation; }
+  finally { quizBowlPresetGenerationLocks.delete(slug); }
+}
+
 app.get('/api/quizbowl/presets', authMiddleware, (req, res) => {
-  res.json({
-    presets: COUNTRY_GEO_NOTES.filter(p => p.category !== 'geo-subdivision').map(p => ({
-      slug: p.slug,
-      label: p.country,
-      region: p.region,
-      subregion: p.subregion,
-      title: p.title,
-      preview: p.summary,
-    })),
-  });
+  res.json({ presets: quizBowlCountryPresetCatalog() });
+});
+
+app.post('/api/quizbowl/presets/:slug/set', authMiddleware, async (req, res) => {
+  try {
+    const result = await getOrGenerateQuizBowlPresetSet(req.params.slug);
+    if (!result) return res.status(404).json({ error: 'Country preset not found' });
+    res.json(result);
+  } catch (error) {
+    console.error('Quiz Bowl preset set generation failed:', error);
+    res.status(500).json({ error: error.message || 'Preset generation failed' });
+  }
 });
 
 app.get('/api/quizbowl/presets/:slug', authMiddleware, (req, res) => {
-  const preset = COUNTRY_GEO_NOTES_BY_SLUG[req.params.slug];
+  const geographyPreset = COUNTRY_GEO_NOTES_BY_SLUG[req.params.slug];
+  const historyPreset = COUNTRY_HISTORY_NOTES_BY_SLUG[req.params.slug];
+  const preset = geographyPreset || historyPreset;
   if (preset?.category === 'geo-subdivision') return res.status(404).json({ error: 'Country preset not found' });
   if (!preset) return res.status(404).json({ error: 'Country preset not found' });
   res.json({
     preset: {
       slug: preset.slug,
       label: preset.country,
+      category: historyPreset ? 'History' : 'Geography',
       region: preset.region,
       subregion: preset.subregion,
       title: preset.title,
@@ -14724,6 +13770,9 @@ app.get('/api/quizbowl/presets/:slug', authMiddleware, (req, res) => {
 
 function normalizeSavedQuizBowlSet(raw = {}, existing = {}) {
   const allowedDifficulties = new Set(['Easy', 'Medium', 'Hard', 'Tournament']);
+  const status = raw.status === 'published' || raw.status === 'draft'
+    ? raw.status
+    : (existing.status || 'draft');
   const questions = Array.isArray(raw.questions) ? raw.questions.slice(0, 60).map((q, index) => ({
     id: typeof q?.id === 'string' && q.id ? q.id.slice(0, 100) : crypto.randomUUID(),
     text: String(q?.text || '').slice(0, 12000),
@@ -14737,8 +13786,86 @@ function normalizeSavedQuizBowlSet(raw = {}, existing = {}) {
     category: typeof raw.category === 'string' ? raw.category.slice(0, 80) || 'Mixed' : (existing.category || 'Mixed'),
     difficulty: allowedDifficulties.has(raw.difficulty) ? raw.difficulty : (existing.difficulty || 'Easy'),
     presetSlug: typeof raw.presetSlug === 'string' ? raw.presetSlug.slice(0, 160) : (existing.presetSlug || null),
+    status,
+    publishedAt: status === 'published' ? (existing.publishedAt || new Date().toISOString()) : null,
+    source: raw.source === 'pdf' ? 'pdf' : (existing.source || 'created'),
+    sourceFileName: typeof raw.sourceFileName === 'string'
+      ? raw.sourceFileName.slice(0, 240)
+      : (existing.sourceFileName || null),
     questions,
   };
+}
+
+function cleanPacketAnswerline(raw = '') {
+  let answer = String(raw).replace(/\s+/g, ' ').trim();
+  const directiveIndex = answer.search(/\s+(?:ACCEPT|PROMPT|REJECT)(?:\s+ON)?\s*:/i);
+  if (directiveIndex > 0) answer = answer.slice(0, directiveIndex).trim();
+  answer = answer
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/[{}_]/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/[.;,]+$/, '')
+    .trim();
+  return answer.slice(0, 500);
+}
+
+// Parse the common packet convention: numbered tossup text followed by an
+// ANSWER: line. Bonus sections are intentionally ignored because the solo
+// player currently runs tossups only.
+function parseQuizBowlPacketText(rawText = '') {
+  const lines = String(rawText)
+    .replace(/\r/g, '')
+    .split('\n')
+    .map(line => line.replace(/\s+/g, ' ').trim());
+  const questions = [];
+  let current = null;
+  let orphanLines = [];
+
+  function finish(answerline) {
+    const text = (current?.lines || orphanLines).join(' ').replace(/\s+/g, ' ').trim();
+    const answer = cleanPacketAnswerline(answerline);
+    if (text.length >= 20 && answer) {
+      questions.push({
+        id: crypto.randomUUID(),
+        text: text.slice(0, 12000),
+        answer,
+        category: 'Mixed',
+        coverageTag: '',
+      });
+    }
+    current = null;
+    orphanLines = [];
+  }
+
+  for (const line of lines) {
+    if (!line) continue;
+    if (/^(?:BONUS|BONUSES)(?:\s|$|:)/i.test(line)) break;
+
+    const numbered = line.match(/^(?:TOSSUP\s+)?(\d{1,3})[.)]\s*(.*)$/i)
+      || line.match(/^TOSSUP\s+(\d{1,3})\s*[:\-]?\s*(.*)$/i);
+    if (numbered) {
+      current = { number: Number(numbered[1]), lines: numbered[2] ? [numbered[2]] : [] };
+      orphanLines = [];
+      continue;
+    }
+
+    const answerAt = line.search(/\bANSWER\s*:/i);
+    if (answerAt >= 0) {
+      const before = line.slice(0, answerAt).trim();
+      if (before) {
+        if (current) current.lines.push(before);
+        else orphanLines.push(before);
+      }
+      finish(line.slice(answerAt).replace(/^.*?ANSWER\s*:/i, ''));
+      if (questions.length >= 60) break;
+      continue;
+    }
+
+    if (current) current.lines.push(line);
+    else if (!/^(?:ROUND|PACKET|TOSSUPS?|PAGE)\b/i.test(line)) orphanLines.push(line);
+  }
+
+  return questions;
 }
 
 app.get('/api/quizbowl/saved-sets', authMiddleware, (req, res) => {
@@ -14749,6 +13876,8 @@ app.get('/api/quizbowl/saved-sets', authMiddleware, (req, res) => {
     users[email].data = migrateUserData(users[email].data);
     const sets = (users[email].data.quizbowlSavedSets || []).map(({ questions, ...set }) => ({
       ...set,
+      status: set.status || 'draft',
+      source: set.source || 'created',
       questionCount: (questions || []).length,
       preview: (questions || []).find(q => q.text)?.text?.slice(0, 140) || '',
     }));
@@ -14783,6 +13912,52 @@ app.post('/api/quizbowl/saved-sets', authMiddleware, (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.post('/api/quizbowl/saved-sets/import', authMiddleware, upload.single('file'), async (req, res) => {
+  try {
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: 'Choose a PDF packet to import.' });
+    const fileName = file.originalname || 'Imported packet.pdf';
+    if (file.mimetype !== 'application/pdf' && !fileName.toLowerCase().endsWith('.pdf')) {
+      return res.status(415).json({ error: 'Quiz Bowl packet imports must be PDF files.' });
+    }
+
+    const parsed = await pdfParse(file.buffer);
+    const extracted = String(parsed.text || '').slice(0, 500000).trim();
+    if (!extracted) return res.status(422).json({ error: 'This PDF has no selectable text. Try a text-based packet instead of a scanned image.' });
+    const questions = parseQuizBowlPacketText(extracted);
+    if (!questions.length) {
+      return res.status(422).json({ error: 'No tossups were found. The PDF needs numbered questions with ANSWER: lines.' });
+    }
+
+    const users = loadUsers();
+    const email = findEmailById(users, req.userId);
+    if (!email) return res.status(404).json({ error: 'User not found' });
+    users[email].data = migrateUserData(users[email].data);
+    const now = new Date().toISOString();
+    const title = fileName.replace(/\.pdf$/i, '').replace(/[_-]+/g, ' ').trim() || 'Imported packet';
+    const set = {
+      id: crypto.randomUUID(),
+      ...normalizeSavedQuizBowlSet({
+        title,
+        category: 'Mixed',
+        difficulty: 'Medium',
+        status: 'draft',
+        source: 'pdf',
+        sourceFileName: fileName,
+        questions,
+      }),
+      createdAt: now,
+      updatedAt: now,
+    };
+    users[email].data.quizbowlSavedSets.unshift(set);
+    users[email].data.quizbowlSavedSets = users[email].data.quizbowlSavedSets.slice(0, 100);
+    saveUsers(users);
+    res.json({ set, importedCount: set.questions.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Could not import that PDF.' });
+  }
+});
+
 app.put('/api/quizbowl/saved-sets/:id', authMiddleware, (req, res) => {
   try {
     const users = loadUsers();
@@ -14794,7 +13969,11 @@ app.put('/api/quizbowl/saved-sets/:id', authMiddleware, (req, res) => {
     if (req.body?.baseUpdatedAt && set.updatedAt && new Date(set.updatedAt).getTime() > new Date(req.body.baseUpdatedAt).getTime()) {
       return res.status(409).json({ error: 'Set changed since you loaded it', set });
     }
-    Object.assign(set, normalizeSavedQuizBowlSet(req.body, set), { updatedAt: new Date().toISOString() });
+    const next = normalizeSavedQuizBowlSet(req.body, set);
+    if (next.status === 'published' && (!next.questions.length || next.questions.some(q => !q.text.trim() || !q.answer.trim()))) {
+      return res.status(400).json({ error: 'Every published question needs both tossup text and an answer.' });
+    }
+    Object.assign(set, next, { updatedAt: new Date().toISOString() });
     saveUsers(users);
     res.json({ set });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -14811,6 +13990,89 @@ app.delete('/api/quizbowl/saved-sets/:id', authMiddleware, (req, res) => {
     if (before === users[email].data.quizbowlSavedSets.length) return res.status(404).json({ error: 'Saved set not found' });
     saveUsers(users);
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Quiz Bowl Collection. Built-in country presets appear alongside finished
+// community packets. The catalog response stays metadata-only; full preset
+// notes or community tossups are returned only after a player opens one game.
+function quizBowlCollectionListingId(userId, setId) {
+  return `community:${userId}:${setId}`;
+}
+
+function quizBowlCollectionAuthor(user) {
+  return user?.data?.socialDisplayName || user?.name || 'Covalent creator';
+}
+
+function listQuizBowlCollection(users) {
+  const presetListings = quizBowlCountryPresetCatalog().map(preset => ({
+      listingId: `preset:${preset.slug}`,
+      source: 'preset',
+      presetSlug: preset.slug,
+      title: preset.title,
+      category: preset.category,
+      difficulty: 'Easy',
+      questionCount: 10,
+      author: 'Covalent Library',
+      region: preset.region,
+      subregion: preset.subregion,
+      preview: preset.preview,
+    }));
+  const communityListings = [];
+  for (const user of Object.values(users || {})) {
+    for (const set of user?.data?.quizbowlSavedSets || []) {
+      if (set?.status !== 'published') continue;
+      const playable = (set.questions || []).filter(question => question?.text?.trim() && question?.answer?.trim());
+      if (!playable.length) continue;
+      communityListings.push({
+        listingId: quizBowlCollectionListingId(user.id, set.id),
+        source: 'community',
+        title: set.title || 'Untitled packet',
+        category: set.category || 'Mixed',
+        difficulty: set.difficulty || 'Medium',
+        questionCount: playable.length,
+        author: quizBowlCollectionAuthor(user),
+        publishedAt: set.publishedAt || set.updatedAt || set.createdAt || null,
+        preview: playable[0].text.slice(0, 180),
+      });
+    }
+  }
+  communityListings.sort((a, b) => String(b.publishedAt || '').localeCompare(String(a.publishedAt || '')));
+  return [...presetListings, ...communityListings];
+}
+
+function findQuizBowlCollectionSet(users, listingId) {
+  for (const user of Object.values(users || {})) {
+    const set = (user?.data?.quizbowlSavedSets || []).find(candidate => (
+      candidate?.status === 'published'
+      && quizBowlCollectionListingId(user.id, candidate.id) === listingId
+    ));
+    if (set) return { set, user };
+  }
+  return null;
+}
+
+app.get('/api/quizbowl/collection', authMiddleware, (req, res) => {
+  try { res.json({ listings: listQuizBowlCollection(loadUsers()) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/quizbowl/collection/:listingId', authMiddleware, (req, res) => {
+  try {
+    const found = findQuizBowlCollectionSet(loadUsers(), req.params.listingId);
+    if (!found) return res.status(404).json({ error: 'This Quiz Bowl set is no longer public.' });
+    const playable = (found.set.questions || []).filter(question => question?.text?.trim() && question?.answer?.trim());
+    res.json({
+      set: {
+        id: found.set.id,
+        title: found.set.title || 'Untitled packet',
+        category: found.set.category || 'Mixed',
+        difficulty: found.set.difficulty || 'Medium',
+        source: 'collection',
+        author: quizBowlCollectionAuthor(found.user),
+        questions: playable,
+      },
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -14951,7 +14213,7 @@ app.post('/api/quizbowl/matches', authMiddleware, (req, res) => {
       code: 'AI',
       category: str(body.category, 60) || 'Mixed',
       difficulty: str(body.difficulty, 30) || 'Medium',
-      scoringFormat: str(body.scoringFormat, 30) || 'standard',
+      scoringFormat: str(body.scoringFormat, 30) || 'iac-prelim',
       finishedAt: new Date().toISOString(),
       players,
       questions,
@@ -15593,7 +14855,7 @@ function saveMatchReplay(match) {
       code: match.code,
       category: match.category || 'Mixed',
       difficulty: match.difficulty || 'Medium',
-      scoringFormat: match.scoringFormat || 'standard',
+      scoringFormat: match.scoringFormat || (match.mode === 'team' ? 'standard' : 'iac-prelim'),
       mode: match.mode || 'individual',
       teamNames: match.teamNames || null,
       teamScores: match.mode === 'team' ? { ...(match.teamScores || { A: 0, B: 0 }) } : null,
@@ -15995,7 +15257,7 @@ function publicMatchState(match) {
     customTopic: match.customTopic || null,
     difficulty: match.difficulty,
     revealSpeedMs: match.revealSpeedMs,
-    scoringFormat: match.scoringFormat || 'standard',
+    scoringFormat: match.scoringFormat || (match.mode === 'team' ? 'standard' : 'iac-prelim'),
     mode: match.mode || 'individual',
     teamNames: match.teamNames || { A: 'Blue Team', B: 'Orange Team' },
     teamScores: match.mode === 'team' ? { ...(match.teamScores || { A: 0, B: 0 }) } : null,
@@ -16058,7 +15320,7 @@ app.post('/api/quizbowl/match', authMiddleware, (req, res) => {
       questionCount: 10,
       category: 'Mixed', difficulty: 'Medium', revealSpeedMs: 140,
       customTopic: null,
-      scoringFormat: 'standard',
+      scoringFormat: mode === 'team' ? 'standard' : 'iac-prelim',
       mode,
       teamNames,
       teamScores: { A: 0, B: 0 },
@@ -16080,7 +15342,7 @@ app.post('/api/quizbowl/match', authMiddleware, (req, res) => {
 const QUIZBOWL_MAX_PLAYERS = 8;
 
 // Scoring format rules mirroring the client. Three data models coexist:
-//   - NAQT (the default 'standard'): word-position based - +15 if buzz
+//   - NAQT (`standard`): word-position based - +15 if buzz
 //     word < powerWordIndex, +10 if before end, +0 if after, -5 if wrong
 //     interrupt, 0 if wrong after end. See https://www.naqt.com/rules/
 //   - Flat: `getPts`/`negPts` (+ optional `powerThreshold`/`powerPts`).
@@ -16098,7 +15360,8 @@ const QUIZBOWL_FORMATS = {
 };
 
 function quizbowlScoreForBuzz(match, { correct }) {
-  const fmt = QUIZBOWL_FORMATS[match.scoringFormat] || QUIZBOWL_FORMATS.standard;
+  const fmt = QUIZBOWL_FORMATS[match.scoringFormat]
+    || (match.mode === 'team' ? QUIZBOWL_FORMATS.standard : QUIZBOWL_FORMATS['iac-prelim']);
   const q = match.questions ? match.questions[match.currentIdx] : null;
   const totalWords = q ? ((q.text || '').split(/\s+/).filter(Boolean).length || 1) : 1;
   const totalReadMs = totalWords * (match.revealSpeedMs || 140);
@@ -16136,7 +15399,8 @@ function quizbowlScoreForBuzz(match, { correct }) {
 }
 
 function quizbowlScoreForLoggedBuzz(match, q, buzz, { correct }) {
-  const fmt = QUIZBOWL_FORMATS[match.scoringFormat] || QUIZBOWL_FORMATS.standard;
+  const fmt = QUIZBOWL_FORMATS[match.scoringFormat]
+    || (match.mode === 'team' ? QUIZBOWL_FORMATS.standard : QUIZBOWL_FORMATS['iac-prelim']);
   const totalWords = buzz?.totalWords || ((q?.text || '').split(/\s+/).filter(Boolean).length || 1);
   const buzzWord = Math.max(0, Math.min(totalWords - 1, Number(buzz?.buzzWord) || 0));
 
@@ -16282,7 +15546,7 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
     difficulty = match.difficulty || 'Medium',
     questionCount = 10,
     revealSpeedMs = match.revealSpeedMs || 140,
-    scoringFormat = match.scoringFormat || 'standard',
+    scoringFormat = match.scoringFormat || (match.mode === 'team' ? 'standard' : 'iac-prelim'),
     customTopic,
     setInstructions,
     bots,
@@ -16348,7 +15612,7 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
       if (!quota.allowed) {
         return res.status(402).json({
           error: 'message_limit_reached',
-          message: `Generating tossups costs ${QB_TOSSUP_CREDIT_COST} credits and you only have ${quota.remaining} left this week.`,
+          message: `Generating tossups costs ${QB_TOSSUP_CREDIT_COST} credits and you only have ${quota.remaining} left this week. ${creditLimitRecoveryHint(usersQB[emailQB], emailQB)}`,
           limit: quota.limit, remaining: quota.remaining, plan: quota.plan, cost: QB_TOSSUP_CREDIT_COST,
         });
       }
@@ -16363,7 +15627,7 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
   match.customTopic = isCustomTopic ? customTopicText : null;
   match.difficulty = difficulty;
   match.revealSpeedMs = revealSpeedMs;
-  match.scoringFormat = match.mode === 'team' ? 'standard' : (QUIZBOWL_FORMATS[scoringFormat] ? scoringFormat : 'standard');
+  match.scoringFormat = match.mode === 'team' ? 'standard' : (QUIZBOWL_FORMATS[scoringFormat] ? scoringFormat : 'iac-prelim');
   if (match.mode === 'team') {
     match.teamNames = {
       A: safeQuizBowlTeamName(teamNames?.A, match.teamNames?.A || 'Blue Team'),
@@ -16395,30 +15659,30 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
       }
     } else {
       const exactFormat = match.mode === 'team'
-        ? `{"questions":[{"text":"Hard clues, (*) easier clues, giveaway.","answer":"Answer"}],"bonuses":[{"leadin":"For 10 points each:","parts":["Part one","Part two","Part three"],"answers":["Answer one","Answer two","Answer three"]}]}`
-        : `{"questions":[{"text":"Hard clues here, more clues, (*) easier clues here, giveaway clue.","answer":"Answer"}]}`;
+        ? `{"questions":[{"text":"Extremely obscure specialist clues. Hard connecting clues. (*) Accessible clues and giveaway.","answer":"Canonical answer","accept":[],"prompt":[]}],"bonuses":[{"leadin":"For 10 points each:","parts":["Part one","Part two","Part three"],"answers":["Answer one","Answer two","Answer three"]}]}`
+        : `{"questions":[{"text":"Extremely obscure specialist clues. Hard connecting clues. (*) Accessible clues and giveaway.","answer":"Canonical answer","accept":[],"prompt":[]}]}`;
       const bonusRule = match.mode === 'team'
         ? ' Write exactly one three-part bonus for every tossup. Every bonus needs a short lead-in, exactly three independently answerable parts, and exactly three canonical answers. Bonuses must match the requested difficulty and source restrictions.'
         : '';
       const sys = grounded
-      ? `You are a quiz bowl question writer. Write pyramidal tossup questions based ONLY on the provided study material - never use outside knowledge; every clue and every answer must be checkable against the material text alone. Each question starts with obscure clues and progressively gets easier. Include a NAQT-style power mark "(*)" placed roughly 60-70% of the way through each question (after the hard clues but before the "giveaway" clue) - buzzing before the mark earns +15, after earns +10.${bonusRule} Output ONLY valid JSON with no markdown, no code fences, no prose before or after.
+      ? `You are an elite ACF/NAQT packet editor. Write rigorously pyramidal tossups based ONLY on the provided study material - never use outside knowledge; every clue and every answer must be checkable against the material text alone. Each tossup should normally be 7-10 sentences. Its opening 30-35% must use the material's most obscure, uniquely identifying specialist details; its middle must use hard connecting clues; only its final 25-30% may use familiar facts and the giveaway. Silently audit clue order and replace or move any early clue that is easier than a later one. Never fabricate facts to make a clue obscure. Include exactly one NAQT-style power mark "(*)" 65-75% through, immediately before the accessible clues.${bonusRule} For each tossup, "answer" is canonical, "accept" contains only literal fully equivalent answers (never regex or loose fragments), and "prompt" contains incomplete answers shaped as {"answer":"literal partial","message":"brief directed clarification"}; use empty arrays when unnecessary. Output ONLY valid JSON with no markdown, no code fences, no prose before or after.
 
 Exact format:
 ${exactFormat}`
-      : `You are a quiz bowl question writer. Write pyramidal tossup questions - each starts with obscure clues and progressively gets easier. Include a NAQT-style power mark "(*)" placed roughly 60-70% of the way through each question (after the hard clues but before the "giveaway" clue) - buzzing before the mark earns +15, after earns +10.${bonusRule} Output ONLY valid JSON with no markdown, no code fences, no prose before or after.
+      : `You are an elite ACF/NAQT packet editor. Write rigorously pyramidal tossups, normally 7-10 sentences and 120-190 words each. The opening 30-35% must use extremely obscure but verifiable specialist clues such as minor works, technical terminology, lesser-known episodes, secondary characters, or named scholarly arguments. The middle must use hard connecting clues. Only the final 25-30% may use famous works, common dates, definitions, epithets, locations, classroom facts, and the giveaway. Silently audit clue order and replace or move any early clue that is easier than a later one. Never open with a stock clue and never fabricate obscurity. Include exactly one NAQT-style power mark "(*)" 65-75% through, immediately before the accessible clues.${bonusRule} For each tossup, "answer" is canonical, "accept" contains only literal fully equivalent answers (never regex or loose fragments), and "prompt" contains incomplete answers shaped as {"answer":"literal partial","message":"brief directed clarification"}; use empty arrays when unnecessary. Output ONLY valid JSON with no markdown, no code fences, no prose before or after.
 
 Exact format:
 ${exactFormat}`;
       const userMsg = grounded
-        ? `Write ${safeQuestionCount} pyramidal quiz bowl tossup questions at ${difficulty} difficulty using ONLY facts from the study material below. Every answer must be directly supported by the text. Each question MUST contain exactly one (*) power mark.
+        ? `Write ${safeQuestionCount} aggressively pyramidal quiz bowl tossup questions at ${difficulty} difficulty using ONLY facts from the study material below. Every answer must be directly supported by the text. Start with the most obscure source-supported clues and keep familiar material for the end. Each question MUST contain exactly one (*) power mark and the complete accept/prompt answer guide.
 
 STUDY MATERIAL ("${match.studyContext.title}"):
 ${match.studyContext.text}
 
 ${setInstructionsText ? `Host set instructions:\n${setInstructionsText}\n\n` : ''}Return ONLY the JSON object described - nothing else.`
         : isCustomTopic
-          ? `Generate ${safeQuestionCount} pyramidal quiz bowl questions about the topic "${customTopicText}" at ${difficulty} difficulty. Stay strictly on that topic - every question's answer must belong to it. Each MUST contain exactly one (*) power mark.${setInstructionsText ? `\nHost set instructions:\n${setInstructionsText}` : ''}\nReturn ONLY the JSON object described - nothing else.`
-          : `Generate ${safeQuestionCount} pyramidal quiz bowl questions in category "${category}" at ${difficulty} difficulty. Each MUST contain exactly one (*) power mark.${setInstructionsText ? `\nHost set instructions:\n${setInstructionsText}` : ''}\nReturn ONLY the JSON object described - nothing else.`;
+          ? `Generate ${safeQuestionCount} aggressively pyramidal quiz bowl questions about the topic "${customTopicText}" at ${difficulty} difficulty. Stay strictly on that topic - every question's answer must belong to it. Begin with extremely obscure specialist clues and reserve familiar clues for the final giveaway. Each MUST contain exactly one (*) power mark and the complete accept/prompt answer guide.${setInstructionsText ? `\nHost set instructions:\n${setInstructionsText}` : ''}\nReturn ONLY the JSON object described - nothing else.`
+          : `Generate ${safeQuestionCount} aggressively pyramidal quiz bowl questions in category "${category}" at ${difficulty} difficulty. Begin with extremely obscure specialist clues and reserve familiar clues for the final giveaway. Each MUST contain exactly one (*) power mark and the complete accept/prompt answer guide.${setInstructionsText ? `\nHost set instructions:\n${setInstructionsText}` : ''}\nReturn ONLY the JSON object described - nothing else.`;
       // Flash is faster + more reliable for raw-JSON tasks; Pro's thinking
       // tokens often consume the budget before emitting output.
       const result = await callGemini(sys, [{ role: 'user', content: userMsg }], GEMINI_FLASH, 8192);
@@ -16520,11 +15784,11 @@ app.post('/api/quizbowl/match/:code/answer', authMiddleware, (req, res) => {
   if (match.buzzWinner !== req.userId) return res.status(403).json({ error: 'You did not buzz first' });
 
   const answer = String(req.body?.answer || '').trim();
-  const correctAnswer = match.questions[match.currentIdx].answer;
+  const currentQuestion = match.questions[match.currentIdx];
+  const correctAnswer = currentQuestion.answer;
   // QBReader's checker returns a third state: prompt. A prompted player keeps
   // the buzz and can clarify rather than being incorrectly negged.
-  const answerline = match.questions[match.currentIdx].answerline || correctAnswer;
-  const judgement = judgeQuizBowlAnswer(answer, answerline);
+  const judgement = judgeQuizBowlQuestion(currentQuestion, answer);
   if (judgement.directive === 'prompt') {
     return res.json({ ok: false, directive: 'prompt', directedPrompt: judgement.directedPrompt || null });
   }
@@ -16629,21 +15893,78 @@ app.post('/api/quizbowl/match/:code/review', authMiddleware, (req, res) => {
   if (!q || !lastWrong) return res.status(409).json({ error: 'No wrong answer from you to review' });
 
   const verifier = match.players.find(p => p.userId !== req.userId && !p.isBot);
-  if (!verifier) return res.status(409).json({ error: 'Need another human player to verify' });
   const requester = match.players.find(p => p.userId === req.userId);
   const review = {
     id: crypto.randomUUID(),
     status: 'pending',
     requesterId: req.userId,
     requesterName: requester?.name || 'Player',
-    verifierId: verifier.userId,
-    verifierName: verifier.name || 'Opponent',
+    verifierId: verifier?.userId || null,
+    verifierName: verifier?.name || 'AI opponents',
     questionIdx: match.currentIdx,
     questionText: q.text || '',
     submittedAnswer: lastWrong.answer || '',
     correctAnswer: q.answer || '',
     createdAt: Date.now(),
   };
+
+  // A bot-only room has no human who can adjudicate a protest. Treat the
+  // player's claim as accepted immediately, using the same score delta as a
+  // human-approved review (remove the original neg, then award the correct
+  // buzz value). This keeps the single-player/bot-room flow moving without
+  // introducing a fake verifier.
+  if (!verifier) {
+    const idx = buzzes.findLastIndex
+      ? buzzes.findLastIndex(b => b.userId === req.userId && !b.correct)
+      : (() => {
+          for (let i = buzzes.length - 1; i >= 0; i--) if (buzzes[i].userId === req.userId && !buzzes[i].correct) return i;
+          return -1;
+        })();
+    const buzz = idx >= 0 ? buzzes[idx] : null;
+    let scoreDelta = 0;
+    let ptsGained = 0;
+    if (buzz) {
+      const previousPts = typeof buzz.points === 'number' ? buzz.points : 0;
+      ptsGained = quizbowlScoreForLoggedBuzz(match, q, buzz, { correct: true });
+      scoreDelta = ptsGained - previousPts;
+      buzz.correct = true;
+      buzz.points = ptsGained;
+      buzz.reviewAccepted = true;
+      match.scores[req.userId] = (match.scores[req.userId] || 0) + scoreDelta;
+      if (match.lockedOutForQ) delete match.lockedOutForQ[req.userId];
+    }
+    const acceptedReview = {
+      ...review,
+      status: buzz ? 'accepted' : 'rejected',
+      resolvedAt: Date.now(),
+      resolvedBy: req.userId,
+    };
+    match.activeAnswerReview = acceptedReview;
+    match.lastActivity = Date.now();
+    const autoAdvanceInMs = match.state === 'reveal' && buzz ? 3000 : null;
+    if (autoAdvanceInMs != null) scheduleAutoAdvance(match, autoAdvanceInMs);
+    pushMatchEvent(match, 'answer_review', {
+      review: acceptedReview,
+      accepted: !!buzz,
+      scores: match.scores,
+      scoreDelta,
+      ptsGained,
+      autoAdvanceInMs,
+      paused: false,
+      match: publicMatchState(match),
+    });
+    return res.json({
+      ok: true,
+      accepted: !!buzz,
+      autoAccepted: true,
+      review: acceptedReview,
+      scores: match.scores,
+      scoreDelta,
+      ptsGained,
+      autoAdvanceInMs,
+    });
+  }
+
   match.activeAnswerReview = review;
   match.lastActivity = Date.now();
   pauseMatchForAnswerReview(match);
@@ -18242,7 +17563,7 @@ app.post('/api/trial/generate', authMiddleware, async (req, res) => {
         if (!quota.allowed) {
           return res.status(402).json({
             error: 'message_limit_reached',
-            message: `Generating tossups costs ${QB_TOSSUP_CREDIT_COST} credits and you only have ${quota.remaining} left this week.`,
+            message: `Generating tossups costs ${QB_TOSSUP_CREDIT_COST} credits and you only have ${quota.remaining} left this week. ${creditLimitRecoveryHint(usersQB[emailQB], emailQB)}`,
             limit: quota.limit, remaining: quota.remaining, plan: quota.plan, cost: QB_TOSSUP_CREDIT_COST,
           });
         }
@@ -18252,14 +17573,18 @@ app.post('/api/trial/generate', authMiddleware, async (req, res) => {
     const diffMap = { easy: 'introductory/middle-school', medium: 'high-school varsity', hard: 'college/national championship' };
     const diffLabel = diffMap[difficulty] || diffMap.medium;
 
-    const systemPrompt = `You are a quiz bowl question writer specializing in ${diffLabel}-level tossups. Output ONLY valid JSON, no markdown or fences.`;
+    const systemPrompt = `You are an elite ACF/NAQT packet editor specializing in ${diffLabel}-level tossups. Enforce a steep, rigorously audited clue pyramid and output ONLY valid JSON, no markdown or fences.`;
     const userPrompt = `Write ${count} tossup questions on the topic "${topic}" at ${diffLabel} difficulty.
 
 Each tossup must:
-- Be 4-8 sentences long, starting with obscure clues and ending with the most obvious giveaway
-- Use the classic pyramid structure (hard clues → easy giveaway)
+- Be 7-10 sentences and roughly 120-190 words
+- Put extremely obscure but verifiable specialist clues in the opening 30-35%, hard connecting clues in the middle, and familiar classroom facts only in the final 25-30%
+- Silently audit clue order: replace or move any early clue that is easier than a later clue
+- Never open with a definition, birthplace, most-famous work, signature discovery, or another stock giveaway; never fabricate a clue to make it obscure
+- Include exactly one (*) power mark 65-75% through, immediately before the accessible clues
 - Cover different specific sub-topics within "${topic}"
 - Have a clear, concise answer (a specific name, term, work, or event)
+- Supply literal answer guidance: "accept" lists only fully equivalent aliases and "prompt" lists incomplete forms as {"answer":"literal partial","message":"directed clarification"}; never output regex syntax
 
 Return JSON:
 {
@@ -18267,6 +17592,8 @@ Return JSON:
     {
       "question": "Full tossup text as a single continuous paragraph...",
       "answer": "Short canonical answer (1-5 words)",
+      "accept": [],
+      "prompt": [],
       "topic": "${topic}",
       "difficulty": "${difficulty}"
     }
@@ -18283,6 +17610,8 @@ Return JSON:
       id: crypto.randomUUID(),
       question: q.question,
       answer: q.answer,
+      accept: Array.isArray(q.accept) ? q.accept.slice(0, 20) : [],
+      prompt: Array.isArray(q.prompt) ? q.prompt.slice(0, 20) : [],
       topic: q.topic || topic,
       difficulty: q.difficulty || difficulty,
     }));

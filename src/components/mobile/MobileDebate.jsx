@@ -164,11 +164,7 @@ function ModeMenu({ onPick }) {
             <button
               key={t.id}
               onClick={() => onPick(t.id)}
-              className={`w-full rounded-2xl border p-4 flex items-center gap-3 text-left active:scale-[0.99] transition-transform ${
-                t.id === 'history'
-                  ? `bg-gradient-to-br ${t.tone}`
-                  : 'bg-blue-500 border-blue-500 active:bg-blue-600'
-              }`}
+              className="w-full rounded-2xl border border-blue-500 bg-blue-500 p-4 flex items-center gap-3 text-left active:bg-blue-600 active:scale-[0.99] transition-transform"
             >
               <div className="w-11 h-11 rounded-xl grid place-items-center bg-white/[0.06] border border-white/[0.08] shrink-0">
                 <Icon size={20} className="text-white/80" />
@@ -385,7 +381,7 @@ function SoloDebate({ onExit }) {
           <VerdictRow label="Your strongest" body={verdict.studentStrongest} tone="emerald" />
           <VerdictRow label="Your weakest" body={verdict.studentWeakest} tone="rose" />
           <VerdictRow label="Drill next" body={verdict.improve} tone="blue" />
-          <button onClick={reset} className="w-full h-12 rounded-2xl bg-white/[0.08] border border-white/10 font-semibold text-[14px] active:bg-white/[0.12]">
+          <button onClick={reset} className="w-full h-12 rounded-2xl bg-blue-500 border border-blue-400/30 text-white font-semibold text-[14px] active:bg-blue-600">
             New debate
           </button>
         </div>
@@ -638,7 +634,7 @@ function Multiplayer({ onExit, presetCode = null, tournamentCode = null, spectat
               <button
                 onClick={handleJoin}
                 disabled={busy || !joinCode.trim()}
-                className="px-5 rounded-2xl bg-white/[0.08] border border-white/10 font-semibold disabled:opacity-40 active:bg-white/[0.12]"
+                className="px-5 rounded-2xl bg-blue-500/15 border border-blue-400/30 text-blue-100 font-semibold disabled:opacity-40 active:bg-blue-500/25"
               >Join</button>
             </div>
           </div>
@@ -679,7 +675,7 @@ function Multiplayer({ onExit, presetCode = null, tournamentCode = null, spectat
           <VerdictRow label="Summary" body={v.summary} />
           <VerdictRow label="FOR strongest" body={v.forStrongest} tone="emerald" />
           <VerdictRow label="AGAINST strongest" body={v.againstStrongest} tone="rose" />
-          <button onClick={onExit} className="w-full h-12 rounded-2xl bg-white/[0.08] border border-white/10 font-semibold text-[14px] active:bg-white/[0.12]">
+          <button onClick={onExit} className="w-full h-12 rounded-2xl bg-blue-500 border border-blue-400/30 text-white font-semibold text-[14px] active:bg-blue-600">
             {tournamentCode ? 'Back to bracket' : 'Done'}
           </button>
         </div>
@@ -755,7 +751,7 @@ function Multiplayer({ onExit, presetCode = null, tournamentCode = null, spectat
         <div className="px-4 pb-4 pt-2 border-t border-white/[0.06] space-y-2">
           <button
             onClick={() => handleReady(!iAmReady)}
-            className={`w-full h-11 rounded-2xl font-bold text-[14px] flex items-center justify-center gap-2 ${iAmReady ? 'bg-white/[0.08] border border-white/10 text-white/70' : 'bg-emerald-500 text-white active:bg-emerald-600'}`}
+            className={`w-full h-11 rounded-2xl font-bold text-[14px] flex items-center justify-center gap-2 ${iAmReady ? 'bg-blue-500/15 border border-blue-400/30 text-blue-100' : 'bg-emerald-500 text-white active:bg-emerald-600'}`}
           >
             {iAmReady ? 'Ready ✓ (tap to unready)' : 'Ready up'}
           </button>
@@ -863,7 +859,7 @@ function Multiplayer({ onExit, presetCode = null, tournamentCode = null, spectat
           ) : (
             <div className="flex items-center gap-2">
               <p className="flex-1 text-[12px] text-white/35 flex items-center gap-2"><InlineProgress active /> Waiting for {opp?.name || 'opponent'}…</p>
-              <button onClick={handleVoteEnd} className="px-3 h-9 rounded-full bg-white/[0.06] border border-white/10 text-[12px] font-semibold text-white/60 flex items-center gap-1">
+          <button onClick={handleVoteEnd} className="px-3 h-9 rounded-full bg-blue-500/15 border border-blue-400/30 text-[12px] font-semibold text-blue-100 flex items-center gap-1 active:bg-blue-500/25">
                 <Flag size={12} /> End {match.endVotes?.length ? `(${match.endVotes.length}/2)` : ''}
               </button>
             </div>
@@ -1040,7 +1036,7 @@ function Tournament({ onExit }) {
           <div className="flex gap-2">
             <input value={joinCode} onChange={e => setJoinCode(e.target.value.toUpperCase())} placeholder="CODE" maxLength={8}
               className="flex-1 rounded-2xl bg-white/[0.05] border border-white/[0.08] px-4 py-3 text-[16px] font-mono tracking-widest text-white placeholder-white/20 outline-none focus:border-blue-400/40" />
-            <button onClick={handleJoin} disabled={busy || !joinCode.trim()} className="px-5 rounded-2xl bg-white/[0.08] border border-white/10 font-semibold disabled:opacity-40 active:bg-white/[0.12]">Join</button>
+            <button onClick={handleJoin} disabled={busy || !joinCode.trim()} className="px-5 rounded-2xl bg-blue-500/15 border border-blue-400/30 text-blue-100 font-semibold disabled:opacity-40 active:bg-blue-500/25">Join</button>
           </div>
           {err && <p className="text-[12px] text-rose-300">{err}</p>}
         </div>
@@ -1307,7 +1303,7 @@ function SectionLabel({ children }) {
 function Pill({ active, onClick, children }) {
   return (
     <button onClick={onClick}
-      className={`px-3 py-2 rounded-xl text-[12px] font-semibold tracking-tight whitespace-nowrap transition-colors ${active ? 'bg-white/[0.10] text-white/80 border border-white/[0.18]' : 'bg-white/[0.04] border border-white/[0.05] text-white/35 active:bg-white/[0.08]'}`}>
+      className={`px-3 py-2 rounded-xl text-[12px] font-semibold tracking-tight whitespace-nowrap transition-colors ${active ? 'bg-blue-500/20 text-blue-100 border border-blue-400/50' : 'bg-white/[0.04] border border-white/[0.05] text-white/35 active:bg-blue-500/[0.08]'}`}>
       {children}
     </button>
   );

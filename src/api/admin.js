@@ -1,10 +1,17 @@
 import { apiFetch } from './client';
 
 export const checkAdmin     = () => apiFetch('/api/admin/check');
+export const getPromptProtectionSettings = () => apiFetch('/api/admin/moderation/prompt-protection');
+export const updatePromptProtectionSettings = (strictness) => apiFetch('/api/admin/moderation/prompt-protection', {
+  method: 'PUT',
+  body: JSON.stringify({ strictness }),
+});
 export const getMetrics     = () => apiFetch('/api/admin/metrics');
 export const listUsers      = (opts = {}) => apiFetch(`/api/admin/users${opts.includeDemo ? '?includeDemo=1' : ''}`);
 export const getUser        = (uid, opts = {}) => apiFetch(`/api/admin/users/${uid}${opts.includeDemo ? '?includeDemo=1' : ''}`);
 export const toggleBan      = (uid) => apiFetch(`/api/admin/users/${uid}/ban`, { method: 'POST' });
+export const grantCreditReset = (uid) => apiFetch(`/api/admin/users/${uid}/credit-resets/grant`, { method: 'POST' });
+export const grantCreditResetToAll = () => apiFetch('/api/admin/credit-resets/grant-all', { method: 'POST' });
 export const deleteUser     = (uid) => apiFetch(`/api/admin/users/${uid}`, { method: 'DELETE' });
 
 // Conversation transcripts

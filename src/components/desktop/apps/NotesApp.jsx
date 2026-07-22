@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { ArrowLeft, FileText, Plus, Trash2, Pencil, Layout, Wand2, Loader2, BookOpen, Network, Folder, Layers, ChevronRight, ChevronDown, Check, Share2, Globe } from 'lucide-react';
+import { ArrowLeft, FileText, Plus, Trash2, Pencil, Layout, Wand2, Loader2, BookOpen, Network, Folder, Layers, ChevronRight, ChevronDown, Check, Share2, Globe, Upload } from 'lucide-react';
 import { InlineProgress } from '../../shared/ProgressBar';
 import { listNotes, createNote, deleteNote, getNote, updateNote, generateCues, generateSummary,
          listNoteMaps, createNoteMap, deleteNoteMap, updateNoteMap,
@@ -18,6 +18,7 @@ import { useSharing } from '../../../context/SharingContext';
 import useBrowserBack from '../../../hooks/useBrowserBack';
 import NoteActions, { QuizFromNotePanel, AIEditNotePanel } from '../../notes/NoteActions';
 import PresetNotesBrowser from '../../notes/PresetNotesBrowser';
+import ImportNotesView from '../../notes/ImportNotesView';
 import NoteMap from '../../notes/NoteMap';
 import MarkdownNoteEditor from '../../notes/MarkdownNoteEditor';
 import NoteFlashcards from '../../notes/NoteFlashcards';
@@ -591,7 +592,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
 
   function refreshNotes() {
     bust('notes:list');
-    fetchOnce('notes:list', listNotes).then(d => setNotes(d.notes || [])).catch(() => {});
+    return fetchOnce('notes:list', listNotes).then(d => setNotes(d.notes || [])).catch(() => {});
   }
 
   function submitTopicDialog(name) {
@@ -843,6 +844,17 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
             </button>
           </div>
         </div>
+      </ViewFade>
+    );
+  }
+
+  if (view === 'import') {
+    return (
+      <ViewFade viewKey="import" className="h-full flex flex-col">
+        <ImportNotesView
+          onBack={() => setView('list')}
+          onImported={() => refreshNotes()}
+        />
       </ViewFade>
     );
   }
@@ -1161,6 +1173,9 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
         <div className="flex items-center gap-2">
           <Button size="sm" variant="secondary" onClick={() => setView('presets')}>
             <Globe size={14} /> Preset
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => setView('import')}>
+            <Upload size={14} /> Upload
           </Button>
           <Button size="sm" variant="secondary" onClick={() => setView('ai')}>
             <Wand2 size={14} /> AI

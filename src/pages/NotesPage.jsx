@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileText, Plus, Trash2, Layout, Network, Globe } from 'lucide-react';
+import { FileText, Plus, Trash2, Layout, Network, Globe, Upload } from 'lucide-react';
 import { listNotes, createNote, deleteNote } from '../api/notes';
 import Button from '../components/shared/Button';
 import LoadingSpinner from '../components/shared/LoadingSpinner';
 import Modal from '../components/shared/Modal';
 import SharedWithMeView from '../components/library/SharedWithMeView';
 import PresetNotesBrowser from '../components/notes/PresetNotesBrowser';
+import NoteImportDialog from '../components/notes/NoteImportDialog';
 
 export default function NotesPage() {
   const navigate = useNavigate();
@@ -14,6 +15,7 @@ export default function NotesPage() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [showPresets, setShowPresets] = useState(false);
+  const [showImport, setShowImport] = useState(false);
 
   useEffect(() => {
     listNotes().then(d => { setNotes(d.notes || []); setLoading(false); }).catch(() => setLoading(false));
@@ -48,8 +50,17 @@ export default function NotesPage() {
         </div>
       </div>
 
+      <NoteImportDialog
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        onImported={async () => {
+          const data = await listNotes();
+          setNotes(data.notes || []);
+        }}
+      />
+
       <Modal open={showCreate} onClose={() => setShowCreate(false)} title="New note">
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3">
           <button
             onClick={() => handleCreate('regular')}
             className="flex flex-col items-center gap-2 p-5 rounded-xl border border-white/[0.08] bg-white/[0.04] hover:border-white/[0.18] hover:bg-white/[0.08] transition-colors text-center"
@@ -72,12 +83,20 @@ export default function NotesPage() {
           >
             <Globe size={22} className="text-white/40" />
             <span className="text-[13px] font-semibold text-white/80">Preset</span>
-            <span className="text-[11px] text-white/35">Countries + subdivisions</span>
+            <span className="text-[11px] text-white/35">Geography, history + science</span>
+          </button>
+          <button
+            onClick={() => { setShowCreate(false); setShowImport(true); }}
+            className="flex flex-col items-center gap-2 p-5 rounded-xl border border-white/[0.08] bg-white/[0.04] hover:border-emerald-400/30 hover:bg-emerald-500/[0.06] transition-colors text-center"
+          >
+            <Upload size={22} className="text-emerald-300/70" />
+            <span className="text-[13px] font-semibold text-white/80">Import</span>
+            <span className="text-[11px] text-white/35">Convert to RushilAI format</span>
           </button>
         </div>
       </Modal>
 
-      <Modal open={showPresets} onClose={() => setShowPresets(false)} title="Geography preset notes" size="lg">
+      <Modal open={showPresets} onClose={() => setShowPresets(false)} title="Preset notes" size="lg">
         <PresetNotesBrowser
           notes={notes}
           onOpenNote={(id) => { setShowPresets(false); navigate(`/notes/${id}`); }}
