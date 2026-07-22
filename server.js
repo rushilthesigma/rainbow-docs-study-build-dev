@@ -3439,9 +3439,10 @@ async function callGemini(systemPrompt, messages, model, maxOutputTokens = 4096,
           // Without this, the model burns the entire token budget on a
           // hidden `thoughtSignature` and the visible JSON gets cut off
           // mid-sentence - which broke the AI debate-topic chip.
-          // Pro models require thinking and reject thinkingBudget:0 with a 400,
-          // so only disable thinking on non-Pro models.
-          ...(opts.disableThinking && !isProModel ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+          // Gemini 3 models do not support the legacy thinkingBudget:0 switch.
+          // Minimal thinking is the supported low-latency equivalent; Pro does
+          // not support minimal and therefore keeps its default thinking mode.
+          ...(opts.disableThinking && !isProModel ? { thinkingConfig: { thinkingLevel: 'minimal' } } : {}),
         },
       });
 
@@ -5676,14 +5677,14 @@ SOURCE MODE - NON-NEGOTIABLE RULES:
         maxOutputTokens: 32768,
         temperature: 0.7,
         // Thinking config: show thought summaries when the caller wants them
-        // (Pro + thinking on, or any model with includeThoughts). Pro rejects
-        // thinkingBudget:0, so "thinking off" for Pro just omits the config
+        // (Pro + thinking on, or any model with includeThoughts). Pro cannot
+        // use minimal thinking, so "thinking off" for Pro omits the config
         // (thoughts happen silently but aren't streamed to the client).
-        // Non-Pro can hard-disable with thinkingBudget:0.
+        // Gemini 3 non-Pro models use minimal thinking for low latency.
         ...(!opts.disableThinking && (isProModel || opts.includeThoughts)
           ? { thinkingConfig: { includeThoughts: true } }
           : (opts.disableThinking && !isProModel
-              ? { thinkingConfig: { thinkingBudget: 0 } }
+              ? { thinkingConfig: { thinkingLevel: 'minimal' } }
               : {})),
       },
     });
@@ -15549,18 +15550,32 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
     scoringFormat = match.scoringFormat || (match.mode === 'team' ? 'standard' : 'iac-prelim'),
     customTopic,
     setInstructions,
+    questions,
     bots,
     teamNames,
   } = req.body || {};
   const safeQuestionCount = Math.max(1, Math.min(match.mode === 'team' ? 20 : 40, Number(questionCount) || 10));
-  const requestedQuestionSource = rawQuestionSource === 'ai' || rawQuestionSource === 'gemini' ? 'ai' : 'qbreader';
+  const requestedQuestionSource = rawQuestionSource === 'ai' || rawQuestionSource === 'gemini'
+    ? 'ai'
+    : rawQuestionSource === 'saved' ? 'saved' : 'qbreader';
+  const fixedQuestions = requestedQuestionSource === 'saved' && Array.isArray(questions)
+    ? questions.slice(0, 40).map(q => ({
+      ...q,
+      text: String(q?.text || '').trim().slice(0, 12000),
+      answer: String(q?.answer || '').trim().slice(0, 500),
+    })).filter(q => q.text && q.answer)
+    : [];
+  if (requestedQuestionSource === 'saved' && !fixedQuestions.length) {
+    return res.status(400).json({ error: 'This collection set has no playable tossups.' });
+  }
 
   // Custom lobbies: the host types any topic and Gemini writes the tossups on
   // it instead of drawing from the preset category list. Study-material
   // matches keep priority - their questions stay pinned to the material.
   const customTopicText = (typeof customTopic === 'string' ? customTopic : '').trim().slice(0, 200);
   const isCustomTopic = !!customTopicText && !(match.studyContext && match.studyContext.text);
-  const useGeminiTossups = requestedQuestionSource === 'ai' || isCustomTopic || !!(match.studyContext && match.studyContext.text);
+  const useFixedQuestions = fixedQuestions.length > 0;
+  const useGeminiTossups = !useFixedQuestions && (requestedQuestionSource === 'ai' || isCustomTopic || !!(match.studyContext && match.studyContext.text));
   const setInstructionsText = (typeof setInstructions === 'string' ? setInstructions : '').trim().slice(0, 1200);
 
   // Inject bots BEFORE player-count check so the host can start solo with bot fill.
@@ -15621,8 +15636,8 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
   }
 
   // Persist settings + flip to "generating" so the opponent sees a spinner.
-  match.questionSource = useGeminiTossups ? 'ai' : 'qbreader';
-  match.questionCount = safeQuestionCount;
+  match.questionSource = useFixedQuestions ? 'saved' : (useGeminiTossups ? 'ai' : 'qbreader');
+  match.questionCount = useFixedQuestions ? fixedQuestions.length : safeQuestionCount;
   match.category = isCustomTopic ? 'Custom' : category;
   match.customTopic = isCustomTopic ? customTopicText : null;
   match.difficulty = difficulty;
@@ -15648,7 +15663,9 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
     const grounded = !!(match.studyContext && match.studyContext.text);
     let generatedQuestions;
     let generatedBonuses = [];
-    if (!useGeminiTossups) {
+    if (useFixedQuestions) {
+      generatedQuestions = fixedQuestions;
+    } else if (!useGeminiTossups) {
       if (match.mode === 'team') {
         [generatedQuestions, generatedBonuses] = await Promise.all([
           fetchQBReaderTossups({ count: safeQuestionCount, category, difficulty }),

@@ -94,18 +94,19 @@ function useWordReveal(text, startedAt, speedMs, frozen, frozenAt) {
 //                        configuring a room, used by the "Vs AI bots" entry)
 //   initialFillWithBots - pre-enable the bot fill toggle
 //   onExit             - back out of the multiplayer surface entirely
-export default function MobileMatch({ initialView = 'menu', initialFillWithBots = false, onExit } = {}) {
+export default function MobileMatch({ initialView = 'menu', initialFillWithBots = false, initialSet = null, onExit } = {}) {
   const { user } = useAuth();
   const myId = user?.id;
 
-  const [view, setView] = useState(initialView);
+  const [view, setView] = useState(initialSet ? 'setup' : initialView);
   const [code, setCode] = useState('');
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [matchMode, setMatchMode] = useState('individual');
-  const [category, setCategory] = useState('Mixed');
+  const [questionSource, setQuestionSource] = useState(initialSet ? 'saved' : 'qbreader');
+  const [category, setCategory] = useState(initialSet?.category || 'Mixed');
   const [customTopic, setCustomTopic] = useState('');
-  const [difficulty, setDifficulty] = useState('Medium');
-  const [questionCount, setQuestionCount] = useState(10);
+  const [difficulty, setDifficulty] = useState(initialSet?.difficulty || 'Medium');
+  const [questionCount, setQuestionCount] = useState(initialSet?.questions?.length || 10);
   const [revealSpeedMs, setRevealSpeedMs] = useState(140);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -390,7 +391,8 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
     botEngRef.current.thinkTimers = {};
     try {
       await startMatch(code, {
-        category, difficulty, questionCount, revealSpeedMs, bots,
+        questionSource, category, difficulty, questionCount, revealSpeedMs, bots,
+        questions: questionSource === 'saved' ? initialSet?.questions : undefined,
         customTopic: category === 'Custom' ? customTopic.trim() : undefined,
       });
     }
@@ -543,17 +545,18 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
             <SectionLabel>Game type</SectionLabel>
             <div className="grid grid-cols-2 gap-2">
               <button onClick={() => setMatchMode('individual')} className={`rounded-2xl border p-3 text-left ${matchMode === 'individual' ? 'border-blue-400/50 bg-blue-500/15' : 'border-white/[0.08] bg-white/[0.03]'}`}><Zap size={14} className="text-blue-300 mb-1" /><p className="text-[12px] font-bold">Open match</p><p className="text-[10px] text-white/35">Individual scoring</p></button>
-              <button onClick={() => setMatchMode('team')} className={`rounded-2xl border p-3 text-left ${matchMode === 'team' ? 'border-blue-400/50 bg-blue-500/15' : 'border-white/[0.08] bg-white/[0.03]'}`}><Users size={14} className="text-blue-300 mb-1" /><p className="text-[12px] font-bold">Team scrimmage</p><p className="text-[10px] text-white/35">Tossups + bonuses</p></button>
+              <button onClick={() => setMatchMode('team')} disabled={!!initialSet} className={`rounded-2xl border p-3 text-left ${initialSet ? 'cursor-not-allowed border-white/[0.05] bg-white/[0.015] opacity-50' : matchMode === 'team' ? 'border-blue-400/50 bg-blue-500/15' : 'border-white/[0.08] bg-white/[0.03]'}`}><Users size={14} className="text-blue-300 mb-1" /><p className="text-[12px] font-bold">Team scrimmage</p><p className="text-[10px] text-white/35">{initialSet ? 'Needs bonus parts' : 'Tossups + bonuses'}</p></button>
             </div>
           </div>
+          {initialSet && <div className="rounded-2xl border border-amber-400/25 bg-amber-500/[0.08] p-3"><p className="text-[10px] font-bold uppercase tracking-[0.15em] text-amber-300/75">Exact collection set</p><p className="mt-1 truncate text-[13px] font-semibold text-amber-50">{initialSet.title}</p><p className="mt-0.5 text-[10px] text-amber-100/55">{initialSet.questions.length} tossups · no regeneration</p></div>}
           <div>
             <SectionLabel>Category</SectionLabel>
             <div className="flex flex-wrap gap-1.5">
-              {['Science','History','Literature','Geography','Math','Art','Music','Philosophy','Mixed','Custom'].map(o => (
+              {!initialSet && ['Science','History','Literature','Geography','Math','Art','Music','Philosophy','Mixed','Custom'].map(o => (
                 <Chip key={o} active={category === o} onClick={() => setCategory(o)}>{o}</Chip>
               ))}
             </div>
-            {category === 'Custom' && (
+            {!initialSet && category === 'Custom' && (
               <input
                 type="text" value={customTopic} maxLength={200}
                 onChange={e => setCustomTopic(e.target.value)}
@@ -565,7 +568,7 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
           <div>
             <SectionLabel>Difficulty</SectionLabel>
             <div className="flex gap-1.5">
-              {['Easy','Medium','Hard','Tournament'].map(o => (
+              {!initialSet && ['Easy','Medium','Hard','Tournament'].map(o => (
                 <Chip key={o} active={difficulty === o} onClick={() => setDifficulty(o)}>{o}</Chip>
               ))}
             </div>
@@ -576,8 +579,8 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
                 <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-white/30">Questions</span>
                 <span className="text-[11px] font-mono font-bold text-blue-300">{questionCount}</span>
               </div>
-              <input type="range" min="5" max="20" step="5" value={questionCount}
-                onChange={e => setQuestionCount(Number(e.target.value))} className="w-full accent-blue-500" />
+              {initialSet ? <p className="text-[10px] text-amber-200/55">Fixed to the published packet</p> : <input type="range" min="5" max="20" step="5" value={questionCount}
+                onChange={e => setQuestionCount(Number(e.target.value))} className="w-full accent-blue-500" />}
             </div>
             <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
               <div className="flex items-center justify-between mb-1.5">

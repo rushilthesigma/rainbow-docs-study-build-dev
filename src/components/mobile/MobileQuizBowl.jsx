@@ -81,6 +81,7 @@ export default function MobileQuizBowl() {
   // 'menu' = create/join a multiplayer room; 'bots' = jump straight
   // into a room setup with bot fill pre-enabled.
   const [matchScreen, setMatchScreen] = useState(null);
+  const [matchSet, setMatchSet] = useState(null);
   const [questions, setQuestions] = useState([]);
   const [currentQ, setCurrentQ] = useState(0);
   const [generating, setGenerating] = useState(false);
@@ -195,6 +196,17 @@ export default function MobileQuizBowl() {
     setActiveTitle(set.title || listing.title || 'Collection set');
     setQuestions(playable); setCurrentQ(0); setScores([]); setBuzzed(false); setShowResult(false); setCorrect(null); setWrongAnswer(null); setReading(true);
     startedAtRef.current = Date.now(); savedSetRef.current = null; setView('playing');
+  }
+
+  async function playCollectionSetMultiplayer(listing) {
+    const data = listing.source === 'preset'
+      ? await fetchQuizBowlPresetSet(listing.presetSlug)
+      : await getQuizBowlCollectionSet(listing.listingId);
+    const set = data.set || {};
+    const playable = (set.questions || []).filter(question => String(question.text || '').trim() && String(question.answer || '').trim());
+    if (!playable.length) throw new Error('This collection set has no playable tossups.');
+    setMatchSet({ ...set, questions: playable, title: set.title || listing.title });
+    setMatchScreen('set');
   }
 
   function handleBuzz() { if (buzzed || !reading) return; setAnswerPrompt(''); setBuzzed(true); setReading(false); stop(); }
@@ -315,15 +327,16 @@ export default function MobileQuizBowl() {
     return (
       <MobileMatch
         key={matchScreen}
-        initialView={matchScreen === 'bots' ? 'setup' : 'menu'}
+        initialView={matchScreen === 'bots' || matchScreen === 'set' ? 'setup' : 'menu'}
         initialFillWithBots={matchScreen === 'bots'}
-        onExit={() => setMatchScreen(null)}
+        initialSet={matchSet}
+        onExit={() => { setMatchSet(null); setMatchScreen(null); }}
       />
     );
   }
 
   if (view === 'collection') {
-    return <div className="flex-1 min-h-0 bg-transparent"><QuizBowlCollection mobile onBack={() => setView('setup')} onPlay={playCollectionSet} /></div>;
+    return <div className="flex-1 min-h-0 bg-transparent"><QuizBowlCollection mobile onBack={() => setView('setup')} onPlay={playCollectionSet} onPlayMultiplayer={playCollectionSetMultiplayer} /></div>;
   }
 
   // ===== REVIEW =====

@@ -315,6 +315,7 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
   const [savedSets, setSavedSets] = useState([]);
   const [savedSetsLoading, setSavedSetsLoading] = useState(false);
   const [editingSavedSet, setEditingSavedSet] = useState(null);
+  const [multiplayerSet, setMultiplayerSet] = useState(null);
   // The played set open in the My Sets detail view, and where the solo
   // replay player should return when it exits (replays list vs detail).
   const [playedSetFocus, setPlayedSetFocus] = useState(null);
@@ -448,6 +449,22 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
       }
       const data = await getQuizBowlCollectionSet(listing.listingId);
       playSavedSet(data.set);
+    } catch (err) {
+      setError(err.message || 'Could not open that collection set.');
+      throw err;
+    }
+  }
+
+  async function playCollectionSetMultiplayer(listing) {
+    try {
+      const data = listing.source === 'preset'
+        ? await fetchQuizBowlPresetSet(listing.presetSlug)
+        : await getQuizBowlCollectionSet(listing.listingId);
+      const set = data.set || {};
+      const playable = (set.questions || []).filter(q => String(q.text || '').trim() && String(q.answer || '').trim());
+      if (!playable.length) throw new Error('This collection set has no playable tossups.');
+      setMultiplayerSet({ ...set, questions: playable, title: set.title || listing.title });
+      setView('multiplayer');
     } catch (err) {
       setError(err.message || 'Could not open that collection set.');
       throw err;
@@ -1385,7 +1402,7 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
   if (view === 'multiplayer') {
     return (
       <ViewFade viewKey="multiplayer" className="h-full flex flex-col">
-        <QuizBowlMatch user={user} onExit={() => { bustHubCache(); setView('hub'); }} onMatchReplay={openMatchReplay} />
+        <QuizBowlMatch user={user} initialSet={multiplayerSet} onExit={() => { setMultiplayerSet(null); bustHubCache(); setView('hub'); }} onMatchReplay={openMatchReplay} />
       </ViewFade>
     );
   }
@@ -1404,6 +1421,7 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
       onBack={() => setView('hub')}
       onMyPackets={() => { loadSavedSets(); setView('saved-sets'); }}
       onPlay={playCollectionSet}
+      onPlayMultiplayer={playCollectionSetMultiplayer}
     /></ViewFade>;
   }
 

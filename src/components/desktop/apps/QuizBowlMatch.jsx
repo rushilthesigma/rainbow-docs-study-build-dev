@@ -108,18 +108,18 @@ function useWordReveal(text, startedAt, speedMs, frozen, frozenAt) {
 //                     create-new path, friendlier blocked states
 //   onMatchEnd      — called with the final scores map when the match ends
 //                     (the group session host persists them to the summary)
-export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, embedded = false, onMatchEnd = null, onMatchReplay = null }) {
+export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, initialSet = null, embedded = false, onMatchEnd = null, onMatchReplay = null }) {
   const { state } = useWindowManager();
-  const [view, setView] = useState('menu');
+  const [view, setView] = useState(initialSet ? 'pre-setup' : 'menu');
   const [code, setCode] = useState('');
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [matchMode, setMatchMode] = useState('individual');
-  const [questionSource, setQuestionSource] = useState('qbreader');
-  const [category, setCategory] = useState('Mixed');
+  const [questionSource, setQuestionSource] = useState(initialSet ? 'saved' : 'qbreader');
+  const [category, setCategory] = useState(initialSet?.category || 'Mixed');
   const [customTopic, setCustomTopic] = useState('');
   const [setInstructions, setSetInstructions] = useState('');
-  const [difficulty, setDifficulty] = useState('Medium');
-  const [questionCount, setQuestionCount] = useState(10);
+  const [difficulty, setDifficulty] = useState(initialSet?.difficulty || 'Medium');
+  const [questionCount, setQuestionCount] = useState(initialSet?.questions?.length || 10);
   const [revealSpeedMs, setRevealSpeedMs] = useState(140);
   const [scoringFormat, setScoringFormat] = useState('iac-prelim');
   const [busy, setBusy] = useState(false);
@@ -467,6 +467,7 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
     try {
       await startMatch(code, {
         questionSource, category, difficulty, questionCount, revealSpeedMs, scoringFormat, bots,
+        questions: questionSource === 'saved' ? initialSet?.questions : undefined,
         customTopic: category === 'Custom' ? customTopic.trim() : undefined,
         setInstructions: questionSource === 'ai' ? setInstructions.trim() : undefined,
       });
@@ -663,20 +664,33 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
           <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Game type</p>
           <div className="grid grid-cols-2 gap-2">
             <SetupTile active={matchMode === 'individual'} icon={<Zap size={14} />} label="Open match" sub="Individual scoring" onClick={() => { setMatchMode('individual'); setScoringFormat('iac-prelim'); }} />
-            <SetupTile active={matchMode === 'team'} icon={<Users size={14} />} label="Team scrimmage" sub="Tossups + 3-part bonuses" onClick={() => { setMatchMode('team'); setScoringFormat('standard'); }} />
+            <SetupTile active={matchMode === 'team'} disabled={!!initialSet} icon={<Users size={14} />} label="Team scrimmage" sub={initialSet ? 'Needs bonus parts' : 'Tossups + 3-part bonuses'} onClick={() => { setMatchMode('team'); setScoringFormat('standard'); }} />
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          {initialSet && (
+            <div className="rounded-xl border border-amber-400/25 bg-amber-500/[0.08] p-3">
+              <div className="flex items-start gap-2.5">
+                <BookOpen size={15} className="mt-0.5 shrink-0 text-amber-300" />
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-amber-300/75">Playing exact collection set</p>
+                  <p className="mt-1 truncate text-[13px] font-semibold text-amber-50">{initialSet.title}</p>
+                  <p className="mt-0.5 text-[10px] text-amber-100/55">{initialSet.questions.length} tossups · {initialSet.category || 'Mixed'} · {initialSet.difficulty || 'Medium'} · no regeneration</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!initialSet && <div className="grid grid-cols-2 gap-2">
             <SetupTile active={questionSource === 'qbreader'} icon={<BookOpen size={14} />} label="Past QB" sub="qbreader.org" onClick={() => setQuestionSource('qbreader')} />
             <SetupTile active={questionSource === 'ai'} icon={<Sparkles size={14} />} label="AI" sub="Gemini" onClick={() => setQuestionSource('ai')} />
-          </div>
+          </div>}
 
-          <div className="flex flex-wrap gap-1.5">
+          {!initialSet && <div className="flex flex-wrap gap-1.5">
             {QB_MATCH_CATEGORIES.map(c => (
               <SetupPill key={c} active={category === c} onClick={() => { setCategory(c); if (c === 'Custom') setQuestionSource('ai'); }}>{c}</SetupPill>
             ))}
-          </div>
-          {category === 'Custom' && (
+          </div>}
+          {!initialSet && category === 'Custom' && (
             <input
               type="text" value={customTopic} maxLength={200}
               onChange={e => setCustomTopic(e.target.value)}
@@ -684,7 +698,7 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
               className="w-full px-3 py-2 rounded-lg bg-blue-500/[0.06] border border-blue-500/25 text-[12.5px] text-blue-100 placeholder:text-blue-300/35 focus:outline-none focus:border-blue-400/60 transition-colors"
             />
           )}
-          {questionSource === 'ai' && (
+          {!initialSet && questionSource === 'ai' && (
             <div>
               <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 mb-1.5">Set instructions</p>
               <textarea
@@ -697,9 +711,9 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
             </div>
           )}
 
-          <div className="grid grid-cols-4 gap-1.5">
+          {!initialSet && <div className="grid grid-cols-4 gap-1.5">
             {QB_MATCH_DIFFICULTIES.map(d => <SetupPill key={d} active={difficulty === d} onClick={() => setDifficulty(d)}>{d}</SetupPill>)}
-          </div>
+          </div>}
 
           <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 mt-1">Scoring Format</p>
           <div className="grid grid-cols-2 gap-1.5">
@@ -721,8 +735,8 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
                 <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-400/70">Questions</span>
                 <span className="text-[11px] font-mono font-bold tabular-nums text-blue-100">{questionCount}</span>
               </div>
-              <input type="range" min="5" max="20" step="5" value={questionCount}
-                onChange={e => setQuestionCount(Number(e.target.value))} className="w-full accent-blue-500" />
+              {initialSet ? <p className="text-[10px] text-amber-200/55">Fixed to the published packet</p> : <input type="range" min="5" max="20" step="5" value={questionCount}
+                onChange={e => setQuestionCount(Number(e.target.value))} className="w-full accent-blue-500" />}
             </div>
             <div className="rounded-xl border border-blue-500/20 bg-blue-500/[0.04] p-3">
               <div className="flex items-center justify-between mb-1.5">
@@ -915,6 +929,16 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
             </div>
           </div>
 
+          {initialSet && (
+            <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-400/25 bg-amber-500/[0.08] px-3 py-2.5">
+              <BookOpen size={14} className="shrink-0 text-amber-300" />
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-amber-300/75">Exact collection set</p>
+                <p className="truncate text-[12px] font-medium text-amber-50">{initialSet.title} · {initialSet.questions.length} tossups</p>
+              </div>
+            </div>
+          )}
+
           {/* Bot fill - host only */}
           {isHost && (
             <div className="mb-4">
@@ -965,11 +989,11 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
             <>
               {!match?.studyTitle && (
                 <>
-                  <div className="mb-3 grid grid-cols-2 gap-2">
+                  {!initialSet && <div className="mb-3 grid grid-cols-2 gap-2">
                     <SetupTile active={questionSource === 'qbreader'} icon={<BookOpen size={14} />} label="Past QB" sub="qbreader.org" onClick={() => setQuestionSource('qbreader')} />
                     <SetupTile active={questionSource === 'ai'} icon={<Sparkles size={14} />} label="AI" sub="Gemini" onClick={() => setQuestionSource('ai')} />
-                  </div>
-                  <div className="mb-3 space-y-2">
+                  </div>}
+                  {!initialSet && <div className="mb-3 space-y-2">
                     <div className="flex flex-wrap gap-1.5">
                       {QB_MATCH_CATEGORIES.map(c => (
                         <SetupPill key={c} active={category === c} onClick={() => { setCategory(c); if (c === 'Custom') setQuestionSource('ai'); }}>{c}</SetupPill>
@@ -995,12 +1019,12 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
                         />
                       </div>
                     )}
-                  </div>
+                  </div>}
                 </>
               )}
-              <div className="mb-3 grid grid-cols-4 gap-1.5">
+              {!initialSet && <div className="mb-3 grid grid-cols-4 gap-1.5">
                 {QB_MATCH_DIFFICULTIES.map(d => <SetupPill key={d} active={difficulty === d} onClick={() => setDifficulty(d)}>{d}</SetupPill>)}
-              </div>
+              </div>}
               <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 mb-2">Scoring Format</p>
               <div className="mb-3 grid grid-cols-2 gap-1.5">
                 {QB_SCORING_FORMATS.map(f => (
@@ -1080,8 +1104,8 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, em
         <div className="w-full max-w-sm">
           <ProgressBar
             active
-            label="Generating questions"
-            hint={`${(match?.questionCount || questionCount)} ${(match?.questionSource || questionSource) === 'ai' ? 'Gemini' : 'Past QB'} · ${match?.customTopic || match?.category || category} · ${match?.difficulty || difficulty}`}
+            label={(match?.questionSource || questionSource) === 'saved' ? 'Loading collection set' : 'Generating questions'}
+            hint={`${(match?.questionCount || questionCount)} ${(match?.questionSource || questionSource) === 'saved' ? 'exact tossups' : (match?.questionSource || questionSource) === 'ai' ? 'Gemini' : 'Past QB'} · ${match?.customTopic || match?.category || category} · ${match?.difficulty || difficulty}`}
             duration={15000}
           />
         </div>
@@ -1621,13 +1645,15 @@ function MatchSelector({ label, options, value, onChange, grid }) {
   );
 }
 
-function SetupTile({ active, icon, label, sub, onClick }) {
+function SetupTile({ active, disabled = false, icon, label, sub, onClick }) {
   return (
-    <button onClick={onClick}
+    <button onClick={onClick} disabled={disabled}
       className={`text-left rounded-2xl border p-3 transition-all backdrop-blur-sm ${
         active
           ? 'border-blue-400/45 bg-blue-500/15 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_14px_rgba(59,130,246,0.25)]'
-          : 'border-white/[0.08] bg-white/[0.03] text-white/60 hover:bg-white/[0.07] hover:text-white/80'
+          : disabled
+            ? 'cursor-not-allowed border-white/[0.05] bg-white/[0.015] text-white/25 opacity-60'
+            : 'border-white/[0.08] bg-white/[0.03] text-white/60 hover:bg-white/[0.07] hover:text-white/80'
       }`}>
       <div className="flex items-center gap-1.5 mb-0.5">
         {icon}

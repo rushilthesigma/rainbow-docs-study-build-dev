@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Check, FileText, Globe2, Landmark, Loader2, Pencil, Play, Plus, Save, Search, Send, Store, Trash2, Upload, UserRound } from 'lucide-react';
+import { ArrowLeft, Check, FileText, Globe2, Landmark, Loader2, Pencil, Play, Plus, Save, Search, Send, Store, Trash2, Upload, UserRound, Users } from 'lucide-react';
 import {
   fetchQuizBowlCollection,
   fetchQuizBowlCountryPresets,
@@ -120,7 +120,7 @@ export function CountryPracticeBrowser({ onBack, onPractice }) {
   );
 }
 
-export function QuizBowlCollection({ onBack, onMyPackets, onPlay, mobile = false }) {
+export function QuizBowlCollection({ onBack, onMyPackets, onPlay, onPlayMultiplayer, mobile = false }) {
   const [listings, setListings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -166,6 +166,14 @@ export function QuizBowlCollection({ onBack, onMyPackets, onPlay, mobile = false
     setPlayingId(null);
   }
 
+  async function playMultiplayer(listing) {
+    if (playingId) return;
+    setPlayingId(listing.listingId); setError('');
+    try { await onPlayMultiplayer(listing); }
+    catch (err) { setError(err.message || 'Could not open that set for multiplayer.'); }
+    setPlayingId(null);
+  }
+
   function listingRows(items) {
     return items.map(listing => {
       const busy = playingId === listing.listingId;
@@ -181,8 +189,12 @@ export function QuizBowlCollection({ onBack, onMyPackets, onPlay, mobile = false
             {isPreset ? <><Globe2 size={10} className="mr-1 inline -mt-px" />{listing.author} · {listing.category} · {listing.subregion || listing.region || 'Country course'} · {listing.difficulty}</> : <><UserRound size={10} className="mr-1 inline -mt-px" />{listing.author} · {listing.difficulty} · {listing.questionCount} tossup{listing.questionCount === 1 ? '' : 's'}</>}
           </p>
         </div>
-        <button onClick={() => play(listing)} disabled={!!playingId} aria-label={`Play ${listing.title}`}
-          className={`inline-flex ${busy && isPreset ? 'min-w-[100px]' : 'min-w-[64px]'} shrink-0 items-center justify-center gap-1.5 rounded-lg border border-blue-500 bg-blue-500 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:border-blue-400 hover:bg-blue-400 disabled:opacity-40 transition-colors ${mobile ? 'min-h-11' : ''}`}>{busy ? <><Loader2 size={12} className="animate-spin" />{isPreset && <span>Set is loading…</span>}</> : <><Play size={12} /> Play</>}</button>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <button onClick={() => play(listing)} disabled={!!playingId} aria-label={`Play ${listing.title}`}
+            className={`inline-flex ${busy && isPreset ? 'min-w-[100px]' : 'min-w-[64px]'} items-center justify-center gap-1.5 rounded-lg border border-blue-500 bg-blue-500 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:border-blue-400 hover:bg-blue-400 disabled:opacity-40 transition-colors ${mobile ? 'min-h-11' : ''}`}>{busy ? <><Loader2 size={12} className="animate-spin" />{isPreset && <span>Set is loading…</span>}</> : <><Play size={12} /> Play</>}</button>
+          {onPlayMultiplayer && <button onClick={() => playMultiplayer(listing)} disabled={!!playingId} aria-label={`Play ${listing.title} in multiplayer`} title="Play in multiplayer"
+            className={`inline-flex items-center justify-center gap-1.5 rounded-lg border border-sky-400/35 bg-sky-500/[0.10] px-2.5 py-1.5 text-[11px] font-semibold text-sky-200 hover:border-sky-300/55 hover:bg-sky-500/[0.18] disabled:opacity-40 transition-colors ${mobile ? 'min-h-11' : ''}`}><Users size={12} /> <span className="hidden sm:inline">Multiplayer</span></button>}
+        </div>
       </div>;
     });
   }
