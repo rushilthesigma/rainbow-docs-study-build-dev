@@ -13693,7 +13693,15 @@ function normalizedPresetAnswer(value = '') {
 function isCountryPresetAnswer(answer, country) {
   const normalizedAnswer = normalizedPresetAnswer(answer);
   const normalizedCountry = normalizedPresetAnswer(country);
-  return Boolean(normalizedAnswer && normalizedCountry && normalizedAnswer === normalizedCountry);
+  if (!normalizedAnswer || !normalizedCountry) return false;
+  if (normalizedAnswer === normalizedCountry) return true;
+
+  // Reject answer-line labels that merely decorate the country name, such as
+  // "France (country)" or "Japan nation". More specific entities such as
+  // "French Revolution" remain valid answers.
+  return [
+    'country', 'nation', 'state', 'republic', 'kingdom', 'territory',
+  ].some(suffix => normalizedAnswer === `${normalizedCountry} ${suffix}`);
 }
 
 function presetSetUsesCountryAnswer(set, country) {
@@ -13715,7 +13723,7 @@ async function getOrGenerateQuizBowlPresetSet(slug) {
       return { set: latest, cached: true };
     }
 
-    const basePrompt = `Generate a country ${definition.category.toLowerCase()} preset set for ${definition.label}. Use ONLY the source notes below. Return exactly 10 questions in the requested JSON format. The canonical answer for every question must be a specific entity from the clues, never ${definition.label} itself.\n\nSOURCE NOTES for "${definition.title}":\n${definition.source}`;
+    const basePrompt = `Generate a country ${definition.category.toLowerCase()} preset set for ${definition.label}. Use ONLY the source notes below. Return exactly 10 questions in the requested JSON format. The canonical answer for every question must be a specific entity from the clues, never ${definition.label} itself or an official-name variant of that country. Do not use the country name as an answer with a suffix such as "country", "nation", "state", "republic", "kingdom", or "territory".\n\nSOURCE NOTES for "${definition.title}":\n${definition.source}`;
     let lastQuestionCount = 0;
     for (let attempt = 0; attempt < 3; attempt++) {
       const prompt = attempt === 0
