@@ -25,6 +25,8 @@ import { NORTH_AMERICA_GEOGRAPHY_COURSE } from './northAmericaGeography.js';
 import { OCEANIA_HISTORY_COURSE } from './oceaniaHistory.js';
 import { ASIA_HISTORY_COURSE } from './asiaHistory.js';
 import { SOUTH_AMERICA_HISTORY_COURSE } from './southAmericaHistory.js';
+import { LITERATURE_COURSES } from './literatureCurricula.js';
+import { FINE_ARTS_COURSE } from './fineArtsCurriculum.js';
 
 export const PAUSD_CATALOG = [
   // =====================================================================
@@ -1543,6 +1545,8 @@ export const PAUSD_CATALOG = [
   ASIA_HISTORY_COURSE,
   SOUTH_AMERICA_HISTORY_COURSE,
   HUMAN_GEOGRAPHY_COURSE,
+  ...LITERATURE_COURSES,
+  FINE_ARTS_COURSE,
 ];
 
 // Helper: get a single template by slug.

@@ -27,14 +27,19 @@ export const resolveAnswerReview = (code, reviewId, accepted) => apiFetch(`/api/
   method: 'POST',
   body: JSON.stringify({ accepted }),
 });
+export const setMatchPaused = (code, paused) => apiFetch(`/api/quizbowl/match/${code}/pause`, {
+  method: 'POST',
+  body: JSON.stringify({ paused }),
+});
 export const nextMatchQuestion = (code) => apiFetch(`/api/quizbowl/match/${code}/next`, { method: 'POST' });
 export const endMatch = (code) => apiFetch(`/api/quizbowl/match/${code}/end`, { method: 'POST' });
 export const leaveMatch = (code) => apiFetch(`/api/quizbowl/match/${code}/leave`, { method: 'POST' });
 
 // Solo "Past QB questions" mode - pulls real tossups from QBReader by
-// category + difficulty. Returns { tossups, source: 'qbreader' }.
-export const fetchQBReaderTossups = ({ count = 10, category = 'Mixed', difficulty = 'Medium' } = {}) => {
+// one or more categories + difficulty. Returns { tossups, source: 'qbreader' }.
+export const fetchQBReaderTossups = ({ count = 10, category = 'Mixed', categories = [], difficulty = 'Medium' } = {}) => {
   const params = new URLSearchParams({ count: String(count), category, difficulty });
+  if (Array.isArray(categories) && categories.length) params.set('categories', categories.join(','));
   return apiFetch(`/api/quizbowl/tossups?${params.toString()}`);
 };
 
@@ -99,6 +104,9 @@ export const deleteSavedQuizBowlSet = (id) => apiFetch(`/api/quizbowl/saved-sets
 // makes it visible here; playing a listing never copies or regenerates it.
 export const fetchQuizBowlCollection = () => apiFetch('/api/quizbowl/collection');
 export const getQuizBowlCollectionSet = (listingId) => apiFetch(`/api/quizbowl/collection/${encodeURIComponent(listingId)}`);
+export const reportQuizBowlCollectionSet = (listingId, payload) => apiFetch(`/api/quizbowl/collection/${encodeURIComponent(listingId)}/report`, {
+  method: 'POST', body: JSON.stringify(payload),
+});
 
 // Returns { recommendations: [{ kind, category, difficulty, reason }] }
 export const fetchQuizBowlRecommendations = () => apiFetch('/api/quizbowl/recommendations');
@@ -181,6 +189,7 @@ export function streamMatch(code, handlers) {
             else if (t === 'bonus_start') handlers.onBonusStart?.(data);
             else if (t === 'bonus_result') handlers.onBonusResult?.(data);
             else if (t === 'answer_review') handlers.onAnswerReview?.(data);
+            else if (t === 'match_paused') handlers.onMatchPaused?.(data);
             else if (t === 'match_end') handlers.onMatchEnd?.(data);
             else if (t === 'player_left') handlers.onPlayerLeft?.(data);
           } catch {}

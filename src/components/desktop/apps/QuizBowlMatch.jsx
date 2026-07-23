@@ -1,15 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useWindowManager } from '../../../context/WindowManagerContext';
-import { Zap, Users, Copy, Check, X, Trophy, Play, LogOut, ArrowLeft, ArrowRight, Flag, Bot, Loader2, BookOpen, Sparkles } from 'lucide-react';
+import { Zap, Users, Copy, Check, X, Trophy, Play, Pause, LogOut, ArrowLeft, ArrowRight, Flag, Bot, Loader2, BookOpen, Sparkles } from 'lucide-react';
 import ProgressBar, { InlineProgress } from '../../shared/ProgressBar';
 import { useQbVoicePref, useSpokenFollow, QbVoiceToggle, speakLine, spokenAnswer } from '../../shared/qbVoice';
 import { speechSynthesisSupported } from '../../../hooks/useSpeechSynthesis';
 import {
   createMatch, joinMatch, startMatch, buzzMatch, answerMatch, nextMatchQuestion,
-  answerMatchBonus, setMatchTeam, endMatch, leaveMatch, streamMatch, botBuzz, botAnswer, requestAnswerReview, resolveAnswerReview,
+  answerMatchBonus, setMatchTeam, endMatch, leaveMatch, streamMatch, botBuzz, botAnswer, requestAnswerReview, resolveAnswerReview, setMatchPaused,
 } from '../../../api/quizMatch';
 import { AnswerResultPanel } from '../../trial/TrialSession';
 import MatchComparison from '../../shared/MatchComparison';
+import QuizBowlJoinPanel from '../../quizbowl/QuizBowlJoinPanel';
 
 // Mirrors the server's QUIZBOWL_BUZZ_ANSWER_MS. Only used to scale the
 // countdown bar; the actual deadline comes from the server buzz event.
@@ -63,6 +64,23 @@ const QB_SCORING_FORMATS = [
 const QB_MATCH_CATEGORIES = ['Science', 'History', 'Literature', 'Geography', 'Math', 'Art', 'Music', 'Philosophy', 'Pop Culture', 'Mixed', 'Custom'];
 const QB_MATCH_DIFFICULTIES = ['Easy', 'Medium', 'Hard', 'Tournament'];
 
+function initialMatchCategories(initialSet) {
+  const seeded = Array.isArray(initialSet?.categories)
+    ? initialSet.categories.filter(category => QB_MATCH_CATEGORIES.includes(category))
+    : [];
+  if (seeded.length) return seeded;
+  return QB_MATCH_CATEGORIES.includes(initialSet?.category) ? [initialSet.category] : ['Mixed'];
+}
+
+function toggleMatchCategory(selected, nextCategory) {
+  if (nextCategory === 'Mixed' || nextCategory === 'Custom') return [nextCategory];
+  const subjects = selected.filter(category => category !== 'Mixed' && category !== 'Custom');
+  const next = subjects.includes(nextCategory)
+    ? subjects.filter(category => category !== nextCategory)
+    : [...subjects, nextCategory];
+  return next.length ? QB_MATCH_CATEGORIES.filter(category => next.includes(category)) : ['Mixed'];
+}
+
 function useWordReveal(text, startedAt, speedMs, frozen, frozenAt) {
   const [, setTick] = useState(0);
   const lockedIdxRef = useRef(null);
@@ -108,20 +126,20 @@ function useWordReveal(text, startedAt, speedMs, frozen, frozenAt) {
 //                     create-new path, friendlier blocked states
 //   onMatchEnd      — called with the final scores map when the match ends
 //                     (the group session host persists them to the summary)
-export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, initialSet = null, embedded = false, onMatchEnd = null, onMatchReplay = null }) {
+export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, initialSet = null, initialConfig = null, autoCreate = false, embedded = false, onMatchEnd = null, onMatchReplay = null }) {
   const { state } = useWindowManager();
-  const [view, setView] = useState(initialSet ? 'pre-setup' : 'menu');
+  const [view, setView] = useState(autoCreate ? 'creating' : initialSet ? 'pre-setup' : 'menu');
   const [code, setCode] = useState('');
   const [joinCodeInput, setJoinCodeInput] = useState('');
-  const [matchMode, setMatchMode] = useState('individual');
-  const [questionSource, setQuestionSource] = useState(initialSet ? 'saved' : 'qbreader');
-  const [category, setCategory] = useState(initialSet?.category || 'Mixed');
-  const [customTopic, setCustomTopic] = useState('');
-  const [setInstructions, setSetInstructions] = useState('');
-  const [difficulty, setDifficulty] = useState(initialSet?.difficulty || 'Medium');
-  const [questionCount, setQuestionCount] = useState(initialSet?.questions?.length || 10);
-  const [revealSpeedMs, setRevealSpeedMs] = useState(140);
-  const [scoringFormat, setScoringFormat] = useState('iac-prelim');
+  const [matchMode, setMatchMode] = useState(initialConfig?.matchMode || 'individual');
+  const [questionSource, setQuestionSource] = useState(initialSet ? 'saved' : initialConfig?.questionSource || 'qbreader');
+  const [categories, setCategories] = useState(() => initialConfig?.categories?.length ? initialConfig.categories : initialMatchCategories(initialSet));
+  const [customTopic, setCustomTopic] = useState(initialConfig?.customTopic || '');
+  const [setInstructions, setSetInstructions] = useState(initialConfig?.setInstructions || '');
+  const [difficulty, setDifficulty] = useState(initialSet?.difficulty || initialConfig?.difficulty || 'Medium');
+  const [questionCount, setQuestionCount] = useState(initialSet?.questions?.length || initialConfig?.questionCount || 10);
+  const [revealSpeedMs, setRevealSpeedMs] = useState(initialConfig?.revealSpeedMs || 140);
+  const [scoringFormat, setScoringFormat] = useState(initialConfig?.scoringFormat || 'iac-prelim');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false);
@@ -144,8 +162,8 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, in
   const [reviewStatus, setReviewStatus] = useState(null);
   const [reviewBusy, setReviewBusy] = useState(false);
   const [abandoned, setAbandoned] = useState(null);
-  const [fillWithBots, setFillWithBots] = useState(false);
-  const [botLevel, setBotLevel] = useState('varsity');
+  const [fillWithBots, setFillWithBots] = useState(!!initialConfig?.fillWithBots);
+  const [botLevel, setBotLevel] = useState(initialConfig?.botLevel || 'varsity');
   const [presets, setPresets] = useState(() => loadBotPresets());
   const [savingPreset, setSavingPreset] = useState(false);
   const [presetName, setPresetName] = useState('');
@@ -153,6 +171,18 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, in
 
   const abortRef = useRef(null);
   const myId = user?.id;
+  const category = categories.length === 1 ? categories[0] : 'Mixed';
+  const categoryLabel = categories.join(' + ');
+
+  function toggleCategory(nextCategory) {
+    setCategories(current => toggleMatchCategory(current, nextCategory));
+    if (nextCategory === 'Custom') setQuestionSource('ai');
+  }
+
+  function selectQuestionSource(source) {
+    setQuestionSource(source);
+    if (source === 'qbreader' && categories.includes('Custom')) setCategories(['Mixed']);
+  }
 
   // Bot engine - mutable refs, no rerenders needed.
   const botEngRef = useRef({ bots: [], lockedOut: new Set(), buzzTimers: {}, thinkTimers: {} });
@@ -208,7 +238,7 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, in
           if (m.buzzWinner) {
             setBuzz({ userId: m.buzzWinner, buzzAt: m.buzzAt });
             // Resume the same countdown a reconnecting client missed.
-            setAnswerDeadline((m.buzzAt || Date.now()) + (m.answerWindowMs || BUZZ_WINDOW_MS));
+            setAnswerDeadline(m.paused ? null : (m.answerDeadlineAt || (m.buzzAt || Date.now()) + (m.answerWindowMs || BUZZ_WINDOW_MS)));
           } else {
             setAnswerDeadline(null);
           }
@@ -355,6 +385,11 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, in
         setAnswerReview(data.review || data.match?.activeAnswerReview || null);
         if (data.match) setMatch(data.match);
         if (data.match?.currentQuestion) setQuestion(data.match.currentQuestion);
+        if (data.queued && data.review?.requesterId === myId) {
+          setReviewStatus('queued');
+          setLastReviewableWrong(null);
+          setReviewBusy(false);
+        }
         if (data.paused) {
           setAutoAdvanceDeadline(null);
           setAnswerDeadline(null);
@@ -363,7 +398,7 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, in
           setAutoAdvanceDeadline(Date.now() + data.autoAdvanceInMs);
         }
         if (data.accepted != null && data.scores) {
-          setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: data.scores[p.userId] || 0 })) } : prev);
+          setMatch(prev => prev ? { ...prev, teamScores: data.teamScores || prev.teamScores, players: prev.players.map(p => ({ ...p, score: data.scores[p.userId] || 0 })) } : prev);
           setReviewStatus(data.accepted ? 'accepted' : 'rejected');
           setReviewBusy(false);
           if (data.accepted && data.review?.requesterId) {
@@ -372,8 +407,47 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, in
           if (data.review?.requesterId === myId) {
             setLastReviewableWrong(null);
           }
-          if (data.accepted && data.review?.requesterId === myId) {
-            setAnswerResult(prev => prev ? { ...prev, correct: true, userId: myId, ptsGained: data.ptsGained, scores: data.scores } : prev);
+        }
+      },
+      onMatchPaused: ({ paused, match: m }) => {
+        setMatch(m);
+        if (m?.buzzWinner) setBuzz({ userId: m.buzzWinner, buzzAt: m.buzzAt });
+        if (m?.currentQuestion) {
+          setQuestion(m.currentQuestion);
+          questionRef.current = m.currentQuestion;
+        }
+        if (paused) {
+          setAnswerDeadline(null);
+          setBonusDeadline(null);
+          setAutoAdvanceDeadline(null);
+          if (isHostRef.current) clearBotTimers();
+        } else {
+          setAnswerDeadline(m?.answerDeadlineAt || null);
+          setBonusDeadline(m?.bonus?.deadlineAt || null);
+          setAutoAdvanceDeadline(m?.protestWindowOpensAt || m?.revealDeadlineAt || null);
+          if (isHostRef.current && m?.state === 'playing' && botEngRef.current.bots.length) {
+            clearBotTimers();
+            const curQ = m.currentQuestion || questionRef.current;
+            if (m.buzzWinner?.startsWith('bot:')) {
+              const bot = botEngRef.current.bots.find(b => b.userId === m.buzzWinner);
+              if (bot) {
+                botEngRef.current.thinkTimers[bot.userId] = setTimeout(async () => {
+                  delete botEngRef.current.thinkTimers[bot.userId];
+                  try { await botAnswer(code, bot.userId, Math.random() < bot.accuracy); } catch {}
+                }, Math.max(200, bot.thinkMs));
+              }
+            } else if (curQ) {
+              const totalWords = curQ.text.split(/\s+/).filter(Boolean).length || 1;
+              const now = Date.now();
+              for (const bot of botEngRef.current.bots) {
+                if (botEngRef.current.lockedOut.has(bot.userId)) continue;
+                const delay = Math.max(300, (curQ.startedAt || now) + Math.floor(bot.buzzAt * totalWords) * speedMsRef.current - now);
+                botEngRef.current.buzzTimers[bot.userId] = setTimeout(async () => {
+                  delete botEngRef.current.buzzTimers[bot.userId];
+                  try { await botBuzz(code, bot.userId); } catch {}
+                }, delay);
+              }
+            }
           }
         }
       },
@@ -430,6 +504,13 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, in
     setBusy(false);
   }
 
+  const autoCreateRef = useRef(false);
+  useEffect(() => {
+    if (!autoCreate || autoCreateRef.current) return;
+    autoCreateRef.current = true;
+    handleCreate();
+  }, [autoCreate]);
+
   async function handleJoin() {
     const c = joinCodeInput.trim().toUpperCase();
     if (!c || busy) return;
@@ -466,9 +547,9 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, in
     botEngRef.current.thinkTimers = {};
     try {
       await startMatch(code, {
-        questionSource, category, difficulty, questionCount, revealSpeedMs, scoringFormat, bots,
+        questionSource, category, categories, difficulty, questionCount, revealSpeedMs, scoringFormat, bots,
         questions: questionSource === 'saved' ? initialSet?.questions : undefined,
-        customTopic: category === 'Custom' ? customTopic.trim() : undefined,
+        customTopic: categories.includes('Custom') ? customTopic.trim() : undefined,
         setInstructions: questionSource === 'ai' ? setInstructions.trim() : undefined,
       });
     }
@@ -480,14 +561,22 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, in
     try { await endMatch(code); } catch (e) { setError(e.message); }
   }
 
+  async function handlePauseToggle() {
+    if (!isHost || !match) return;
+    try {
+      const res = await setMatchPaused(code, !match.paused);
+      if (res.match) setMatch(res.match);
+    } catch (e) { setError(e.message || 'Could not change pause state'); }
+  }
+
   const handleBuzz = useCallback(async () => {
-    if (!question || buzz) return;
+    if (!question || buzz || match?.paused) return;
     if (lockedOut.includes(myId)) return;
     setBuzz({ userId: user?.id || 'me', buzzAt: Date.now(), _optimistic: true });
     // Start the answer clock instantly; onBuzz refines it to the server time.
     setAnswerDeadline(Date.now() + BUZZ_WINDOW_MS);
     try { await buzzMatch(code); } catch { setBuzz(null); setAnswerDeadline(null); }
-  }, [question, buzz, code, user?.id, lockedOut, myId]);
+  }, [question, buzz, code, user?.id, lockedOut, myId, match?.paused]);
 
   async function handleSubmitAnswer() {
     if (!answer.trim()) return;
@@ -524,16 +613,8 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, in
     try {
       const res = await requestAnswerReview(code);
       setAnswerReview(res.review);
-      if (res.autoAccepted) {
-        setReviewStatus(res.accepted ? 'accepted' : 'rejected');
-        setAutoAdvanceDeadline(res.autoAdvanceInMs != null ? Date.now() + res.autoAdvanceInMs : null);
-        setAnswerDeadline(null);
-        if (res.scores) {
-          setMatch(prev => prev ? { ...prev, players: prev.players.map(p => ({ ...p, score: res.scores[p.userId] || 0 })) } : prev);
-        }
-        if (res.accepted && res.review?.requesterId) {
-          setLockedOut(prev => prev.filter(id => id !== res.review.requesterId));
-        }
+      if (res.queued) {
+        setReviewStatus('queued');
         setLastReviewableWrong(null);
       } else {
         setReviewStatus('pending');
@@ -550,7 +631,8 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, in
     if (reviewBusy) return;
     setReviewBusy(true); setError(null);
     try { await resolveAnswerReview(code, reviewId, accepted); }
-    catch (e) { setError(e.message || 'Could not resolve review'); setReviewBusy(false); }
+    catch (e) { setError(e.message || 'Could not resolve review'); }
+    finally { setReviewBusy(false); }
   }
 
   async function handleLeave() {
@@ -582,6 +664,23 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, in
   const isHost = match?.hostId === myId;
 
   // ============ MENU ============
+  if (view === 'creating') {
+    return (
+      <div className="flex h-full items-center justify-center bg-transparent">
+        <div className="w-full max-w-sm px-6 text-center">
+          <Loader2 size={22} className="mx-auto mb-3 animate-spin text-blue-300" />
+          <p className="text-sm font-semibold text-white/80">Creating your room…</p>
+          <p className="mt-1 text-[11px] text-white/35">Your selected questions, scoring, and bot settings are being carried into the lobby.</p>
+          {error && (
+            <div className="mt-4">
+              <p className="text-[11px] text-rose-300">{error}</p>
+              <button type="button" onClick={onExit} className="mt-3 rounded-lg bg-blue-500 px-4 py-2 text-[12px] font-semibold text-white">Back to setup</button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
   if (view === 'menu' && initialJoinCode) {
     // Embedded auto-join in flight (or blocked: match already started/full).
     return (
@@ -629,24 +728,13 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, in
             <div className="flex-1 border-t border-blue-500/20" />
           </div>
 
-          <div className="flex gap-2">
-            <input
-              value={joinCodeInput}
-              onChange={e => setJoinCodeInput(e.target.value.toUpperCase().slice(0, 6))}
-              onKeyDown={e => { if (e.key === 'Enter') handleJoin(); }}
-              placeholder="CODE"
-              className="flex-1 px-3 py-2.5 rounded-xl border border-blue-500/30 bg-white/50 dark:bg-white/[0.06] text-sm font-mono uppercase tracking-widest text-gray-900 dark:text-white placeholder-gray-400 outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/60"
-            />
-            <button
-              onClick={handleJoin}
-              disabled={busy || joinCodeInput.trim().length < 4}
-              className="px-5 py-2.5 rounded-xl bg-blue-500 text-white text-sm font-semibold border border-blue-400/40 hover:bg-blue-400 disabled:opacity-40 disabled:shadow-none transition-all"
-            >
-              Join
-            </button>
-          </div>
-
-          {error && <p className="mt-3 text-xs text-rose-300 bg-rose-500/10 border border-rose-500/25 rounded-lg px-3 py-2">{error}</p>}
+          <QuizBowlJoinPanel
+            value={joinCodeInput}
+            onChange={setJoinCodeInput}
+            onSubmit={handleJoin}
+            busy={busy}
+            error={error}
+          />
         </div>
       </div>
     );
@@ -656,41 +744,47 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, in
   if (view === 'pre-setup') {
     return (
       <div className="h-full overflow-y-auto bg-transparent">
-        <div className="p-5 pb-8 space-y-3 max-w-md md:max-w-2xl mx-auto">
-          <button onClick={() => setView('menu')} className="text-xs text-blue-300/60 hover:text-blue-200 mb-1 inline-flex items-center gap-1 transition-colors">
-            <ArrowLeft size={12} /> Back
+        <div className="mx-auto max-w-md space-y-5 p-5 pb-8 md:max-w-2xl">
+          <button onClick={() => setView('menu')} className="inline-flex items-center gap-1.5 text-xs text-white/40 transition-colors hover:text-white/75">
+            <ArrowLeft size={13} /> Back
           </button>
 
-          <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Game type</p>
-          <div className="grid grid-cols-2 gap-2">
-            <SetupTile active={matchMode === 'individual'} icon={<Zap size={14} />} label="Open match" sub="Individual scoring" onClick={() => { setMatchMode('individual'); setScoringFormat('iac-prelim'); }} />
-            <SetupTile active={matchMode === 'team'} disabled={!!initialSet} icon={<Users size={14} />} label="Team scrimmage" sub={initialSet ? 'Needs bonus parts' : 'Tossups + 3-part bonuses'} onClick={() => { setMatchMode('team'); setScoringFormat('standard'); }} />
+          <div>
+            <h2 className="text-lg font-bold text-white/90">Create a match</h2>
+            <p className="mt-0.5 text-[11px] text-white/35">Choose the room, question mix, and scoring rules.</p>
           </div>
 
+          <section className="space-y-2">
+            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Game type</p>
+            <div className="grid grid-cols-2 gap-2">
+              <SetupTile active={matchMode === 'individual'} icon={<Zap size={14} />} label="Open match" sub="Individual scoring" onClick={() => { setMatchMode('individual'); setScoringFormat('iac-prelim'); }} />
+              <SetupTile active={matchMode === 'team'} disabled={!!initialSet} icon={<Users size={14} />} label="Team scrimmage" sub={initialSet ? 'Needs bonus parts' : 'Tossups + 3-part bonuses'} onClick={() => { setMatchMode('team'); setScoringFormat('standard'); }} />
+            </div>
+          </section>
+
           {initialSet && (
-            <div className="rounded-xl border border-amber-400/25 bg-amber-500/[0.08] p-3">
+            <div className="rounded-xl border border-blue-400/25 bg-blue-500/[0.08] p-3">
               <div className="flex items-start gap-2.5">
-                <BookOpen size={15} className="mt-0.5 shrink-0 text-amber-300" />
+                <BookOpen size={15} className="mt-0.5 shrink-0 text-blue-300" />
                 <div className="min-w-0">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-amber-300/75">Playing exact collection set</p>
-                  <p className="mt-1 truncate text-[13px] font-semibold text-amber-50">{initialSet.title}</p>
-                  <p className="mt-0.5 text-[10px] text-amber-100/55">{initialSet.questions.length} tossups · {initialSet.category || 'Mixed'} · {initialSet.difficulty || 'Medium'} · no regeneration</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-blue-300/75">Playing exact collection set</p>
+                  <p className="mt-1 truncate text-[13px] font-semibold text-blue-50">{initialSet.title}</p>
+                  <p className="mt-0.5 text-[10px] text-blue-100/55">{initialSet.questions.length} tossups · {initialSet.category || 'Mixed'} · {initialSet.difficulty || 'Medium'} · no regeneration</p>
                 </div>
               </div>
             </div>
           )}
 
-          {!initialSet && <div className="grid grid-cols-2 gap-2">
-            <SetupTile active={questionSource === 'qbreader'} icon={<BookOpen size={14} />} label="Past QB" sub="qbreader.org" onClick={() => setQuestionSource('qbreader')} />
-            <SetupTile active={questionSource === 'ai'} icon={<Sparkles size={14} />} label="AI" sub="Gemini" onClick={() => setQuestionSource('ai')} />
-          </div>}
+          {!initialSet && <section className="space-y-2">
+            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Question source</p>
+            <div className="grid grid-cols-2 gap-2">
+              <SetupTile active={questionSource === 'qbreader'} icon={<BookOpen size={14} />} label="Past QB" sub="qbreader.org" onClick={() => selectQuestionSource('qbreader')} />
+              <SetupTile active={questionSource === 'ai'} icon={<Sparkles size={14} />} label="AI" sub="Gemini" onClick={() => selectQuestionSource('ai')} />
+            </div>
+          </section>}
 
-          {!initialSet && <div className="flex flex-wrap gap-1.5">
-            {QB_MATCH_CATEGORIES.map(c => (
-              <SetupPill key={c} active={category === c} onClick={() => { setCategory(c); if (c === 'Custom') setQuestionSource('ai'); }}>{c}</SetupPill>
-            ))}
-          </div>}
-          {!initialSet && category === 'Custom' && (
+          {!initialSet && <CategoryPicker categories={categories} onToggle={toggleCategory} />}
+          {!initialSet && categories.includes('Custom') && (
             <input
               type="text" value={customTopic} maxLength={200}
               onChange={e => setCustomTopic(e.target.value)}
@@ -711,23 +805,28 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, in
             </div>
           )}
 
-          {!initialSet && <div className="grid grid-cols-4 gap-1.5">
-            {QB_MATCH_DIFFICULTIES.map(d => <SetupPill key={d} active={difficulty === d} onClick={() => setDifficulty(d)}>{d}</SetupPill>)}
-          </div>}
+          {!initialSet && <section className="space-y-2">
+            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Difficulty</p>
+            <div className="grid grid-cols-4 gap-1.5">
+              {QB_MATCH_DIFFICULTIES.map(d => <SetupPill key={d} active={difficulty === d} onClick={() => setDifficulty(d)}>{d}</SetupPill>)}
+            </div>
+          </section>}
 
-          <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 mt-1">Scoring Format</p>
-          <div className="grid grid-cols-2 gap-1.5">
-            {QB_SCORING_FORMATS.map(f => (
-              <button key={f.id} onClick={() => setScoringFormat(f.id)}
-                className={`rounded-lg border p-2.5 text-left transition-all focus:outline-none ${
-                  scoringFormat === f.id
-                    ? 'bg-blue-500/[0.18] text-white border-blue-400/[0.40]'
-                    : 'bg-white/[0.02] border-white/[0.06] text-white/75 hover:border-white/[0.14] hover:bg-white/[0.05]'
-                }`}>
-                <div className="text-[12px] font-semibold leading-tight">{f.label}</div>
-              </button>
-            ))}
-          </div>
+          <section className="space-y-2">
+            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Scoring format</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              {QB_SCORING_FORMATS.map(f => (
+                <button key={f.id} onClick={() => setScoringFormat(f.id)} aria-pressed={scoringFormat === f.id}
+                  className={`rounded-lg border p-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/40 ${
+                    scoringFormat === f.id
+                      ? 'border-blue-400/[0.40] bg-blue-500/[0.18] text-white'
+                      : 'border-white/[0.06] bg-white/[0.02] text-white/70 hover:border-white/[0.14] hover:bg-white/[0.05]'
+                  }`}>
+                  <div className="text-[12px] font-semibold leading-tight">{f.label}</div>
+                </button>
+              ))}
+            </div>
+          </section>
 
           <div className="grid grid-cols-2 gap-2 mt-1">
             <div className="rounded-xl border border-blue-500/20 bg-blue-500/[0.04] p-3">
@@ -930,11 +1029,11 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, in
           </div>
 
           {initialSet && (
-            <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-400/25 bg-amber-500/[0.08] px-3 py-2.5">
-              <BookOpen size={14} className="shrink-0 text-amber-300" />
+            <div className="mb-4 flex items-center gap-2 rounded-xl border border-blue-400/25 bg-blue-500/[0.08] px-3 py-2.5">
+              <BookOpen size={14} className="shrink-0 text-blue-300" />
               <div className="min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-amber-300/75">Exact collection set</p>
-                <p className="truncate text-[12px] font-medium text-amber-50">{initialSet.title} · {initialSet.questions.length} tossups</p>
+                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-300/75">Exact collection set</p>
+                <p className="truncate text-[12px] font-medium text-blue-50">{initialSet.title} · {initialSet.questions.length} tossups</p>
               </div>
             </div>
           )}
@@ -990,16 +1089,12 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, in
               {!match?.studyTitle && (
                 <>
                   {!initialSet && <div className="mb-3 grid grid-cols-2 gap-2">
-                    <SetupTile active={questionSource === 'qbreader'} icon={<BookOpen size={14} />} label="Past QB" sub="qbreader.org" onClick={() => setQuestionSource('qbreader')} />
-                    <SetupTile active={questionSource === 'ai'} icon={<Sparkles size={14} />} label="AI" sub="Gemini" onClick={() => setQuestionSource('ai')} />
+                    <SetupTile active={questionSource === 'qbreader'} icon={<BookOpen size={14} />} label="Past QB" sub="qbreader.org" onClick={() => selectQuestionSource('qbreader')} />
+                    <SetupTile active={questionSource === 'ai'} icon={<Sparkles size={14} />} label="AI" sub="Gemini" onClick={() => selectQuestionSource('ai')} />
                   </div>}
                   {!initialSet && <div className="mb-3 space-y-2">
-                    <div className="flex flex-wrap gap-1.5">
-                      {QB_MATCH_CATEGORIES.map(c => (
-                        <SetupPill key={c} active={category === c} onClick={() => { setCategory(c); if (c === 'Custom') setQuestionSource('ai'); }}>{c}</SetupPill>
-                      ))}
-                    </div>
-                    {category === 'Custom' && (
+                    <CategoryPicker categories={categories} onToggle={toggleCategory} compact />
+                    {categories.includes('Custom') && (
                       <input
                         type="text" value={customTopic} maxLength={200}
                         onChange={e => setCustomTopic(e.target.value)}
@@ -1069,7 +1164,7 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, in
           {isHost && (
             <button
               onClick={handleStart}
-              disabled={(waiting && !fillWithBots) || (match?.mode === 'team' && !teamReady) || (!match?.studyTitle && category === 'Custom' && !customTopic.trim())}
+              disabled={(waiting && !fillWithBots) || (match?.mode === 'team' && !teamReady) || (!match?.studyTitle && categories.includes('Custom') && !customTopic.trim())}
               className="w-full py-3 rounded-xl bg-blue-500 text-white text-sm font-semibold border border-blue-400/40 hover:bg-blue-400 disabled:opacity-40 disabled:shadow-none flex items-center justify-center gap-2 transition-all"
             >
               <Play size={14} />
@@ -1105,7 +1200,7 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, in
           <ProgressBar
             active
             label={(match?.questionSource || questionSource) === 'saved' ? 'Loading collection set' : 'Generating questions'}
-            hint={`${(match?.questionCount || questionCount)} ${(match?.questionSource || questionSource) === 'saved' ? 'exact tossups' : (match?.questionSource || questionSource) === 'ai' ? 'Gemini' : 'Past QB'} · ${match?.customTopic || match?.category || category} · ${match?.difficulty || difficulty}`}
+            hint={`${(match?.questionCount || questionCount)} ${(match?.questionSource || questionSource) === 'saved' ? 'exact tossups' : (match?.questionSource || questionSource) === 'ai' ? 'Gemini' : 'Past QB'} · ${match?.customTopic || match?.categories?.join(' + ') || match?.category || categoryLabel} · ${match?.difficulty || difficulty}`}
             duration={15000}
           />
         </div>
@@ -1122,6 +1217,7 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, in
       onBuzz={handleBuzz} onSubmitAnswer={handleSubmitAnswer} onNext={handleNext}
       onSubmitBonus={handleSubmitBonus}
       onLeave={handleLeave} onEndMatch={handleEndMatch}
+      onPauseToggle={handlePauseToggle}
       iBuzzed={iBuzzed} isHost={isHost} myId={myId}
       lockedOut={lockedOut} wrongFlash={wrongFlash} lastReviewableWrong={lastReviewableWrong}
       answerReview={answerReview} reviewStatus={reviewStatus} reviewBusy={reviewBusy}
@@ -1237,7 +1333,7 @@ export function PlayerCard({ player, isMe, buzz, lockedOut, answerResult, maxSco
   );
 }
 
-function TeamBonusView({ match, bonusAnswer, setBonusAnswer, bonusResult, bonusDeadline, onSubmitBonus, onNext, onLeave, isHost, myId }) {
+function TeamBonusView({ match, bonusAnswer, setBonusAnswer, bonusResult, bonusDeadline, onSubmitBonus, onNext, onLeave, onPauseToggle, isHost, myId }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!bonusDeadline) return undefined;
@@ -1263,6 +1359,11 @@ function TeamBonusView({ match, bonusAnswer, setBonusAnswer, bonusResult, bonusD
         <span className="text-[12px] font-bold text-blue-300">{match.teamNames?.A || 'Blue'} {scores.A}</span>
         <span className="text-white/20">·</span>
         <span className="text-[12px] font-bold text-amber-300">{match.teamNames?.B || 'Orange'} {scores.B}</span>
+        {isHost && (
+          <button onClick={onPauseToggle} aria-label={match.paused ? 'Resume game' : 'Pause game'} className="inline-flex items-center gap-1 rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1 text-[10px] font-semibold text-white/55 hover:text-white/80">
+            {match.paused ? <Play size={10} /> : <Pause size={10} />} {match.paused ? 'Resume' : 'Pause'}
+          </button>
+        )}
         <button onClick={onLeave} aria-label="Leave match" className="text-white/20 hover:text-rose-400/60 transition-colors"><LogOut size={12} /></button>
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto p-5">
@@ -1287,9 +1388,9 @@ function TeamBonusView({ match, bonusAnswer, setBonusAnswer, bonusResult, bonusD
               </div>
             ) : isControlling && match.state === 'bonus' ? (
               <div className="flex gap-2">
-                <input autoFocus value={bonusAnswer} onChange={e => setBonusAnswer(e.target.value)} onKeyDown={e => e.key === 'Enter' && onSubmitBonus(false)} placeholder="Team answer…" className="flex-1 rounded-xl border border-amber-400/30 bg-white/[0.04] px-3 py-3 text-sm text-white/85 placeholder-white/25 outline-none focus:border-amber-300/60" />
-                <button onClick={() => onSubmitBonus(false)} disabled={!bonusAnswer.trim()} className="rounded-xl bg-amber-500 px-4 py-3 text-sm font-semibold text-black disabled:opacity-30">Submit</button>
-                <button onClick={() => onSubmitBonus(true)} className="rounded-xl border border-white/[0.10] px-3 py-3 text-sm text-white/50 hover:text-white/80">Pass</button>
+                <input autoFocus value={bonusAnswer} onChange={e => setBonusAnswer(e.target.value)} onKeyDown={e => e.key === 'Enter' && !match.paused && onSubmitBonus(false)} placeholder={match.paused ? 'Game paused…' : 'Team answer…'} disabled={match.paused} className="flex-1 rounded-xl border border-amber-400/30 bg-white/[0.04] px-3 py-3 text-sm text-white/85 placeholder-white/25 outline-none focus:border-amber-300/60 disabled:opacity-50" />
+                <button onClick={() => onSubmitBonus(false)} disabled={match.paused || !bonusAnswer.trim()} className="rounded-xl bg-amber-500 px-4 py-3 text-sm font-semibold text-black disabled:opacity-30">Submit</button>
+                <button onClick={() => onSubmitBonus(true)} disabled={match.paused} className="rounded-xl border border-white/[0.10] px-3 py-3 text-sm text-white/50 hover:text-white/80 disabled:opacity-30">Pass</button>
               </div>
             ) : (
               <p className="rounded-xl border border-white/[0.07] bg-white/[0.03] px-3 py-3 text-center text-[12px] text-white/40">{isControlling ? 'Bonus starting…' : `${teamName} is conferring…`}</p>
@@ -1305,18 +1406,18 @@ function TeamBonusView({ match, bonusAnswer, setBonusAnswer, bonusResult, bonusD
 }
 
 // ===== PLAYING VIEW =====
-function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, bonusAnswer, setBonusAnswer, bonusResult, bonusDeadline, onBuzz, onSubmitAnswer, onSubmitBonus, onNext, onLeave, onEndMatch, iBuzzed, isHost, myId, lockedOut = [], wrongFlash, lastReviewableWrong, answerReview, reviewStatus, reviewBusy, onRequestReview, onResolveReview, autoAdvanceDeadline, answerDeadline, revealSpeedMs }) {
+function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, bonusAnswer, setBonusAnswer, bonusResult, bonusDeadline, onBuzz, onSubmitAnswer, onSubmitBonus, onNext, onLeave, onEndMatch, onPauseToggle, iBuzzed, isHost, myId, lockedOut = [], wrongFlash, lastReviewableWrong, answerReview, reviewStatus, reviewBusy, onRequestReview, onResolveReview, autoAdvanceDeadline, answerDeadline, revealSpeedMs }) {
   if (match?.mode === 'team' && ['bonus', 'bonus_reveal', 'reveal'].includes(match.state) && (match.bonus || match.pendingBonusTeam || bonusResult)) {
-    return <TeamBonusView match={match} bonusAnswer={bonusAnswer} setBonusAnswer={setBonusAnswer} bonusResult={bonusResult} bonusDeadline={bonusDeadline} onSubmitBonus={onSubmitBonus} onNext={onNext} onLeave={onLeave} isHost={isHost} myId={myId} />;
+    return <TeamBonusView match={match} bonusAnswer={bonusAnswer} setBonusAnswer={setBonusAnswer} bonusResult={bonusResult} bonusDeadline={bonusDeadline} onSubmitBonus={onSubmitBonus} onNext={onNext} onLeave={onLeave} onPauseToggle={onPauseToggle} isHost={isHost} myId={myId} />;
   }
   const reviewPending = answerReview?.status === 'pending';
-  const frozen = !!buzz || !!answerResult || reviewPending;
+  const frozen = !!buzz || !!answerResult || reviewPending || !!match.paused;
   const frozenAt = buzz?.buzzAt || answerResult?.buzzAt || null;
   const { revealed, wordIndex, totalWords } = useWordReveal(question?.text || '', question?.startedAt || 0, revealSpeedMs, frozen, frozenAt);
 
   // Live answer-clock tick: only runs while a buzz is awaiting an answer.
   const [nowTick, setNowTick] = useState(() => Date.now());
-  const countingDown = !!answerDeadline && !!buzz && !answerResult;
+  const countingDown = !!answerDeadline && !!buzz && !answerResult && !match.paused;
   useEffect(() => {
     if (!countingDown) return;
     const id = setInterval(() => setNowTick(Date.now()), 100);
@@ -1369,11 +1470,15 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, b
         : (answerResult.userId === myId ? 'Wrong!' : `${buzzerName} was wrong`))
     : '';
   const reviewForMe = reviewPending && answerReview.requesterId === myId;
-  const reviewForOpponent = reviewPending && answerReview.verifierId === myId;
+  const iAlreadyVoted = reviewPending && ([...(answerReview.acceptedBy || []), ...(answerReview.rejectedBy || [])].includes(myId));
+  const canVoteOnReview = reviewPending && answerReview.requesterId !== myId
+    && answerReview.voterIds?.includes(myId) && !iAlreadyVoted;
+  const myProtestQueued = (answerReview?.status === 'queued' && answerReview.requesterId === myId)
+    || match.queuedProtests?.some(review => review.requesterId === myId);
   const reviewableWrong = (wrongFlash?.userId === myId && wrongFlash.answer && !wrongFlash.timedOut)
     ? wrongFlash
     : lastReviewableWrong;
-  const canRequestReview = !reviewPending && !reviewBusy && (
+  const canRequestReview = !match.validProtestUsed && !myProtestQueued && !reviewBusy && (
     !!reviewableWrong
     || (answerResult?.userId === myId && answerResult.correct === false && answerResult.answer)
   );
@@ -1394,6 +1499,12 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, b
           <span className="text-[11px] font-bold tabular-nums text-white/60">{match.teamNames?.[myTeam] || 'Your team'} · {teamScores[myTeam] || 0}</span>
         ) : <span className={`text-[12px] font-bold tabular-nums ${myScore > 0 ? 'text-emerald-400' : 'text-white/40'}`}>{myScore}</span>}
         <QbVoiceToggle on={voiceMode} onToggle={toggleVoiceMode} />
+        {isHost && (
+          <button onClick={onPauseToggle} title={match.paused ? 'Resume game' : 'Pause game'} aria-label={match.paused ? 'Resume game' : 'Pause game'}
+            className="inline-flex items-center gap-1 text-[10px] font-semibold text-white/55 hover:text-white/80 px-2 py-1 rounded-md border border-white/[0.08] hover:border-white/[0.16] bg-white/[0.03] transition-colors">
+            {match.paused ? <Play size={10} /> : <Pause size={10} />} {match.paused ? 'Resume' : 'Pause'}
+          </button>
+        )}
         {isHost && (
           <button onClick={onEndMatch} title="End match early"
             className="inline-flex items-center gap-1 text-[10px] font-semibold text-rose-400/70 hover:text-rose-300 px-2 py-1 rounded-md border border-rose-500/20 hover:border-rose-500/40 bg-rose-500/[0.05] transition-colors">
@@ -1419,6 +1530,11 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, b
 
           {/* Action bar */}
           <div className="px-4 py-3 border-t border-white/[0.04] flex-shrink-0 space-y-2">
+            {match.paused && (
+              <div className="rounded-lg border border-amber-400/20 bg-amber-400/[0.07] px-3 py-2 text-center text-[11px] font-medium text-amber-100/75">
+                Game paused{isHost ? ' · resume when everyone is ready' : ' by the host'}
+              </div>
+            )}
             {wrongFlash && !buzz && !answerResult && (
               <div className="px-3 py-2 rounded-lg bg-rose-500/[0.08] border border-rose-500/15 text-[11px] text-rose-400/70 text-center space-y-1.5">
                 <p>
@@ -1427,30 +1543,35 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, b
                 </p>
                 {canRequestReview && (
                   <button onClick={onRequestReview} className="rounded-lg border border-amber-400/25 bg-amber-400/[0.10] px-2 py-1 text-[10px] font-semibold text-amber-200 hover:border-amber-300/45">
-                    I was right
+                    Queue protest
                   </button>
                 )}
               </div>
             )}
-            {reviewForOpponent && (
+            {canVoteOnReview && (
               <AnswerReviewPanel review={answerReview} busy={reviewBusy} onResolve={onResolveReview} />
             )}
             {reviewForMe && (
               <div className="rounded-lg border border-amber-400/20 bg-amber-400/[0.07] px-3 py-2 text-center text-[11px] text-amber-100/75">
-                Protest sent to {answerReview.verifierName}. Game paused while they verify.
+                Your protest is up for a unanimous vote. Game paused while everyone responds.
               </div>
             )}
-            {reviewPending && !reviewForMe && !reviewForOpponent && (
+            {reviewPending && !reviewForMe && !canVoteOnReview && (
               <div className="rounded-lg border border-amber-400/15 bg-amber-400/[0.05] px-3 py-2 text-center text-[11px] text-amber-100/60">
-                Game paused for an answer review.
+                {iAlreadyVoted ? 'Vote recorded. Waiting for every real player.' : 'Game paused for a protest vote.'}
               </div>
             )}
-            {reviewStatus && !reviewPending && answerReview?.requesterId === myId && (
+            {myProtestQueued && !reviewPending && (
+              <div className="rounded-lg border border-amber-400/20 bg-amber-400/[0.07] px-3 py-2 text-center text-[11px] text-amber-100/75">
+                Protest queued. It will come up five seconds after the question, in buzz order.
+              </div>
+            )}
+            {['accepted', 'rejected'].includes(reviewStatus) && !reviewPending && answerReview && (
               <div className={`rounded-lg border px-3 py-2 text-center text-[11px] ${reviewStatus === 'accepted' ? 'border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-200/80' : 'border-white/[0.08] bg-white/[0.03] text-white/45'}`}>
-                Review {reviewStatus}. {reviewStatus === 'accepted' ? 'Score corrected.' : 'Ruling stands.'}
+                {answerReview.requesterId === myId ? 'Your' : `${answerReview.requesterName}'s`} protest was {reviewStatus}. {reviewStatus === 'accepted' ? 'Scores rewound; no bonus awarded.' : 'Ruling stands.'}
               </div>
             )}
-            {!buzz && !answerResult && !iAmLocked && !reviewPending && (
+            {!buzz && !answerResult && !iAmLocked && !reviewPending && !match.paused && (
               <>
                 <button onClick={onBuzz}
                   className="w-full py-4 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[15px] font-bold uppercase tracking-[0.15em] active:scale-[0.98] transition-all">
@@ -1465,7 +1586,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, b
                 {canRequestReview && (
                   <button onClick={onRequestReview} disabled={reviewBusy}
                     className="rounded-lg border border-amber-400/25 bg-amber-400/[0.10] px-3 py-1.5 text-[11px] font-semibold text-amber-100/85 hover:border-amber-300/45 disabled:opacity-40">
-                    {reviewBusy ? 'Sending review…' : 'I was right'}
+                    {reviewBusy ? 'Queuing protest…' : 'Queue protest'}
                   </button>
                 )}
               </div>
@@ -1486,10 +1607,10 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, b
                     autoFocus value={answer} onChange={e => setAnswer(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && answer.trim() && !timeUp && onSubmitAnswer()}
                     placeholder={timeUp ? "Time's up…" : 'Answer…'}
-                    disabled={timeUp}
+                    disabled={timeUp || match.paused}
                     className="flex-1 px-4 py-3 rounded-lg border border-blue-500/40 bg-white/[0.05] text-[14px] text-white placeholder-white/25 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/25 transition-colors disabled:opacity-50"
                   />
-                  <button onClick={onSubmitAnswer} disabled={!answer.trim() || timeUp}
+                  <button onClick={onSubmitAnswer} disabled={!answer.trim() || timeUp || match.paused}
                     className="px-5 py-3 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-[13px] font-bold disabled:opacity-30 transition-colors">
                     <ArrowRight size={16} />
                   </button>
@@ -1518,7 +1639,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, b
                 {canRequestReview && (
                   <button onClick={onRequestReview} disabled={reviewBusy}
                     className="w-full py-2 rounded-lg border border-amber-400/25 bg-amber-400/[0.08] text-[12px] font-semibold text-amber-100/80 hover:border-amber-300/45 disabled:opacity-40 transition-colors">
-                    {reviewBusy ? 'Sending review…' : 'I was right'}
+                    {reviewBusy ? 'Queuing protest…' : 'Queue protest'}
                   </button>
                 )}
                 {!reviewPending && <AutoAdvanceCountdown deadline={autoAdvanceDeadline} isHost={isHost} onNext={onNext} />}
@@ -1570,8 +1691,8 @@ function AnswerReviewPanel({ review, busy, onResolve }) {
     <div className="rounded-lg border border-amber-400/25 bg-amber-400/[0.07] p-3 text-left">
       <div className="flex items-start justify-between gap-3 mb-2">
         <div>
-          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-amber-200/70">Verify answer</p>
-          <p className="text-[12px] text-white/55">{review.requesterName} says they were right.</p>
+          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-amber-200/70">Protest vote</p>
+          <p className="text-[12px] text-white/55">{review.requesterName} says they were right. Every real player must agree.</p>
         </div>
       </div>
       <p className="max-h-24 overflow-y-auto rounded-lg border border-white/[0.06] bg-black/15 p-2 text-[12px] leading-relaxed text-white/75">
@@ -1590,11 +1711,11 @@ function AnswerReviewPanel({ review, busy, onResolve }) {
       <div className="mt-2 grid grid-cols-2 gap-2">
         <button onClick={() => onResolve(review.id, false)} disabled={busy}
           className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-[12px] font-semibold text-white/55 hover:bg-white/[0.07] disabled:opacity-40">
-          Keep wrong
+          Reject
         </button>
         <button onClick={() => onResolve(review.id, true)} disabled={busy}
           className="rounded-lg border border-emerald-400/30 bg-emerald-400/[0.12] px-3 py-2 text-[12px] font-semibold text-emerald-100 hover:bg-emerald-400/[0.18] disabled:opacity-40">
-          Mark right
+          Accept protest
         </button>
       </div>
     </div>
@@ -1647,13 +1768,13 @@ function MatchSelector({ label, options, value, onChange, grid }) {
 
 function SetupTile({ active, disabled = false, icon, label, sub, onClick }) {
   return (
-    <button onClick={onClick} disabled={disabled}
-      className={`text-left rounded-2xl border p-3 transition-all backdrop-blur-sm ${
+    <button type="button" onClick={onClick} disabled={disabled} aria-pressed={active}
+      className={`rounded-lg border p-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/40 ${
         active
-          ? 'border-blue-400/45 bg-blue-500/15 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_14px_rgba(59,130,246,0.25)]'
+          ? 'border-blue-400/40 bg-blue-500/[0.16] text-white'
           : disabled
             ? 'cursor-not-allowed border-white/[0.05] bg-white/[0.015] text-white/25 opacity-60'
-            : 'border-white/[0.08] bg-white/[0.03] text-white/60 hover:bg-white/[0.07] hover:text-white/80'
+            : 'border-white/[0.08] bg-white/[0.03] text-white/60 hover:border-white/[0.16] hover:bg-white/[0.06] hover:text-white/80'
       }`}>
       <div className="flex items-center gap-1.5 mb-0.5">
         {icon}
@@ -1666,13 +1787,55 @@ function SetupTile({ active, disabled = false, icon, label, sub, onClick }) {
 
 function SetupPill({ active, onClick, children }) {
   return (
-    <button onClick={onClick}
-      className={`px-3 py-1.5 rounded-xl text-[11px] font-semibold transition-all whitespace-nowrap backdrop-blur-sm ${
+    <button type="button" onClick={onClick} aria-pressed={active}
+      className={`whitespace-nowrap rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/40 ${
         active
-          ? 'bg-blue-500/20 text-white border border-blue-400/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_0_12px_rgba(59,130,246,0.28)]'
-          : 'bg-white/[0.05] border border-white/[0.08] text-white/55 hover:bg-white/[0.09] hover:text-white/80'
+          ? 'border-blue-400/[0.40] bg-blue-500/[0.18] text-blue-100'
+          : 'border-white/[0.06] bg-white/[0.03] text-white/55 hover:bg-white/[0.06] hover:text-white/80'
       }`}>
       {children}
     </button>
+  );
+}
+
+function CategoryPicker({ categories, onToggle, compact = false }) {
+  const subjectCount = categories.filter(category => category !== 'Mixed' && category !== 'Custom').length;
+  const summary = categories.includes('Mixed')
+    ? 'All categories'
+    : categories.includes('Custom')
+      ? 'Custom topic'
+      : `${subjectCount} selected`;
+
+  return (
+    <section className="space-y-2">
+      <div className="flex items-end justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Categories</p>
+          {!compact && <p className="mt-0.5 text-[10px] text-white/30">Select one or combine several subjects.</p>}
+        </div>
+        <span className="shrink-0 text-[10px] tabular-nums text-white/30">{summary}</span>
+      </div>
+      <div className="flex flex-wrap gap-1.5" role="group" aria-label="Question categories">
+        {QB_MATCH_CATEGORIES.map(category => {
+          const active = categories.includes(category);
+          return (
+            <button
+              key={category}
+              type="button"
+              onClick={() => onToggle(category)}
+              aria-pressed={active}
+              className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/40 ${
+                active
+                  ? 'border-blue-400/[0.40] bg-blue-500/[0.18] text-blue-100'
+                  : 'border-white/[0.06] bg-white/[0.03] text-white/55 hover:bg-white/[0.06] hover:text-white/80'
+              }`}
+            >
+              {active && <Check size={11} strokeWidth={2.5} aria-hidden="true" />}
+              {category}
+            </button>
+          );
+        })}
+      </div>
+    </section>
   );
 }

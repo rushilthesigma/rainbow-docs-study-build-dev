@@ -19,9 +19,10 @@ import { useQbModel } from '../../../hooks/useQbModel';
 import { studyModelLabel } from '../../study/studyModels';
 import { useSpeechRecognition, speechRecognitionSupported } from '../../../hooks/useSpeechRecognition';
 import { speechSynthesisSupported } from '../../../hooks/useSpeechSynthesis';
-import { CountryPracticeBrowser, QuizBowlCollection, SavedSetEditor, SavedSetLibrary } from './QuizBowlSetLibrary';
+import { CountryPracticeBrowser, QuizBowlCollection, SavedSetCreator, SavedSetEditor, SavedSetLibrary } from './QuizBowlSetLibrary';
 import { judgeQuizBowlQuestion } from '../../../lib/qbAnswerChecker';
 import { markLessonComplete } from '../../../api/curriculum';
+import QuizBowlGameSetup from '../../quizbowl/QuizBowlGameSetup';
 
 // Explicitly open (then immediately release) an audio stream before starting
 // recognition. This is the same permission flow as Study Mode dictation.
@@ -315,7 +316,17 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
   const [savedSets, setSavedSets] = useState([]);
   const [savedSetsLoading, setSavedSetsLoading] = useState(false);
   const [editingSavedSet, setEditingSavedSet] = useState(null);
+  const [setCreatorSeed, setSetCreatorSeed] = useState({});
+  const [setCreatorReturnView, setSetCreatorReturnView] = useState('saved-sets');
   const [multiplayerSet, setMultiplayerSet] = useState(null);
+  const [setupPlayMode, setSetupPlayMode] = useState('multiplayer');
+  const [setupMatchMode, setSetupMatchMode] = useState('individual');
+  const [setupFillWithBots, setSetupFillWithBots] = useState(false);
+  const [setupBotLevel, setSetupBotLevel] = useState('varsity');
+  const [setupScoringFormat, setSetupScoringFormat] = useState('iac-prelim');
+  const [setupJoinCode, setSetupJoinCode] = useState('');
+  const [matchJoinCode, setMatchJoinCode] = useState(null);
+  const [matchLaunchConfig, setMatchLaunchConfig] = useState(null);
   // The played set open in the My Sets detail view, and where the solo
   // replay player should return when it exits (replays list vs detail).
   const [playedSetFocus, setPlayedSetFocus] = useState(null);
@@ -333,6 +344,7 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
 
   const startingCategory = CATEGORIES.includes(initialCategory) ? initialCategory : 'Mixed';
   const [category, setCategory] = useState(startingCategory);
+  const [selectedCategories, setSelectedCategories] = useState(() => [startingCategory]);
   const [difficulty, setDifficulty] = useState(() => {
     // Study-mode deep link maps lowercase NAQT levels to the picker labels
     // this app uses ("Easy" / "Medium" / "Hard"). Default Medium otherwise.
@@ -346,6 +358,87 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
   // "Focus on" instructions only apply to generated questions, not qbreader.
   const [questionSource, setQuestionSource] = useState(initialTopic ? 'ai' : 'qbreader');
   const [playingSource, setPlayingSource] = useState('ai');
+
+  function selectQuestionSource(nextSource) {
+    setQuestionSource(nextSource);
+    if (nextSource === 'ai' && selectedCategories.length > 1) {
+      setCategory(selectedCategories[0]);
+    }
+  }
+
+  function selectCategory(nextCategory) {
+    if (questionSource !== 'qbreader') {
+      setCategory(nextCategory);
+      setSelectedCategories([nextCategory]);
+      return;
+    }
+    setSelectedCategories(current => {
+      if (nextCategory === 'Mixed') {
+        setCategory('Mixed');
+        return ['Mixed'];
+      }
+      const subjects = current.filter(value => value !== 'Mixed');
+      const next = subjects.includes(nextCategory)
+        ? subjects.filter(value => value !== nextCategory)
+        : [...subjects, nextCategory];
+      const normalized = next.length ? CATEGORIES.filter(value => next.includes(value)) : ['Mixed'];
+      setCategory(normalized.length === 1 ? normalized[0] : 'Mixed');
+      return normalized;
+    });
+  }
+
+  function openGameSetup(mode = 'multiplayer') {
+    setSetupPlayMode(mode);
+    setMatchJoinCode(null);
+    setMatchLaunchConfig(null);
+    setMultiplayerSet(null);
+    setError(null);
+    setView('custom');
+  }
+
+  function openCustomRound() {
+    const customCategory = selectedCategories.find(item => item !== 'Mixed') || category;
+    setQuestionSource('ai');
+    setCategory(customCategory);
+    setSelectedCategories([customCategory]);
+    openGameSetup('solo');
+  }
+
+  function startConfiguredGame() {
+    if (setupPlayMode === 'solo') {
+      handleGenerate();
+      return;
+    }
+    const exactSet = multiplayerSet;
+    const exactCategory = exactSet?.category || category;
+    const exactCategories = Array.isArray(exactSet?.categories) && exactSet.categories.length
+      ? exactSet.categories
+      : exactSet
+        ? [exactCategory]
+        : selectedCategories;
+    setMatchJoinCode(null);
+    setMatchLaunchConfig({
+      matchMode: setupMatchMode,
+      questionSource: exactSet ? 'saved' : questionSource,
+      categories: exactCategories,
+      difficulty: exactSet?.difficulty || difficulty,
+      questionCount: exactSet?.questions?.length || questionCount,
+      revealSpeedMs,
+      scoringFormat: setupScoringFormat,
+      fillWithBots: setupFillWithBots,
+      botLevel: setupBotLevel,
+      setInstructions: questionSource === 'ai' ? customInstructions : '',
+    });
+    setView('multiplayer');
+  }
+
+  function joinConfiguredGame() {
+    const code = setupJoinCode.trim().toUpperCase();
+    if (code.length < 4) return;
+    setMatchLaunchConfig(null);
+    setMatchJoinCode(code);
+    setView('multiplayer');
+  }
 
   // Hub: history + recommendations from the server. Loaded on first
   // mount and refreshed whenever the user returns to the hub from a
@@ -464,7 +557,10 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
       const playable = (set.questions || []).filter(q => String(q.text || '').trim() && String(q.answer || '').trim());
       if (!playable.length) throw new Error('This collection set has no playable tossups.');
       setMultiplayerSet({ ...set, questions: playable, title: set.title || listing.title });
-      setView('multiplayer');
+      setSetupPlayMode('multiplayer');
+      setMatchJoinCode(null);
+      setMatchLaunchConfig(null);
+      setView('custom');
     } catch (err) {
       setError(err.message || 'Could not open that collection set.');
       throw err;
@@ -473,15 +569,64 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
 
   function launchCountryPreset(set) { return playSavedSet(set); }
 
-  async function createEmptySavedSet() {
-    try {
-      const data = await createSavedQuizBowlSet({
-        title: 'Untitled packet', category: 'Mixed', difficulty: 'Easy', status: 'draft', questions: [],
-      });
-      setEditingSavedSet(data.set);
-      setSavedSets(current => [data.set, ...current]);
-      setView('set-editor');
-    } catch (err) { setError(err.message || 'Could not create a saved set.'); }
+  function openSetCreator(initial = {}, returnView = 'saved-sets') {
+    setSetCreatorSeed(initial);
+    setSetCreatorReturnView(returnView);
+    setView('set-creator');
+  }
+
+  async function createEmptySavedSet({ title = '', category: setCategory = 'Mixed', difficulty: setDifficulty = 'Medium' } = {}) {
+    const data = await createSavedQuizBowlSet({
+      title: title || `${setCategory} custom set`, category: setCategory, difficulty: setDifficulty, status: 'draft', questions: [],
+    });
+    setEditingSavedSet(data.set);
+    setSavedSets(current => [data.set, ...current]);
+    setView('set-editor');
+    return data.set;
+  }
+
+  async function generateSavedSet({ title, category: setCategory, categories: selectedCategories = [], difficulty: setDifficulty, count, prompt }) {
+    const categoryInstructions = selectedCategories.length > 1
+      ? `${prompt}\n\nBalance the set across these selected categories: ${selectedCategories.join(', ')}. Give each selected category meaningful representation.`
+      : prompt;
+    const result = await apiFetch('/api/chat', {
+      method: 'POST',
+      body: JSON.stringify({
+        system: SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: generatePrompt(setCategory, setDifficulty, count, categoryInstructions) }],
+        max_tokens: 8192,
+        model: qbModel,
+        jsonMode: true,
+      }),
+    });
+    const text = result.content?.[0]?.text || '';
+    let parsed;
+    try { parsed = JSON.parse(text); }
+    catch {
+      const match = text.match(/\{[\s\S]*\}/);
+      if (match) parsed = JSON.parse(match[0]);
+    }
+    const generated = Array.isArray(parsed?.questions) ? parsed.questions : [];
+    if (!generated.length) throw new Error('The AI did not return any questions. Try a more specific prompt.');
+    const questions = generated.slice(0, count).map((question, index) => ({
+      id: `ai-${Date.now()}-${index}`,
+      text: String(question?.text || '').trim(),
+      answer: String(question?.answer || '').trim(),
+      category: String(question?.category || setCategory),
+      coverageTag: '',
+    })).filter(question => question.text && question.answer);
+    if (!questions.length) throw new Error('The generated questions were incomplete. Try again.');
+    const data = await createSavedQuizBowlSet({
+      title: title || `${setCategory} custom set`,
+      category: setCategory,
+      difficulty: setDifficulty,
+      status: 'draft',
+      questions,
+    });
+    setEditingSavedSet(data.set);
+    setSavedSets(current => [data.set, ...current.filter(set => set.id !== data.set.id)]);
+    setView('set-editor');
+    return data.set;
   }
 
   async function importPacketPdf(file) {
@@ -508,7 +653,9 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
   function playSavedSet(set) {
     const playable = (set.questions || []).filter(q => String(q.text || '').trim() && String(q.answer || '').trim());
     if (!playable.length) { setError('Add a question and answer before playing this set.'); return; }
-    setCategory(set.category || 'Mixed');
+    const savedCategory = set.category || 'Mixed';
+    setCategory(savedCategory);
+    setSelectedCategories([savedCategory]);
     setDifficulty(set.difficulty || 'Easy');
     setQuestionSource('saved');
     setPlayingSource('saved');
@@ -545,7 +692,9 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
     const pool = (s.perQuestion || []).filter(q => String(q.text || '').trim() && String(q.correctAnswer || '').trim());
     const picked = onlyMissed ? pool.filter(q => !q.correct) : pool;
     if (!picked.length) return;
-    setCategory(s.category || 'Mixed');
+    const replayCategory = s.category || 'Mixed';
+    setCategory(replayCategory);
+    setSelectedCategories([replayCategory]);
     setDifficulty(s.difficulty || 'Medium');
     setQuestionSource('replay');
     setPlayingSource('replay');
@@ -714,8 +863,10 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
   // topic. Pass `notes` ({ title, text }) to ground generation entirely in
   // source material — only the QBpedia handoff does; hub CTAs must not, or
   // a category drill after an article game would stay pinned to the article.
-  async function launchSet({ category: cat, difficulty: diff, source = 'qbreader', customInstructions: customInstr = '', notes = null, title = '' }) {
-    setCategory(cat);
+  async function launchSet({ category: cat, categories: cats = null, difficulty: diff, source = 'qbreader', customInstructions: customInstr = '', notes = null, title = '' }) {
+    const nextCategories = Array.isArray(cats) && cats.length ? cats : [cat];
+    setSelectedCategories(nextCategories);
+    setCategory(nextCategories.length === 1 ? nextCategories[0] : 'Mixed');
     setDifficulty(diff);
     setQuestionSource(source);
     // Run the same fetch logic handleGenerate() does, inline so the
@@ -723,7 +874,7 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
     setGenerating(true); setError(null);
     try {
       if (source === 'qbreader') {
-        const data = await fetchQBReaderTossups({ count: QB_BATCH_SIZE, category: cat, difficulty: diff });
+        const data = await fetchQBReaderTossups({ count: QB_BATCH_SIZE, category: nextCategories.length === 1 ? nextCategories[0] : 'Mixed', categories: nextCategories, difficulty: diff });
         const tossups = data?.tossups || [];
         if (!tossups.length) { setError('No questions for that combo.'); setGenerating(false); return; }
         setQuestions(tossups);
@@ -762,7 +913,7 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
     setError(null);
     if (questionSource === 'qbreader') {
       try {
-        const data = await fetchQBReaderTossups({ count: QB_BATCH_SIZE, category, difficulty });
+        const data = await fetchQBReaderTossups({ count: QB_BATCH_SIZE, category, categories: selectedCategories, difficulty });
         const tossups = data?.tossups || [];
         if (!tossups.length) {
           setError('No questions for that combo. Try different filters.');
@@ -815,7 +966,7 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
     if (fetchingMoreRef.current) return;
     fetchingMoreRef.current = true;
     setRefilling(true);
-    fetchQBReaderTossups({ count: QB_BATCH_SIZE, category, difficulty })
+    fetchQBReaderTossups({ count: QB_BATCH_SIZE, category, categories: selectedCategories, difficulty })
       .then(data => {
         const more = data?.tossups || [];
         if (more.length) setQuestions(prev => [...prev, ...more]);
@@ -825,7 +976,7 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
         fetchingMoreRef.current = false;
         setRefilling(false);
       });
-  }, [currentQ, questions.length, view, playingSource, category, difficulty]);
+  }, [currentQ, questions.length, view, playingSource, category, selectedCategories, difficulty]);
 
   const prevCategoryRef = useRef(category);
   const prevDifficultyRef = useRef(difficulty);
@@ -1244,8 +1395,8 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
               <div>
                 <div className="grid grid-cols-3 gap-1">
                   {CATEGORIES.map(c => (
-                    <button key={c} onClick={() => setCategory(c)}
-                      className={`px-2 py-1 rounded-lg text-[10px] font-semibold transition-colors focus:outline-none ${category === c ? 'bg-blue-500/[0.18] text-blue-100 border border-blue-400/[0.40]' : 'bg-white/[0.03] text-white/55 border border-white/[0.06] hover:bg-white/[0.06] hover:text-white/75'}`}>
+                    <button key={c} onClick={() => selectCategory(c)}
+                      className={`px-2 py-1 rounded-lg text-[10px] font-semibold transition-colors focus:outline-none ${(questionSource === 'qbreader' ? selectedCategories.includes(c) : category === c) ? 'bg-blue-500/[0.18] text-blue-100 border border-blue-400/[0.40]' : 'bg-white/[0.03] text-white/55 border border-white/[0.06] hover:bg-white/[0.06] hover:text-white/75'}`}>
                       {c}
                     </button>
                   ))}
@@ -1402,7 +1553,21 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
   if (view === 'multiplayer') {
     return (
       <ViewFade viewKey="multiplayer" className="h-full flex flex-col">
-        <QuizBowlMatch user={user} initialSet={multiplayerSet} onExit={() => { setMultiplayerSet(null); bustHubCache(); setView('hub'); }} onMatchReplay={openMatchReplay} />
+        <QuizBowlMatch
+          user={user}
+          initialSet={multiplayerSet}
+          initialJoinCode={matchJoinCode}
+          initialConfig={matchLaunchConfig}
+          autoCreate={!!matchLaunchConfig}
+          onExit={() => {
+            setMultiplayerSet(null);
+            setMatchJoinCode(null);
+            setMatchLaunchConfig(null);
+            bustHubCache();
+            setView('hub');
+          }}
+          onMatchReplay={openMatchReplay}
+        />
       </ViewFade>
     );
   }
@@ -1430,11 +1595,23 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
     return <ViewFade viewKey="saved-sets" className="h-full"><SavedSetLibrary
       sets={savedSets} loading={savedSetsLoading}
       onBack={() => setView('hub')}
-      onNew={createEmptySavedSet}
+      onNew={() => openSetCreator({}, 'saved-sets')}
       onImport={importPacketPdf}
       onEdit={openSavedSet}
       onPlay={(id) => getSavedQuizBowlSet(id).then(data => playSavedSet(data.set)).catch(err => setError(err.message || 'Could not open that set.'))}
       onDelete={deleteSavedSet}
+    /></ViewFade>;
+  }
+
+  if (view === 'set-creator') {
+    return <ViewFade viewKey="set-creator" className="h-full"><SavedSetCreator
+      initial={setCreatorSeed}
+      onBack={() => setView(setCreatorReturnView)}
+      onCreateManual={createEmptySavedSet}
+      onGenerate={generateSavedSet}
+      model={qbModel}
+      models={qbModels}
+      onPickModel={pickQbModel}
     /></ViewFade>;
   }
 
@@ -1476,71 +1653,42 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
   if (view === 'custom') {
     return (
       <div className="h-full overflow-y-auto bg-transparent">
-        <div className="p-5 pb-8 space-y-3">
-          <button onClick={() => setView('hub')} className="flex items-center gap-2 text-sm text-white/35 hover:text-white/60 transition-colors mb-1">
-            <ArrowLeft size={16} /> Hub
-          </button>
-
-          {error && <p className="text-[11px] text-rose-400 px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-center">{error}</p>}
-
-          {/* Source */}
-          <div className="grid grid-cols-2 gap-2">
-            <GlassTile active={questionSource === 'qbreader'} icon={<BookOpen size={14} />} label="Past QB" sub="qbreader.org" onClick={() => setQuestionSource('qbreader')} />
-            <GlassTile active={questionSource === 'ai'} icon={<Sparkles size={14} />} label="AI" sub={studyModelLabel(qbModel)} onClick={() => setQuestionSource('ai')} />
-          </div>
-
-          {/* Category */}
-          <div className="flex flex-wrap gap-1.5" data-tour="qb-category-picker">
-            {CATEGORIES.map(c => <GlassPill key={c} active={category === c} onClick={() => setCategory(c)}>{c}</GlassPill>)}
-          </div>
-
-          {/* Difficulty */}
-          <div className="grid grid-cols-4 gap-1.5" data-tour="qb-difficulty-picker">
-            {DIFFICULTIES.map(d => <GlassPill key={d} active={difficulty === d} onClick={() => setDifficulty(d)}>{d}</GlassPill>)}
-          </div>
-
-          {/* AI model (AI only) */}
-          {questionSource === 'ai' && (
-            <QbModelPicker value={qbModel} onPick={pickQbModel} models={qbModels} />
-          )}
-
-          {/* Count (AI only) */}
-          {questionSource === 'ai' && (
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Questions</span>
-                <span className="text-[11px] font-mono text-white/70">{questionCount}</span>
-              </div>
-              <input type="range" min="5" max="30" step="5" value={questionCount}
-                onChange={e => setQuestionCount(Number(e.target.value))} className="w-full accent-blue-400" />
-            </div>
-          )}
-
-          {/* Speed */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">Speed</span>
-              <span className="text-[11px] font-mono text-white/70">{revealSpeedMs}ms</span>
-            </div>
-            <input type="range" min="60" max="400" step="10" value={revealSpeedMs}
-              onChange={e => setRevealSpeedMs(Number(e.target.value))} className="w-full accent-blue-400" />
-          </div>
-
-          {/* Custom instructions (AI only) */}
-          {questionSource === 'ai' && (
-            <textarea value={customInstructions} onChange={e => setCustomInstructions(e.target.value)}
-              placeholder="Custom instructions…" rows={2}
-              className="w-full px-3 py-2.5 rounded-lg border border-white/[0.08] bg-white/[0.04] text-[12px] text-white/80 placeholder-white/20 resize-none outline-none focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20 transition-colors" />
-          )}
-
-          {/* Start */}
-          <button onClick={handleGenerate} disabled={generating} data-tour="qb-generate"
-            className="w-full py-3.5 rounded-lg bg-blue-500 hover:bg-blue-400 disabled:opacity-40 text-white text-[14px] font-bold inline-flex items-center justify-center gap-2 transition-all border border-blue-400/40">
-            {generating
-              ? <><InlineProgress active /> {questionSource === 'qbreader' ? 'Loading…' : 'Generating…'}</>
-              : <><Play size={15} /> Start</>}
-          </button>
-        </div>
+        <QuizBowlGameSetup
+          onBack={() => { setMultiplayerSet(null); setView('hub'); }}
+          playMode={setupPlayMode}
+          onPlayModeChange={mode => { setSetupPlayMode(mode); if (mode === 'solo') setMultiplayerSet(null); }}
+          matchMode={setupMatchMode}
+          onMatchModeChange={setSetupMatchMode}
+          questionSource={multiplayerSet ? 'saved' : questionSource}
+          onQuestionSourceChange={selectQuestionSource}
+          categories={multiplayerSet ? [multiplayerSet.category || 'Mixed'] : selectedCategories}
+          onToggleCategory={selectCategory}
+          difficulty={multiplayerSet?.difficulty || difficulty}
+          onDifficultyChange={setDifficulty}
+          questionCount={multiplayerSet?.questions?.length || questionCount}
+          onQuestionCountChange={setQuestionCount}
+          revealSpeedMs={revealSpeedMs}
+          onRevealSpeedChange={setRevealSpeedMs}
+          customInstructions={customInstructions}
+          onCustomInstructionsChange={setCustomInstructions}
+          aiModelLabel={studyModelLabel(qbModel)}
+          aiModelControl={<QbModelPicker value={qbModel} onPick={pickQbModel} models={qbModels} />}
+          fillWithBots={setupFillWithBots}
+          onFillWithBotsChange={setSetupFillWithBots}
+          botLevel={setupBotLevel}
+          onBotLevelChange={setSetupBotLevel}
+          scoringFormat={setupScoringFormat}
+          onScoringFormatChange={setSetupScoringFormat}
+          joinCode={setupJoinCode}
+          onJoinCodeChange={setSetupJoinCode}
+          onJoin={joinConfiguredGame}
+          onBrowseCollection={() => setView('collection')}
+          onBrowseCustomSets={() => { loadSavedSets(); setView('saved-sets'); }}
+          initialSet={multiplayerSet}
+          busy={generating}
+          error={error}
+          onSubmit={startConfiguredGame}
+        />
       </div>
     );
   }
@@ -1626,15 +1774,15 @@ export default function QuizBowlApp({ initialTopic = null, initialCategory = nul
       error={error}
       generating={generating}
       onLaunch={launchSet}
-      onMultiplayer={() => setView('multiplayer')}
-      onCustom={() => setView('custom')}
+      onMultiplayer={() => openGameSetup('multiplayer')}
+      onCustom={openCustomRound}
       onClueLab={() => setView('clue-lab')}
       onCollection={() => setView('collection')}
       onCountryPractice={() => setView('country-practice')}
       onSavedSets={() => { loadSavedSets(); setView('saved-sets'); }}
       onMySets={() => setView('my-sets')}
       onOpenPlayedSet={(s) => { setPlayedSetFocus(s); setView('my-set-detail'); }}
-      onAILobby={() => { setAiLobbyInitial('lobby'); setView('ai-lobby'); }}
+      onAILobby={() => { setSetupFillWithBots(true); openGameSetup('multiplayer'); }}
       onReplay={(s) => { setReplaySet(s); setView('replay'); }}
       onReplayMatch={(rec) => { setMatchReplayRec(rec); setView('match-replay'); }}
       onReplays={() => setView('replays')}
@@ -2396,6 +2544,7 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
   // within head-to-head: 'ai' | 'real'
   const [h2hOpponent, setH2hOpponent]   = useState('ai');
   const [category, setCategory]         = useState('History');
+  const [selectedCategories, setSelectedCategories] = useState(['History']);
   const [difficulty, setDifficulty]     = useState('medium');
   const [source, setSource]             = useState('qbreader');
   const [scoringFormat, setScoringFormat] = useState(
@@ -2438,6 +2587,34 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
   useEffect(() => { setBotOverrides({}); }, [roomLevel]);
 
   const diffMap = { easy: 'Easy', medium: 'Medium', hard: 'Hard', tournament: 'Tournament' };
+
+  function selectQuestionSource(nextSource) {
+    setSource(nextSource);
+    if (nextSource === 'ai' && selectedCategories.length > 1) {
+      setCategory(selectedCategories[0]);
+    }
+  }
+
+  function selectCategory(nextCategory) {
+    if (source !== 'qbreader') {
+      setCategory(nextCategory);
+      setSelectedCategories([nextCategory]);
+      return;
+    }
+    setSelectedCategories(current => {
+      if (nextCategory === 'Mixed') {
+        setCategory('Mixed');
+        return ['Mixed'];
+      }
+      const subjects = current.filter(value => value !== 'Mixed');
+      const next = subjects.includes(nextCategory)
+        ? subjects.filter(value => value !== nextCategory)
+        : [...subjects, nextCategory];
+      const normalized = next.length ? QB_LOBBY_CATEGORIES.filter(value => next.includes(value)) : ['Mixed'];
+      setCategory(normalized.length === 1 ? normalized[0] : 'Mixed');
+      return normalized;
+    });
+  }
 
   // Effective bots that will be passed to TrialSession
   const effectiveLobbyBots = useMemo(() => {
@@ -2522,7 +2699,7 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
     try {
       let qs;
       if (source === 'qbreader') {
-        const data = await fetchQBReaderTossups({ count: 15, category, difficulty: diffMap[difficulty] });
+        const data = await fetchQBReaderTossups({ count: 15, category, categories: selectedCategories, difficulty: diffMap[difficulty] });
         const raw = data?.tossups || [];
         if (!raw.length) throw new Error('No questions found. Try a different category or switch to AI.');
         qs = raw.map(t => ({ ...t, question: t.text || t.question }));
@@ -2833,12 +3010,12 @@ function AILobbyView({ onExit, user, initialLobbyType = 'lobby' }) {
         {/* ── Source / Category / Difficulty / Scoring / Topic (AI modes only) ── */}
         {!(lobbyType === 'head-to-head' && h2hOpponent === 'real') && <>
           <div className="grid grid-cols-2 gap-2">
-            <GlassTile active={source === 'qbreader'} icon={<BookOpen size={14} />} label="Past QB" sub="qbreader.org" onClick={() => setSource('qbreader')} />
-            <GlassTile active={source === 'ai'} icon={<Sparkles size={14} />} label="AI" sub="Gemini · niche topics" onClick={() => setSource('ai')} />
+            <GlassTile active={source === 'qbreader'} icon={<BookOpen size={14} />} label="Past QB" sub="qbreader.org" onClick={() => selectQuestionSource('qbreader')} />
+            <GlassTile active={source === 'ai'} icon={<Sparkles size={14} />} label="AI" sub="Gemini · niche topics" onClick={() => selectQuestionSource('ai')} />
           </div>
 
           <div className="flex flex-wrap gap-1.5" data-tour="qb-lobby-category">
-            {QB_LOBBY_CATEGORIES.map(c => <GlassPill key={c} active={category === c} onClick={() => setCategory(c)}>{c}</GlassPill>)}
+            {QB_LOBBY_CATEGORIES.map(c => <GlassPill key={c} active={source === 'qbreader' ? selectedCategories.includes(c) : category === c} onClick={() => selectCategory(c)}>{c}</GlassPill>)}
           </div>
 
           <div>

@@ -5,12 +5,13 @@ import {
   RefreshCw, ChevronRight, Zap, ClipboardList, BarChart3, X, Check,
   Swords, Activity, ChevronDown, Sparkles, TrendingDown, Clock,
   Lock, Unlock, GraduationCap, Globe, AlertTriangle, Wand2, Edit3,
-  Gift, Users, Network, RotateCcw,
+  Flag, Gift, Users, Network, RotateCcw,
 } from 'lucide-react';
 import {
   checkAdmin, getMetrics, listUsers, getUser, toggleBan, deleteUser,
   getStudySession, getStandaloneLesson, getCurriculumLesson, getUserQuizBowl,
   unlockExam, grantCreditReset, grantCreditResetToAll, getPromptProtectionSettings, updatePromptProtectionSettings,
+  listQuizBowlSetReports, resolveQuizBowlSetReport,
 } from '../../../api/admin';
 import { listWikiReports, resolveWikiReport, deleteWikiPage } from '../../../api/wiki';
 import { ownerGrantPro, ownerRevokePro } from '../../../api/billing';
@@ -30,7 +31,7 @@ export default function AdminApp() {
   // per-user list since landing visits are anonymous/pre-signup.
   const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState('list'); // list | analytics | detail | chat | wiki | referrals | moderation
+  const [view, setView] = useState('list'); // list | analytics | detail | chat | wiki | set-reports | referrals | moderation
   const [selectedUser, setSelectedUser] = useState(null);
   const [conv, setConv] = useState(null);
 
@@ -254,6 +255,14 @@ export default function AdminApp() {
     );
   }
 
+  if (view === 'set-reports') {
+    return (
+      <ViewFade viewKey="set-reports" className="h-full flex flex-col">
+        <QuizBowlSetReportsPanel onClose={() => setView('list')} />
+      </ViewFade>
+    );
+  }
+
   if (view === 'referrals') {
     return (
       <ViewFade viewKey="referrals" className="h-full flex flex-col">
@@ -284,6 +293,7 @@ export default function AdminApp() {
       onRefresh={refreshList}
       onAnalytics={() => setView('analytics')}
       onWiki={() => setView('wiki')}
+      onSetReports={() => setView('set-reports')}
       onReferrals={() => setView('referrals')}
       onModeration={() => setView('moderation')}
       onGrantResetAll={handleGrantResetToAll}
@@ -439,7 +449,7 @@ function activenessScore(u) {
 }
 
 /* ====================== USER LIST ====================== */
-function UserList({ users, total, metrics, query, setQuery, planFilter, setPlanFilter, sort, setSort, includeDemo, setIncludeDemo, onOpen, onRefresh, onAnalytics, onWiki, onReferrals, onModeration, onGrantResetAll, grantingAllReset }) {
+function UserList({ users, total, metrics, query, setQuery, planFilter, setPlanFilter, sort, setSort, includeDemo, setIncludeDemo, onOpen, onRefresh, onAnalytics, onWiki, onSetReports, onReferrals, onModeration, onGrantResetAll, grantingAllReset }) {
   const DAY = 86_400_000;
   const HOUR = 3_600_000;
   const now = Date.now();
@@ -465,7 +475,7 @@ function UserList({ users, total, metrics, query, setQuery, planFilter, setPlanF
       {/* Header strip - keeps the icon + title compact and pushes the
           action cluster to the right. Stats live in their own dense card
           row below so the title bar stays scannable. */}
-      <div className="flex items-center gap-2 mb-3">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="w-8 h-8 rounded-xl bg-white/[0.08] border border-white/[0.10] flex items-center justify-center text-white/55 flex-shrink-0">
           <Shield size={15} />
         </div>
@@ -476,7 +486,7 @@ function UserList({ users, total, metrics, query, setQuery, planFilter, setPlanF
             {activeNow} active now
           </span>
         )}
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-1">
           <label className="flex items-center gap-1.5 text-[11px] text-white/45 hover:text-white/70 px-2 py-1.5 rounded-lg hover:bg-white/[0.05] cursor-pointer transition-colors">
             <input
               type="checkbox"
@@ -492,6 +502,13 @@ function UserList({ users, total, metrics, query, setQuery, planFilter, setPlanF
             title="QBpedia Reports"
           >
             <Globe size={13} /> Wiki
+          </button>
+          <button
+            onClick={onSetReports}
+            className="flex items-center gap-1 text-white/35 hover:text-rose-200 px-2.5 py-1.5 rounded-lg hover:bg-rose-500/[0.08] transition-colors text-[11px] font-medium"
+            title="Reported Quiz Bowl sets"
+          >
+            <Flag size={13} /> Set reports
           </button>
           <button
             onClick={onReferrals}
@@ -2042,6 +2059,139 @@ function ConversationViewer({ conv, onBack }) {
             <div className="text-xs text-white/80 whitespace-pre-wrap break-words">{m.content}</div>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+/* =====================================================================
+ * QUIZ BOWL SET REPORTS
+ * Reviews reports against public collection sets. Community packets can
+ * be unpublished without deleting the creator's editable source packet.
+ * ===================================================================*/
+const SET_REPORT_REASON_LABELS = {
+  inappropriate: 'Inappropriate or offensive',
+  inaccurate: 'Inaccurate or misleading',
+  spam: 'Spam or low quality',
+  copyright: 'Copyright or copied material',
+  other: 'Other',
+};
+
+function QuizBowlSetReportsPanel({ onClose }) {
+  const [reports, setReports] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState({});
+  const [expanded, setExpanded] = useState(null);
+  const toast = useToast();
+
+  useEffect(() => {
+    let active = true;
+    listQuizBowlSetReports()
+      .then(data => { if (active) setReports(data.reports || []); })
+      .catch(error => { if (active) toast.error(error.message || 'Could not load set reports.'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  async function resolve(report, resolution) {
+    if (resolution === 'unpublish' && !confirm(`Unpublish “${report.setTitle}”? The creator will keep it as a draft.`)) return;
+    setBusy(current => ({ ...current, [report.id]: resolution }));
+    try {
+      const result = await resolveQuizBowlSetReport(report.id, resolution);
+      const affected = new Set(result.affectedIds || [report.id]);
+      setReports(current => current.filter(item => !affected.has(item.id)));
+      setExpanded(current => affected.has(current) ? null : current);
+      toast.success(resolution === 'unpublish' ? 'Set unpublished and related reports resolved.' : 'Report resolved.');
+    } catch (error) {
+      toast.error(error.message || 'Could not resolve this report.');
+    } finally {
+      setBusy(current => ({ ...current, [report.id]: null }));
+    }
+  }
+
+  return (
+    <div className="h-full min-h-0 overflow-y-auto">
+      <div className="p-5 pb-8">
+        <button onClick={onClose} className="mb-4 flex items-center gap-1.5 text-[12px] text-white/40 transition-colors hover:text-white/75">
+          <ArrowLeft size={15} /> Admin
+        </button>
+        <div className="mb-5 flex items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-rose-400/20 bg-rose-500/[0.10]">
+            <Flag size={15} className="text-rose-300" />
+          </div>
+          <div>
+            <h2 className="text-[15px] font-bold text-white/90">Quiz Bowl set reports</h2>
+            <p className="mt-0.5 text-[10px] text-white/35">Review content flags from the public set collection</p>
+          </div>
+          {!loading && <span className="ml-auto rounded-full border border-white/[0.08] bg-white/[0.04] px-2 py-0.5 text-[10px] tabular-nums text-white/40">{reports.length} open</span>}
+        </div>
+
+        {loading ? (
+          <div className="flex justify-center py-16"><LoadingSpinner size={22} /></div>
+        ) : reports.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-white/[0.10] bg-white/[0.02] px-5 py-12 text-center">
+            <Check size={25} className="mx-auto mb-2 text-emerald-300/45" />
+            <p className="text-[13px] font-semibold text-white/65">No open set reports</p>
+            <p className="mt-1 text-[11px] text-white/30">New reports will appear here for review.</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {reports.map(report => {
+              const isOpen = expanded === report.id;
+              const resolving = busy[report.id];
+              return (
+                <div key={report.id} className="overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.03]">
+                  <button type="button" onClick={() => setExpanded(isOpen ? null : report.id)} aria-expanded={isOpen}
+                    className="flex w-full items-start gap-3 px-3.5 py-3 text-left transition-colors hover:bg-white/[0.025]">
+                    <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-rose-400/20 bg-rose-500/[0.10]">
+                      <Flag size={12} className="text-rose-300" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <p className="truncate text-[13px] font-semibold text-white/90">{report.setTitle}</p>
+                        <span className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${report.source === 'community' ? 'bg-blue-500/[0.14] text-blue-200/90' : 'bg-emerald-500/[0.13] text-emerald-200/90'}`}>{report.source}</span>
+                      </div>
+                      <p className="mt-0.5 truncate text-[11px] text-white/45">{SET_REPORT_REASON_LABELS[report.reason] || report.reason}</p>
+                      <p className="mt-0.5 text-[10px] text-white/25">{report.setAuthor} · {new Date(report.createdAt).toLocaleString()}</p>
+                    </div>
+                    <ChevronDown size={14} className={`mt-1 shrink-0 text-white/30 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {isOpen && (
+                    <div className="space-y-3 border-t border-white/[0.05] bg-black/20 px-3.5 py-3">
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <div className="rounded-lg border border-white/[0.07] bg-white/[0.025] px-3 py-2">
+                          <p className="mb-1 text-[9px] font-bold uppercase tracking-[0.14em] text-white/30">Reported by</p>
+                          <p className="break-all text-[11px] text-white/65">{report.reportedBy}</p>
+                        </div>
+                        <div className="rounded-lg border border-white/[0.07] bg-white/[0.025] px-3 py-2">
+                          <p className="mb-1 text-[9px] font-bold uppercase tracking-[0.14em] text-white/30">Listing</p>
+                          <p className="truncate font-mono text-[10px] text-white/55">{report.listingId}</p>
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-amber-400/20 bg-amber-500/[0.07] px-3 py-2.5">
+                        <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-amber-300/70">Report details</p>
+                        <p className="whitespace-pre-wrap text-[12px] leading-relaxed text-white/75">{report.details || 'No additional details provided.'}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {report.source === 'community' && (
+                          <button onClick={() => resolve(report, 'unpublish')} disabled={!!resolving}
+                            className="flex items-center gap-1.5 rounded-lg border border-rose-400/30 bg-rose-500/[0.14] px-3 py-1.5 text-[11px] font-semibold text-rose-200 transition-colors hover:bg-rose-500/[0.22] disabled:opacity-40">
+                            {resolving === 'unpublish' ? <RefreshCw size={11} className="animate-spin" /> : <Trash2 size={11} />} Unpublish set
+                          </button>
+                        )}
+                        <button onClick={() => resolve(report, 'dismiss')} disabled={!!resolving}
+                          className="flex items-center gap-1.5 rounded-lg border border-white/[0.10] bg-white/[0.05] px-3 py-1.5 text-[11px] font-semibold text-white/55 transition-colors hover:bg-white/[0.09] hover:text-white/75 disabled:opacity-40">
+                          {resolving === 'dismiss' ? <RefreshCw size={11} className="animate-spin" /> : <Check size={11} />} {report.source === 'community' ? 'Dismiss report' : 'Mark resolved'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

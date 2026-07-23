@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { Zap, Play, Check, X, BookOpen, Sparkles, ArrowRight, Users, Bot, Store } from 'lucide-react';
+import { Zap, Check, X, ArrowRight } from 'lucide-react';
 import { apiFetch } from '../../api/client';
 import MobileMatch from './MobileMatch';
 import { fetchQBReaderTossups, getQuizBowlCollectionSet, fetchQuizBowlPresetSet, saveQuizBowlSet } from '../../api/quizMatch';
-import { InlineProgress } from '../shared/ProgressBar';
 import QbModelPicker from '../shared/QbModelPicker';
 import { useQbModel } from '../../hooks/useQbModel';
 import { studyModelLabel } from '../study/studyModels';
@@ -11,8 +10,8 @@ import { judgeQuizBowlQuestion } from '../../lib/qbAnswerChecker';
 import { useAuth } from '../../context/AuthContext';
 import { markLessonComplete } from '../../api/curriculum';
 import { QuizBowlCollection } from '../desktop/apps/QuizBowlSetLibrary';
+import QuizBowlGameSetup from '../quizbowl/QuizBowlGameSetup';
 
-const DIFFICULTIES = ['Easy', 'Medium', 'Hard', 'Tournament'];
 const CATEGORIES = ['Science', 'History', 'Literature', 'Geography', 'Math', 'Art', 'Music', 'Philosophy', 'Pop Culture', 'Mixed'];
 
 const SYSTEM_PROMPT = `You are an elite ACF/NAQT packet editor writing rigorously pyramidal quiz bowl tossups.
@@ -82,12 +81,22 @@ export default function MobileQuizBowl() {
   // into a room setup with bot fill pre-enabled.
   const [matchScreen, setMatchScreen] = useState(null);
   const [matchSet, setMatchSet] = useState(null);
+  const [matchConfig, setMatchConfig] = useState(null);
+  const [matchJoinCode, setMatchJoinCode] = useState(null);
+  const [setupPlayMode, setSetupPlayMode] = useState('multiplayer');
+  const [setupMatchMode, setSetupMatchMode] = useState('individual');
+  const [setupFillWithBots, setSetupFillWithBots] = useState(false);
+  const [setupBotLevel, setSetupBotLevel] = useState('varsity');
+  const [setupScoringFormat, setSetupScoringFormat] = useState('iac-prelim');
+  const [setupJoinCode, setSetupJoinCode] = useState('');
   const [questions, setQuestions] = useState([]);
   const [currentQ, setCurrentQ] = useState(0);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState(null);
 
-  const [category, setCategory] = useState(() => onboardingSetup?.category || onboardingDefaults?.category || 'Mixed');
+  const initialSoloCategory = onboardingSetup?.category || onboardingDefaults?.category || 'Mixed';
+  const [category, setCategory] = useState(initialSoloCategory);
+  const [selectedCategories, setSelectedCategories] = useState(() => [initialSoloCategory]);
   const [difficulty, setDifficulty] = useState(() => onboardingSetup?.difficulty || onboardingDefaults?.difficulty || 'Medium');
   const [questionSource, setQuestionSource] = useState(() => onboardingSetup?.source === 'ai' ? 'ai' : 'qbreader');
   const [customInstructions, setCustomInstructions] = useState(() => onboardingSetup?.customInstructions || onboardingDefaults?.customInstructions || '');
@@ -95,6 +104,34 @@ export default function MobileQuizBowl() {
   const [revealSpeedMs, setRevealSpeedMs] = useState(140);
   // Which AI writes the AI-generated tossups (persisted, plan-gated).
   const { model: qbModel, pick: pickQbModel, available: qbModels } = useQbModel();
+
+  function selectQuestionSource(nextSource) {
+    setQuestionSource(nextSource);
+    if (nextSource === 'ai' && selectedCategories.length > 1) {
+      setCategory(selectedCategories[0]);
+    }
+  }
+
+  function selectCategory(nextCategory) {
+    if (questionSource !== 'qbreader') {
+      setCategory(nextCategory);
+      setSelectedCategories([nextCategory]);
+      return;
+    }
+    setSelectedCategories(current => {
+      if (nextCategory === 'Mixed') {
+        setCategory('Mixed');
+        return ['Mixed'];
+      }
+      const subjects = current.filter(value => value !== 'Mixed');
+      const next = subjects.includes(nextCategory)
+        ? subjects.filter(value => value !== nextCategory)
+        : [...subjects, nextCategory];
+      const normalized = next.length ? CATEGORIES.filter(value => next.includes(value)) : ['Mixed'];
+      setCategory(normalized.length === 1 ? normalized[0] : 'Mixed');
+      return normalized;
+    });
+  }
 
   const [buzzed, setBuzzed] = useState(false);
   const [answer, setAnswer] = useState('');
@@ -118,13 +155,21 @@ export default function MobileQuizBowl() {
   }, [onboardingSetup]);
 
   async function handleStart(overrides = {}) {
-    const nextCategory = overrides.category || category;
     const nextDifficulty = overrides.difficulty || difficulty;
     const nextSource = overrides.source || questionSource;
+    const nextCategory = overrides.category || (nextSource === 'qbreader' && selectedCategories.length > 1 ? 'Mixed' : category);
+    const nextCategories = Array.isArray(overrides.categories) && overrides.categories.length
+      ? overrides.categories
+      : overrides.category
+        ? [nextCategory]
+        : nextSource === 'qbreader'
+          ? selectedCategories
+          : [nextCategory];
     const nextCount = overrides.questionCount || questionCount;
     const nextInstructions = overrides.customInstructions ?? customInstructions;
     const nextTitle = overrides.title || '';
-    setCategory(nextCategory);
+    setCategory(nextSource === 'qbreader' && nextCategories.length > 1 ? 'Mixed' : nextCategory);
+    setSelectedCategories(nextCategories);
     setDifficulty(nextDifficulty);
     setQuestionSource(nextSource);
     setQuestionCount(nextCount);
@@ -133,7 +178,7 @@ export default function MobileQuizBowl() {
     setGenerating(true); setError(null);
     if (nextSource === 'qbreader') {
       try {
-        const data = await fetchQBReaderTossups({ count: nextCount, category: nextCategory, difficulty: nextDifficulty });
+        const data = await fetchQBReaderTossups({ count: nextCount, category: nextCategory, categories: nextCategories, difficulty: nextDifficulty });
         const tossups = data?.tossups || [];
         if (!tossups.length) setError('No questions for that combo. Try another.');
         else {
@@ -165,6 +210,37 @@ export default function MobileQuizBowl() {
     setGenerating(false);
   }
 
+  function startConfiguredGame() {
+    if (setupPlayMode === 'solo') {
+      handleStart();
+      return;
+    }
+    const exactCategory = matchSet?.category || category;
+    setMatchJoinCode(null);
+    setMatchConfig({
+      matchMode: setupMatchMode,
+      questionSource: matchSet ? 'saved' : questionSource,
+      category: exactCategory,
+      categories: matchSet ? [exactCategory] : selectedCategories,
+      difficulty: matchSet?.difficulty || difficulty,
+      questionCount: matchSet?.questions?.length || questionCount,
+      revealSpeedMs,
+      scoringFormat: setupScoringFormat,
+      fillWithBots: setupFillWithBots,
+      botLevel: setupBotLevel,
+      setInstructions: questionSource === 'ai' ? customInstructions : '',
+    });
+    setMatchScreen('configured');
+  }
+
+  function joinConfiguredGame() {
+    const code = setupJoinCode.trim().toUpperCase();
+    if (code.length < 4) return;
+    setMatchConfig(null);
+    setMatchJoinCode(code);
+    setMatchScreen('join');
+  }
+
   const autoGenerationStarted = useRef(false);
   useEffect(() => {
     if (!onboardingSetup?.autoStart || autoGenerationStarted.current) return;
@@ -178,7 +254,9 @@ export default function MobileQuizBowl() {
       const set = data.set || {};
       const playable = (set.questions || []).filter(question => String(question.text || '').trim() && String(question.answer || '').trim());
       if (!playable.length) throw new Error('This preset set has no playable tossups.');
-      setCategory(set.category || listing.category || 'Geography');
+      const presetCategory = set.category || listing.category || 'Geography';
+      setCategory(presetCategory);
+      setSelectedCategories([presetCategory]);
       setDifficulty(set.difficulty || 'Easy');
       setQuestionSource('saved');
       setActiveTitle(set.title || listing.title || 'Preset set');
@@ -190,7 +268,9 @@ export default function MobileQuizBowl() {
     const set = data.set || {};
     const playable = (set.questions || []).filter(question => String(question.text || '').trim() && String(question.answer || '').trim());
     if (!playable.length) throw new Error('This collection set has no playable tossups.');
-    setCategory(set.category || 'Mixed');
+    const collectionCategory = set.category || 'Mixed';
+    setCategory(collectionCategory);
+    setSelectedCategories([collectionCategory]);
     setDifficulty(set.difficulty || 'Medium');
     setQuestionSource('saved');
     setActiveTitle(set.title || listing.title || 'Collection set');
@@ -206,7 +286,10 @@ export default function MobileQuizBowl() {
     const playable = (set.questions || []).filter(question => String(question.text || '').trim() && String(question.answer || '').trim());
     if (!playable.length) throw new Error('This collection set has no playable tossups.');
     setMatchSet({ ...set, questions: playable, title: set.title || listing.title });
-    setMatchScreen('set');
+    setSetupPlayMode('multiplayer');
+    setMatchConfig(null);
+    setMatchJoinCode(null);
+    setView('setup');
   }
 
   function handleBuzz() { if (buzzed || !reading) return; setAnswerPrompt(''); setBuzzed(true); setReading(false); stop(); }
@@ -238,7 +321,7 @@ export default function MobileQuizBowl() {
     if (currentQ + 1 < questions.length) {
       setCurrentQ((p) => p + 1); setBuzzed(false); setShowResult(false); setCorrect(null); setWrongAnswer(null); setAnswer(''); setAnswerPrompt(''); setReading(true);
     } else if (questionSource === 'qbreader') {
-      fetchQBReaderTossups({ count: questionCount, category, difficulty }).then((data) => {
+      fetchQBReaderTossups({ count: questionCount, category, categories: selectedCategories, difficulty }).then((data) => {
         const more = data?.tossups || [];
         if (more.length) setQuestions((prev) => [...prev, ...more]);
       }).catch(() => {});
@@ -327,10 +410,16 @@ export default function MobileQuizBowl() {
     return (
       <MobileMatch
         key={matchScreen}
-        initialView={matchScreen === 'bots' || matchScreen === 'set' ? 'setup' : 'menu'}
-        initialFillWithBots={matchScreen === 'bots'}
         initialSet={matchSet}
-        onExit={() => { setMatchSet(null); setMatchScreen(null); }}
+        initialConfig={matchConfig}
+        initialJoinCode={matchJoinCode}
+        autoCreate={matchScreen === 'configured'}
+        onExit={() => {
+          setMatchSet(null);
+          setMatchConfig(null);
+          setMatchJoinCode(null);
+          setMatchScreen(null);
+        }}
       />
     );
   }
@@ -462,135 +551,42 @@ export default function MobileQuizBowl() {
 
   // ===== SETUP =====
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-6 pb-8 bg-transparent">
-      {/* Hero */}
-      <div className="text-center mb-6">
-        <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-blue-500/15 border border-blue-400/25 mb-3">
-          <Zap size={22} className="text-yellow-300" />
-        </div>
-        <h1 className="text-[24px] font-bold text-white tracking-tight">Quiz Bowl</h1>
-      </div>
-
-      {error && <p className="text-[11px] text-rose-400 px-3 py-2 mb-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-center">{error}</p>}
-
-      {/* Play with others */}
-      <div className="grid grid-cols-2 gap-2 mb-4">
-        <MobileTile emphasized icon={<Users size={14} />} label="Multiplayer" sub="Rooms & join codes" onClick={() => setMatchScreen('menu')} />
-        <MobileTile emphasized icon={<Bot size={14} />} label="Vs AI bots" sub="You + up to 7 bots" onClick={() => setMatchScreen('bots')} />
-      </div>
-
-      <button type="button" onClick={() => setView('collection')}
-        className="mb-4 flex min-h-14 w-full items-center gap-3 rounded-2xl border border-blue-400/25 bg-blue-500/[0.07] px-3.5 py-3 text-left active:bg-blue-500/[0.14]">
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-blue-400/20 bg-blue-500/10 text-blue-300"><Store size={15} /></span>
-        <span className="min-w-0 flex-1"><span className="block text-[13px] font-bold text-white/85">Quiz Bowl Collection</span><span className="block text-[10px] text-white/35">Play already-created community sets</span></span>
-        <ArrowRight size={14} className="text-white/25" />
-      </button>
-
-      {/* Source */}
-      <p className="text-[10px] text-white/30 uppercase tracking-wider mb-1.5">Solo round</p>
-      <div className="grid grid-cols-2 gap-2 mb-4">
-        <MobileTile active={questionSource === 'qbreader'} icon={<BookOpen size={14} />} label="Past QB" sub="qbreader.org" onClick={() => setQuestionSource('qbreader')} />
-        <MobileTile active={questionSource === 'ai'} icon={<Sparkles size={14} />} label="Custom" sub={studyModelLabel(qbModel)} onClick={() => setQuestionSource('ai')} />
-      </div>
-
-      {/* AI model (AI only) */}
-      {questionSource === 'ai' && (
-        <div className="mb-4">
-          <QbModelPicker value={qbModel} onPick={pickQbModel} models={qbModels} />
-        </div>
-      )}
-
-      {questionSource === 'ai' && (
-        <div className="mb-4">
-          <label htmlFor="mobile-custom-instructions" className="mb-1.5 block text-[10px] uppercase tracking-wider text-white/30">Custom focus</label>
-          <textarea
-            id="mobile-custom-instructions"
-            value={customInstructions}
-            onChange={(event) => setCustomInstructions(event.target.value)}
-            rows={2}
-            placeholder="Custom instructions…"
-            className="w-full resize-none rounded-2xl border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 text-[12px] text-white/80 placeholder:text-white/20 outline-none transition-colors focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/15"
-          />
-        </div>
-      )}
-
-      {/* Category */}
-      <div className="mb-4">
-        <div className="grid grid-cols-3 gap-1.5">
-          {CATEGORIES.map((c) => (
-            <MobilePill key={c} active={category === c} onClick={() => setCategory(c)}>{c}</MobilePill>
-          ))}
-        </div>
-      </div>
-
-      {/* Difficulty */}
-      <div className="mb-4">
-        <div className="grid grid-cols-2 gap-1.5">
-          {DIFFICULTIES.map((d) => (
-            <MobilePill key={d} active={difficulty === d} onClick={() => setDifficulty(d)}>{d}</MobilePill>
-          ))}
-        </div>
-      </div>
-
-      {questionSource === 'ai' && (
-        <div className="mb-4">
-          <div className="mb-1.5 flex items-center justify-between">
-            <span className="text-[10px] uppercase tracking-wider text-white/30">Questions</span>
-            <span className="text-[11px] font-mono text-blue-300">{questionCount}</span>
-          </div>
-          <input type="range" min="5" max="15" step="5" value={questionCount} onChange={(event) => setQuestionCount(Number(event.target.value))} className="w-full accent-blue-500" />
-        </div>
-      )}
-
-      {/* Speed */}
-      <div className="mb-5">
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="text-[10px] text-white/30 uppercase tracking-wider">Speed</span>
-          <span className="text-[11px] font-mono text-blue-300">{revealSpeedMs}ms</span>
-        </div>
-        <input type="range" min="60" max="400" step="10" value={revealSpeedMs}
-          onChange={(e) => setRevealSpeedMs(Number(e.target.value))} className="w-full accent-blue-500" />
-      </div>
-
-      {/* Start */}
-      <button onClick={() => handleStart()} disabled={generating}
-        className="w-full py-4 rounded-2xl bg-blue-500 hover:bg-blue-400 active:bg-blue-600 disabled:opacity-50 text-white text-[15px] font-bold inline-flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0a0a14]">
-        {generating
-          ? <><InlineProgress active /> {questionSource === 'qbreader' ? 'Loading…' : 'Generating…'}</>
-          : <><Play size={16} /> Start</>}
-      </button>
+    <div className="flex-1 min-h-0 overflow-y-auto bg-transparent">
+      <QuizBowlGameSetup
+        mobile
+        playMode={setupPlayMode}
+        onPlayModeChange={mode => { setSetupPlayMode(mode); if (mode === 'solo') setMatchSet(null); }}
+        matchMode={setupMatchMode}
+        onMatchModeChange={setSetupMatchMode}
+        questionSource={matchSet ? 'saved' : questionSource}
+        onQuestionSourceChange={selectQuestionSource}
+        categories={matchSet ? [matchSet.category || 'Mixed'] : selectedCategories}
+        onToggleCategory={selectCategory}
+        difficulty={matchSet?.difficulty || difficulty}
+        onDifficultyChange={setDifficulty}
+        questionCount={matchSet?.questions?.length || questionCount}
+        onQuestionCountChange={setQuestionCount}
+        revealSpeedMs={revealSpeedMs}
+        onRevealSpeedChange={setRevealSpeedMs}
+        customInstructions={customInstructions}
+        onCustomInstructionsChange={setCustomInstructions}
+        aiModelLabel={studyModelLabel(qbModel)}
+        aiModelControl={<QbModelPicker value={qbModel} onPick={pickQbModel} models={qbModels} />}
+        fillWithBots={setupFillWithBots}
+        onFillWithBotsChange={setSetupFillWithBots}
+        botLevel={setupBotLevel}
+        onBotLevelChange={setSetupBotLevel}
+        scoringFormat={setupScoringFormat}
+        onScoringFormatChange={setSetupScoringFormat}
+        joinCode={setupJoinCode}
+        onJoinCodeChange={setSetupJoinCode}
+        onJoin={joinConfiguredGame}
+        onBrowseCollection={() => setView('collection')}
+        initialSet={matchSet}
+        busy={generating}
+        error={error}
+        onSubmit={startConfiguredGame}
+      />
     </div>
-  );
-}
-
-function MobileTile({ active, emphasized = false, icon, label, sub, onClick }) {
-  return (
-    <button onClick={onClick}
-      className={`text-left rounded-2xl border p-3 transition-all backdrop-blur-sm ${
-        active
-          ? 'border-blue-400/50 bg-blue-500/15 text-white/85'
-          : emphasized
-            ? 'border-blue-400/35 bg-blue-500/[0.08] text-white/80 active:bg-blue-500/15'
-            : 'border-white/[0.06] bg-white/[0.02] text-white/40 active:bg-white/[0.05]'
-      }`}>
-      <div className="flex items-center gap-1.5 mb-0.5">
-        <span className={active ? 'text-blue-300' : emphasized ? 'text-blue-300' : undefined}>{icon}</span>
-        <p className="text-[12px] font-bold">{label}</p>
-      </div>
-      {sub && <p className="text-[10px] opacity-40">{sub}</p>}
-    </button>
-  );
-}
-
-function MobilePill({ active, onClick, children }) {
-  return (
-    <button onClick={onClick}
-      className={`px-3 py-2 rounded-xl text-[12px] font-semibold tracking-tight whitespace-nowrap transition-colors backdrop-blur-sm ${
-        active
-          ? 'bg-blue-500/15 text-blue-100 border border-blue-400/50'
-          : 'bg-white/[0.04] border border-white/[0.05] text-white/35 active:bg-white/[0.08] active:text-white/60'
-      }`}>
-      {children}
-    </button>
   );
 }

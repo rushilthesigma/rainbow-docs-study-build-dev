@@ -1,16 +1,29 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Check, FileText, Globe2, Landmark, Loader2, Pencil, Play, Plus, Save, Search, Send, Store, Trash2, Upload, UserRound, Users } from 'lucide-react';
+import { ArrowLeft, Check, FileText, Flag, Globe2, Landmark, Loader2, Pencil, Play, Plus, Save, Search, Send, Sparkles, Store, Trash2, Upload, UserRound, Users } from 'lucide-react';
 import {
   fetchQuizBowlCollection,
   fetchQuizBowlCountryPresets,
   fetchQuizBowlPresetSet,
+  reportQuizBowlCollectionSet,
   updateSavedQuizBowlSet,
 } from '../../../api/quizMatch';
 import ProgressBar from '../../shared/ProgressBar';
 import Dropdown from '../../shared/Dropdown';
+import QbModelPicker from '../../shared/QbModelPicker';
+import Modal from '../../shared/Modal';
+import Button from '../../shared/Button';
 
 const REGIONS = ['Africa', 'Americas', 'Asia', 'Europe', 'Oceania'];
 const DIFFICULTIES = ['Easy', 'Medium', 'Hard', 'Tournament'];
+const SET_CATEGORIES = ['Mixed', 'History', 'Science', 'Literature', 'Geography', 'Art', 'Music', 'Philosophy', 'Math', 'Pop Culture'];
+const SET_COUNTS = [5, 10, 15];
+const REPORT_REASONS = [
+  { value: 'inappropriate', label: 'Inappropriate or offensive content' },
+  { value: 'inaccurate', label: 'Inaccurate or misleading questions' },
+  { value: 'spam', label: 'Spam or low-quality content' },
+  { value: 'copyright', label: 'Copyright or copied material' },
+  { value: 'other', label: 'Something else' },
+];
 
 function normalizeCountryPreset(preset) {
   const isHistory = String(preset?.slug || '').startsWith('history-')
@@ -127,6 +140,12 @@ export function QuizBowlCollection({ onBack, onMyPackets, onPlay, onPlayMultipla
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('All');
   const [playingId, setPlayingId] = useState(null);
+  const [reporting, setReporting] = useState(null);
+  const [reportReason, setReportReason] = useState(REPORT_REASONS[0].value);
+  const [reportDetails, setReportDetails] = useState('');
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reportError, setReportError] = useState('');
+  const [reportedIds, setReportedIds] = useState(() => new Set());
 
   async function load() {
     setLoading(true); setError('');
@@ -174,6 +193,29 @@ export function QuizBowlCollection({ onBack, onMyPackets, onPlay, onPlayMultipla
     setPlayingId(null);
   }
 
+  function openReport(listing) {
+    setReporting(listing);
+    setReportReason(REPORT_REASONS[0].value);
+    setReportDetails('');
+    setReportError('');
+  }
+
+  async function submitReport(event) {
+    event.preventDefault();
+    if (!reporting || reportBusy) return;
+    setReportBusy(true); setReportError('');
+    try {
+      await reportQuizBowlCollectionSet(reporting.listingId, {
+        reason: reportReason,
+        details: reportDetails.trim(),
+      });
+      setReportedIds(current => new Set(current).add(reporting.listingId));
+      setReporting(null);
+    } catch (err) {
+      setReportError(err.message || 'Could not submit this report.');
+    } finally { setReportBusy(false); }
+  }
+
   function listingRows(items) {
     return items.map(listing => {
       const busy = playingId === listing.listingId;
@@ -194,6 +236,11 @@ export function QuizBowlCollection({ onBack, onMyPackets, onPlay, onPlayMultipla
             className={`inline-flex ${busy && isPreset ? 'min-w-[100px]' : 'min-w-[64px]'} items-center justify-center gap-1.5 rounded-lg border border-blue-500 bg-blue-500 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:border-blue-400 hover:bg-blue-400 disabled:opacity-40 transition-colors ${mobile ? 'min-h-11' : ''}`}>{busy ? <><Loader2 size={12} className="animate-spin" />{isPreset && <span>Set is loading…</span>}</> : <><Play size={12} /> Play</>}</button>
           {onPlayMultiplayer && <button onClick={() => playMultiplayer(listing)} disabled={!!playingId} aria-label={`Play ${listing.title} in multiplayer`} title="Play in multiplayer"
             className={`inline-flex items-center justify-center gap-1.5 rounded-lg border border-sky-400/35 bg-sky-500/[0.10] px-2.5 py-1.5 text-[11px] font-semibold text-sky-200 hover:border-sky-300/55 hover:bg-sky-500/[0.18] disabled:opacity-40 transition-colors ${mobile ? 'min-h-11' : ''}`}><Users size={12} /> <span className="hidden sm:inline">Multiplayer</span></button>}
+          <button type="button" onClick={() => openReport(listing)} disabled={reportedIds.has(listing.listingId)}
+            aria-label={reportedIds.has(listing.listingId) ? `${listing.title} reported` : `Report ${listing.title}`} title={reportedIds.has(listing.listingId) ? 'Report submitted' : 'Report this set'}
+            className={`inline-flex items-center justify-center rounded-lg text-white/25 transition-colors hover:bg-rose-500/10 hover:text-rose-300 disabled:cursor-default disabled:text-emerald-300/55 disabled:hover:bg-transparent ${mobile ? 'min-h-11 min-w-11' : 'h-7 w-7'}`}>
+            {reportedIds.has(listing.listingId) ? <Check size={13} /> : <Flag size={13} />}
+          </button>
         </div>
       </div>;
     });
@@ -247,6 +294,33 @@ export function QuizBowlCollection({ onBack, onMyPackets, onPlay, onPlayMultipla
           </div>
         )}
       </div>
+      <Modal
+        open={!!reporting}
+        onClose={() => !reportBusy && setReporting(null)}
+        title="Report set"
+        description={reporting ? `Tell the moderation team what is wrong with “${reporting.title}”.` : ''}
+        size="sm"
+        closeOnOverlay={!reportBusy}
+      >
+        <form onSubmit={submitReport} className="space-y-4">
+          <div>
+            <label className="mb-1.5 block text-[11px] font-semibold text-gray-600 dark:text-white/55">Reason</label>
+            <Dropdown value={reportReason} options={REPORT_REASONS} onChange={setReportReason} aria-label="Reason for reporting this set" />
+          </div>
+          <div>
+            <label htmlFor="quizbowl-report-details" className="mb-1.5 block text-[11px] font-semibold text-gray-600 dark:text-white/55">Details <span className="font-normal text-gray-400 dark:text-white/30">(optional)</span></label>
+            <textarea id="quizbowl-report-details" value={reportDetails} onChange={event => setReportDetails(event.target.value.slice(0, 1000))}
+              rows={5} placeholder="Point out the question, answer, or content that should be reviewed."
+              className="w-full resize-none rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-[12px] text-gray-900 outline-none placeholder:text-gray-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-400/15 dark:border-white/[0.08] dark:bg-white/[0.04] dark:text-white/85 dark:placeholder:text-white/25" />
+            <p className="mt-1 text-right text-[10px] tabular-nums text-gray-400 dark:text-white/25">{reportDetails.length}/1000</p>
+          </div>
+          {reportError && <p role="alert" className="rounded-lg border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-300">{reportError}</p>}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" size="sm" disabled={reportBusy} onClick={() => setReporting(null)}>Cancel</Button>
+            <Button type="submit" variant="danger" size="sm" loading={reportBusy}>{reportBusy ? <><Loader2 size={13} className="animate-spin" /> Sending…</> : <><Flag size={13} /> Submit report</>}</Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }
@@ -289,7 +363,7 @@ export function SavedSetLibrary({ sets, loading, onBack, onNew, onImport, onEdit
             className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.10] bg-white/[0.03] px-2.5 py-1.5 text-[12px] font-semibold text-white/65 hover:bg-white/[0.08] hover:text-white disabled:opacity-45 transition-colors">
             {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} {importing ? 'Importing…' : 'Import PDF'}
           </button>
-          <button onClick={onNew} className="inline-flex items-center gap-1.5 rounded-lg bg-blue-500 px-2.5 py-1.5 text-[12px] font-semibold text-white hover:bg-blue-400 transition-colors"><Plus size={13} /> Create packet</button>
+          <button onClick={onNew} className="inline-flex items-center gap-1.5 rounded-lg bg-blue-500 px-2.5 py-1.5 text-[12px] font-semibold text-white hover:bg-blue-400 transition-colors"><Plus size={13} /> Create set</button>
         </div>
       </div>
 
@@ -315,7 +389,7 @@ export function SavedSetLibrary({ sets, loading, onBack, onNew, onImport, onEdit
             <p className="mx-auto mt-1 max-w-sm text-[11px] leading-relaxed text-white/35">Write a packet from scratch or import a text-based PDF with numbered tossups and ANSWER: lines.</p>
             <div className="mt-4 flex justify-center gap-2">
               <button onClick={() => fileInputRef.current?.click()} className="rounded-lg border border-white/[0.10] px-3 py-2 text-[12px] font-semibold text-white/60 hover:bg-white/[0.06]">Import PDF</button>
-              <button onClick={onNew} className="rounded-lg bg-blue-500 px-3 py-2 text-[12px] font-semibold text-white hover:bg-blue-400">Create packet</button>
+              <button onClick={onNew} className="rounded-lg bg-blue-500 px-3 py-2 text-[12px] font-semibold text-white hover:bg-blue-400">Create set</button>
             </div>
           </div>
         ) : visibleSets.length === 0 ? (
@@ -345,6 +419,201 @@ export function SavedSetLibrary({ sets, loading, onBack, onNew, onImport, onEdit
             </div>
           );
         })}</div>}
+      </div>
+    </div>
+  );
+}
+
+export function SavedSetCreator({
+  initial = {},
+  onBack,
+  onCreateManual,
+  onGenerate,
+  model,
+  models,
+  onPickModel,
+}) {
+  const [mode, setMode] = useState(initial.mode === 'manual' ? 'manual' : 'ai');
+  const [title, setTitle] = useState(initial.title || '');
+  const [categories, setCategories] = useState(() => {
+    const seeded = Array.isArray(initial.categories)
+      ? initial.categories.filter(category => SET_CATEGORIES.includes(category))
+      : (SET_CATEGORIES.includes(initial.category) ? [initial.category] : []);
+    return seeded.length ? [...new Set(seeded)] : ['Mixed'];
+  });
+  const [difficulty, setDifficulty] = useState(DIFFICULTIES.includes(initial.difficulty) ? initial.difficulty : 'Medium');
+  const [count, setCount] = useState(SET_COUNTS.includes(initial.count) ? initial.count : 10);
+  const [prompt, setPrompt] = useState(initial.prompt || '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const categoryLabel = categories.length === 1 ? categories[0] : categories.join(' + ');
+
+  const payload = {
+    title: title.trim() || `${categoryLabel} custom set`,
+    category: categoryLabel,
+    categories,
+    difficulty,
+    count,
+    prompt: prompt.trim(),
+  };
+
+  function toggleCategory(category) {
+    if (category === 'Mixed') {
+      setCategories(['Mixed']);
+      return;
+    }
+    setCategories(current => {
+      const specific = current.filter(value => value !== 'Mixed');
+      if (specific.includes(category)) {
+        const next = specific.filter(value => value !== category);
+        return next.length ? next : ['Mixed'];
+      }
+      return [...specific, category];
+    });
+  }
+
+  async function submit() {
+    if (busy) return;
+    if (mode === 'ai' && !prompt.trim()) {
+      setError('Describe the set you want the AI to write.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      if (mode === 'ai') await onGenerate(payload);
+      else await onCreateManual(payload);
+    } catch (err) {
+      setError(err.message || `Could not ${mode === 'ai' ? 'generate' : 'create'} this set.`);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="h-full min-h-0 flex flex-col bg-transparent">
+      <div className="flex items-center gap-3 border-b border-white/[0.06] px-5 py-3 flex-shrink-0">
+        <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-white/40 transition-colors hover:text-white/75"><ArrowLeft size={15} /> Back</button>
+        <div className="min-w-0">
+          <h2 className="text-[15px] font-bold text-white/90">Set creator</h2>
+          <p className="text-[10px] text-white/35">Generate a draft with AI or write every tossup yourself</p>
+        </div>
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto p-5">
+        <div className="mx-auto max-w-xl space-y-4">
+          <div className="grid grid-cols-2 gap-1 rounded-xl border border-white/[0.08] bg-white/[0.025] p-1" role="tablist" aria-label="Set creation method">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === 'ai'}
+              onClick={() => { setMode('ai'); setError(''); }}
+              className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-[12px] font-semibold transition-colors ${mode === 'ai' ? 'bg-blue-500/15 text-blue-100' : 'text-white/40 hover:bg-white/[0.05] hover:text-white/70'}`}
+            >
+              <Sparkles size={14} /> Generate with AI
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === 'manual'}
+              onClick={() => { setMode('manual'); setError(''); }}
+              className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-[12px] font-semibold transition-colors ${mode === 'manual' ? 'bg-blue-500/15 text-blue-100' : 'text-white/40 hover:bg-white/[0.05] hover:text-white/70'}`}
+            >
+              <Pencil size={14} /> Write manually
+            </button>
+          </div>
+
+          <section className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 space-y-4">
+            <label className="flex flex-col gap-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/35">Set title</span>
+              <input
+                value={title}
+                onChange={event => setTitle(event.target.value)}
+                placeholder={`${categoryLabel} custom set`}
+                maxLength={120}
+                className="w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 text-[12px] text-white/85 outline-none placeholder:text-white/25 focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20"
+              />
+            </label>
+
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/35">Categories</span>
+                <span className="text-[10px] tabular-nums text-white/25">{categories[0] === 'Mixed' ? 'Broad mix' : `${categories.length} selected`}</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5" role="group" aria-label="Set categories">
+                {SET_CATEGORIES.map(category => {
+                  const selected = categories.includes(category);
+                  return (
+                    <button
+                      key={category}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => toggleCategory(category)}
+                      className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition-colors ${selected ? 'border-blue-400/35 bg-blue-500/15 text-blue-100' : 'border-white/[0.08] bg-white/[0.025] text-white/40 hover:bg-white/[0.06] hover:text-white/70'}`}
+                    >
+                      {category}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[10px] text-white/25">Choose one category or combine several. Mixed resets to a broad distribution.</p>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/35">Difficulty</span>
+              <Dropdown value={difficulty} options={DIFFICULTIES} onChange={setDifficulty} aria-label="Set difficulty" />
+            </div>
+
+            {mode === 'ai' ? (
+              <>
+                <div>
+                  <label htmlFor="qb-set-prompt" className="mb-1.5 block text-[10px] font-bold uppercase tracking-[0.14em] text-white/35">What should this set cover?</label>
+                  <textarea
+                    id="qb-set-prompt"
+                    value={prompt}
+                    onChange={event => { setPrompt(event.target.value); if (error) setError(''); }}
+                    rows={5}
+                    maxLength={2000}
+                    placeholder="Example: Write a set on the Cold War, emphasizing proxy conflicts and diplomacy. Avoid questions whose answers are U.S. presidents."
+                    className="w-full resize-y rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2.5 text-[12px] leading-relaxed text-white/85 outline-none placeholder:text-white/25 focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20"
+                  />
+                  <div className="mt-1 flex justify-between gap-3 text-[10px] text-white/25">
+                    <span>Include topics, distribution, style, and anything to avoid.</span>
+                    <span className="tabular-nums">{prompt.length}/2000</span>
+                  </div>
+                </div>
+                <QbModelPicker value={model} onPick={onPickModel} models={models || []} label="Writer model" />
+                <div>
+                  <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-[0.14em] text-white/35">Questions</span>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {SET_COUNTS.map(option => (
+                      <button key={option} type="button" onClick={() => setCount(option)} className={`rounded-lg border px-2 py-2 text-[11px] font-semibold transition-colors ${count === option ? 'border-blue-400/35 bg-blue-500/15 text-blue-100' : 'border-white/[0.08] bg-white/[0.025] text-white/40 hover:bg-white/[0.06] hover:text-white/70'}`}>{option}</button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="flex items-start gap-3 rounded-lg border border-white/[0.08] bg-white/[0.025] px-3 py-3">
+                <Pencil size={15} className="mt-0.5 shrink-0 text-white/35" />
+                <div>
+                  <p className="text-[12px] font-semibold text-white/70">Start with an empty draft</p>
+                  <p className="mt-0.5 text-[10px] leading-relaxed text-white/35">The editor lets you add, edit, and remove tossups, enter answer lines, preview the round, and publish when it is ready.</p>
+                </div>
+              </div>
+            )}
+          </section>
+
+          {error && <p role="alert" className="rounded-lg border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-300">{error}</p>}
+
+          <button
+            type="button"
+            onClick={submit}
+            disabled={busy}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 py-3 text-[13px] font-bold text-white transition-colors hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            {busy ? <><Loader2 size={14} className="animate-spin" /> {mode === 'ai' ? 'Writing your set…' : 'Creating draft…'}</> : mode === 'ai' ? <><Sparkles size={14} /> Generate custom set</> : <><Pencil size={14} /> Open manual editor</>}
+          </button>
+          <p className="text-center text-[10px] text-white/25">AI output is saved as a draft so you can review and edit every question before publishing.</p>
+        </div>
       </div>
     </div>
   );

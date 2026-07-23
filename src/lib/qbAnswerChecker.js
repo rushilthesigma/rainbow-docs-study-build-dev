@@ -25,6 +25,53 @@ function normalizedAnswer(value) {
     .trim();
 }
 
+// Generated answer guides are intentionally literal, but ordinary players do
+// not always use the same grammatical form as the guide.  Keep the strict
+// literal check first, then allow a narrow semantic-normalization pass for
+// equivalent constructions such as "Chinese provinces" and "provinces of
+// China".  This is deliberately token based rather than fuzzy/edit-distance
+// based so a merely similar proper noun is never accepted.
+const DEMONYM_TO_COUNTRY = new Map(Object.entries({
+  american: 'united states', british: 'united kingdom', chinese: 'china',
+  dutch: 'netherlands', english: 'england', french: 'france', german: 'germany',
+  greek: 'greece', indian: 'india', indonesian: 'indonesia', iranian: 'iran',
+  iraqi: 'iraq', irish: 'ireland', italian: 'italy', japanese: 'japan',
+  korean: 'korea', mexican: 'mexico', pakistani: 'pakistan', polish: 'poland',
+  portuguese: 'portugal', russian: 'russia', spanish: 'spain',
+  swiss: 'switzerland', turkish: 'turkey', ukrainian: 'ukraine',
+  vietnamese: 'vietnam',
+}));
+
+function semanticTokens(value) {
+  const raw = normalizedAnswer(value)
+    .replace(/\b(?:a|an|the|of|in|from|for|to)\b/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  const usedDemonym = raw.some((token) => DEMONYM_TO_COUNTRY.has(token));
+  const expanded = raw.flatMap((token) => (DEMONYM_TO_COUNTRY.get(token) || token).split(' '));
+  const tokens = expanded.map((token) => {
+    // Only normalize uncomplicated plurals. Proper names ending in ss/us/is
+    // retain their spelling, while province/provinces and dynasty/dynasties
+    // compare as the same concept.
+    if (/ies$/.test(token) && token.length > 4) return `${token.slice(0, -3)}y`;
+    if (/s$/.test(token) && !/(?:ss|us|is)$/.test(token) && token.length > 3) return token.slice(0, -1);
+    return token;
+  });
+  return { tokens, usedDemonym };
+}
+
+function semanticallyEquivalentLiteral(givenAnswer, variants) {
+  const given = semanticTokens(givenAnswer);
+  if (!given.tokens.length) return false;
+  return variants.some((variant) => {
+    const expected = semanticTokens(variant);
+    if (expected.tokens.length !== given.tokens.length) return false;
+    if (expected.tokens.every((token, index) => token === given.tokens[index])) return true;
+    if (!expected.usedDemonym && !given.usedDemonym) return false;
+    return [...expected.tokens].sort().every((token, index) => token === [...given.tokens].sort()[index]);
+  });
+}
+
 function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -75,7 +122,9 @@ export function judgeQuizBowlQuestion(question, givenAnswer, strictness = 7) {
     || Array.isArray(q.prompt) || Array.isArray(q.promptAnswers);
   if (!hasGuide) return judgeQuizBowlAnswer(q.answer || '', givenAnswer, strictness);
 
-  if (matchesLiteralVariant(givenAnswer, [q.answer, ...accepts])) return { directive: 'accept' };
+  const acceptedVariants = [q.answer, ...accepts];
+  if (matchesLiteralVariant(givenAnswer, acceptedVariants)
+    || semanticallyEquivalentLiteral(givenAnswer, acceptedVariants)) return { directive: 'accept' };
   const promptMatch = prompts.find((entry) => matchesLiteralVariant(givenAnswer, [entry.answer]));
   if (promptMatch) {
     return {

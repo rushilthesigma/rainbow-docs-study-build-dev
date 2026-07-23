@@ -8,6 +8,7 @@ import {
   endMatch, leaveMatch, streamMatch, botBuzz, botAnswer, requestAnswerReview, resolveAnswerReview,
 } from '../../api/quizMatch';
 import MatchComparison from '../shared/MatchComparison';
+import QuizBowlJoinPanel from '../quizbowl/QuizBowlJoinPanel';
 
 // Mirrors the server's QUIZBOWL_BUZZ_ANSWER_MS; only scales the countdown bar.
 const BUZZ_WINDOW_MS = 9000;
@@ -89,31 +90,31 @@ function useWordReveal(text, startedAt, speedMs, frozen, frozenAt) {
   };
 }
 
-// Props (all optional so the component still works standalone):
-//   initialView        - 'menu' (create/join) or 'setup' (jump straight into
-//                        configuring a room, used by the "Vs AI bots" entry)
-//   initialFillWithBots - pre-enable the bot fill toggle
-//   onExit             - back out of the multiplayer surface entirely
-export default function MobileMatch({ initialView = 'menu', initialFillWithBots = false, initialSet = null, onExit } = {}) {
+// Props are optional so the component can still work as a standalone
+// multiplayer surface as well as receiving a completed shared setup.
+export default function MobileMatch({ initialView = 'menu', initialFillWithBots = false, initialSet = null, initialConfig = null, initialJoinCode = null, autoCreate = false, onExit } = {}) {
   const { user } = useAuth();
   const myId = user?.id;
 
-  const [view, setView] = useState(initialSet ? 'setup' : initialView);
+  const [view, setView] = useState(autoCreate ? 'creating' : initialJoinCode ? 'joining' : initialSet ? 'setup' : initialView);
   const [code, setCode] = useState('');
   const [joinCodeInput, setJoinCodeInput] = useState('');
-  const [matchMode, setMatchMode] = useState('individual');
-  const [questionSource, setQuestionSource] = useState(initialSet ? 'saved' : 'qbreader');
-  const [category, setCategory] = useState(initialSet?.category || 'Mixed');
-  const [customTopic, setCustomTopic] = useState('');
-  const [difficulty, setDifficulty] = useState(initialSet?.difficulty || 'Medium');
-  const [questionCount, setQuestionCount] = useState(initialSet?.questions?.length || 10);
-  const [revealSpeedMs, setRevealSpeedMs] = useState(140);
+  const [matchMode, setMatchMode] = useState(initialConfig?.matchMode || 'individual');
+  const [questionSource, setQuestionSource] = useState(initialSet ? 'saved' : initialConfig?.questionSource || 'qbreader');
+  const [category, setCategory] = useState(initialSet?.category || initialConfig?.category || 'Mixed');
+  const [categories] = useState(() => initialConfig?.categories?.length ? initialConfig.categories : [initialSet?.category || initialConfig?.category || 'Mixed']);
+  const [customTopic, setCustomTopic] = useState(initialConfig?.customTopic || '');
+  const [setInstructions] = useState(initialConfig?.setInstructions || '');
+  const [difficulty, setDifficulty] = useState(initialSet?.difficulty || initialConfig?.difficulty || 'Medium');
+  const [questionCount, setQuestionCount] = useState(initialSet?.questions?.length || initialConfig?.questionCount || 10);
+  const [revealSpeedMs, setRevealSpeedMs] = useState(initialConfig?.revealSpeedMs || 140);
+  const [scoringFormat] = useState(initialConfig?.scoringFormat || 'iac-prelim');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false);
   const [match, setMatch] = useState(null);
-  const [fillWithBots, setFillWithBots] = useState(initialFillWithBots);
-  const [botLevel, setBotLevel] = useState('varsity');
+  const [fillWithBots, setFillWithBots] = useState(initialConfig?.fillWithBots ?? initialFillWithBots);
+  const [botLevel, setBotLevel] = useState(initialConfig?.botLevel || 'varsity');
 
   const [presets, setPresets] = useState(() => loadMatchPresets());
   const [savingPreset, setSavingPreset] = useState(false);
@@ -360,6 +361,33 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
     setBusy(false);
   }
 
+  const autoCreateRef = useRef(false);
+  useEffect(() => {
+    if (!autoCreate || autoCreateRef.current) return;
+    autoCreateRef.current = true;
+    handleCreate();
+  }, [autoCreate]);
+
+  const autoJoinRef = useRef(false);
+  useEffect(() => {
+    if (!initialJoinCode || autoJoinRef.current) return;
+    autoJoinRef.current = true;
+    (async () => {
+      setBusy(true); setError(null);
+      try {
+        const normalizedCode = initialJoinCode.trim().toUpperCase();
+        const res = await joinMatch(normalizedCode);
+        setCode(normalizedCode);
+        setMatch(res.match);
+        setMatchMode(res.match?.mode || 'individual');
+        setView('lobby');
+      } catch (e) {
+        setError(e.message || 'Failed to join');
+      }
+      setBusy(false);
+    })();
+  }, [initialJoinCode]);
+
   async function handleJoin() {
     const c = joinCodeInput.trim().toUpperCase();
     if (!c || busy) return;
@@ -391,9 +419,10 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
     botEngRef.current.thinkTimers = {};
     try {
       await startMatch(code, {
-        questionSource, category, difficulty, questionCount, revealSpeedMs, bots,
+        questionSource, category, categories, difficulty, questionCount, revealSpeedMs, scoringFormat, bots,
         questions: questionSource === 'saved' ? initialSet?.questions : undefined,
         customTopic: category === 'Custom' ? customTopic.trim() : undefined,
+        setInstructions: questionSource === 'ai' ? setInstructions : undefined,
       });
     }
     catch (e) { setError(e.message); }
@@ -479,6 +508,24 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
   const iBuzzed = buzz && buzz.userId === myId;
   const isHost = match?.hostId === myId;
 
+  if (view === 'creating' || view === 'joining') {
+    return (
+      <div className="flex flex-1 min-h-0 items-center justify-center bg-[#0a0a14] px-6 text-white">
+        <div className="w-full max-w-sm text-center">
+          <Loader2 size={24} className="mx-auto mb-3 animate-spin text-blue-300" />
+          <p className="text-[15px] font-semibold text-white/85">{view === 'joining' ? `Joining ${initialJoinCode}…` : 'Creating your room…'}</p>
+          <p className="mt-1 text-[11px] text-white/35">{view === 'joining' ? 'Connecting you to the lobby.' : 'Carrying your questions, scoring, and bot settings into the lobby.'}</p>
+          {error && (
+            <div className="mt-4">
+              <p className="text-[12px] text-rose-300">{error}</p>
+              <button type="button" onClick={onExit} className="mt-3 min-h-11 rounded-xl bg-blue-500 px-4 text-[13px] font-semibold text-white">Back to setup</button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // ── MENU ──
   if (view === 'menu') {
     return (
@@ -509,27 +556,14 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
             <div className="flex-1 h-px bg-white/[0.08]" /> OR <div className="flex-1 h-px bg-white/[0.08]" />
           </div>
 
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-white/30 mb-1.5">Join with code</p>
-            <div className="flex gap-2">
-              <input
-                value={joinCodeInput}
-                onChange={e => setJoinCodeInput(e.target.value.toUpperCase().slice(0, 6))}
-                onKeyDown={e => { if (e.key === 'Enter') handleJoin(); }}
-                placeholder="CODE"
-                className="flex-1 rounded-2xl bg-white/[0.05] border border-white/[0.08] px-4 py-3 text-[16px] font-mono tracking-widest text-white placeholder-white/20 outline-none focus:border-blue-400/40"
-              />
-              <button
-                onClick={handleJoin}
-                disabled={busy || joinCodeInput.trim().length < 4}
-                className="px-5 rounded-2xl bg-blue-500/15 border border-blue-400/30 text-blue-100 font-semibold disabled:opacity-40 active:bg-blue-500/25"
-              >
-                {busy ? <InlineProgress active /> : 'Join'}
-              </button>
-            </div>
-          </div>
-
-          {error && <p className="text-[12px] text-rose-300">{error}</p>}
+          <QuizBowlJoinPanel
+            mobile
+            value={joinCodeInput}
+            onChange={setJoinCodeInput}
+            onSubmit={handleJoin}
+            busy={busy}
+            error={error}
+          />
         </div>
       </div>
     );
@@ -548,7 +582,7 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
               <button onClick={() => setMatchMode('team')} disabled={!!initialSet} className={`rounded-2xl border p-3 text-left ${initialSet ? 'cursor-not-allowed border-white/[0.05] bg-white/[0.015] opacity-50' : matchMode === 'team' ? 'border-blue-400/50 bg-blue-500/15' : 'border-white/[0.08] bg-white/[0.03]'}`}><Users size={14} className="text-blue-300 mb-1" /><p className="text-[12px] font-bold">Team scrimmage</p><p className="text-[10px] text-white/35">{initialSet ? 'Needs bonus parts' : 'Tossups + bonuses'}</p></button>
             </div>
           </div>
-          {initialSet && <div className="rounded-2xl border border-amber-400/25 bg-amber-500/[0.08] p-3"><p className="text-[10px] font-bold uppercase tracking-[0.15em] text-amber-300/75">Exact collection set</p><p className="mt-1 truncate text-[13px] font-semibold text-amber-50">{initialSet.title}</p><p className="mt-0.5 text-[10px] text-amber-100/55">{initialSet.questions.length} tossups · no regeneration</p></div>}
+          {initialSet && <div className="rounded-2xl border border-blue-400/25 bg-blue-500/[0.08] p-3"><p className="text-[10px] font-bold uppercase tracking-[0.15em] text-blue-300/75">Exact collection set</p><p className="mt-1 truncate text-[13px] font-semibold text-blue-50">{initialSet.title}</p><p className="mt-0.5 text-[10px] text-blue-100/55">{initialSet.questions.length} tossups · no regeneration</p></div>}
           <div>
             <SectionLabel>Category</SectionLabel>
             <div className="flex flex-wrap gap-1.5">
@@ -579,7 +613,7 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
                 <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-white/30">Questions</span>
                 <span className="text-[11px] font-mono font-bold text-blue-300">{questionCount}</span>
               </div>
-              {initialSet ? <p className="text-[10px] text-amber-200/55">Fixed to the published packet</p> : <input type="range" min="5" max="20" step="5" value={questionCount}
+              {initialSet ? <p className="text-[10px] text-blue-200/55">Fixed to the published packet</p> : <input type="range" min="5" max="20" step="5" value={questionCount}
                 onChange={e => setQuestionCount(Number(e.target.value))} className="w-full accent-blue-500" />}
             </div>
             <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
@@ -783,11 +817,12 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
 
   // ── GENERATING ──
   if (view === 'generating') {
+    const isFixedSet = (match?.questionSource || questionSource) === 'saved';
     return (
       <div className="flex-1 min-h-0 flex flex-col items-center justify-center bg-[#0a0a14] text-white gap-3">
         <InlineProgress active />
-        <p className="text-[13px] text-white/40">Generating questions…</p>
-        <p className="text-[11px] text-white/25">{match?.questionCount || questionCount} questions · {match?.customTopic || match?.category || category}</p>
+        <p className="text-[13px] text-white/40">{isFixedSet ? 'Loading selected set…' : 'Generating questions…'}</p>
+        <p className="text-[11px] text-white/25">{match?.questionCount || questionCount} {isFixedSet ? 'exact tossups' : 'questions'} · {match?.customTopic || match?.category || category}</p>
       </div>
     );
   }

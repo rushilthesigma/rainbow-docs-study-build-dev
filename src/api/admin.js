@@ -6,6 +6,11 @@ export const updatePromptProtectionSettings = (strictness) => apiFetch('/api/adm
   method: 'PUT',
   body: JSON.stringify({ strictness }),
 });
+export const listQuizBowlSetReports = () => apiFetch('/api/admin/quizbowl/set-reports');
+export const resolveQuizBowlSetReport = (id, resolution) => apiFetch(`/api/admin/quizbowl/set-reports/${id}/resolve`, {
+  method: 'POST',
+  body: JSON.stringify({ resolution }),
+});
 export const getMetrics     = () => apiFetch('/api/admin/metrics');
 export const listUsers      = (opts = {}) => apiFetch(`/api/admin/users${opts.includeDemo ? '?includeDemo=1' : ''}`);
 export const getUser        = (uid, opts = {}) => apiFetch(`/api/admin/users/${uid}${opts.includeDemo ? '?includeDemo=1' : ''}`);
