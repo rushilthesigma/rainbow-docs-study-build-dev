@@ -1898,7 +1898,7 @@ async function buildStudyArtifacts(fullText, userData, sessionCtx = {}) {
     let initialQuestions = null;
     if (studyText.trim()) {
       const diffLabel = { elementary: 'easy/middle-school', middle: 'easy/middle-school', high: 'high-school varsity', college: 'college championship' }[difficulty] || 'high-school varsity';
-      const sys = `You are an elite ACF/NAQT packet editor. Write rigorously pyramidal tossups based ONLY on the provided study material. Open with the material's most obscure, uniquely identifying details, move through hard connecting clues, and reserve familiar facts for the final giveaway. Silently audit the clue order before responding. Output ONLY valid JSON, no markdown.`;
+      const sys = `You are an elite ACF/NAQT packet editor. Write rigorously pyramidal tossups based ONLY on the provided study material. Open with the material's most obscure, uniquely identifying details, move through hard connecting clues, and reserve familiar facts for the final giveaway. Silently audit the clue order before responding. Never use the bare pronoun "it" as an answer identifier or final giveaway; identify the answer with a precise noun phrase such as "this novel," "this person," or "this treaty." Output ONLY valid JSON, no markdown.`;
       const prompt = `Write ${count} pyramidal quiz bowl tossup questions about "${topic}" using ONLY facts from the study material below.
 
 RULES:
@@ -13677,6 +13677,7 @@ function quizBowlCountryPresetCatalog() {
 // player, so replaying a set never calls /api/chat or spends player credits.
 const QUIZBOWL_PRESET_SETS_FILE = join(DATA_DIR, 'quizbowlPresetSets.json');
 const quizBowlPresetGenerationLocks = new Map();
+const QUIZBOWL_EXPLICIT_IDENTIFIER_RULE = 'Never use the bare pronoun "it" as an answer identifier or final giveaway; identify the answer with a precise noun phrase such as "this novel," "this person," or "this treaty."';
 
 function loadQuizBowlPresetSets() {
   try {
@@ -13694,7 +13695,7 @@ function saveQuizBowlPresetSets(sets) {
 }
 
 const QUIZBOWL_PRESET_SYSTEM = `You are an elite ACF/NAQT packet editor writing rigorously pyramidal quiz bowl tossups from source notes.
-Plan the complete answer slate before writing any clues. Write exactly 10 tossups, each with a distinct answer, coverage angle, and clue path. Each should be one coherent 7-10 sentence paragraph of at least 70 words, with extremely obscure source-supported clues first, hard connecting clues in the middle, and accessible giveaway clues last. Include exactly one NAQT-style power mark "(*)" 65-75% through each question. Never invent facts or state the answer in the question. Every answer must be supported by the notes.
+Plan the complete answer slate before writing any clues. Write exactly 10 tossups, each with a distinct answer, coverage angle, and clue path. Each should be one coherent 7-10 sentence paragraph of at least 70 words, with extremely obscure source-supported clues first, hard connecting clues in the middle, and accessible giveaway clues last. Include exactly one NAQT-style power mark "(*)" 65-75% through each question. Never invent facts or state the answer in the question. Every answer must be supported by the notes. ${QUIZBOWL_EXPLICIT_IDENTIFIER_RULE}
 
 The country being studied is only the SET TOPIC and must NEVER be an answer line—not in "answer", not in "accept", by itself, under an official or alternate name, or decorated with words such as country, nation, state, republic, kingdom, or territory. Use specific people, places, physical features, events, institutions, works, groups, and other named entities related to it. The country's name may appear in clues.
 
@@ -14914,6 +14915,10 @@ function newMatchCode() {
 // buzz and look the answer up. Surfaced to every client as a live countdown.
 const QUIZBOWL_BUZZ_ANSWER_MS = 9000;
 const QUIZBOWL_BONUS_PART_MS = 15000;
+// The client submits a completed field as its displayed clock reaches zero.
+// Keep a tiny transport buffer so that final keystroke is judged instead of
+// racing the server's fallback empty-answer timeout.
+const QUIZBOWL_FINAL_SUBMISSION_GRACE_MS = 500;
 const QUIZBOWL_PROTEST_DELAY_MS = 5000;
 const QUIZBOWL_TEAM_IDS = ['A', 'B'];
 
@@ -15158,7 +15163,7 @@ function beginQuizBowlBonusPart(match, partIdx) {
   match.bonusTimeoutId = setTimeout(() => {
     if (!matches.has(match.code) || match.state !== 'bonus' || match.bonusPartIdx !== partIdx) return;
     resolveQuizBowlBonusAnswer(match, null, '', { timedOut: true, correctOverride: false });
-  }, QUIZBOWL_BONUS_PART_MS);
+  }, QUIZBOWL_BONUS_PART_MS + QUIZBOWL_FINAL_SUBMISSION_GRACE_MS);
   scheduleQuizBowlBonusBot(match);
 }
 
@@ -15341,7 +15346,7 @@ function scheduleBuzzTimeout(match, delayMs = QUIZBOWL_BUZZ_ANSWER_MS) {
       });
       scheduleQuestionTimeout(match);
     }
-  }, delayMs);
+  }, delayMs + QUIZBOWL_FINAL_SUBMISSION_GRACE_MS);
 }
 
 // Server-side "time's up" for the current question. If no correct answer
@@ -15429,7 +15434,13 @@ function applyAcceptedProtest(match, review) {
     revoked.push({ userId: later.userId, points });
   }
   match.validProtestUsed = true;
-  return { ptsGained, scoreDelta, revoked };
+  // A successful protest restores a valid tossup conversion. In team play it
+  // therefore earns the same three-part bonus that an on-the-floor correct
+  // answer would have earned.
+  const bonusTeam = match.mode === 'team'
+    ? quizbowlTeamForUser(match, review.requesterId)
+    : null;
+  return { ptsGained, scoreDelta, revoked, bonusTeam };
 }
 
 function resolveActiveProtest(match, accepted, resolvedBy = null) {
@@ -15451,7 +15462,8 @@ function resolveActiveProtest(match, accepted, resolvedBy = null) {
     match.pendingQuestionResolution = null;
     match.protestWindowOpensAt = null;
     const autoAdvanceInMs = 3000;
-    scheduleAutoAdvance(match, autoAdvanceInMs);
+    if (result.bonusTeam) scheduleQuizBowlTeamBonus(match, result.bonusTeam, autoAdvanceInMs);
+    else scheduleAutoAdvance(match, autoAdvanceInMs);
     pushMatchEvent(match, 'answer_review', {
       review: match.activeAnswerReview,
       accepted: true,
@@ -15460,6 +15472,8 @@ function resolveActiveProtest(match, accepted, resolvedBy = null) {
       scoreDelta: result.scoreDelta,
       ptsGained: result.ptsGained,
       revoked: result.revoked,
+      bonusPending: !!result.bonusTeam,
+      bonusTeam: result.bonusTeam,
       autoAdvanceInMs,
       paused: false,
       match: publicMatchState(match),
@@ -15573,7 +15587,7 @@ function resumeQuizBowlMatch(match) {
     match.bonusTimeoutId = setTimeout(() => {
       if (!matches.has(match.code) || match.state !== 'bonus' || match.bonusPartIdx !== idx) return;
       resolveQuizBowlBonusAnswer(match, null, '', { timedOut: true, correctOverride: false });
-    }, paused.bonusRemainingMs);
+    }, paused.bonusRemainingMs + QUIZBOWL_FINAL_SUBMISSION_GRACE_MS);
     scheduleQuizBowlBonusBot(match);
   } else if (paused.bonusAdvanceRemainingMs != null && match.state === 'bonus_reveal') {
     const idx = match.bonusPartIdx || 0;
@@ -16104,11 +16118,11 @@ app.post('/api/quizbowl/match/:code/start', authMiddleware, async (req, res) => 
         ? 'in a balanced mixed-category distribution'
         : `across these categories: ${selectedCategories.join(', ')}`;
       const sys = grounded
-      ? `You are an elite ACF/NAQT packet editor. Write rigorously pyramidal tossups based ONLY on the provided study material - never use outside knowledge; every clue and every answer must be checkable against the material text alone. Each tossup should normally be 7-10 sentences. Its opening 30-35% must use the material's most obscure, uniquely identifying specialist details; its middle must use hard connecting clues; only its final 25-30% may use familiar facts and the giveaway. Silently audit clue order and replace or move any early clue that is easier than a later one. Never fabricate facts to make a clue obscure. Include exactly one NAQT-style power mark "(*)" 65-75% through, immediately before the accessible clues.${bonusRule} For each tossup, "answer" is canonical, "accept" contains only literal fully equivalent answers (never regex or loose fragments), and "prompt" contains incomplete answers shaped as {"answer":"literal partial","message":"brief directed clarification"}; use empty arrays when unnecessary. Output ONLY valid JSON with no markdown, no code fences, no prose before or after.
+      ? `You are an elite ACF/NAQT packet editor. Write rigorously pyramidal tossups based ONLY on the provided study material - never use outside knowledge; every clue and every answer must be checkable against the material text alone. Each tossup should normally be 7-10 sentences. Its opening 30-35% must use the material's most obscure, uniquely identifying specialist details; its middle must use hard connecting clues; only its final 25-30% may use familiar facts and the giveaway. Silently audit clue order and replace or move any early clue that is easier than a later one. Never fabricate facts to make a clue obscure. Include exactly one NAQT-style power mark "(*)" 65-75% through, immediately before the accessible clues. ${QUIZBOWL_EXPLICIT_IDENTIFIER_RULE} ${bonusRule} For each tossup, "answer" is canonical, "accept" contains only literal fully equivalent answers (never regex or loose fragments), and "prompt" contains incomplete answers shaped as {"answer":"literal partial","message":"brief directed clarification"}; use empty arrays when unnecessary. Output ONLY valid JSON with no markdown, no code fences, no prose before or after.
 
 Exact format:
 ${exactFormat}`
-      : `You are an elite ACF/NAQT packet editor. Write rigorously pyramidal tossups, normally 7-10 sentences and 120-190 words each. The opening 30-35% must use extremely obscure but verifiable specialist clues such as minor works, technical terminology, lesser-known episodes, secondary characters, or named scholarly arguments. The middle must use hard connecting clues. Only the final 25-30% may use famous works, common dates, definitions, epithets, locations, classroom facts, and the giveaway. Silently audit clue order and replace or move any early clue that is easier than a later one. Never open with a stock clue and never fabricate obscurity. Include exactly one NAQT-style power mark "(*)" 65-75% through, immediately before the accessible clues.${bonusRule} For each tossup, "answer" is canonical, "accept" contains only literal fully equivalent answers (never regex or loose fragments), and "prompt" contains incomplete answers shaped as {"answer":"literal partial","message":"brief directed clarification"}; use empty arrays when unnecessary. Output ONLY valid JSON with no markdown, no code fences, no prose before or after.
+      : `You are an elite ACF/NAQT packet editor. Write rigorously pyramidal tossups, normally 7-10 sentences and 120-190 words each. The opening 30-35% must use extremely obscure but verifiable specialist clues such as minor works, technical terminology, lesser-known episodes, secondary characters, or named scholarly arguments. The middle must use hard connecting clues. Only the final 25-30% may use famous works, common dates, definitions, epithets, locations, classroom facts, and the giveaway. Silently audit clue order and replace or move any early clue that is easier than a later one. Never open with a stock clue and never fabricate obscurity. Include exactly one NAQT-style power mark "(*)" 65-75% through, immediately before the accessible clues. ${QUIZBOWL_EXPLICIT_IDENTIFIER_RULE} ${bonusRule} For each tossup, "answer" is canonical, "accept" contains only literal fully equivalent answers (never regex or loose fragments), and "prompt" contains incomplete answers shaped as {"answer":"literal partial","message":"brief directed clarification"}; use empty arrays when unnecessary. Output ONLY valid JSON with no markdown, no code fences, no prose before or after.
 
 Exact format:
 ${exactFormat}`;
@@ -18006,7 +18020,7 @@ app.post('/api/trial/generate', authMiddleware, async (req, res) => {
     const diffMap = { easy: 'introductory/middle-school', medium: 'high-school varsity', hard: 'college/national championship' };
     const diffLabel = diffMap[difficulty] || diffMap.medium;
 
-    const systemPrompt = `You are an elite ACF/NAQT packet editor specializing in ${diffLabel}-level tossups. Enforce a steep, rigorously audited clue pyramid and output ONLY valid JSON, no markdown or fences.`;
+    const systemPrompt = `You are an elite ACF/NAQT packet editor specializing in ${diffLabel}-level tossups. Enforce a steep, rigorously audited clue pyramid. ${QUIZBOWL_EXPLICIT_IDENTIFIER_RULE} Output ONLY valid JSON, no markdown or fences.`;
     const userPrompt = `Write ${count} tossup questions on the topic "${topic}" at ${diffLabel} difficulty.
 
 Each tossup must:

@@ -654,6 +654,15 @@ export default function QuizBowlMatch({ user, onExit, initialJoinCode = null, in
     if (view !== 'playing') return;
     function onKey(e) {
       if (!_mpIsActiveRef.current) return;
+      // The spacebar is the buzzer shortcut only when the player is not
+      // actively entering text. Without this guard, the window-level handler
+      // steals spaces from team-bonus answers (and any future text field in a
+      // live match).
+      const target = e.target;
+      if (target instanceof HTMLElement && (
+        target.matches('input, textarea, [contenteditable="true"]') ||
+        target.closest('[contenteditable="true"]')
+      )) return;
       if (e.key === ' ' && !_mpBuzzRef.current) { e.preventDefault(); _mpHandleBuzzRef.current(); }
     }
     window.addEventListener('keydown', onKey);
@@ -1335,6 +1344,7 @@ export function PlayerCard({ player, isMe, buzz, lockedOut, answerResult, maxSco
 
 function TeamBonusView({ match, bonusAnswer, setBonusAnswer, bonusResult, bonusDeadline, onSubmitBonus, onNext, onLeave, onPauseToggle, isHost, myId }) {
   const [now, setNow] = useState(() => Date.now());
+  const finalSubmissionRef = useRef(null);
   useEffect(() => {
     if (!bonusDeadline) return undefined;
     const id = setInterval(() => setNow(Date.now()), 100);
@@ -1346,9 +1356,17 @@ function TeamBonusView({ match, bonusAnswer, setBonusAnswer, bonusResult, bonusD
   const isControlling = me?.team === activeTeam;
   const msLeft = bonusDeadline ? Math.max(0, bonusDeadline - now) : 0;
   const seconds = Math.ceil(msLeft / 1000);
+  const timeUp = !!bonusDeadline && msLeft === 0;
   const pct = bonusDeadline ? Math.max(0, Math.min(100, msLeft / (match.bonusWindowMs || 15000) * 100)) : 0;
   const teamName = match.teamNames?.[activeTeam] || `Team ${activeTeam || ''}`;
   const scores = match.teamScores || { A: 0, B: 0 };
+  useEffect(() => {
+    if (msLeft > 0 || !isControlling || !bonusAnswer.trim() || match.state !== 'bonus' || match.paused) return;
+    if (finalSubmissionRef.current === bonusDeadline) return;
+    finalSubmissionRef.current = bonusDeadline;
+    onSubmitBonus(false);
+  }, [msLeft, isControlling, bonusAnswer, bonusDeadline, match.state, match.paused, onSubmitBonus]);
+  useEffect(() => { finalSubmissionRef.current = null; }, [bonusDeadline]);
   return (
     <div className="flex flex-col h-full min-h-0 bg-transparent">
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/[0.04]">
@@ -1374,7 +1392,7 @@ function TeamBonusView({ match, bonusAnswer, setBonusAnswer, bonusResult, bonusD
                 <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-amber-300/70">{teamName} confers</p>
                 <p className="text-[12px] text-white/45">Part {(bonus.partIndex || 0) + 1} of {bonus.totalParts || 3} · {bonus.value || 10} points</p>
               </div>
-              {bonusDeadline && <span className={`text-[18px] font-bold tabular-nums ${seconds <= 3 ? 'text-rose-300' : 'text-amber-200'}`}>{seconds}s</span>}
+              {bonusDeadline && <span className={`text-[18px] font-bold tabular-nums ${seconds <= 3 ? 'text-rose-300' : 'text-amber-200'}`}>{timeUp && bonusAnswer.trim() ? '…' : `${seconds}s`}</span>}
             </div>
             <div className="h-1 rounded-full bg-white/[0.06] overflow-hidden"><div className={`h-full ${seconds <= 3 ? 'bg-rose-400' : 'bg-amber-400'} transition-all`} style={{ width: `${pct}%` }} /></div>
             <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-4">
@@ -1388,9 +1406,9 @@ function TeamBonusView({ match, bonusAnswer, setBonusAnswer, bonusResult, bonusD
               </div>
             ) : isControlling && match.state === 'bonus' ? (
               <div className="flex gap-2">
-                <input autoFocus value={bonusAnswer} onChange={e => setBonusAnswer(e.target.value)} onKeyDown={e => e.key === 'Enter' && !match.paused && onSubmitBonus(false)} placeholder={match.paused ? 'Game paused…' : 'Team answer…'} disabled={match.paused} className="flex-1 rounded-xl border border-amber-400/30 bg-white/[0.04] px-3 py-3 text-sm text-white/85 placeholder-white/25 outline-none focus:border-amber-300/60 disabled:opacity-50" />
-                <button onClick={() => onSubmitBonus(false)} disabled={match.paused || !bonusAnswer.trim()} className="rounded-xl bg-amber-500 px-4 py-3 text-sm font-semibold text-black disabled:opacity-30">Submit</button>
-                <button onClick={() => onSubmitBonus(true)} disabled={match.paused} className="rounded-xl border border-white/[0.10] px-3 py-3 text-sm text-white/50 hover:text-white/80 disabled:opacity-30">Pass</button>
+                <input autoFocus value={bonusAnswer} onChange={e => setBonusAnswer(e.target.value)} onKeyDown={e => e.key === 'Enter' && !match.paused && !timeUp && onSubmitBonus(false)} placeholder={match.paused ? 'Game paused…' : timeUp ? 'Submitting answer…' : 'Team answer…'} disabled={match.paused || timeUp} className="flex-1 rounded-xl border border-amber-400/30 bg-white/[0.04] px-3 py-3 text-sm text-white/85 placeholder-white/25 outline-none focus:border-amber-300/60 disabled:opacity-50" />
+                <button onClick={() => onSubmitBonus(false)} disabled={match.paused || timeUp || !bonusAnswer.trim()} className="rounded-xl bg-amber-500 px-4 py-3 text-sm font-semibold text-black disabled:opacity-30">Submit</button>
+                <button onClick={() => onSubmitBonus(true)} disabled={match.paused || timeUp} className="rounded-xl border border-white/[0.10] px-3 py-3 text-sm text-white/50 hover:text-white/80 disabled:opacity-30">Pass</button>
               </div>
             ) : (
               <p className="rounded-xl border border-white/[0.07] bg-white/[0.03] px-3 py-3 text-center text-[12px] text-white/40">{isControlling ? 'Bonus starting…' : `${teamName} is conferring…`}</p>
@@ -1417,6 +1435,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, b
 
   // Live answer-clock tick: only runs while a buzz is awaiting an answer.
   const [nowTick, setNowTick] = useState(() => Date.now());
+  const finalSubmissionRef = useRef(null);
   const countingDown = !!answerDeadline && !!buzz && !answerResult && !match.paused;
   useEffect(() => {
     if (!countingDown) return;
@@ -1445,6 +1464,16 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, b
   const answerPct = answerMsLeft != null ? Math.max(0, Math.min(100, (answerMsLeft / BUZZ_WINDOW_MS) * 100)) : 0;
   const answerUrgent = answerMsLeft != null && answerMsLeft <= 3000;
   const timeUp = answerMsLeft === 0;
+
+  // At the visible deadline, submit what is already in the field. The server
+  // retains a short transport buffer before it falls back to a blank neg.
+  useEffect(() => {
+    if (!timeUp || !iBuzzed || !answer.trim() || match?.paused) return;
+    if (finalSubmissionRef.current === answerDeadline) return;
+    finalSubmissionRef.current = answerDeadline;
+    onSubmitAnswer();
+  }, [timeUp, iBuzzed, answer, answerDeadline, match?.paused, onSubmitAnswer]);
+  useEffect(() => { finalSubmissionRef.current = null; }, [answerDeadline, buzz?.userId]);
 
   if (!match || !Array.isArray(match.players)) {
     return <div className="p-5 text-center text-[12px] text-white/30 bg-transparent h-full"><InlineProgress active /> Loading…</div>;
@@ -1568,7 +1597,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, b
             )}
             {['accepted', 'rejected'].includes(reviewStatus) && !reviewPending && answerReview && (
               <div className={`rounded-lg border px-3 py-2 text-center text-[11px] ${reviewStatus === 'accepted' ? 'border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-200/80' : 'border-white/[0.08] bg-white/[0.03] text-white/45'}`}>
-                {answerReview.requesterId === myId ? 'Your' : `${answerReview.requesterName}'s`} protest was {reviewStatus}. {reviewStatus === 'accepted' ? 'Scores rewound; no bonus awarded.' : 'Ruling stands.'}
+                {answerReview.requesterId === myId ? 'Your' : `${answerReview.requesterName}'s`} protest was {reviewStatus}. {reviewStatus === 'accepted' ? (match.mode === 'team' ? 'Scores corrected; that team earned the bonus.' : 'Scores corrected.') : 'Ruling stands.'}
               </div>
             )}
             {!buzz && !answerResult && !iAmLocked && !reviewPending && !match.paused && (
@@ -1595,7 +1624,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, b
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className={`text-[11px] font-medium ${answerUrgent ? 'text-rose-300' : 'text-white/45'}`}>
-                    {timeUp ? "Time's up" : 'Answer before the timer runs out'}
+                    {timeUp ? (answer.trim() ? 'Submitting your answer…' : "Time's up") : 'Answer before the timer runs out'}
                   </span>
                   <span className={`text-[13px] font-bold tabular-nums ${answerUrgent ? 'text-rose-300' : 'text-white/70'}`}>{answerSecs ?? 0}s</span>
                 </div>
@@ -1606,7 +1635,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, b
                   <input
                     autoFocus value={answer} onChange={e => setAnswer(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && answer.trim() && !timeUp && onSubmitAnswer()}
-                    placeholder={timeUp ? "Time's up…" : 'Answer…'}
+                    placeholder={timeUp ? 'Submitting answer…' : 'Answer…'}
                     disabled={timeUp || match.paused}
                     className="flex-1 px-4 py-3 rounded-lg border border-blue-500/40 bg-white/[0.05] text-[14px] text-white placeholder-white/25 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/25 transition-colors disabled:opacity-50"
                   />

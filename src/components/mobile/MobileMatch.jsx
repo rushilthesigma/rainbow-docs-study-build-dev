@@ -911,18 +911,28 @@ export default function MobileMatch({ initialView = 'menu', initialFillWithBots 
 
 function MobileBonusView({ match, myId, bonusAnswer, setBonusAnswer, bonusResult, bonusDeadline, onSubmitBonus, onNext, onLeave, isHost }) {
   const [now, setNow] = useState(() => Date.now());
+  const finalSubmissionRef = useRef(null);
   useEffect(() => { if (!bonusDeadline) return undefined; const id = setInterval(() => setNow(Date.now()), 100); return () => clearInterval(id); }, [bonusDeadline]);
   const bonus = match.bonus;
   const activeTeam = bonus?.team || match.pendingBonusTeam;
   const me = match.players?.find(p => p.userId === myId);
   const controlling = me?.team === activeTeam;
-  const seconds = bonusDeadline ? Math.max(0, Math.ceil((bonusDeadline - now) / 1000)) : 0;
+  const msLeft = bonusDeadline ? Math.max(0, bonusDeadline - now) : 0;
+  const seconds = bonusDeadline ? Math.ceil(msLeft / 1000) : 0;
+  const timeUp = !!bonusDeadline && msLeft === 0;
   const scores = match.teamScores || { A: 0, B: 0 };
+  useEffect(() => {
+    if (msLeft > 0 || !controlling || !bonusAnswer.trim() || match.state !== 'bonus' || match.paused) return;
+    if (finalSubmissionRef.current === bonusDeadline) return;
+    finalSubmissionRef.current = bonusDeadline;
+    onSubmitBonus(false);
+  }, [msLeft, controlling, bonusAnswer, bonusDeadline, match.state, match.paused, onSubmitBonus]);
+  useEffect(() => { finalSubmissionRef.current = null; }, [bonusDeadline]);
   return <div className="flex-1 min-h-0 flex flex-col bg-[#0a0a14] text-white">
     <MatchHeader title="Team Bonus" onBack={onLeave} />
     <div className="flex-1 min-h-0 overflow-y-auto px-4 py-5 space-y-4">
       <div className="grid grid-cols-2 gap-2"><div className="rounded-2xl border border-blue-400/20 bg-blue-500/[0.08] p-3"><p className="text-[10px] text-white/35 truncate">{match.teamNames?.A || 'Blue Team'}</p><p className="text-[22px] font-bold tabular-nums">{scores.A || 0}</p></div><div className="rounded-2xl border border-amber-400/20 bg-amber-500/[0.08] p-3"><p className="text-[10px] text-white/35 truncate">{match.teamNames?.B || 'Orange Team'}</p><p className="text-[22px] font-bold tabular-nums">{scores.B || 0}</p></div></div>
-      {bonus ? <><div><p className="text-[10px] font-bold uppercase tracking-[0.15em] text-amber-300/70">{match.teamNames?.[activeTeam] || `Team ${activeTeam}`} · Part {(bonus.partIndex || 0) + 1}/{bonus.totalParts || 3}</p><p className="text-[11px] text-white/35 mt-1">{bonus.leadin}</p></div><div className="rounded-2xl border border-amber-400/20 bg-amber-400/[0.06] p-4"><p className="text-[16px] leading-relaxed text-white/90">{bonus.part}</p></div>{bonusResult ? <div className={`rounded-2xl border p-4 ${bonusResult.correct ? 'border-emerald-400/25 bg-emerald-400/[0.08]' : 'border-rose-400/20 bg-rose-400/[0.06]'}`}><p className="text-[12px] font-semibold">{bonusResult.correct ? `+${bonusResult.points} · Correct` : bonusResult.timedOut ? 'Time expired' : 'No points'}</p><p className="text-[13px] text-white/70 mt-1">Answer: <strong>{bonusResult.correctAnswer}</strong></p></div> : controlling && match.state === 'bonus' ? <div className="space-y-2"><div className="flex justify-end text-[18px] font-bold tabular-nums text-amber-200">{seconds}s</div><div className="flex gap-2"><input autoFocus value={bonusAnswer} onChange={e => setBonusAnswer(e.target.value)} onKeyDown={e => e.key === 'Enter' && onSubmitBonus(false)} placeholder="Team answer…" className="flex-1 rounded-2xl border border-amber-400/30 bg-white/[0.04] px-4 py-3 text-[14px] text-white outline-none" /><button onClick={() => onSubmitBonus(false)} disabled={!bonusAnswer.trim()} className="rounded-2xl bg-amber-500 px-4 py-3 font-semibold text-black disabled:opacity-30">Submit</button></div><button onClick={() => onSubmitBonus(true)} className="w-full rounded-2xl border border-white/[0.08] py-2.5 text-[12px] text-white/45">Pass</button></div> : <p className="rounded-2xl border border-white/[0.07] bg-white/[0.03] p-3 text-center text-[12px] text-white/40">{controlling ? 'Bonus starting…' : 'Other team is conferring…'}</p>}{isHost && (bonusResult || match.state === 'reveal') && <button onClick={onNext} className="w-full rounded-2xl border border-white/[0.08] py-3 text-[13px] text-white/55">Next →</button>}</> : <div className="py-16 text-center text-[12px] text-white/40"><InlineProgress active /> Preparing bonus…</div>}
+      {bonus ? <><div><p className="text-[10px] font-bold uppercase tracking-[0.15em] text-amber-300/70">{match.teamNames?.[activeTeam] || `Team ${activeTeam}`} · Part {(bonus.partIndex || 0) + 1}/{bonus.totalParts || 3}</p><p className="text-[11px] text-white/35 mt-1">{bonus.leadin}</p></div><div className="rounded-2xl border border-amber-400/20 bg-amber-400/[0.06] p-4"><p className="text-[16px] leading-relaxed text-white/90">{bonus.part}</p></div>{bonusResult ? <div className={`rounded-2xl border p-4 ${bonusResult.correct ? 'border-emerald-400/25 bg-emerald-400/[0.08]' : 'border-rose-400/20 bg-rose-400/[0.06]'}`}><p className="text-[12px] font-semibold">{bonusResult.correct ? `+${bonusResult.points} · Correct` : bonusResult.timedOut ? 'Time expired' : 'No points'}</p><p className="text-[13px] text-white/70 mt-1">Answer: <strong>{bonusResult.correctAnswer}</strong></p></div> : controlling && match.state === 'bonus' ? <div className="space-y-2"><div className="flex justify-end text-[18px] font-bold tabular-nums text-amber-200">{timeUp && bonusAnswer.trim() ? '…' : `${seconds}s`}</div><div className="flex gap-2"><input autoFocus value={bonusAnswer} onChange={e => setBonusAnswer(e.target.value)} onKeyDown={e => e.key === 'Enter' && !timeUp && onSubmitBonus(false)} placeholder={timeUp ? 'Submitting answer…' : 'Team answer…'} disabled={timeUp} className="flex-1 rounded-2xl border border-amber-400/30 bg-white/[0.04] px-4 py-3 text-[14px] text-white outline-none disabled:opacity-50" /><button onClick={() => onSubmitBonus(false)} disabled={timeUp || !bonusAnswer.trim()} className="rounded-2xl bg-amber-500 px-4 py-3 font-semibold text-black disabled:opacity-30">Submit</button></div><button onClick={() => onSubmitBonus(true)} disabled={timeUp} className="w-full rounded-2xl border border-white/[0.08] py-2.5 text-[12px] text-white/45 disabled:opacity-30">Pass</button></div> : <p className="rounded-2xl border border-white/[0.07] bg-white/[0.03] p-3 text-center text-[12px] text-white/40">{controlling ? 'Bonus starting…' : 'Other team is conferring…'}</p>}{isHost && (bonusResult || match.state === 'reveal') && <button onClick={onNext} className="w-full rounded-2xl border border-white/[0.08] py-3 text-[13px] text-white/55">Next →</button>}</> : <div className="py-16 text-center text-[12px] text-white/40"><InlineProgress active /> Preparing bonus…</div>}
     </div>
   </div>;
 }
@@ -932,6 +942,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
   const effectiveFrozen = frozen || reviewPending;
   const { revealed, wordIndex, totalWords } = useWordReveal(question?.text || '', question?.startedAt || 0, revealSpeedMs, effectiveFrozen, frozenAt);
   const [now, setNow] = useState(() => Date.now());
+  const finalSubmissionRef = useRef(null);
 
   const countingDown = !!answerDeadline && !!buzz && !answerResult;
   useEffect(() => {
@@ -946,6 +957,13 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
   const answerPct = answerMsLeft != null ? Math.max(0, Math.min(100, (answerMsLeft / BUZZ_WINDOW_MS) * 100)) : 0;
   const answerUrgent = answerMsLeft != null && answerMsLeft <= 3000;
   const timeUp = answerMsLeft === 0;
+  useEffect(() => {
+    if (!timeUp || !iBuzzed || !answer.trim()) return;
+    if (finalSubmissionRef.current === answerDeadline) return;
+    finalSubmissionRef.current = answerDeadline;
+    onSubmitAnswer();
+  }, [timeUp, iBuzzed, answer, answerDeadline, onSubmitAnswer]);
+  useEffect(() => { finalSubmissionRef.current = null; }, [answerDeadline, buzz?.userId]);
   const reviewForMe = reviewPending && answerReview.requesterId === myId;
   const reviewForOpponent = reviewPending && answerReview.verifierId === myId;
   const reviewableWrong = (wrongFlash?.userId === myId && wrongFlash.answer && !wrongFlash.timedOut)
@@ -1052,7 +1070,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <span className={`text-[11px] font-medium ${answerUrgent ? 'text-rose-300' : 'text-white/45'}`}>
-                {timeUp ? "Time's up" : 'Answer before the timer runs out'}
+                {timeUp ? (answer.trim() ? 'Submitting your answer…' : "Time's up") : 'Answer before the timer runs out'}
               </span>
               <span className={`text-[14px] font-bold tabular-nums ${answerUrgent ? 'text-rose-300' : 'text-white/70'}`}>{answerSecs ?? 0}s</span>
             </div>
@@ -1063,7 +1081,7 @@ function PlayingView({ match, question, buzz, answerResult, answer, setAnswer, o
               <input
                 autoFocus value={answer} onChange={e => setAnswer(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && answer.trim() && !timeUp && onSubmitAnswer()}
-                placeholder={timeUp ? "Time's up…" : 'Answer…'}
+                placeholder={timeUp ? 'Submitting answer…' : 'Answer…'}
                 disabled={timeUp}
                 className="flex-1 px-4 py-3 rounded-2xl border border-white/[0.08] bg-white/[0.04] text-[14px] text-white/85 placeholder-white/20 outline-none focus:border-white/15 disabled:opacity-50"
               />

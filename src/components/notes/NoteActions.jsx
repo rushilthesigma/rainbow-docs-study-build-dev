@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { MessageSquare, ClipboardCheck, BookOpen, X, CheckCircle2, XCircle, ArrowRight, ArrowLeft, Wand2, Share2, Cpu, ChevronDown, Lock, Check, Download } from 'lucide-react';
+import { MessageSquare, ClipboardCheck, BookOpen, X, CheckCircle2, XCircle, ArrowRight, ArrowLeft, Wand2, Share2, Cpu, ChevronDown, Lock, Check, Download, Zap } from 'lucide-react';
 import Modal from '../shared/Modal';
 import Button from '../shared/Button';
 import PillGroup from '../shared/PillGroup';
@@ -65,6 +65,18 @@ export default function NoteActions({ note, onNoteUpdated, onMakeQuiz, onAiEdit,
     }
   }
 
+  function launchQuizBowl() {
+    // Quiz Bowl's source mode treats this note as the complete fact base.
+    // Sending the rendered source, rather than just its title, prevents the
+    // generated tossups from drifting into unrelated general knowledge.
+    if (!wm?.openApp || !hasContent) return;
+    wm.openApp('quizbowl', 'Quiz Bowl', {
+      initialTopic: title,
+      initialContext: noteText,
+      autoStart: true,
+    });
+  }
+
   async function handleExportPdf() {
     if (!note || exportingPdf) return;
     setExportingPdf(true);
@@ -79,46 +91,56 @@ export default function NoteActions({ note, onNoteUpdated, onMakeQuiz, onAiEdit,
 
   return (
     <>
-      <div className="flex items-center gap-2 flex-wrap">
-        <ActionButton
-          icon={<MessageSquare size={13} />}
-          label="Study with AI"
-          onClick={launchStudy}
-          disabled={!hasContent}
-        />
-        <ActionButton
-          icon={<ClipboardCheck size={13} />}
-          label="Make Quiz"
-          onClick={() => (onMakeQuiz ? onMakeQuiz() : setQuizOpen(true))}
-          disabled={!hasContent}
-        />
-        <ActionButton
-          icon={<BookOpen size={13} />}
-          label="Build Curriculum"
-          onClick={launchCurriculum}
-          disabled={!hasContent}
-        />
-        <ActionButton
-          icon={<Wand2 size={13} />}
-          label="AI Edit"
-          onClick={() => (onAiEdit ? onAiEdit() : setAiEditOpen(true))}
-        />
-        <ActionButton
-          icon={<Download size={13} />}
-          label={exportingPdf ? 'Exporting...' : 'Export as PDF'}
-          onClick={handleExportPdf}
-          disabled={exportingPdf}
-        />
-        {onShare && (
+      <div className="flex items-center gap-3 border-y border-white/[0.06] py-2">
+        <span className="shrink-0 text-[10px] font-bold uppercase tracking-[0.16em] text-white/35">Actions</span>
+        <div className="flex min-w-0 items-center gap-1 overflow-x-auto scrollbar-hide">
           <ActionButton
-            icon={<Share2 size={13} />}
-            label="Share"
-            onClick={onShare}
+            icon={<MessageSquare size={13} />}
+            label="Study"
+            onClick={launchStudy}
+            disabled={!hasContent}
           />
-        )}
-        {!hasContent && (
-          <span className="text-[11px] text-white/30 ml-1">Write some notes first</span>
-        )}
+          <ActionButton
+            icon={<ClipboardCheck size={13} />}
+            label="Quiz"
+            onClick={() => (onMakeQuiz ? onMakeQuiz() : setQuizOpen(true))}
+            disabled={!hasContent}
+          />
+          <ActionButton
+            icon={<Zap size={13} />}
+            label="Quiz Bowl"
+            onClick={launchQuizBowl}
+            disabled={!hasContent || !wm?.openApp}
+            primary
+          />
+          <ActionButton
+            icon={<BookOpen size={13} />}
+            label="Curriculum"
+            onClick={launchCurriculum}
+            disabled={!hasContent}
+          />
+          <ActionButton
+            icon={<Wand2 size={13} />}
+            label="Edit"
+            onClick={() => (onAiEdit ? onAiEdit() : setAiEditOpen(true))}
+          />
+          <ActionButton
+            icon={<Download size={13} />}
+            label={exportingPdf ? 'Exporting…' : 'Export'}
+            onClick={handleExportPdf}
+            disabled={exportingPdf}
+          />
+          {onShare && (
+            <ActionButton
+              icon={<Share2 size={13} />}
+              label="Share"
+              onClick={onShare}
+            />
+          )}
+          {!hasContent && (
+            <span className="ml-1 shrink-0 text-[10px] text-white/30">Write some notes first</span>
+          )}
+        </div>
       </div>
       {!onMakeQuiz && quizOpen && (
         <QuizFromNote note={note} onClose={() => setQuizOpen(false)} />
@@ -375,14 +397,14 @@ function NoteModelPicker({ active, onPick, plan, email, disabled }) {
   );
 }
 
-function ActionButton({ icon, label, onClick, disabled }) {
+function ActionButton({ icon, label, onClick, disabled, primary = false }) {
   return (
     <button
       onClick={onClick}
       disabled={disabled}
-      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[12px] font-medium bg-blue-500 hover:bg-blue-400 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 disabled:cursor-not-allowed disabled:opacity-40 ${primary ? 'border-blue-500 bg-blue-500 text-white hover:border-blue-400 hover:bg-blue-400' : 'border-transparent text-white/50 hover:bg-white/[0.06] hover:text-white'}`}
     >
-      <span className="opacity-80">{icon}</span>
+      <span className={primary ? 'opacity-85' : 'text-white/40'}>{icon}</span>
       {label}
     </button>
   );

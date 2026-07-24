@@ -36,13 +36,26 @@ ANSWER GUIDE:
 Format:
 {"questions":[{"text":"Extremely obscure clues. Hard clues. (*) Accessible clues and giveaway.","answer":"Canonical answer","accept":[],"prompt":[]}]}`;
 
-function generatePrompt(category, difficulty, count, customInstructions = '') {
+function generatePrompt(category, difficulty, count, customInstructions = '', source = null) {
   const guides = {
     Easy: 'Use well-known facts. Giveaway should be very obvious.',
     Medium: 'Mix of common and uncommon knowledge. Standard college level.',
     Hard: 'Use obscure clues early. Require deep subject expertise.',
     Tournament: 'NAQT/ACF Nationals level. Extremely obscure references.',
   };
+  if (source?.text) {
+    return `Generate ${count} aggressively pyramidal quiz bowl tossups sourced ENTIRELY from the notes below.
+Difficulty: ${difficulty}
+${guides[difficulty] || ''}
+
+SOURCE NOTES on "${source.title}" — the only permitted fact base:
+"""
+${source.text}
+"""
+
+Every clue must restate a fact from these notes; do not use outside knowledge. Every answer must be named in the notes. Start with the most obscure supported details and reserve the clearest giveaway for the end.${customInstructions ? `\nAdditional instructions: ${customInstructions}` : ''}
+Return JSON: {"questions":[{"text":"...","answer":"...","category":"...","accept":[],"prompt":[]}]}`;
+  }
   return `Generate ${count} aggressively pyramidal quiz bowl tossups.\nCategory: ${category}\nDifficulty: ${difficulty}\n${guides[difficulty] || ''}${customInstructions ? `\nAdditional instructions: ${customInstructions}` : ''}\nThe first clues must be the most obscure clues in each tossup; familiar clues belong only in the final giveaway.\nReturn JSON: {"questions":[{"text":"...","answer":"...","category":"...","accept":[],"prompt":[]}]}`;
 }
 
@@ -50,6 +63,15 @@ function readOnboardingSetup() {
   try {
     const setup = JSON.parse(sessionStorage.getItem('mobileQuizBowlInitialSetup') || 'null');
     return setup && typeof setup === 'object' ? setup : null;
+  } catch {
+    return null;
+  }
+}
+
+function readNoteQuizBowlLaunch() {
+  try {
+    const launch = JSON.parse(sessionStorage.getItem('mobileQuizBowlNoteLaunch') || 'null');
+    return launch?.title && launch?.text ? launch : null;
   } catch {
     return null;
   }
@@ -76,6 +98,11 @@ export default function MobileQuizBowl() {
   const { user } = useAuth();
   const onboardingDefaults = user?.data?.preferences?.quizBowlOnboarding;
   const [onboardingSetup] = useState(readOnboardingSetup);
+  const [noteLaunch] = useState(readNoteQuizBowlLaunch);
+  // Keep this for the lifetime of the Quiz Bowl session so a retry from the
+  // setup screen remains grounded in the same note after the one-shot handoff
+  // has been consumed from session storage.
+  const [noteSource] = useState(() => noteLaunch ? { title: noteLaunch.title, text: noteLaunch.text } : null);
   // Live-room surface (MobileMatch). null = solo flows below;
   // 'menu' = create/join a multiplayer room; 'bots' = jump straight
   // into a room setup with bot fill pre-enabled.
@@ -94,13 +121,13 @@ export default function MobileQuizBowl() {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState(null);
 
-  const initialSoloCategory = onboardingSetup?.category || onboardingDefaults?.category || 'Mixed';
+  const initialSoloCategory = noteLaunch ? 'Mixed' : (onboardingSetup?.category || onboardingDefaults?.category || 'Mixed');
   const [category, setCategory] = useState(initialSoloCategory);
   const [selectedCategories, setSelectedCategories] = useState(() => [initialSoloCategory]);
-  const [difficulty, setDifficulty] = useState(() => onboardingSetup?.difficulty || onboardingDefaults?.difficulty || 'Medium');
-  const [questionSource, setQuestionSource] = useState(() => onboardingSetup?.source === 'ai' ? 'ai' : 'qbreader');
+  const [difficulty, setDifficulty] = useState(() => noteLaunch?.difficulty || onboardingSetup?.difficulty || onboardingDefaults?.difficulty || 'Medium');
+  const [questionSource, setQuestionSource] = useState(() => noteLaunch || onboardingSetup?.source === 'ai' ? 'ai' : 'qbreader');
   const [customInstructions, setCustomInstructions] = useState(() => onboardingSetup?.customInstructions || onboardingDefaults?.customInstructions || '');
-  const [questionCount, setQuestionCount] = useState(() => onboardingSetup?.questionCount || onboardingDefaults?.questionCount || 5);
+  const [questionCount, setQuestionCount] = useState(() => noteLaunch?.questionCount || onboardingSetup?.questionCount || onboardingDefaults?.questionCount || 5);
   const [revealSpeedMs, setRevealSpeedMs] = useState(140);
   // Which AI writes the AI-generated tossups (persisted, plan-gated).
   const { model: qbModel, pick: pickQbModel, available: qbModels } = useQbModel();
@@ -167,7 +194,8 @@ export default function MobileQuizBowl() {
           : [nextCategory];
     const nextCount = overrides.questionCount || questionCount;
     const nextInstructions = overrides.customInstructions ?? customInstructions;
-    const nextTitle = overrides.title || '';
+    const nextNotes = overrides.notes || noteSource;
+    const nextTitle = overrides.title || nextNotes?.title || '';
     setCategory(nextSource === 'qbreader' && nextCategories.length > 1 ? 'Mixed' : nextCategory);
     setSelectedCategories(nextCategories);
     setDifficulty(nextDifficulty);
@@ -194,7 +222,7 @@ export default function MobileQuizBowl() {
         method: 'POST',
         body: JSON.stringify({
           system: SYSTEM_PROMPT,
-          messages: [{ role: 'user', content: generatePrompt(nextCategory, nextDifficulty, nextCount, nextInstructions) }],
+          messages: [{ role: 'user', content: generatePrompt(nextCategory, nextDifficulty, nextCount, nextInstructions, nextNotes) }],
           max_tokens: 4096,
           model: qbModel,
         }),
@@ -247,6 +275,20 @@ export default function MobileQuizBowl() {
     autoGenerationStarted.current = true;
     handleStart();
   }, [onboardingSetup]);
+
+  useEffect(() => {
+    if (!noteLaunch || autoGenerationStarted.current) return;
+    autoGenerationStarted.current = true;
+    try { sessionStorage.removeItem('mobileQuizBowlNoteLaunch'); } catch {}
+    handleStart({
+      source: 'ai',
+      category: 'Mixed',
+      difficulty: noteLaunch.difficulty || 'Medium',
+      questionCount: noteLaunch.questionCount || 5,
+      notes: noteLaunch,
+      title: noteLaunch.title,
+    });
+  }, [noteLaunch]);
 
   async function playCollectionSet(listing) {
     if (listing.source === 'preset') {

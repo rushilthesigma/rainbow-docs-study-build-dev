@@ -28,10 +28,10 @@ import { speakableText } from '../../utils/voiceText';
 // what the AI is good at, so the study mode does NOT feel like ChatGPT's
 // blank greeting.
 const QUICK_PROMPTS = [
-  { icon: Calculator, label: 'Quiz me on the quadratic formula', prompt: 'Quiz me on the quadratic formula. 5 multiple-choice questions, escalating difficulty.' },
-  { icon: Beaker,     label: 'Explain photosynthesis at honors level', prompt: 'Explain photosynthesis at honors-tier depth. Don\'t skip the Calvin cycle.' },
-  { icon: Lightbulb,  label: 'Help me understand limits in calculus', prompt: 'Walk me through limits in calculus, starting with intuition before the formal definition.' },
-  { icon: Compass,    label: 'What\'s a good thing to study right now?', prompt: 'What should I work on right now?' },
+  { icon: Calculator, label: 'Quiz me on the quadratic formula', prompt: 'Quiz me on the quadratic formula. 5 multiple-choice questions, escalating difficulty.', iconClass: 'border-blue-400/20 bg-blue-500/[0.10] text-blue-300' },
+  { icon: Beaker,     label: 'Explain photosynthesis at honors level', prompt: 'Explain photosynthesis at honors-tier depth. Don\'t skip the Calvin cycle.', iconClass: 'border-emerald-400/20 bg-emerald-500/[0.10] text-emerald-300' },
+  { icon: Lightbulb,  label: 'Help me understand limits in calculus', prompt: 'Walk me through limits in calculus, starting with intuition before the formal definition.', iconClass: 'border-amber-400/20 bg-amber-500/[0.10] text-amber-200' },
+  { icon: Compass,    label: 'What\'s a good thing to study right now?', prompt: 'What should I work on right now?', iconClass: 'border-violet-400/20 bg-violet-500/[0.10] text-violet-300' },
 ];
 
 const MATH_CANVAS_WIDTH = 460;
@@ -888,48 +888,57 @@ export default function StudyModePanel({ className = '', flush = false, initialM
     );
   }
 
+  const headerToolClass = (active = false, primary = false) => `inline-flex h-7 w-7 items-center justify-center rounded-lg border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 ${primary ? 'border-blue-500 bg-blue-500 text-white hover:border-blue-400 hover:bg-blue-400' : active ? 'border-blue-400/35 bg-blue-500/[0.15] text-blue-100' : 'border-white/[0.08] bg-white/[0.025] text-white/45 hover:bg-white/[0.07] hover:text-white'}`;
+
   const header = (
-    <div className="flex items-center gap-2 px-3 py-2.5 bg-transparent">
-      <span className="text-[13px] font-bold text-gray-900 dark:text-white">Study</span>
+    <div className="flex items-center gap-2 border-b border-white/[0.06] px-4 py-2.5 bg-transparent">
+      <div className="min-w-0">
+        <span className="text-[13px] font-bold text-gray-900 dark:text-white">Study Mode</span>
+      </div>
       <div className="flex-1" />
+      <div className="flex items-center gap-1 border-l border-white/[0.06] pl-2">
       <button
         type="button"
         onClick={mathTutorSideScreen ? collapseMathTutorSideScreen : openMathTutorSideScreen}
         title={mathTutorSideScreen ? 'Close Math Tutor side screen' : 'Open Math Tutor in side screen'}
         aria-label={mathTutorSideScreen ? 'Close Math Tutor side screen' : 'Open Math Tutor in side screen'}
-        className={`p-1.5 rounded-lg transition-colors ${mathTutorSideScreen ? 'text-white bg-white/20' : 'text-white/70 hover:text-white hover:bg-white/[0.15]'}`}
+        className={headerToolClass(mathTutorSideScreen)}
       >
-        <Calculator size={14} />
+        <Calculator size={13} strokeWidth={1.8} />
       </button>
       <button
         onClick={() => setShowCurriculumPicker(true)}
         title="Integrate with a curriculum"
-        className={`p-1.5 rounded-lg transition-colors ${linkedCurriculumId ? 'text-white bg-white/20' : 'text-white/70 hover:text-white hover:bg-white/[0.15]'}`}
+        aria-label="Integrate with a curriculum"
+        className={headerToolClass(!!linkedCurriculumId)}
       >
-        <BookOpen size={14} />
+        <BookOpen size={13} strokeWidth={1.8} />
       </button>
       <button
         onClick={() => setShowSourcesSheet(true)}
         title="Attach sources"
-        className={`p-1.5 rounded-lg transition-colors relative ${sources.length ? 'text-white bg-white/20' : 'text-white/70 hover:text-white hover:bg-white/[0.15]'}`}
+        aria-label="Attach sources"
+        className={`${headerToolClass(sources.length > 0)} relative`}
       >
-        <Link2 size={14} />
-        {sources.length > 0 && <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-white/80 text-gray-900 text-[8px] font-bold flex items-center justify-center">{sources.length}</span>}
+        <Link2 size={13} strokeWidth={1.8} />
+        {sources.length > 0 && <span className="absolute -top-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full border border-[#181818] bg-blue-400 px-0.5 text-[8px] font-bold text-blue-950">{sources.length}</span>}
       </button>
       <button
         onClick={() => { loadHistory(); setShowHistory(true); }}
         title="History"
-        className="p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/[0.15] transition-colors"
+        aria-label="History"
+        className={headerToolClass()}
       >
-        <History size={14} />
+        <History size={13} strokeWidth={1.8} />
       </button>
       {sessionId && (
         <button
           onClick={newChat}
           title="New chat"
-          className="p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/[0.15] transition-colors"
+          aria-label="New chat"
+          className={headerToolClass(false, true)}
         >
-          <Plus size={14} />
+          <Plus size={13} strokeWidth={2} />
         </button>
       )}
       {/* Show-PDF toggle: appears at the window's top-right whenever a PDF is
@@ -939,11 +948,12 @@ export default function StudyModePanel({ className = '', flush = false, initialM
           onClick={showPdfSideScreen}
           title="Show PDF"
           aria-label="Show PDF side screen"
-          className="p-1.5 rounded-lg text-white bg-white/20 hover:bg-white/30 transition-colors"
+          className={headerToolClass(true)}
         >
-          <PanelRightOpen size={14} />
+          <PanelRightOpen size={13} strokeWidth={1.8} />
         </button>
       )}
+      </div>
     </div>
   );
 
@@ -1037,7 +1047,8 @@ export default function StudyModePanel({ className = '', flush = false, initialM
   // Rich empty state - quick-prompt cards, NOT ChatGPT's blank greeting.
   const emptyState = (
     <div className="h-full flex flex-col items-center justify-center px-4 py-6">
-      <div className="grid sm:grid-cols-2 gap-2 w-full max-w-md">
+      <div className="mb-3 w-full max-w-md text-[10px] font-bold uppercase tracking-[0.16em] text-white/35">Quick start</div>
+      <div className="grid w-full max-w-md gap-1.5 sm:grid-cols-2">
         {QUICK_PROMPTS.map((p, i) => {
           const Icon = p.icon;
           return (
@@ -1045,12 +1056,12 @@ export default function StudyModePanel({ className = '', flush = false, initialM
               key={i}
               onClick={() => doSend(p.prompt)}
               disabled={streaming}
-              className="group text-left flex items-start gap-2.5 p-3 rounded-xl border border-white/[0.08] dark:border-white/[0.07] bg-white/[0.03] dark:bg-white/[0.03] hover:bg-white/[0.07] dark:hover:bg-white/[0.06] transition-colors duration-150 disabled:opacity-50"
+              className="group flex items-center gap-2.5 rounded-lg border border-white/[0.08] bg-white/[0.025] px-3 py-2.5 text-left transition-colors duration-150 hover:border-white/[0.14] hover:bg-white/[0.06] disabled:opacity-50"
             >
-              <div className="w-7 h-7 rounded-md bg-white/[0.07] dark:bg-white/[0.06] flex items-center justify-center text-gray-500 dark:text-gray-400 flex-shrink-0">
-                <Icon size={13} />
+              <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border ${p.iconClass}`}>
+                <Icon size={13} strokeWidth={1.8} />
               </div>
-              <p className="text-[12px] font-medium text-gray-800 dark:text-gray-200 leading-snug pt-0.5">{p.label}</p>
+              <p className="text-[12px] font-medium leading-snug text-gray-800 dark:text-gray-200">{p.label}</p>
             </button>
           );
         })}

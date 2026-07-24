@@ -501,13 +501,13 @@ export function SavedSetCreator({
 
       <div className="flex-1 min-h-0 overflow-y-auto p-5">
         <div className="mx-auto max-w-xl space-y-4">
-          <div className="grid grid-cols-2 gap-1 rounded-xl border border-white/[0.08] bg-white/[0.025] p-1" role="tablist" aria-label="Set creation method">
+          <div className="flex gap-1.5" role="tablist" aria-label="Set creation method">
             <button
               type="button"
               role="tab"
               aria-selected={mode === 'ai'}
               onClick={() => { setMode('ai'); setError(''); }}
-              className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-[12px] font-semibold transition-colors ${mode === 'ai' ? 'bg-blue-500/15 text-blue-100' : 'text-white/40 hover:bg-white/[0.05] hover:text-white/70'}`}
+              className={`flex flex-1 items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-[12px] font-semibold transition-colors focus-visible:outline-none focus-visible:underline focus-visible:underline-offset-4 ${mode === 'ai' ? 'border-blue-400/35 bg-blue-500/15 text-blue-100' : 'border-white/[0.08] bg-white/[0.025] text-white/40 hover:bg-white/[0.06] hover:text-white/70'}`}
             >
               <Sparkles size={14} /> Generate with AI
             </button>
@@ -516,7 +516,7 @@ export function SavedSetCreator({
               role="tab"
               aria-selected={mode === 'manual'}
               onClick={() => { setMode('manual'); setError(''); }}
-              className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-[12px] font-semibold transition-colors ${mode === 'manual' ? 'bg-blue-500/15 text-blue-100' : 'text-white/40 hover:bg-white/[0.05] hover:text-white/70'}`}
+              className={`flex flex-1 items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-[12px] font-semibold transition-colors focus-visible:outline-none focus-visible:underline focus-visible:underline-offset-4 ${mode === 'manual' ? 'border-blue-400/35 bg-blue-500/15 text-blue-100' : 'border-white/[0.08] bg-white/[0.025] text-white/40 hover:bg-white/[0.06] hover:text-white/70'}`}
             >
               <Pencil size={14} /> Write manually
             </button>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { FileText, Plus, ChevronRight, ArrowLeft, Save, Trash2, Download, Upload } from 'lucide-react';
+import { FileText, Plus, ChevronRight, ArrowLeft, Save, Trash2, Download, Upload, Zap } from 'lucide-react';
 import { listNotes, createNote, getNote, updateNote, deleteNote } from '../../api/notes';
 import { exportNoteAsPdf } from '../../lib/notesPdf';
 import { importNotesFromFiles, NOTE_IMPORT_ACCEPT } from '../../lib/noteImport';
@@ -9,7 +9,7 @@ import MarkdownNoteEditor from '../notes/MarkdownNoteEditor';
 // Mobile-native notes flow: list → create-or-edit. Tapping "New note"
 // creates a note immediately and drops the user into the editor. List
 // rows open the editor for that note. Editor has Save + Delete inline.
-export default function MobileNotes() {
+export default function MobileNotes({ onNavigate }) {
   const [view, setView] = useState('list'); // list | edit
   const [notes, setNotes] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -114,6 +114,31 @@ export default function MobileNotes() {
     }
   }
 
+  function launchQuizBowl() {
+    const sourceText = [
+      `# ${title.trim() || 'Untitled note'}`,
+      mainNotes,
+      cues.length ? `Cues:\n${cues.map(cue => `- ${cue}`).join('\n')}` : '',
+      summary ? `Summary:\n${summary}` : '',
+    ].filter(Boolean).join('\n\n').trim();
+    if (sourceText.length <= 20) return;
+
+    // Mobile Quiz Bowl is a sibling app rather than a route. Its one-shot
+    // handoff lets the generator use the note as its sole fact source.
+    try {
+      sessionStorage.setItem('mobileQuizBowlNoteLaunch', JSON.stringify({
+        title: title.trim() || 'Untitled note',
+        text: sourceText,
+        difficulty: 'Medium',
+        questionCount: 5,
+      }));
+    } catch {
+      return;
+    }
+    void handleSave();
+    onNavigate?.('quizbowl');
+  }
+
   // ===== EDIT =====
   if (view === 'edit' && activeId) {
     return (
@@ -147,6 +172,16 @@ export default function MobileNotes() {
         </header>
 
         <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+          <div className="px-4 pt-2 flex-shrink-0">
+            <button
+              type="button"
+              onClick={launchQuizBowl}
+              disabled={mainNotes.trim().length <= 20}
+              className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-amber-400/25 bg-amber-500/[0.10] px-3 py-2.5 text-[12px] font-bold text-amber-100 active:bg-amber-500/[0.18] disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Zap size={14} /> Play Quiz Bowl from this note
+            </button>
+          </div>
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}

@@ -1168,98 +1168,27 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
 
   return (
     <ViewFade viewKey="list" className="h-full flex flex-col min-h-0">
-      <div className="flex items-center justify-between mb-5 flex-shrink-0">
-        <h2 className="text-lg font-bold text-white/90">Notes</h2>
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="secondary" onClick={() => setView('presets')}>
-            <Globe size={14} /> Preset
-          </Button>
-          <Button size="sm" variant="secondary" onClick={() => setView('import')}>
-            <Upload size={14} /> Upload
-          </Button>
-          <Button size="sm" variant="secondary" onClick={() => setView('ai')}>
-            <Wand2 size={14} /> AI
-          </Button>
-          <Button size="sm" onClick={() => setView('create')}><Plus size={14} /> New</Button>
-          <Button size="sm" variant="secondary" onClick={handleCreateMap} disabled={creatingMap || maps.length >= 20}>
-            <Plus size={12} /> New map
-          </Button>
+      <header className="flex items-center gap-3 border-b border-white/[0.06] pb-3 flex-shrink-0">
+        <div className="min-w-0 flex-1">
+          <h2 className="text-[15px] font-bold text-white/90">Notes</h2>
         </div>
-      </div>
+        <div className="flex flex-wrap justify-end gap-1.5">
+          <button type="button" onClick={() => setView('presets')} className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.025] px-2.5 py-1.5 text-[11px] font-semibold text-white/55 transition-colors hover:bg-white/[0.06] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50"><Globe size={12} /> Presets</button>
+          <button type="button" onClick={() => setView('import')} className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.025] px-2.5 py-1.5 text-[11px] font-semibold text-white/55 transition-colors hover:bg-white/[0.06] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50"><Upload size={12} /> Import</button>
+          <button type="button" onClick={() => setView('ai')} className="inline-flex items-center gap-1.5 rounded-lg border border-blue-400/20 bg-blue-500/[0.08] px-2.5 py-1.5 text-[11px] font-semibold text-blue-100 transition-colors hover:border-blue-400/35 hover:bg-blue-500/[0.14] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50"><Wand2 size={12} /> AI</button>
+          <button type="button" onClick={() => setView('create')} className="inline-flex items-center gap-1.5 rounded-lg border border-blue-500 bg-blue-500 px-2.5 py-1.5 text-[11px] font-semibold text-white transition-colors hover:border-blue-400 hover:bg-blue-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50"><Plus size={13} /> New note</button>
+        </div>
+      </header>
 
-      {/* Maps */}
-      <div className="mb-5 flex-shrink-0">
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 flex items-center gap-1.5">
-            <Network size={12} /> Maps
-          </h3>
-        </div>
-        {mapsLoading && maps.length === 0 ? (
-          <div className="text-[11px] text-white/30 italic px-1">Loading maps…</div>
-        ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-            {maps.map(m => (
-              <div
-                key={m.id}
-                onClick={() => openMap(m)}
-                className="group flex items-center gap-2 bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.06] hover:border-white/[0.12] rounded-lg px-3 py-2.5 cursor-pointer transition-colors"
-              >
-                <span
-                  className="h-7 w-7 rounded-md flex items-center justify-center shrink-0"
-                  style={{ background: `${m.color}1F`, color: m.color }}
-                >
-                  <Network size={13} />
-                </span>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[12.5px] font-medium text-white/85 truncate">{m.name}</div>
-                  <div className="text-[10.5px] text-white/40">
-                    {m.nodeCount} node{m.nodeCount === 1 ? '' : 's'}
-                    {m.isDefault ? ' · default' : ''}
-                  </div>
-                </div>
-                <button
-                  onClick={(e) => { e.stopPropagation(); setShareTarget({ id: m.id, type: 'noteMap', title: m.name }); }}
-                  className="opacity-0 group-hover:opacity-100 text-white/20 hover:text-blue-300 transition-opacity"
-                  title="Share map"
-                >
-                  <Share2 size={12} />
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleRenameMap(m); }}
-                  className="opacity-0 group-hover:opacity-100 text-white/20 hover:text-white/70 transition-opacity"
-                  title="Rename map"
-                >
-                  <Pencil size={12} />
-                </button>
-                {!m.isDefault && (
-                  <button
-                    onClick={(e) => handleDeleteMap(e, m)}
-                    className="opacity-0 group-hover:opacity-100 text-white/20 hover:text-rose-400 transition-opacity"
-                    title="Delete map"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                )}
-              </div>
-            ))}
+      <div className="space-y-2.5 border-b border-white/[0.06] py-3 flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="flex w-[66px] shrink-0 items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-white/35">
+            <Folder size={11} /> Folders
           </div>
-        )}
-      </div>
-
-      {/* Topics */}
-      <div className="mb-5 flex-shrink-0">
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 flex items-center gap-1.5">
-            <Folder size={12} /> Topics
-          </h3>
-          <Button size="sm" variant="secondary" onClick={() => setView('new-topic')}>
-            <Plus size={12} /> New topic
-          </Button>
-        </div>
-        <div className="flex flex-wrap gap-1.5">
+          <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
           <button
             onClick={() => setActiveTopicId(null)}
-            className={`text-[12px] px-2.5 py-1 rounded-lg border transition-colors ${activeTopicId === null ? 'bg-blue-500/[0.18] border-blue-400/[0.40] text-blue-100' : 'bg-white/[0.03] border-white/[0.06] text-white/55 hover:text-white/80 hover:bg-white/[0.06]'}`}
+            className={`shrink-0 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 ${activeTopicId === null ? 'border-blue-400/35 bg-blue-500/[0.15] text-blue-100' : 'border-white/[0.08] bg-white/[0.025] text-white/55 hover:bg-white/[0.06] hover:text-white/80'}`}
           >
             All <span className="text-white/35">{notes.length}</span>
           </button>
@@ -1267,7 +1196,7 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
             <div
               key={t.id}
               onClick={() => setActiveTopicId(t.id)}
-              className={`group flex items-center gap-1.5 text-[12px] pl-2 pr-1.5 py-1 rounded-lg border cursor-pointer transition-colors ${activeTopicId === t.id ? 'bg-blue-500/[0.18] border-blue-400/[0.40] text-blue-100' : 'bg-white/[0.03] border-white/[0.06] text-white/65 hover:text-white/85 hover:bg-white/[0.06]'}`}
+              className={`group flex shrink-0 items-center gap-1.5 rounded-lg border py-1 pl-2 pr-1.5 text-[11px] cursor-pointer transition-colors ${activeTopicId === t.id ? 'border-blue-400/35 bg-blue-500/[0.15] text-blue-100' : 'border-white/[0.08] bg-white/[0.025] text-white/65 hover:bg-white/[0.06] hover:text-white/85'}`}
             >
               <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: t.color }} />
               <span className="truncate max-w-[140px]">{t.name}</span>
@@ -1279,12 +1208,43 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
           {unfiled > 0 && (
             <button
               onClick={() => setActiveTopicId('unfiled')}
-              className={`text-[12px] px-2.5 py-1 rounded-lg border transition-colors ${activeTopicId === 'unfiled' ? 'bg-blue-500/[0.18] border-blue-400/[0.40] text-blue-100' : 'bg-white/[0.03] border-white/[0.06] text-white/55 hover:text-white/80 hover:bg-white/[0.06]'}`}
+              className={`shrink-0 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 ${activeTopicId === 'unfiled' ? 'border-blue-400/35 bg-blue-500/[0.15] text-blue-100' : 'border-white/[0.08] bg-white/[0.025] text-white/55 hover:bg-white/[0.06] hover:text-white/80'}`}
             >
               Unfiled <span className="text-white/35">{unfiled}</span>
             </button>
           )}
+          </div>
+          <button type="button" onClick={() => setView('new-topic')} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.025] text-white/45 transition-colors hover:bg-white/[0.06] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50" title="New folder" aria-label="New folder"><Plus size={13} /></button>
         </div>
+
+        <div className="flex items-center gap-3">
+          <div className="flex w-[66px] shrink-0 items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-white/35">
+            <Network size={11} /> Maps
+          </div>
+          {mapsLoading && maps.length === 0 ? (
+            <div className="text-[11px] italic text-white/30">Loading maps…</div>
+          ) : (
+            <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+              {maps.map(m => (
+                <div key={m.id} onClick={() => openMap(m)} className="group flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.025] px-2 py-1 text-[11px] text-white/60 transition-colors hover:border-white/[0.14] hover:bg-white/[0.06] hover:text-white">
+                  <span className="flex h-4 w-4 items-center justify-center rounded" style={{ background: `${m.color}1F`, color: m.color }}><Network size={10} /></span>
+                  <span className="max-w-[130px] truncate font-medium">{m.name}</span>
+                  <span className="text-[10px] text-white/30">{m.nodeCount}</span>
+                  <button onClick={(e) => { e.stopPropagation(); setShareTarget({ id: m.id, type: 'noteMap', title: m.name }); }} className="hidden text-white/25 hover:text-blue-300 group-hover:inline-flex" title="Share map" aria-label={`Share ${m.name}`}><Share2 size={10} /></button>
+                  <button onClick={(e) => { e.stopPropagation(); handleRenameMap(m); }} className="hidden text-white/25 hover:text-white/70 group-hover:inline-flex" title="Rename map" aria-label={`Rename ${m.name}`}><Pencil size={10} /></button>
+                  {!m.isDefault && <button onClick={(e) => handleDeleteMap(e, m)} className="hidden text-white/25 hover:text-rose-400 group-hover:inline-flex" title="Delete map" aria-label={`Delete ${m.name}`}><Trash2 size={10} /></button>}
+                </div>
+              ))}
+              {!maps.length && <span className="py-1 text-[11px] text-white/30">No maps yet</span>}
+            </div>
+          )}
+          <button type="button" onClick={handleCreateMap} disabled={creatingMap || maps.length >= 20} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.025] text-white/45 transition-colors hover:bg-white/[0.06] hover:text-white disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50" title="New map" aria-label="New map"><Plus size={13} /></button>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 pt-3 pb-1.5 flex-shrink-0">
+        <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40">{activeTopicId === null ? 'All notes' : activeTopicId === 'unfiled' ? 'Unfiled notes' : topicById.get(activeTopicId)?.name || 'Folder notes'}</h3>
+        <span className="text-[10px] tabular-nums text-white/25">{visibleNotes.length}</span>
       </div>
 
       <div className="flex-1 overflow-y-auto min-h-0">
@@ -1301,11 +1261,11 @@ export default function NotesApp({ initialNoteId = null, initialMapId = null, in
           {visibleNotes.map(note => {
             const topic = note.topicId ? topicById.get(note.topicId) : null;
             return (
-            <div key={note.id} onClick={() => openNote(note.id)} className="flex items-center gap-3 px-2 py-2.5 border-b border-white/[0.06] last:border-b-0 cursor-pointer hover:bg-white/[0.03] rounded-md transition-colors group">
-              {note.type === 'cornell' ? <Layout size={13} className="text-white/35 flex-shrink-0" /> : <FileText size={13} className="text-white/35 flex-shrink-0" />}
+            <div key={note.id} onClick={() => openNote(note.id)} className="group flex min-h-16 cursor-pointer items-center gap-3 rounded-md border-b border-white/[0.06] px-2 py-2.5 last:border-b-0 transition-colors hover:bg-white/[0.035]">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.035]">{note.type === 'cornell' ? <Layout size={13} className="text-white/45" /> : <FileText size={13} className="text-white/45" />}</span>
               <div className="flex-1 min-w-0">
-                <h3 className="text-sm font-medium text-white/90 truncate">{note.title}</h3>
-                <p className="text-xs text-white/55">{note.type === 'cornell' ? 'Cornell' : 'Note'} · {new Date(note.updatedAt || note.createdAt).toLocaleDateString()}</p>
+                <h3 className="truncate text-[13px] font-medium text-white/90">{note.title}</h3>
+                <p className="mt-1 text-[10.5px] text-white/35">{note.type === 'cornell' ? 'Cornell' : 'Note'} · {new Date(note.updatedAt || note.createdAt).toLocaleDateString()}</p>
               </div>
               {topic && (
                 <span className="flex items-center gap-1 text-[10.5px] text-white/50 flex-shrink-0">
