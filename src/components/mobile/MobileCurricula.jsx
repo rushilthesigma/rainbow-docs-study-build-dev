@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BookOpen, Plus, ChevronRight, ArrowLeft, CheckCircle2, Circle, FileText, Sparkles, Zap, Store, Search, Download, UserRound, EyeOff, Upload, X } from 'lucide-react';
 import { listCurricula, deleteCurriculum, getCurriculum, generateCurriculum, listCurriculumMarketplace, enrollMarketplaceCurriculum, publishCurriculum, unpublishCurriculum } from '../../api/curriculum';
-import { apiFetch } from '../../api/client';
 import { DEFAULT_SETTINGS } from '../../utils/constants';
 import BlockLessonView from '../lesson/BlockLessonView';
 import ProgressBar, { InlineProgress } from '../shared/ProgressBar';
@@ -118,17 +117,20 @@ export default function MobileCurricula({ onNavigate }) {
     setMarketplaceError('');
     setEnrollingId(listing.listingId);
     try {
-      const data = listing.source === 'preset'
-        ? await apiFetch('/api/pausd/enroll', {
-            method: 'POST',
-            body: JSON.stringify({ slug: listing.listingId.replace(/^preset:/, '') }),
-          })
-        : await enrollMarketplaceCurriculum(listing.listingId);
-      setItems(prev => data.alreadyEnrolled
-        ? prev
-        : [data.curriculum, ...prev.filter(course => course.id !== data.curriculum.id)]);
-      setActiveCurriculum(data.curriculum);
-      setView('detail');
+      const data = await enrollMarketplaceCurriculum(listing.listingId);
+      // Add the returned course to the main list immediately, then refresh it
+      // from the server. The user lands back on My courses with the result
+      // visible instead of a detail screen that can look unchanged.
+      const fallback = [data.curriculum, ...items.filter(course => course.id !== data.curriculum.id)];
+      setItems(fallback);
+      try {
+        const latest = await listCurricula();
+        setItems(latest.curricula || fallback);
+      } catch (refreshError) {
+        console.warn('Could not refresh curricula after enrollment:', refreshError);
+      }
+      setActiveCurriculum(null);
+      setView('list');
     } catch (err) {
       setMarketplaceError(err.message || 'Could not add this curriculum');
     } finally {

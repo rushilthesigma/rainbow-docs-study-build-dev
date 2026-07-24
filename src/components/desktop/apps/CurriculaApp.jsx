@@ -268,22 +268,22 @@ export default function CurriculaApp({ seedTopic, seedSources, seedView, seedCur
     if (enrollingSlug) return;
     setEnrollingSlug(listing.listingId);
     try {
-      const data = listing.source === 'preset'
-        ? await apiFetch('/api/pausd/enroll', {
-            method: 'POST',
-            body: JSON.stringify({ slug: listing.listingId.replace(/^preset:/, '') }),
-          })
-        : await enrollMarketplaceCurriculum(listing.listingId);
-      // If they're already enrolled, show the existing one. Otherwise
-      // prepend the new one.
-      if (data.alreadyEnrolled) {
-        setSelectedCurriculum(data.curriculum);
-      } else {
-        setCurricula(prev => [data.curriculum, ...prev.filter(c => c.id !== data.curriculum.id)]);
-        bust('curricula:list');
-        setSelectedCurriculum(data.curriculum);
+      const data = await enrollMarketplaceCurriculum(listing.listingId);
+      // Return to the main Curricula list and show the enrolled course there.
+      // Updating optimistically first avoids making a successful click look
+      // inert if the follow-up refresh is briefly unavailable.
+      const fallback = [data.curriculum, ...curricula.filter(c => c.id !== data.curriculum.id)];
+      setCurricula(fallback);
+      bust('curricula:list');
+      try {
+        const latest = await listCurricula();
+        setCurricula(latest.curricula || fallback);
+      } catch (refreshError) {
+        console.warn('Could not refresh curricula after enrollment:', refreshError);
       }
-      setView('detail');
+      setSelectedCurriculum(null);
+      setView('list');
+      toast.success(data.alreadyEnrolled ? 'Course is already in your curricula.' : 'Course added to your curricula.');
     } catch (e) {
       console.error('Marketplace enrollment failed:', e);
       toast.error('Could not add course: ' + (e?.message || 'unknown error'));
@@ -1924,31 +1924,6 @@ function CurriculumMarketplaceView({ catalog, loading, error, enrollingSlug, onB
   // marketplace sections and simply removes preset listings.
   const hasActiveSearch = Boolean(normalizedQuery) && filter === 'All';
 
-  function CourseSection({ title, icon: Icon, items }) {
-    if (!items.length) return null;
-    return (
-      <section className="mb-5">
-        <div className="flex items-center gap-2 mb-1.5 px-1">
-          <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 inline-flex items-center gap-1.5">
-            <Icon size={12} /> {title}
-          </h3>
-          <span className="text-[10px] text-white/25 tabular-nums">{items.length}</span>
-        </div>
-        <div>
-          {items.map((course, index) => (
-            <MarketplaceCourseRow
-              key={course.listingId}
-              course={course}
-              enrolling={enrollingSlug === course.listingId}
-              onEnroll={() => onEnroll(course)}
-              tourAnchor={course.source === 'preset' && index === 0}
-            />
-          ))}
-        </div>
-      </section>
-    );
-  }
-
   return (
     <div className="h-full min-h-0 flex flex-col">
       <div className="flex items-center justify-between mb-4 flex-shrink-0">
@@ -2011,16 +1986,46 @@ function CurriculumMarketplaceView({ catalog, loading, error, enrollingSlug, onB
             <button onClick={() => { setQuery(''); setFilter('All'); }} className="mt-2 text-xs text-blue-300 hover:text-blue-200">Clear search</button>
           </div>
         ) : hasActiveSearch ? (
-          <CourseSection title="Results" icon={Search} items={visible} />
+          <CourseSection title="Results" icon={Search} items={visible} enrollingSlug={enrollingSlug} onEnroll={onEnroll} />
         ) : (
           <>
-            <CourseSection title="Featured courses" icon={Sparkles} items={featured} />
-            <CourseSection title="Community made" icon={Users} items={community} />
-            <CourseSection title="Course library" icon={Library} items={library} />
+            <CourseSection title="Featured courses" icon={Sparkles} items={featured} enrollingSlug={enrollingSlug} onEnroll={onEnroll} />
+            <CourseSection title="Community made" icon={Users} items={community} enrollingSlug={enrollingSlug} onEnroll={onEnroll} />
+            <CourseSection title="Course library" icon={Library} items={library} enrollingSlug={enrollingSlug} onEnroll={onEnroll} />
           </>
         )}
       </div>
     </div>
+  );
+}
+
+// Module-level on purpose. When this was declared inside
+// CurriculumMarketplaceView, every parent re-render created a new component
+// type, so React remounted all the rows. The desktop shell focuses the window
+// on pointerdown, which re-renders the app mid-click — the Add button was
+// remounted between mousedown and mouseup and its click never fired.
+function CourseSection({ title, icon: Icon, items, enrollingSlug, onEnroll }) {
+  if (!items.length) return null;
+  return (
+    <section className="mb-5">
+      <div className="flex items-center gap-2 mb-1.5 px-1">
+        <h3 className="text-[11px] font-bold uppercase tracking-[0.16em] text-white/40 inline-flex items-center gap-1.5">
+          <Icon size={12} /> {title}
+        </h3>
+        <span className="text-[10px] text-white/25 tabular-nums">{items.length}</span>
+      </div>
+      <div>
+        {items.map((course, index) => (
+          <MarketplaceCourseRow
+            key={course.listingId}
+            course={course}
+            enrolling={enrollingSlug === course.listingId}
+            onEnroll={() => onEnroll(course)}
+            tourAnchor={course.source === 'preset' && index === 0}
+          />
+        ))}
+      </div>
+    </section>
   );
 }
 
